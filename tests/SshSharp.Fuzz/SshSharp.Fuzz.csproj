@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Coverage-guided fuzzing with SharpFuzz and libFuzzer (Linux, nightly in CI; see .github/workflows/fuzz.yml). -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="SharpFuzz" />
+    <ProjectReference Include="../../src/SshSharp/SshSharp.csproj" />
+  </ItemGroup>
+</Project>

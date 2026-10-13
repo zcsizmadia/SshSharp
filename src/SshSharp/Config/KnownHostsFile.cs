@@ -331,7 +331,8 @@ public sealed class KnownHostsFile
             }
         }
 
-        if (fields.Count < 3 || !TryDecode(fields[2], out var key))
+        // A field of only non-separator whitespace (a vertical tab, say) is as malformed as a missing one: keep the line, ignore it.
+        if (fields.Count < 3 || string.IsNullOrWhiteSpace(fields[0]) || string.IsNullOrWhiteSpace(fields[1]) || !TryDecode(fields[2], out var key))
         {
             return new Line(raw, null, true);
         }

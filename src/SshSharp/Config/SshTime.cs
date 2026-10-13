@@ -47,6 +47,12 @@ internal static class SshTime
             seconds += number * unit;
         }
 
+        // Like OpenSSH's convtime: more than INT_MAX seconds is invalid (and would overflow TimeSpan further up).
+        if (seconds > int.MaxValue)
+        {
+            return false;
+        }
+
         result = TimeSpan.FromSeconds(seconds);
         return true;
     }

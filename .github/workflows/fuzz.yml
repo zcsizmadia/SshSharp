@@ -1,0 +1,67 @@
+name: Fuzz
+
+# Coverage-guided fuzzing (SharpFuzz + libFuzzer) of every parser that reads untrusted input. Nightly, and on demand.
+# The mutation fuzz tests in the normal test run are the always-on part; this finds what random mutation does not.
+on:
+  schedule:
+    - cron: '17 2 * * *'
+  # A short run on pull requests that change the fuzzing setup, so it is never broken when the nightly run comes.
+  pull_request:
+    paths: [tests/SshSharp.Fuzz/**, .github/workflows/fuzz.yml]
+  workflow_dispatch:
+    inputs:
+      seconds:
+        description: Seconds per target
+        default: '600'
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    name: fuzz (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [packet, kexinit, publickey, certificate, privatekey, privatekey-binary, knownhosts, sshconfig, identification]
+    env:
+      LIBFUZZER_DOTNET_VERSION: v2025.05.02.0904
+      LIBFUZZER_DOTNET_SHA256: c2c2a90d94c409a4af339a0d4f244e0442c5a5d249be0f1252ba07871f285958
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+        with:
+          global-json-file: global.json
+      - name: Build and instrument
+        run: |
+          set -euo pipefail
+          dotnet tool install --global SharpFuzz.CommandLine --version 2.3.0
+          dotnet publish tests/SshSharp.Fuzz -c Release -o fuzz-out
+          sharpfuzz fuzz-out/SshSharp.dll
+      - name: Get libfuzzer-dotnet (checksum pinned)
+        run: |
+          set -euo pipefail
+          curl -sSL -o libfuzzer-dotnet "https://github.com/Metalnem/libfuzzer-dotnet/releases/download/$LIBFUZZER_DOTNET_VERSION/libfuzzer-dotnet-ubuntu"
+          echo "$LIBFUZZER_DOTNET_SHA256  libfuzzer-dotnet" | sha256sum -c -
+          chmod +x libfuzzer-dotnet
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: corpus/${{ matrix.target }}
+          key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}
+          restore-keys: fuzz-corpus-${{ matrix.target }}-
+      - name: Fuzz
+        run: |
+          set -euo pipefail
+          mkdir -p "corpus/${{ matrix.target }}" crashes
+          SEEDS="tests/SshSharp.Fuzz/seeds/${{ matrix.target }}"
+          [ -d "$SEEDS" ] || SEEDS=""
+          ./libfuzzer-dotnet --target_path=fuzz-out/SshSharp.Fuzz --target_arg=${{ matrix.target }} \
+            -max_total_time=${{ github.event_name == 'pull_request' && '60' || inputs.seconds || '600' }} -timeout=10 -rss_limit_mb=2048 -artifact_prefix=crashes/ \
+            "corpus/${{ matrix.target }}" $SEEDS
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: failure()
+        with:
+          name: crashes-${{ matrix.target }}
+          path: crashes/
