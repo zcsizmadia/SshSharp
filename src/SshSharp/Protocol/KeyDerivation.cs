@@ -42,7 +42,9 @@ internal static class KeyDerivation
     /// <param name="letter">'A' to 'F'.</param>
     /// <param name="sessionId">H of the first key exchange.</param>
     /// <param name="length">The number of bytes needed.</param>
-    public static byte[] Derive(HashAlgorithmName hash, ReadOnlySpan<byte> sharedSecret, ReadOnlySpan<byte> exchangeHash, char letter, ReadOnlySpan<byte> sessionId, int length)
+    /// <param name="sharedSecretIsString">K is encoded as a string, not an mpint (the post-quantum hybrid methods).</param>
+    public static byte[] Derive(HashAlgorithmName hash, ReadOnlySpan<byte> sharedSecret, ReadOnlySpan<byte> exchangeHash, char letter, ReadOnlySpan<byte> sessionId, int length,
+        bool sharedSecretIsString = false)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(length);
         var result = new byte[length];
@@ -53,7 +55,14 @@ internal static class KeyDerivation
 
         // Sized up front so the writer never grows and leaves an unwiped copy of K behind (Clear zeroes what was written).
         var prefix = new ArrayBufferWriter<byte>(sharedSecret.Length + exchangeHash.Length + 8);
-        new SshWriter(prefix).WriteMpint(sharedSecret);
+        if (sharedSecretIsString)
+        {
+            new SshWriter(prefix).WriteString(sharedSecret);
+        }
+        else
+        {
+            new SshWriter(prefix).WriteMpint(sharedSecret);
+        }
         prefix.Write(exchangeHash);
 
         using var hasher = IncrementalHash.CreateHash(hash);
@@ -88,13 +97,14 @@ internal static class KeyDerivation
         CipherInfo cipherClientToServer,
         CipherInfo cipherServerToClient,
         MacInfo? macClientToServer,
-        MacInfo? macServerToClient) => new()
+        MacInfo? macServerToClient,
+        bool sharedSecretIsString = false) => new()
         {
-            IvClientToServer = Derive(hash, sharedSecret, exchangeHash, 'A', sessionId, cipherClientToServer.IvLength),
-            IvServerToClient = Derive(hash, sharedSecret, exchangeHash, 'B', sessionId, cipherServerToClient.IvLength),
-            EncryptionKeyClientToServer = Derive(hash, sharedSecret, exchangeHash, 'C', sessionId, cipherClientToServer.KeyLength),
-            EncryptionKeyServerToClient = Derive(hash, sharedSecret, exchangeHash, 'D', sessionId, cipherServerToClient.KeyLength),
-            IntegrityKeyClientToServer = Derive(hash, sharedSecret, exchangeHash, 'E', sessionId, cipherClientToServer.IsAead ? 0 : macClientToServer?.KeyLength ?? 0),
-            IntegrityKeyServerToClient = Derive(hash, sharedSecret, exchangeHash, 'F', sessionId, cipherServerToClient.IsAead ? 0 : macServerToClient?.KeyLength ?? 0),
+            IvClientToServer = Derive(hash, sharedSecret, exchangeHash, 'A', sessionId, cipherClientToServer.IvLength, sharedSecretIsString),
+            IvServerToClient = Derive(hash, sharedSecret, exchangeHash, 'B', sessionId, cipherServerToClient.IvLength, sharedSecretIsString),
+            EncryptionKeyClientToServer = Derive(hash, sharedSecret, exchangeHash, 'C', sessionId, cipherClientToServer.KeyLength, sharedSecretIsString),
+            EncryptionKeyServerToClient = Derive(hash, sharedSecret, exchangeHash, 'D', sessionId, cipherServerToClient.KeyLength, sharedSecretIsString),
+            IntegrityKeyClientToServer = Derive(hash, sharedSecret, exchangeHash, 'E', sessionId, cipherClientToServer.IsAead ? 0 : macClientToServer?.KeyLength ?? 0, sharedSecretIsString),
+            IntegrityKeyServerToClient = Derive(hash, sharedSecret, exchangeHash, 'F', sessionId, cipherServerToClient.IsAead ? 0 : macServerToClient?.KeyLength ?? 0, sharedSecretIsString),
         };
 }

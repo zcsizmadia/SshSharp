@@ -489,7 +489,8 @@ internal sealed class FakeSshServer : IAsyncDisposable
         SshAlgorithms.TryGetCipher(negotiated.CipherServerToClient, out var cipherS2C);
         SshAlgorithms.TryGetMac(negotiated.MacClientToServer, out var macC2S);
         SshAlgorithms.TryGetMac(negotiated.MacServerToClient, out var macS2C);
-        using var keys = KeyDerivation.DeriveAll(kexHash, secret, hash, SessionId!, cipherC2S, cipherS2C, macC2S, macS2C);
+        using var keys = KeyDerivation.DeriveAll(kexHash, secret, hash, SessionId!, cipherC2S, cipherS2C, macC2S, macS2C,
+            sharedSecretIsString: negotiated.Kex == SshAlgorithms.MlKem768X25519Sha256);
         var newSend = PacketProtectorFactory.Create(cipherS2C, macS2C, keys.EncryptionKeyServerToClient, keys.IvServerToClient, keys.IntegrityKeyServerToClient);
         var newReceive = PacketProtectorFactory.Create(cipherC2S, macC2S, keys.EncryptionKeyClientToServer, keys.IvClientToServer, keys.IntegrityKeyClientToServer);
 
@@ -651,6 +652,26 @@ internal sealed class FakeSshServer : IAsyncDisposable
         reader.ReadByte();
         switch (method)
         {
+#if NET10_0_OR_GREATER
+            case SshAlgorithms.MlKem768X25519Sha256:
+            {
+                // The server side of mlkem768x25519-sha256: encapsulate to the client's ML-KEM key, add an X25519 share, K = SHA-256 of both.
+                var clientInitValue = reader.ReadString().ToArray();
+                using var encapsulationKey = MLKem.ImportEncapsulationKey(MLKemAlgorithm.MLKem768, clientInitValue.AsSpan(0, 1184));
+                encapsulationKey.Encapsulate(out var ciphertext, out var pqSecret);
+                var priv = RandomNumberGenerator.GetBytes(32);
+                var qs = new byte[32];
+                X25519.GetPublicKey(priv, qs);
+                var classic = new byte[32];
+                X25519.TryAgree(priv, clientInitValue.AsSpan(1184), classic);
+                var k = SHA256.HashData([.. pqSecret, .. classic]);
+                byte[] serverReply = [.. ciphertext, .. qs];
+                var h = ExchangeHash.Compute(HashAlgorithmName.SHA256, clientVersion, serverVersion, clientInit, serverInit, hostKey.Blob,
+                    w => { w.WriteString(clientInitValue); w.WriteString(serverReply); }, k, sharedSecretIsString: true);
+                return (Reply(w => w.WriteString(serverReply), h), k, h, HashAlgorithmName.SHA256);
+            }
+#endif
+
             case SshAlgorithms.Curve25519Sha256 or SshAlgorithms.Curve25519Sha256Libssh:
             {
                 var qc = reader.ReadString().ToArray();

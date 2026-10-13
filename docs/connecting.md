@@ -154,8 +154,9 @@ is disposed.
 
 ## Algorithms
 
-The defaults prefer modern algorithms: `curve25519-sha256` and `ecdh-sha2-nistp*` (plus `diffie-hellman-group14/16`)
-for key exchange; `chacha20-poly1305@openssh.com`, `aes*-gcm@openssh.com` and `aes*-ctr` with `hmac-sha2-*-etm` for
+The defaults prefer modern algorithms: the post-quantum hybrid `mlkem768x25519-sha256` (in OpenSSH since 9.9 and its default since 10.0; offered on
+.NET 10 where the platform has ML-KEM: OpenSSL 3.5+ or a recent Windows), `curve25519-sha256` and `ecdh-sha2-nistp*` (plus
+`diffie-hellman-group14/16`) for key exchange; `chacha20-poly1305@openssh.com`, `aes*-gcm@openssh.com` and `aes*-ctr` with `hmac-sha2-*-etm` for
 ciphers; `ssh-ed25519`, `ecdsa-sha2-*` and `rsa-sha2-256/512` host keys, and OpenSSH host certificates. Strict key exchange
 (the Terrapin fix) is always on. `FipsMode = true` limits negotiation to FIPS-approved algorithms. Keys are renewed after
 `RekeyAfterBytes` (default 1 GiB) or `RekeyAfterTime` (default 1 hour).

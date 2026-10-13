@@ -28,6 +28,12 @@ public class TransportInteropTests
         {
             yield return (kex[0], ciphers[0], h);
         }
+
+        // The post-quantum hybrid (OpenSSH 9.9+), where this platform has ML-KEM; older servers skip it as not offered.
+        if (SshAlgorithms.HasMlKem)
+        {
+            yield return (SshAlgorithms.MlKem768X25519Sha256, ciphers[0], hostKeys[0]);
+        }
     }
 
     private static SshTransportOptions Options(string kex, string cipher, string hostKey, List<HostKeyInfo> seen) => new()

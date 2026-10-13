@@ -61,8 +61,10 @@ public class SshTransportTests
 
     public static IEnumerable<string> Ciphers() => SshAlgorithms.DefaultCiphers;
 
+    // mlkem768x25519-sha256 only where the platform has ML-KEM (.NET 10 with OpenSSL 3.5+ or a recent Windows).
     public static IEnumerable<string> KexMethods() =>
     [
+        .. SshAlgorithms.HasMlKem ? [SshAlgorithms.MlKem768X25519Sha256] : Array.Empty<string>(),
         SshAlgorithms.Curve25519Sha256, SshAlgorithms.Curve25519Sha256Libssh, SshAlgorithms.EcdhNistp256, SshAlgorithms.EcdhNistp384,
         SshAlgorithms.EcdhNistp521, SshAlgorithms.DhGroup14Sha256, SshAlgorithms.DhGroup16Sha512,
     ];

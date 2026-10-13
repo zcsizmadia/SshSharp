@@ -23,6 +23,9 @@ internal sealed class KexResult : IDisposable
     /// <summary>The signature blob over H (<c>string type || string signature</c>).</summary>
     public required byte[] Signature { get; init; }
 
+    /// <summary>K is encoded as a string rather than an mpint in key derivation (the post-quantum hybrid methods).</summary>
+    public bool SharedSecretIsString { get; init; }
+
     public void Dispose() => CryptographicOperations.ZeroMemory(SharedSecret);
 }
 
@@ -45,6 +48,9 @@ internal abstract class ClientKeyExchange : IDisposable
     /// <summary>Creates the client side of the named method.</summary>
     public static ClientKeyExchange Create(string name) => name switch
     {
+#if NET10_0_OR_GREATER
+        SshAlgorithms.MlKem768X25519Sha256 when MLKem.IsSupported => new MlKem768X25519KeyExchange(),
+#endif
         SshAlgorithms.Curve25519Sha256 or SshAlgorithms.Curve25519Sha256Libssh => new Curve25519KeyExchange(),
         SshAlgorithms.EcdhNistp256 => new EcdhKeyExchange(NistCurve.P256),
         SshAlgorithms.EcdhNistp384 => new EcdhKeyExchange(NistCurve.P384),
@@ -75,10 +81,15 @@ internal abstract class ClientKeyExchange : IDisposable
     }
 
     protected static KexResult Finish(
-        HashAlgorithmName hash, KexContext context, byte[] hostKey, byte[] signature, Action<SshWriter> writeKexSpecific, ReadOnlySpan<byte> sharedSecret)
+        HashAlgorithmName hash, KexContext context, byte[] hostKey, byte[] signature, Action<SshWriter> writeKexSpecific, ReadOnlySpan<byte> sharedSecret,
+        bool sharedSecretIsString = false)
     {
-        var h = ExchangeHash.Compute(hash, context.ClientVersion, context.ServerVersion, context.ClientKexInit, context.ServerKexInit, hostKey, writeKexSpecific, sharedSecret);
-        return new KexResult { SharedSecret = sharedSecret.ToArray(), ExchangeHash = h, HostKeyBlob = hostKey, Signature = signature };
+        var h = ExchangeHash.Compute(hash, context.ClientVersion, context.ServerVersion, context.ClientKexInit, context.ServerKexInit, hostKey, writeKexSpecific,
+            sharedSecret, sharedSecretIsString);
+        return new KexResult
+        {
+            SharedSecret = sharedSecret.ToArray(), ExchangeHash = h, HostKeyBlob = hostKey, Signature = signature, SharedSecretIsString = sharedSecretIsString,
+        };
     }
 }
 
@@ -281,3 +292,87 @@ internal sealed class DhKeyExchange : ClientKeyExchange
 
     private static byte[] Magnitude(BigInteger value) => value.ToByteArray(isUnsigned: true, isBigEndian: true);
 }
+
+#if NET10_0_OR_GREATER
+/// <summary>
+/// <c>mlkem768x25519-sha256</c> (draft-ietf-sshm-mlkem-hybrid-kex, OpenSSH 9.9+): ML-KEM-768 (FIPS 203) combined with X25519, so the session
+/// keys stay secret unless both are broken, including by a future quantum computer that records today's traffic. The client sends its
+/// ML-KEM encapsulation key and X25519 public key; the server answers with the ML-KEM ciphertext and its X25519 public key;
+/// K = SHA-256(ML-KEM secret || X25519 secret), encoded as a string. Needs the platform's ML-KEM (<see cref="MLKem.IsSupported"/>).
+/// </summary>
+internal sealed class MlKem768X25519KeyExchange : ClientKeyExchange
+{
+    private const int EncapsulationKeySize = 1184;
+    private const int CiphertextSize = 1088;
+
+    private readonly MLKem _mlkem = MLKem.GenerateKey(MLKemAlgorithm.MLKem768);
+    private readonly byte[] _privateKey = RandomNumberGenerator.GetBytes(X25519.KeySize);
+    private readonly byte[] _clientInit;
+
+    public MlKem768X25519KeyExchange()
+    {
+        _clientInit = new byte[EncapsulationKeySize + X25519.KeySize];
+        _mlkem.ExportEncapsulationKey(_clientInit.AsSpan(0, EncapsulationKeySize));
+        X25519.GetPublicKey(_privateKey, _clientInit.AsSpan(EncapsulationKeySize));
+    }
+
+    public override HashAlgorithmName Hash => HashAlgorithmName.SHA256;
+
+    public override byte[] CreateInit() => BuildInit(SshMessage.KexEcdhInit, w => w.WriteString(_clientInit));
+
+    public override KexResult ProcessReply(ReadOnlySpan<byte> reply, KexContext context)
+    {
+        var reader = new SshReader(reply);
+        var hostKey = ExpectReply(ref reader);
+        var serverReply = reader.ReadString().ToArray();
+        var signature = reader.ReadString().ToArray();
+        if (!reader.IsEmpty)
+        {
+            throw new SshProtocolException("Trailing data in the key exchange reply.");
+        }
+
+        if (serverReply.Length != CiphertextSize + X25519.KeySize)
+        {
+            throw new SshProtocolException($"The ML-KEM/X25519 reply must be {CiphertextSize + X25519.KeySize} bytes.");
+        }
+
+        // Both secrets, then K = SHA-256(ML-KEM secret || X25519 secret).
+        var secrets = new byte[32 + X25519.KeySize];
+        var shared = new byte[32];
+        try
+        {
+            try
+            {
+                _mlkem.Decapsulate(serverReply.AsSpan(0, CiphertextSize), secrets.AsSpan(0, 32));
+            }
+            catch (CryptographicException ex)
+            {
+                throw new SshException(SshFailureReason.KeyExchangeFailed, $"ML-KEM decapsulation failed: {ex.Message}", ex);
+            }
+
+            if (!X25519.TryAgree(_privateKey, serverReply.AsSpan(CiphertextSize), secrets.AsSpan(32)))
+            {
+                throw new SshException(SshFailureReason.KeyExchangeFailed, "The server sent a low-order Curve25519 point.");
+            }
+
+            SHA256.HashData(secrets, shared);
+            return Finish(Hash, context, hostKey, signature, w =>
+            {
+                w.WriteString(_clientInit);
+                w.WriteString(serverReply);
+            }, shared, sharedSecretIsString: true);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(secrets);
+            CryptographicOperations.ZeroMemory(shared);
+        }
+    }
+
+    public override void Dispose()
+    {
+        _mlkem.Dispose();
+        CryptographicOperations.ZeroMemory(_privateKey);
+    }
+}
+#endif

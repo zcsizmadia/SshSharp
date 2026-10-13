@@ -35,7 +35,8 @@ Console.WriteLine(result.StandardOutputText);
   started from `ssh_config`.
 - **Sessions:** run commands, stream stdin/stdout/stderr, interactive shells with a pseudo-terminal, environment variables,
   signals and window resizing.
-- **Modern algorithms:** `curve25519-sha256`, ECDH and DH group 14/16 key exchange; ChaCha20-Poly1305, AES-GCM and
+- **Modern algorithms:** post-quantum `mlkem768x25519-sha256` (on .NET 10 where the platform has ML-KEM), `curve25519-sha256`,
+  ECDH and DH group 14/16 key exchange; ChaCha20-Poly1305, AES-GCM and
   AES-CTR with HMAC-SHA2 ETM; Ed25519, ECDSA and RSA (SHA-2) keys; strict key exchange (Terrapin) always on; a FIPS mode.
 - **File transfer:** SCP uploads and downloads of files, streams and directories, with progress, kept times, and checks
   that stop a hostile server from writing outside the target.
