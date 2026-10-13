@@ -122,11 +122,17 @@ internal abstract class SshPublicKey
 
     private static RsaPublicKey ParseRsa(ref SshReader reader, byte[] blob)
     {
-        var exponent = reader.ReadMpint().ToArray();
-        var modulus = reader.ReadMpint().ToArray();
-        if (modulus.Length < 64 || exponent.Length == 0)
+        var exponent = reader.ReadMpint().TrimStart((byte)0).ToArray();
+        var modulus = reader.ReadMpint().TrimStart((byte)0).ToArray();
+        if (modulus.Length < 64 || (modulus[^1] & 1) == 0)
         {
             throw new SshProtocolException("The RSA public key is too small or malformed.");
+        }
+
+        // e = 1 makes every signature trivially forgeable; e must be odd and at least 3 (OpenSSH checks the same), and far below n.
+        if (exponent.Length == 0 || (exponent[^1] & 1) == 0 || (exponent.Length == 1 && exponent[0] < 3) || exponent.Length > 8)
+        {
+            throw new SshProtocolException("The RSA public exponent is invalid.");
         }
 
         return new RsaPublicKey(new RSAParameters { Exponent = exponent, Modulus = modulus }, blob);
@@ -183,10 +189,26 @@ internal abstract class SshPublicKey
 
         protected override bool VerifyRaw(string algorithm, ReadOnlySpan<byte> signature, ReadOnlySpan<byte> data)
         {
+            // Some implementations drop leading zero bytes from the signature; OpenSSH pads it back to the modulus length, and so do we.
+            var modulusLength = parameters.Modulus!.Length;
+            if (signature.Length > modulusLength)
+            {
+                return false;
+            }
+
+            Span<byte> padded = stackalloc byte[modulusLength];
+            scoped ReadOnlySpan<byte> toVerify = signature;
+            if (signature.Length < modulusLength)
+            {
+                padded.Clear();
+                signature.CopyTo(padded[(modulusLength - signature.Length)..]);
+                toVerify = padded;
+            }
+
             using var rsa = RSA.Create();
             rsa.ImportParameters(parameters);
             var hash = algorithm == SshAlgorithms.RsaSha2_256 ? HashAlgorithmName.SHA256 : HashAlgorithmName.SHA512;
-            return rsa.VerifyData(data, signature, hash, RSASignaturePadding.Pkcs1);
+            return rsa.VerifyData(data, toVerify, hash, RSASignaturePadding.Pkcs1);
         }
     }
 }

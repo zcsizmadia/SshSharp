@@ -32,6 +32,12 @@ internal sealed class SshTransportOptions
     /// <summary>Start a new key exchange after this many payload bytes have been sent and received under the current keys (RFC 4253 section 9 recommends 1 GiB).</summary>
     public long RekeyBytes { get; init; } = 1L << 30;
 
+    /// <summary>
+    /// Start a new key exchange after this many packets in either direction under the current keys. Sequence numbers are 32 bits and
+    /// ChaCha20-Poly1305 uses them as its nonce, so they must never wrap under one key; OpenSSH uses the same limit (2^31).
+    /// </summary>
+    public long RekeyPackets { get; init; } = 1L << 31;
+
     /// <summary>Start a new key exchange after the current keys have been in use this long (RFC 4253 section 9 recommends 1 hour).</summary>
     public TimeSpan RekeyInterval { get; init; } = TimeSpan.FromHours(1);
 

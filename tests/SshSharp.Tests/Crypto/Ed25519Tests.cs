@@ -124,6 +124,34 @@ public class Ed25519Tests
     }
 
     [Test]
+    public async Task Verify_RejectsSmallOrderAndNonCanonicalPublicKeys()
+    {
+        // With the identity as the public key, R = S·B satisfies the verification equation for any message: (R, S) = (identity, 0)
+        // "verifies" without any private key. Small-order keys must be rejected for a fingerprint to mean one signer.
+        var identity = new byte[32];
+        identity[0] = 1;
+        var forged = new byte[64];
+        identity.CopyTo(forged, 0);
+        await Assert.That(Ed25519.Verify(identity, "anything"u8.ToArray(), forged)).IsFalse();
+
+        // The order-2 point (0, -1), and the order-4 point with y = 0.
+        var order2 = H("ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f");
+        await Assert.That(Ed25519.Verify(order2, "m"u8.ToArray(), forged)).IsFalse();
+        await Assert.That(Ed25519.Verify(new byte[32], "m"u8.ToArray(), forged)).IsFalse();
+
+        // y = p + 1 is a non-canonical encoding of y = 1; and x = 0 with the sign bit set is invalid (RFC 8032 5.1.3).
+        var nonCanonical = H("eeffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f");
+        await Assert.That(Ed25519.Verify(nonCanonical, "m"u8.ToArray(), forged)).IsFalse();
+        var negativeZero = (byte[])identity.Clone();
+        negativeZero[31] |= 0x80;
+        await Assert.That(Ed25519.Verify(negativeZero, "m"u8.ToArray(), forged)).IsFalse();
+
+        // Ordinary keys still verify.
+        var seed = H("9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60");
+        await Assert.That(Ed25519.Verify(PublicKey(seed), "m"u8.ToArray(), Sign(seed, "m"u8.ToArray()))).IsTrue();
+    }
+
+    [Test]
     public async Task Verify_RejectsBadSizesAndInvalidPoints()
     {
         var seed = H("9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60");

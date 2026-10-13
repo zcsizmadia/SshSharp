@@ -39,6 +39,8 @@ internal sealed class SshTransport : IAsyncDisposable
     private KexInitMessage? _pendingClientInit;
     private byte[]? _pendingClientInitPayload;
     private long _bytesSinceKex;
+    private long _packetsSentSinceKex;
+    private long _packetsReceivedSinceKex;
     private long _kexStartedAt;
 
     public SshTransport(Stream stream, SshTransportOptions options)
@@ -297,6 +299,8 @@ internal sealed class SshTransport : IAsyncDisposable
             _pendingClientInit = null;
             _pendingClientInitPayload = null;
             _bytesSinceKex = 0;
+            _packetsSentSinceKex = 0;
+            Interlocked.Exchange(ref _packetsReceivedSinceKex, 0);
             _kexStartedAt = _options.TimeProvider.GetTimestamp();
             var done = _rekeyDone;
             _rekeyDone = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -322,6 +326,8 @@ internal sealed class SshTransport : IAsyncDisposable
 
     private bool RekeyDue() =>
         Interlocked.Read(ref _bytesSinceKex) >= _options.RekeyBytes
+        || Interlocked.Read(ref _packetsSentSinceKex) >= _options.RekeyPackets
+        || Interlocked.Read(ref _packetsReceivedSinceKex) >= _options.RekeyPackets
         || _options.TimeProvider.GetElapsedTime(_kexStartedAt) >= _options.RekeyInterval;
 
     /// <summary>We start a re-exchange: send KEXINIT and hold application sends back. The receive side completes it.</summary>
@@ -426,6 +432,7 @@ internal sealed class SshTransport : IAsyncDisposable
                     PacketCodec.Encode(_writer, payload.Span, _sendProtector, _sendSequence++);
                     onCommitted?.Invoke();
                     Interlocked.Add(ref _bytesSinceKex, payload.Length);
+                    Interlocked.Increment(ref _packetsSentSinceKex);
                     SshTelemetry.BytesSent.Add(payload.Length);
                     var flush = _writer.FlushAsync(_lifetime.Token);
                     if (flush.IsCompleted)
@@ -501,6 +508,7 @@ internal sealed class SshTransport : IAsyncDisposable
                 }
 
                 Interlocked.Add(ref _bytesSinceKex, packet.Payload.Length);
+                Interlocked.Increment(ref _packetsReceivedSinceKex);
                 SshTelemetry.BytesReceived.Add(packet.Payload.Length);
                 return packet;
             }

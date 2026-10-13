@@ -150,6 +150,55 @@ public class SshPublicKeyTests
         await Assert.That(key.VerifySignature("ssh-rsa", signature, data)).IsFalse();
     }
 
+    [Test]
+    [Arguments(new byte[] { 1 })]
+    [Arguments(new byte[] { 2 })]
+    [Arguments(new byte[] { 0x01, 0x00, 0x00 })]
+    [Arguments(new byte[0])]
+    public async Task Rsa_RejectsUnsafePublicExponents(byte[] exponent)
+    {
+        using var rsa = RSA.Create(2048);
+        var modulus = rsa.ExportParameters(false).Modulus!;
+        var blob = Blob(w =>
+        {
+            w.WriteString("ssh-rsa");
+            w.WriteMpint(exponent);
+            w.WriteMpint(modulus);
+        });
+        await Assert.That(() => SshPublicKey.Parse(blob)).Throws<SshProtocolException>();
+    }
+
+    [Test]
+    public async Task Rsa_AcceptsASignatureWithItsLeadingZeroBytesDropped()
+    {
+        using var rsa = RSA.Create(2048);
+        var parameters = rsa.ExportParameters(false);
+        var key = SshPublicKey.Parse(Blob(w =>
+        {
+            w.WriteString("ssh-rsa");
+            w.WriteMpint(parameters.Exponent);
+            w.WriteMpint(parameters.Modulus);
+        }));
+
+        // About one signature in 256 starts with a zero byte; some servers send it without, and OpenSSH pads it back.
+        byte[] data, signature;
+        var i = 0;
+        do
+        {
+            data = BitConverter.GetBytes(i++);
+            signature = rsa.SignData(data, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        }
+        while (signature[0] != 0);
+
+        var trimmed = signature.AsSpan().TrimStart((byte)0).ToArray();
+        await Assert.That(key.VerifySignature("rsa-sha2-256", SignatureBlob("rsa-sha2-256", w => w.WriteBytes(trimmed)), data)).IsTrue();
+        await Assert.That(key.VerifySignature("rsa-sha2-256", SignatureBlob("rsa-sha2-256", w => w.WriteBytes(signature)), data)).IsTrue();
+
+        // Longer than the modulus is never valid.
+        byte[] longer = [0, .. signature];
+        await Assert.That(key.VerifySignature("rsa-sha2-256", SignatureBlob("rsa-sha2-256", w => w.WriteBytes(longer)), data)).IsFalse();
+    }
+
     private static byte[] Blob(Action<SshWriter> write)
     {
         var buffer = new ArrayBufferWriter<byte>();

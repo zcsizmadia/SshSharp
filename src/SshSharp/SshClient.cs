@@ -152,7 +152,7 @@ public sealed class SshClient : IAsyncDisposable
         {
             Preferences = options.AlgorithmPreferences ?? (options.FipsMode ? AlgorithmPreferences.Fips() : new AlgorithmPreferences()),
             MinimumRsaBits = options.MinimumRsaBits,
-            RekeyBytes = options.RekeyAfterBytes,
+            RekeyBytes = Math.Min(options.RekeyAfterBytes, SshClientOptions.MaxRekeyAfterBytes),
             RekeyInterval = options.RekeyAfterTime,
             Logger = logger,
             VerifyHostKey = async (info, ct) =>
