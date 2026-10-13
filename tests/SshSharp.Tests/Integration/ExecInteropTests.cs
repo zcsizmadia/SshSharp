@@ -34,18 +34,23 @@ public class ExecInteropTests
             Skip.Test("No real server account configured.");
         }
 
-        // Unanswered probes would drop the connection after 4 x 500 ms; OpenSSH answers keepalive@openssh.com. (Not tighter: a loaded CI
-        // runner can delay the receive loop past a very short interval, which is a genuine miss.)
         var (host, port) = RealServer.Endpoint!.Value;
         var options = new SshClientOptions
         {
             UserName = Environment.GetEnvironmentVariable("SSHSHARP_TEST_USER")!,
             Password = Environment.GetEnvironmentVariable("SSHSHARP_TEST_PASSWORD"),
             HostKeyVerifier = SshHostKeyVerifier.FromDelegate((_, _) => ValueTask.FromResult(true)),
-            KeepAliveInterval = TimeSpan.FromMilliseconds(500),
-            KeepAliveCountMax = 3,
+            KeepAliveInterval = TimeSpan.FromSeconds(1),
+            KeepAliveCountMax = 5,
         };
         await using var client = await SshClient.ConnectAsync(host, port, options, Timeout());
+
+        // The claim itself, without timing: OpenSSH answers keepalive@openssh.com (with a failure, which is still an answer).
+        var reply = await client.Connection.SendGlobalRequestAsync("keepalive@openssh.com", wantReply: true, null, Timeout());
+        await Assert.That(reply.Success).IsFalse();
+
+        // And an idle connection with keep-alives running stays up. The margins are generous: the interop tests run in parallel on
+        // small CI runners, and a stalled test process is a genuine miss as far as the keep-alive is concerned.
         await Task.Delay(TimeSpan.FromSeconds(3));
         await Assert.That(client.ConnectionError).IsNull(); // shows the exception if the connection dropped
         await Assert.That(client.IsConnected).IsTrue();
