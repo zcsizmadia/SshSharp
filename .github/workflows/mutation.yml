@@ -1,0 +1,63 @@
+name: Mutation testing
+
+# Stryker.NET mutates the library and runs the TUnit suite against every mutant: a mutant no test notices is a gap in the tests.
+# A full run takes hours, so it runs weekly and on demand, split into scopes that run in parallel. Reports are uploaded as
+# artifacts; the score is not a gate.
+on:
+  schedule:
+    - cron: '17 3 * * 6' # weekly
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Actions are pinned by commit SHA (the tag in the comment is for humans and Dependabot).
+jobs:
+  stryker:
+    name: stryker (${{ matrix.scope }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - scope: curve25519
+            mutate: -m "**/Crypto/Field25519.cs" -m "**/Crypto/X25519.cs" -m "**/Crypto/Ed25519.cs"
+          - scope: symmetric
+            mutate: -m "**/Crypto/ChaCha20*.cs" -m "**/Crypto/Poly1305.cs" -m "**/Crypto/AesCtr.cs" -m "**/Crypto/XorHelper.cs"
+          - scope: kdf
+            mutate: -m "**/Crypto/Argon2.cs" -m "**/Crypto/BcryptPbkdf.cs" -m "**/Crypto/Blake2b.cs"
+          - scope: ecdh-dh
+            mutate: -m "**/Crypto/NistCurve.cs" -m "**/Crypto/ModpGroup.cs"
+          - scope: packet-codec
+            mutate: -m "**/Protocol/PacketCodec.cs"
+          - scope: config
+            mutate: -m "**/Config/*.cs"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # MinVer computes the version from tags and history
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+      - run: dotnet tool restore
+      - name: Stryker
+        working-directory: tests/SshSharp.Tests
+        # MTP is Stryker's runner for Microsoft.Testing.Platform, which TUnit is built on (a preview runner in Stryker.NET 5).
+        run: >
+          dotnet stryker --test-runner mtp --project SshSharp.csproj --target-framework net10.0
+          ${{ matrix.mutate }} --reporter html --reporter json --reporter progress --output "$RUNNER_TEMP/stryker"
+          | tee "$RUNNER_TEMP/stryker.log"
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### Mutation testing: ${{ matrix.scope }}"
+            grep -E "^(Killed|Survived|Timeout|Errors):|final mutation score" "$RUNNER_TEMP/stryker.log" | sed 's/^.*INF\] //' | sed 's/^/    /'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: mutation-report-${{ matrix.scope }}
+          path: ${{ runner.temp }}/stryker/reports/
+          if-no-files-found: ignore

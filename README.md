@@ -153,6 +153,8 @@ var keys = agent is null ? [] : await agent.GetKeysAsync();
   `SSHSHARP_TEST_SSHD` and related variables are set; CI sets them up on Linux, and `. ./scripts/test-server.ps1` starts the
   same server in Docker locally (`-Server dropbear` for Dropbear, `-Stop` to remove it).
 - Coverage report: `./scripts/coverage.ps1` (target 95%+, not enforced in CI).
+- Mutation testing (Stryker.NET, weekly in CI): `dotnet tool restore`, then in `tests/SshSharp.Tests`:
+  `dotnet stryker --test-runner mtp --project SshSharp.csproj --target-framework net10.0 -m "**/Crypto/X25519.cs"`.
 - Releases: pushing a `v*` tag on `main` publishes to nuget.org (`.github/workflows/publish.yml`).
 
 ## License
