@@ -49,6 +49,13 @@ public class FaultInteropTests
     [Test]
     public async Task ASilentNetwork_IsDetectedByKeepAlive()
     {
+        if (RealServer.IsWindows)
+        {
+            // OpenSSH for Windows 9.5 often fails to answer keepalive@openssh.com ("server_input_global_request: send reply: Connection
+            // aborted" in its log); OpenSSH's own client with ServerAliveInterval times out against it the same way (checked in CI).
+            Skip.Test("OpenSSH for Windows does not answer keep-alives reliably.");
+        }
+
         // A busy CI runner's sshd has gone 4 s without answering anything (1 s x 3 declared a healthy connection dead before the stall):
         // 2 s x 4 needs 10 s of silence, and still detects the stall well within the test's time.
         if (await SetUpAsync(keepAlive: TimeSpan.FromSeconds(2), keepAliveCountMax: 4) is not var (proxy, options))

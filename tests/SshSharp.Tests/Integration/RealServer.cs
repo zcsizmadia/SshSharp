@@ -64,6 +64,9 @@ internal static class RealServer
 
     public static bool IsOpenSsh => Software == "OpenSSH";
 
+    /// <summary>Whether the server runs on Windows (SSHSHARP_TEST_SERVER_OS=windows): no signals, and a pseudo-terminal through ConPTY.</summary>
+    public static bool IsWindows => string.Equals(Environment.GetEnvironmentVariable("SSHSHARP_TEST_SERVER_OS"), "windows", StringComparison.OrdinalIgnoreCase);
+
     /// <summary>Whether the server supports strict KEX (OpenSSH 9.6+, Dropbear 2024.84+); SSHSHARP_TEST_SERVER_STRICTKEX=0 for older ones.</summary>
     public static bool SupportsStrictKex => Environment.GetEnvironmentVariable("SSHSHARP_TEST_SERVER_STRICTKEX") != "0";
 }

@@ -83,7 +83,8 @@ docs/                      # guides, design notes, the API reference site (DocFX
   in parallel scopes. A surviving mutant is a change no test notices. The score is reported, not a gate.
 - **Real-server interop** (`Integration/`, enabled by `SSHSHARP_TEST_*` environment variables): CI starts sshd on the Linux
   runners with throwaway keys of every type and format, a CA for host and user certificates, `ssh-agent`, and PAM for
-  keyboard-interactive; and a container matrix of older and newer OpenSSH releases and Dropbear.
+  keyboard-interactive; a container matrix of older and newer OpenSSH releases and Dropbear; and OpenSSH for Windows on a
+  Windows runner (Git Bash as its shell; signals, the exit status through ConPTY and keep-alives are not tested there).
 - **Platform matrix:** Linux (amd64, arm64), Windows (amd64, arm64) and macOS (arm64), each on net8.0 and net10.0.
 - **Rules:** no code merges without tests. Timing-dependent tests use the fake clock or wait on a signal, not real sleeps.
   Flaky tests are fixed or tracked, not hidden.

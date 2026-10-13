@@ -29,6 +29,12 @@ public class ExecInteropTests
     [Test]
     public async Task KeepAlivesAreAnswered_SoAnIdleConnectionStaysUp()
     {
+        if (RealServer.IsWindows)
+        {
+            // OpenSSH for Windows 9.5 often fails to answer keepalive@openssh.com ("server_input_global_request: send reply: Connection
+            // aborted" in its log); OpenSSH's own client with ServerAliveInterval times out against it the same way (checked in CI).
+            Skip.Test("OpenSSH for Windows does not answer keep-alives reliably.");
+        }
         if (!Configured)
         {
             Skip.Test("No real server account configured.");
@@ -96,6 +102,11 @@ public class ExecInteropTests
         if (!Configured)
         {
             Skip.Test("No real server account configured.");
+        }
+
+        if (RealServer.IsWindows)
+        {
+            Skip.Test("Windows has no signals: OpenSSH for Windows reports an exit status instead.");
         }
 
         await using var client = await ConnectAsync(Timeout());
