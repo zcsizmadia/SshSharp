@@ -142,6 +142,32 @@ public class SshPrivateKeyTests
     }
 
     [Test]
+    [Arguments("aes256-ctr")]
+    [Arguments("aes256-gcm@openssh.com")]
+    public async Task EncryptedOpenSshKeys_NeedTheRightPassphrase(string cipher)
+    {
+        var pem = TestKeys.OpenSshEd25519(out var blob, passphrase: "correct horse", cipher: cipher);
+        using (var key = SshPrivateKey.Parse(pem, "correct horse"))
+        {
+            await AssertSignsAndVerifies(key, blob);
+        }
+
+        await Assert.That(() => SshPrivateKey.Parse(pem)).Throws<FormatException>().WithMessageContaining("passphrase is required");
+
+        // A wrong passphrase shows up as differing check values (CTR) or a failed tag (GCM).
+        var wrong = Assert.Throws<FormatException>(() => SshPrivateKey.Parse(pem, "battery staple"));
+        await Assert.That(wrong.Message).Contains("passphrase");
+    }
+
+    [Test]
+    public async Task UnsupportedKeyCiphers_SayHowToConvert()
+    {
+        var body = Body(TestKeys.OpenSshEd25519(out _, passphrase: "pw"));
+        var text = Encoding.Latin1.GetString(body).Replace("aes256-ctr", "aes256-xyz", StringComparison.Ordinal);
+        await Assert.That(() => SshPrivateKey.Parse(Rewrap(Encoding.Latin1.GetBytes(text)), "pw")).Throws<FormatException>().WithMessageContaining("ssh-keygen -p");
+    }
+
+    [Test]
     public async Task Disposing_ClearsTheEd25519Seed()
     {
         var key = SshPrivateKey.Parse(TestKeys.OpenSshEd25519(out _));

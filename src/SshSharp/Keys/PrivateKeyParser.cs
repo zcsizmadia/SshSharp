@@ -18,7 +18,9 @@ internal static class PrivateKeyParser
     private const string OidEc = "1.2.840.10045.2.1";
     private const string OidEd25519 = "1.3.101.112";
 
-    public static SshPrivateKey Parse(string text, string? passphrase)
+    public static SshPrivateKey Parse(string text, string? passphrase) => SelfChecked(ParseUnchecked(text, passphrase));
+
+    private static SshPrivateKey ParseUnchecked(string text, string? passphrase)
     {
         try
         {
@@ -99,7 +101,7 @@ internal static class PrivateKeyParser
             var reader = new SshReader(data.AsSpan(OpenSshMagic.Length));
             var cipher = reader.ReadUtf8String();
             var kdf = reader.ReadUtf8String();
-            reader.ReadString(); // kdf options
+            var kdfOptions = reader.ReadString();
             if (reader.ReadUInt32() != 1)
             {
                 throw new FormatException("OpenSSH key files with more than one key are not supported.");
@@ -107,14 +109,26 @@ internal static class PrivateKeyParser
 
             var publicBlob = reader.ReadString().ToArray();
             var privateSection = reader.ReadString();
-            if (cipher != "none" || kdf != "none")
+
+            SshPrivateKey key;
+            if (cipher == "none" && kdf == "none")
             {
-                // Encrypted keys need bcrypt_pbkdf; they are the next step.
-                _ = passphrase;
-                throw new FormatException($"Encrypted OpenSSH private keys ({cipher}, {kdf}) are not supported yet.");
+                key = ParseOpenSshPrivate(privateSection);
+            }
+            else
+            {
+                // AEAD ciphers append their tag after the encrypted section.
+                var decrypted = OpenSshKeyDecryptor.Decrypt(cipher, kdf, kdfOptions, privateSection, ref reader, passphrase);
+                try
+                {
+                    key = ParseOpenSshPrivate(decrypted);
+                }
+                finally
+                {
+                    CryptographicOperations.ZeroMemory(decrypted);
+                }
             }
 
-            var key = ParseOpenSshPrivate(privateSection);
             if (!key.PublicKey.Span.SequenceEqual(publicBlob))
             {
                 key.Dispose();
@@ -182,7 +196,7 @@ internal static class PrivateKeyParser
                 {
                     ecdsa.ImportParameters(parameters);
                 }
-                catch (CryptographicException ex)
+                catch (Exception ex) when (ex is CryptographicException or PlatformNotSupportedException)
                 {
                     ecdsa.Dispose();
                     throw new FormatException("The ECDSA private key is not valid for its curve.", ex);
@@ -281,7 +295,7 @@ internal static class PrivateKeyParser
             rsa.ImportFromEncryptedPem(text, passphrase);
             return FromRsa(rsa, null);
         }
-        catch (CryptographicException)
+        catch (Exception ex) when (ex is CryptographicException or PlatformNotSupportedException)
         {
             rsa.Dispose();
         }
@@ -292,11 +306,40 @@ internal static class PrivateKeyParser
             ecdsa.ImportFromEncryptedPem(text, passphrase);
             return FromEcdsa(ecdsa, null);
         }
-        catch (CryptographicException ex)
+        catch (Exception ex) when (ex is CryptographicException or PlatformNotSupportedException)
         {
             ecdsa.Dispose();
             throw new FormatException("Could not decrypt the private key: the passphrase is wrong, or it is not an RSA or ECDSA key.", ex);
         }
+    }
+
+    /// <summary>
+    /// Signs and verifies once. Platforms differ in how much they check when a key is imported (macOS accepts some inconsistent RSA keys
+    /// that then fail to sign), so every RSA and ECDSA key is proven usable here, and a broken one is a format error on every platform.
+    /// </summary>
+    private static SshPrivateKey SelfChecked(SshPrivateKey key)
+    {
+        if (key is SshPrivateKey.Ed25519Key)
+        {
+            return key; // its public key was derived from the seed and compared already
+        }
+
+        try
+        {
+            var data = "SshSharp private key consistency check"u8;
+            var algorithm = key.SignatureAlgorithms[0];
+            if (SshPublicKey.Parse(key.PublicKey.Span).VerifySignature(algorithm, key.Sign(algorithm, data), data))
+            {
+                return key;
+            }
+        }
+        catch (Exception ex) when (ex is CryptographicException or SshProtocolException)
+        {
+            // Reported below.
+        }
+
+        key.Dispose();
+        throw new FormatException("The private key is inconsistent: its parts do not form a usable key.");
     }
 
     private static SshPrivateKey Import(IDisposable algorithm, Action import, Func<SshPrivateKey> create)
@@ -306,7 +349,7 @@ internal static class PrivateKeyParser
             import();
             return create();
         }
-        catch (Exception ex) when (ex is CryptographicException or ArgumentException)
+        catch (Exception ex) when (ex is CryptographicException or ArgumentException or PlatformNotSupportedException)
         {
             algorithm.Dispose();
             throw new FormatException("The PEM private key could not be read.", ex);

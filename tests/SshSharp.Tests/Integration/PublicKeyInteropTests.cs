@@ -11,6 +11,12 @@ public class PublicKeyInteropTests
 
     private static CancellationToken Timeout() => new CancellationTokenSource(TimeSpan.FromSeconds(90)).Token;
 
+    /// <summary>Files with "encrypted" in their name are protected with SSHSHARP_TEST_KEY_PASSPHRASE.</summary>
+    private static Task<SshPrivateKey> LoadAsync(string file) =>
+        SshPrivateKey.LoadFileAsync(file, Path.GetFileName(file).Contains("encrypted", StringComparison.Ordinal)
+            ? Environment.GetEnvironmentVariable("SSHSHARP_TEST_KEY_PASSPHRASE")
+            : null);
+
     private static IEnumerable<string> PrivateKeyFiles(string directory) =>
         Directory.EnumerateFiles(directory).Where(f => !f.EndsWith(".pub", StringComparison.Ordinal) && File.Exists(f + ".pub")).Order(StringComparer.Ordinal);
 
@@ -27,7 +33,7 @@ public class PublicKeyInteropTests
         await Assert.That(files).IsNotEmpty();
         foreach (var file in files)
         {
-            using var key = await SshPrivateKey.LoadFileAsync(file);
+            using var key = await LoadAsync(file);
             var expected = (await File.ReadAllTextAsync(file + ".pub")).Split(' ');
             await Assert.That(key.KeyType).IsEqualTo(expected[0]);
             await Assert.That(Convert.ToBase64String(key.PublicKey.Span)).IsEqualTo(expected[1]);
@@ -47,7 +53,7 @@ public class PublicKeyInteropTests
         var (host, port) = RealServer.Endpoint!.Value;
         foreach (var file in PrivateKeyFiles(directory))
         {
-            using var key = await SshPrivateKey.LoadFileAsync(file);
+            using var key = await LoadAsync(file);
             var options = new SshClientOptions
             {
                 UserName = user,

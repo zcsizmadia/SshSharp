@@ -13,7 +13,8 @@ namespace SshSharp.Tests.Keys;
 /// </summary>
 internal static class TestKeys
 {
-    public static string OpenSshEd25519(out byte[] publicBlob, string comment = "test@example", int? checkOverride = null, byte[]? padding = null)
+    public static string OpenSshEd25519(out byte[] publicBlob, string comment = "test@example", int? checkOverride = null, byte[]? padding = null,
+        string? passphrase = null, string cipher = "aes256-ctr")
     {
         var seed = RandomNumberGenerator.GetBytes(32);
         var pub = new byte[32];
@@ -24,7 +25,7 @@ internal static class TestKeys
             w.WriteString("ssh-ed25519");
             w.WriteString(pub);
             w.WriteString([.. seed, .. pub]);
-        }, comment, checkOverride, padding);
+        }, comment, checkOverride, padding, passphrase, cipher);
     }
 
     public static string OpenSshEcdsa(ECCurve curve, string curveName, out byte[] publicBlob, string comment = "")
@@ -104,7 +105,8 @@ internal static class TestKeys
         return buffer.WrittenSpan.ToArray();
     }
 
-    private static string OpenSsh(byte[] publicBlob, Action<SshWriter> writeKey, string comment, int? checkOverride = null, byte[]? padding = null)
+    private static string OpenSsh(byte[] publicBlob, Action<SshWriter> writeKey, string comment, int? checkOverride = null, byte[]? padding = null,
+        string? passphrase = null, string cipher = "aes256-ctr")
     {
         var check = (uint)RandomNumberGenerator.GetInt32(int.MaxValue);
         var section = Blob(w =>
@@ -114,18 +116,51 @@ internal static class TestKeys
             writeKey(w);
             w.WriteString(comment);
         });
-        var pad = padding ?? Enumerable.Range(1, (8 - (section.Length % 8)) % 8).Select(i => (byte)i).ToArray();
+        var blockSize = passphrase is null ? 8 : 16;
+        var pad = padding ?? Enumerable.Range(1, (blockSize - (section.Length % blockSize)) % blockSize).Select(i => (byte)i).ToArray();
         byte[] privateSection = [.. section, .. pad];
+
+        // Encrypted like ssh-keygen: bcrypt_pbkdf(passphrase, salt, 16 rounds) gives key || IV for the cipher.
+        var salt = RandomNumberGenerator.GetBytes(16);
+        byte[] tag = [];
+        if (passphrase is not null)
+        {
+            var gcm = cipher == "aes256-gcm@openssh.com";
+            var keyAndIv = new byte[32 + (gcm ? 12 : 16)];
+            BcryptPbkdf.DeriveKey(Encoding.UTF8.GetBytes(passphrase), salt, 16, keyAndIv);
+            if (gcm)
+            {
+                tag = new byte[16];
+                var sealedSection = new byte[privateSection.Length];
+                using var aesGcm = new AesGcm(keyAndIv.AsSpan(0, 32), 16);
+                aesGcm.Encrypt(keyAndIv.AsSpan(32), privateSection, sealedSection, tag);
+                privateSection = sealedSection;
+            }
+            else
+            {
+                using var ctr = new AesCtr(keyAndIv.AsSpan(0, 32), keyAndIv.AsSpan(32));
+                ctr.Transform(privateSection);
+            }
+        }
 
         var body = Blob(w =>
         {
             w.WriteBytes("openssh-key-v1\0"u8);
-            w.WriteString("none");
-            w.WriteString("none");
-            w.WriteString(ReadOnlySpan<byte>.Empty);
+            w.WriteString(passphrase is null ? "none" : cipher);
+            w.WriteString(passphrase is null ? "none" : "bcrypt");
+            if (passphrase is null)
+            {
+                w.WriteString(ReadOnlySpan<byte>.Empty);
+            }
+            else
+            {
+                w.WriteString(Blob(o => { o.WriteString(salt); o.WriteUInt32(16); }));
+            }
+
             w.WriteUInt32(1);
             w.WriteString(publicBlob);
             w.WriteString(privateSection);
+            w.WriteBytes(tag);
         });
 
         var base64 = Convert.ToBase64String(body);
