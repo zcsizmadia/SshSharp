@@ -235,9 +235,12 @@ public sealed class SshConfig
             BatchMode = Bool(First("batchmode"), false),
             SendEnv = ResolveSendEnv(All("sendenv")),
             SetEnv = ResolveSetEnv(All("setenv")),
-            LocalForwards = All("localforward"),
-            RemoteForwards = All("remoteforward"),
-            DynamicForwards = All("dynamicforward"),
+            // ClearAllForwardings yes empties the forwarding lists, as in ssh.
+            LocalForwards = Bool(First("clearallforwardings"), false) ? [] : All("localforward"),
+            RemoteForwards = Bool(First("clearallforwardings"), false) ? [] : All("remoteforward"),
+            DynamicForwards = Bool(First("clearallforwardings"), false) ? [] : All("dynamicforward"),
+            GatewayPorts = Bool(First("gatewayports"), false),
+            ExitOnForwardFailure = Bool(First("exitonforwardfailure"), false),
             Options = values.ToDictionary(kv => kv.Key, kv => (IReadOnlyList<string>)kv.Value, StringComparer.OrdinalIgnoreCase),
         };
     }

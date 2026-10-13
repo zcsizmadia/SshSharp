@@ -114,6 +114,24 @@ Port 0 asks the server to pick a free port (`remote.Port` has it). Whether the s
 loopback is up to it (sshd's `GatewayPorts`). Disposing the forwarder cancels the forwarding on the server and closes its
 connections; a connection the server forwards while nothing listens locally is closed straight away.
 
+### Forwardings from `ssh_config`
+
+`LocalForward`, `RemoteForward` and `DynamicForward` are started when connecting by alias with
+`SshConfigConnectOptions.StartForwardings = true` (off by default: they open listening ports). They are disposed with the
+client, and `client.LocalForwardings`, `RemoteForwardings` and `DynamicForwardings` list them.
+
+```
+Host db-tunnel
+  HostName bastion.example.com
+  LocalForward 15432 db.internal:5432
+  DynamicForward 1080
+  ExitOnForwardFailure yes
+```
+
+Bind addresses follow ssh: none means loopback (every address with `GatewayPorts yes`), `localhost` loopback, `*` every
+address. A forwarding that cannot be set up (a port in use, refused by the server, a Unix-socket form, which is not supported
+yet) is logged and skipped, or fails the connection with `ExitOnForwardFailure yes`. `ClearAllForwardings yes` starts none.
+
 ## Keep-alive and connection state
 
 ```csharp
