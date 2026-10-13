@@ -112,6 +112,26 @@ public class SshTransportTests
     }
 
     [Test]
+    public async Task SendIf_SendsOnlyWhileTheConditionHolds_CheckedAtTheMomentOfSending()
+    {
+        // A channel's EOF and data use this so they never follow its CLOSE (Dropbear drops the connection for "EOF for unknown channel").
+        var (transport, server) = await Connect(new FakeServerOptions(), Accepting());
+        await using (transport)
+        await using (server)
+        {
+            var token = Timeout();
+            var checks = 0;
+            await Assert.That(await transport.SendIfAsync(new byte[] { 90, 1 }, () => { checks++; return false; }, token)).IsFalse();
+            await Assert.That(await transport.SendIfAsync(new byte[] { 90, 2 }, () => { checks++; return true; }, token)).IsTrue();
+            await Assert.That(checks).IsEqualTo(2);
+
+            // Only the second message reached the server.
+            using var received = await server.ReceiveAsync(token);
+            await Assert.That(Convert.ToHexString(received.Payload.Span)).IsEqualTo("5A02");
+        }
+    }
+
+    [Test]
     [MethodDataSource(nameof(KexMethods))]
     public async Task EveryKex_Handshakes(string kex)
     {

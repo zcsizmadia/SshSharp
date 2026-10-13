@@ -72,7 +72,11 @@ internal sealed class SshChannel
     {
         _connection = connection;
         LocalId = localId;
+        _isOpenForSending = () => !Volatile.Read(ref _closeSent);
     }
+
+    /// <summary>Whether our CLOSE is still unsent; checked under the transport's send lock (one delegate per channel, not per packet).</summary>
+    private readonly Func<bool> _isOpenForSending;
 
     public uint LocalId { get; }
 
@@ -202,7 +206,11 @@ internal sealed class SshChannel
                 System.Buffers.Binary.BinaryPrimitives.WriteUInt32BigEndian(buffer.AsSpan(1), RemoteId);
                 System.Buffers.Binary.BinaryPrimitives.WriteUInt32BigEndian(buffer.AsSpan(5), (uint)count);
                 data.Span[..count].CopyTo(buffer.AsSpan(9));
-                await _connection.SendAsync(buffer.AsMemory(0, 9 + count), cancellationToken).ConfigureAwait(false);
+                if (!await _connection.SendIfAsync(buffer.AsMemory(0, 9 + count), _isOpenForSending, cancellationToken).ConfigureAwait(false))
+                {
+                    // Closed while we were writing (the peer closed the channel): the rest cannot be sent.
+                    throw new SshException(SshFailureReason.ChannelClosed, "The channel was closed while data was being sent.");
+                }
             }
             finally
             {
@@ -213,14 +221,24 @@ internal sealed class SshChannel
         }
     }
 
-    /// <summary>Sends EOF: no more data from us. Nothing is sent once the channel is closing (EOF after CLOSE would be a protocol error).</summary>
-    public ValueTask SendEofAsync(CancellationToken cancellationToken) => Volatile.Read(ref _closeSent)
-        ? ValueTask.CompletedTask
-        : _connection.SendAsync(Build(w =>
+    /// <summary>
+    /// Sends EOF: no more data from us. Nothing is sent once the channel is closing: EOF after CLOSE is a protocol error, and Dropbear drops
+    /// the connection for it. The check is made where the packet takes its place on the wire, because the receive loop can answer the
+    /// peer's CLOSE at any moment.
+    /// </summary>
+    public async ValueTask SendEofAsync(CancellationToken cancellationToken)
+    {
+        if (Volatile.Read(ref _closeSent))
+        {
+            return;
+        }
+
+        await _connection.SendIfAsync(Build(w =>
         {
             w.WriteByte(SshMessage.ChannelEof);
             w.WriteUInt32(RemoteId);
-        }), cancellationToken);
+        }), _isOpenForSending, cancellationToken).ConfigureAwait(false);
+    }
 
     // ---- receiving ----
 

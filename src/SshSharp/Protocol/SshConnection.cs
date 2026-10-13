@@ -193,6 +193,24 @@ internal sealed class SshConnection : IAsyncDisposable
         }
     }
 
+    /// <summary>Sends a message only if <paramref name="condition"/> holds when it takes its place on the wire (see <see cref="SshTransport.SendIfAsync"/>).</summary>
+    public async ValueTask<bool> SendIfAsync(ReadOnlyMemory<byte> payload, Func<bool> condition, CancellationToken cancellationToken)
+    {
+        if (_failure is { } failure)
+        {
+            throw failure;
+        }
+
+        try
+        {
+            return await _transport.SendIfAsync(payload, condition, cancellationToken).ConfigureAwait(false);
+        }
+        catch (IOException ex)
+        {
+            throw ConnectionLost(ex);
+        }
+    }
+
     /// <summary>A failure of the underlying stream, as the <see cref="SshException"/> callers handle.</summary>
     internal static SshException ConnectionLost(Exception inner) =>
         new(SshFailureReason.ConnectionClosed, "The connection was lost: " + inner.Message, inner);
