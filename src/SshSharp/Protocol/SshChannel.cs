@@ -188,7 +188,8 @@ internal sealed class SshChannel
     {
         if (Volatile.Read(ref _closeSent))
         {
-            throw new InvalidOperationException("The channel is closed for sending.");
+            // Usually the remote program has exited and the server closed the channel: a connection-level fact, not a misuse.
+            throw new SshException(SshFailureReason.ChannelClosed, "The channel is closed; no more data can be sent.");
         }
 
         if (!data.IsEmpty && _remoteMaxPacket == 0)
@@ -206,7 +207,20 @@ internal sealed class SshChannel
                 System.Buffers.Binary.BinaryPrimitives.WriteUInt32BigEndian(buffer.AsSpan(1), RemoteId);
                 System.Buffers.Binary.BinaryPrimitives.WriteUInt32BigEndian(buffer.AsSpan(5), (uint)count);
                 data.Span[..count].CopyTo(buffer.AsSpan(9));
-                if (!await _connection.SendIfAsync(buffer.AsMemory(0, 9 + count), _isOpenForSending, cancellationToken).ConfigureAwait(false))
+                bool sent;
+                try
+                {
+                    sent = await _connection.SendIfAsync(buffer.AsMemory(0, 9 + count), _isOpenForSending, cancellationToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    // Cancelled before the packet was committed (SendIfAsync reports a committed one as sent): the peer never sees these
+                    // bytes and will never grant them again, so give the window back.
+                    _sendWindow.Add((uint)count);
+                    throw;
+                }
+
+                if (!sent)
                 {
                     // Closed while we were writing (the peer closed the channel): the rest cannot be sent.
                     throw new SshException(SshFailureReason.ChannelClosed, "The channel was closed while data was being sent.");
@@ -293,9 +307,9 @@ internal sealed class SshChannel
         }
 
         var adjust = Interlocked.Exchange(ref _consumedSinceAdjust, 0);
-        if (adjust <= 0 || _remoteClosed)
+        if (adjust <= 0 || _remoteClosed || Volatile.Read(ref _closeSent))
         {
-            return;
+            return; // a closing channel needs no more window, and nothing may follow our CLOSE
         }
 
         Interlocked.Add(ref _localWindow, adjust);
@@ -303,12 +317,12 @@ internal sealed class SshChannel
     }
 
     // A method of its own: a lambda capturing `adjust` in Consumed would allocate its closure on every call, which is every packet.
-    private void PostWindowAdjust(uint adjust) => _connection.Post(Build(w =>
+    private void PostWindowAdjust(uint adjust) => _connection.PostIf(Build(w =>
     {
         w.WriteByte(SshMessage.ChannelWindowAdjust);
         w.WriteUInt32(RemoteId);
         w.WriteUInt32(adjust);
-    }));
+    }), _isOpenForSending); // checked when it is sent: the receive loop may answer a CLOSE before then
 
     // ---- events from the connection's receive loop ----
 

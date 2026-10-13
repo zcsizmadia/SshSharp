@@ -325,6 +325,9 @@ internal sealed class FakeSessionServer : IAsyncDisposable
         }
     }
 
+    /// <summary>Completes (in any state) when the server's loop ends, which it does when the client disconnects.</summary>
+    public Task Finished => _loop is { } loop ? loop.ContinueWith(static _ => { }, TaskScheduler.Default) : Task.CompletedTask;
+
     public Task StartAsync()
     {
         var handshake = _server.StartAsync(_cts.Token);

@@ -33,6 +33,9 @@ internal sealed class SshTransport : IAsyncDisposable
     private bool _disposed;
     private bool _strictKex;
 
+    // Set when the connection has failed or is being disposed; checked under _sendLock, so no application message is encoded after it.
+    private Exception? _failed;
+
     // Re-exchange state; _rekeying and the pending KEXINIT are protected by _sendLock.
     private bool _rekeying;
     private TaskCompletionSource _rekeyDone = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -163,8 +166,15 @@ internal sealed class SshTransport : IAsyncDisposable
                     packet.Dispose();
                     throw error;
                 case SshMessage.ExtInfo:
-                    ServerExtensions = ParseExtInfo(payload, ServerExtensions);
-                    packet.Dispose();
+                    try
+                    {
+                        ServerExtensions = ParseExtInfo(payload, ServerExtensions);
+                    }
+                    finally
+                    {
+                        packet.Dispose();
+                    }
+
                     continue;
                 case SshMessage.KexInit:
                     var serverInit = payload.ToArray();
@@ -175,7 +185,15 @@ internal sealed class SshTransport : IAsyncDisposable
                     // A connection that mostly receives (a big download) must also re-key on its own: the threshold counts both directions.
                     if (_connected && !_rekeying && RekeyDue())
                     {
-                        await StartRekeyAsync(cancellationToken).ConfigureAwait(false);
+                        try
+                        {
+                            await StartRekeyAsync(cancellationToken).ConfigureAwait(false);
+                        }
+                        catch
+                        {
+                            packet.Dispose();
+                            throw;
+                        }
                     }
 
                     return packet;
@@ -225,6 +243,16 @@ internal sealed class SshTransport : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// The connection has failed: later application sends throw <paramref name="exception"/>, and senders waiting for a key re-exchange
+    /// that will never finish are released with it.
+    /// </summary>
+    public void Fail(Exception exception)
+    {
+        Interlocked.CompareExchange(ref _failed, exception, null);
+        FailRekeyWaiters(exception);
+    }
+
     public async ValueTask DisposeAsync()
     {
         if (_disposed)
@@ -233,8 +261,14 @@ internal sealed class SshTransport : IAsyncDisposable
         }
 
         _disposed = true;
+        var closed = new SshException(SshFailureReason.ConnectionClosed, "The connection was closed.");
+        Interlocked.CompareExchange(ref _failed, closed, null);
         Abort();
-        FailRekeyWaiters(new SshException(SshFailureReason.ConnectionClosed, "The connection was closed."));
+        FailRekeyWaiters(closed);
+
+        // A sender already inside the send lock finishes first (Abort cancels its flush), and later ones see _failed: the writer and the
+        // protectors are never used while they are being torn down.
+        var locked = await _sendLock.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
         try
         {
             await _writer.CompleteAsync().ConfigureAwait(false);
@@ -242,6 +276,13 @@ internal sealed class SshTransport : IAsyncDisposable
         catch (Exception ex) when (ex is IOException or ObjectDisposedException or OperationCanceledException)
         {
             // The stream is already broken; there is nothing left to flush to.
+        }
+        finally
+        {
+            if (locked)
+            {
+                _sendLock.Release();
+            }
         }
 
         await _reader.CompleteAsync().ConfigureAwait(false);
@@ -310,8 +351,52 @@ internal sealed class SshTransport : IAsyncDisposable
         SshAlgorithms.TryGetMac(negotiated.MacServerToClient, out var macS2C);
         using var keys = KeyDerivation.DeriveAll(kex.Hash, result.SharedSecret, result.ExchangeHash, SessionId!, cipherC2S, cipherS2C, macC2S, macS2C, result.SharedSecretIsString);
         var newSend = PacketProtectorFactory.Create(cipherC2S, macC2S, keys.EncryptionKeyClientToServer, keys.IvClientToServer, keys.IntegrityKeyClientToServer);
-        var newReceive = PacketProtectorFactory.Create(cipherS2C, macS2C, keys.EncryptionKeyServerToClient, keys.IvServerToClient, keys.IntegrityKeyServerToClient);
+        PacketProtector newReceive;
+        try
+        {
+            newReceive = PacketProtectorFactory.Create(cipherS2C, macS2C, keys.EncryptionKeyServerToClient, keys.IvServerToClient, keys.IntegrityKeyServerToClient);
+        }
+        catch
+        {
+            newSend.Dispose();
+            throw;
+        }
 
+        await SwitchKeysAsync(newSend, newReceive, strict, strictMessages, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Sends NEWKEYS and installs the new keys for each direction. Takes ownership of both protectors: one that is not installed when the
+    /// exchange fails part way is wiped here, rather than left to the garbage collector.
+    /// </summary>
+    private async Task SwitchKeysAsync(PacketProtector newSend, PacketProtector newReceive, bool strict, bool strictMessages, CancellationToken cancellationToken)
+    {
+        var sendInstalled = false;
+        var receiveInstalled = false;
+        try
+        {
+            await SwitchKeysCoreAsync(newSend, newReceive, strict, strictMessages, () => sendInstalled = true, () => receiveInstalled = true, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch
+        {
+            if (!sendInstalled)
+            {
+                newSend.Dispose();
+            }
+
+            if (!receiveInstalled)
+            {
+                newReceive.Dispose();
+            }
+
+            throw;
+        }
+    }
+
+    private async Task SwitchKeysCoreAsync(PacketProtector newSend, PacketProtector newReceive, bool strict, bool strictMessages, Action sendInstalled,
+        Action receiveInstalled, CancellationToken cancellationToken)
+    {
         // Each side sends NEWKEYS under the old keys, then protects what it sends with the new ones; incoming switches on the peer's NEWKEYS.
         await _sendLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
@@ -320,6 +405,7 @@ internal sealed class SshTransport : IAsyncDisposable
             await _writer.FlushAsync(_lifetime.Token).ConfigureAwait(false);
             _sendProtector.Dispose();
             _sendProtector = newSend;
+            sendInstalled();
             if (strict)
             {
                 _sendSequence = 0;
@@ -345,6 +431,7 @@ internal sealed class SshTransport : IAsyncDisposable
         await ReceiveKexMessageAsync(SshMessage.NewKeys, strictMessages, cancellationToken).ConfigureAwait(false);
         _receiveProtector.Dispose();
         _receiveProtector = newReceive;
+        receiveInstalled();
         if (strict)
         {
             _receiveSequence = 0;
@@ -460,6 +547,11 @@ internal sealed class SshTransport : IAsyncDisposable
                 }
                 else
                 {
+                    if (!kexMessage && _failed is { } failed)
+                    {
+                        throw failed;
+                    }
+
                     if (condition is not null && !condition())
                     {
                         return false;
@@ -486,6 +578,14 @@ internal sealed class SshTransport : IAsyncDisposable
                     {
                         release = false;
                         _ = ReleaseAfterAsync(pending);
+
+                        // The packet is committed and will be sent. For SendIfAsync that is "sent": its callers treat a cancellation as
+                        // "not sent" (a channel then returns the window it reserved).
+                        if (condition is not null)
+                        {
+                            return true;
+                        }
+
                         throw;
                     }
 

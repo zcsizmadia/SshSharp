@@ -52,6 +52,7 @@ public sealed partial class SshClient
         ValidateDestination(remoteHost, remotePort);
         ObjectDisposedException.ThrowIf(_disposed != 0, this);
         cancellationToken.ThrowIfCancellationRequested();
+        ThrowIfConnectionFailed();
         var listener = LocalListener.Start(localEndPoint, (socket, ct) => OpenForwardedAsync(socket, remoteHost, remotePort, ct), _connection.Closed);
         var bound = listener.LocalEndPoint.ToString();
         SshLog.ForwardingStarted(_logger, bound, remotePort);
@@ -70,10 +71,23 @@ public sealed partial class SshClient
         ArgumentNullException.ThrowIfNull(localEndPoint);
         ObjectDisposedException.ThrowIf(_disposed != 0, this);
         cancellationToken.ThrowIfCancellationRequested();
+        ThrowIfConnectionFailed();
         var listener = LocalListener.Start(localEndPoint, OpenSocksAsync, _connection.Closed);
         var bound = listener.LocalEndPoint.ToString();
         SshLog.ForwardingStarted(_logger, bound, 0);
         return Task.FromResult(new SshSocksProxy(listener));
+    }
+
+    /// <summary>
+    /// A forwarder started on a connection that has already failed would listen on nothing: its accept loop stops at once, and the caller
+    /// would never know. Report the failure instead.
+    /// </summary>
+    private void ThrowIfConnectionFailed()
+    {
+        if (_connection.Failure is { } failure)
+        {
+            throw failure as SshException ?? new SshException(SshFailureReason.ConnectionClosed, "The connection has failed: " + failure.Message, failure);
+        }
     }
 
     /// <summary>The channel for one locally forwarded connection, or null (logged) when the server refuses it.</summary>
@@ -115,6 +129,7 @@ public sealed partial class SshClient
         catch when (channel is not null)
         {
             await channel.CloseAsync(CancellationToken.None).ConfigureAwait(false);
+            channel.DiscardUnread();
             throw;
         }
 
@@ -170,7 +185,10 @@ public sealed partial class SshClient
         var forwarder = new SshRemotePortForwarder(bindAddress, port, localHost, localPort, _logger, CancelRemoteForwardAsync, _connection.Closed);
         if (!_remoteForwards.TryAdd(port, forwarder))
         {
-            throw new InvalidOperationException($"Port {port} is already forwarded on this connection.");
+            // The server accepted it (another bind address for the same port), but this connection routes channels by port: withdraw the
+            // new one on the server too, rather than leave it listening with nothing here to take its connections.
+            await forwarder.DisposeAsync().ConfigureAwait(false);
+            throw new SshException(SshFailureReason.ChannelClosed, $"Port {port} is already forwarded on this connection.");
         }
 
         SshLog.RemoteForwardingStarted(_logger, port, localPort);

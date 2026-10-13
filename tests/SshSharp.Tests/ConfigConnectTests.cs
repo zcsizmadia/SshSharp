@@ -95,6 +95,10 @@ public sealed class ConfigConnectTests : IDisposable
             await Assert.That(known.Find(host).Count()).IsEqualTo(1);
         }
 
+        // Disposing the client tears down the whole chain: every hop's connection ends, the first one too (it used to be left open).
+        await client.DisposeAsync();
+        await Task.WhenAll(jump1.Finished, jump2.Finished, target.Finished).WaitAsync(Timeout());
+
         // A second connection now trusts all three hosts even with StrictHostKeyChecking yes.
         var (again1, again2, againTarget) = Chain();
         await using var a1 = again1;

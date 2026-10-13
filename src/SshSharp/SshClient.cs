@@ -141,6 +141,9 @@ public sealed partial class SshClient : IAsyncDisposable
         {
             SshTelemetry.Commands.Add(1, new KeyValuePair<string, object?>("result", outcome));
             await channel.CloseAsync(CancellationToken.None).ConfigureAwait(false);
+
+            // Output left unread (the limit was exceeded, or the call cancelled) goes back to the buffer pool.
+            channel.DiscardUnread();
         }
     }
 
@@ -259,7 +262,17 @@ public sealed partial class SshClient : IAsyncDisposable
         var started = Stopwatch.GetTimestamp();
 
         var preferences = options.AlgorithmPreferences ?? (options.FipsMode ? AlgorithmPreferences.Fips() : new AlgorithmPreferences());
-        if (await options.HostKeyVerifier.PrefersCertificatesAsync(host, port, options.HostKeyAlias, cancellationToken).ConfigureAwait(false))
+        bool prefersCertificates;
+        try
+        {
+            prefersCertificates = await options.HostKeyVerifier.PrefersCertificatesAsync(host, port, options.HostKeyAlias, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            prefersCertificates = false; // an unreadable known_hosts is reported by the verification itself, with the key it concerns
+        }
+
+        if (prefersCertificates)
         {
             // A certificate authority is trusted for this host: ask for its certificate first, as ssh does.
             preferences = preferences.WithCertificateHostKeysFirst();
@@ -276,7 +289,18 @@ public sealed partial class SshClient : IAsyncDisposable
             VerifyHostKey = async (info, ct) =>
             {
                 var key = new SshHostKey(info.Algorithm, info.KeyType, info.Fingerprint, info.Blob, info.KeySizeBits) { Certificate = info.Certificate };
-                var verdict = await options.HostKeyVerifier.VerifyAsync(new SshHostKeyContext(host, port, options.HostKeyAlias, key), ct).ConfigureAwait(false);
+                SshHostKeyVerdict verdict;
+                try
+                {
+                    verdict = await options.HostKeyVerifier.VerifyAsync(new SshHostKeyContext(host, port, options.HostKeyAlias, key), ct).ConfigureAwait(false);
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    // known_hosts could not be read or written (a locked or protected file): the key was not verified. Without this, the
+                    // IOException would be reported as a lost connection.
+                    throw new SshHostKeyException($"The host key {info.Fingerprint} could not be checked: {ex.Message}", key);
+                }
+
                 if (!verdict.IsAccepted)
                 {
                     SshLog.HostKeyRejected(logger, info.Fingerprint);
