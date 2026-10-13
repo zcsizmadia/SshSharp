@@ -15,13 +15,7 @@ Managed-only, async-first SSH client library for .NET with OpenSSH `known_hosts`
 | Repo | github.com/zcsizmadia/SshSharp (private until M5), commit email `zcsizmadia@gmail.com` |
 | No `netstandard2.0` | The design depends on `Span`/`Memory` in the BCL APIs, Pipelines, `AesGcm`, `TimeProvider`, `SearchValues` and modern ECDH/RSA APIs. .NET Framework and Windows PowerShell 5.1 users stay on SSH.NET. |
 | Public API is tracked | `PublicAPI.Shipped/Unshipped.txt` (PublicApiAnalyzers); every public change shows in review. Package validation on pack. |
-
-### Open decisions
-
-- **Sync API and SSH.NET migration.** Option A: async-only, plus a migration guide mapping SSH.NET calls to SshSharp.
-  Option B: a separate `SshSharp.Compat` package with SSH.NET-shaped synchronous wrappers (`RunCommand`, `ConnectionInfo`,
-  `PrivateKeyFile`). Recommendation: A for 1.0 (sync-over-async in the core is ruled out either way), and revisit B once the
-  async API is stable. This needs deciding before the M3 public types settle.
+| Sync API | **Async-only for now** (decided after M2). No synchronous methods and no sync-over-async in the core. A migration guide mapping SSH.NET calls to SshSharp ships with the docs (M5). An SSH.NET-shaped `SshSharp.Compat` package with synchronous wrappers may be revisited once the async API is stable. |
 
 ## Engineering principles
 
@@ -200,7 +194,7 @@ docs/
 - Outside review of the managed crypto (X25519, Ed25519, Poly1305, ChaCha20) before 1.0; mutation testing (Stryker.NET)
   on `Crypto/`, `PacketCodec` and `Config/`; an AOT-published smoke app in CI to prove trimming/AOT compatibility.
 - CodeQL and the threat model reviewed when the repo goes public; `SECURITY.md` is already in place.
-- Docs, samples, NuGet package metadata, SourceLink, symbols. Decide on strong naming.
+- Docs, samples (including an SSH.NET migration guide), NuGet package metadata, SourceLink, symbols. Decide on strong naming.
 - **Benchmark against SSH.NET** (BenchmarkDotNet, `tests/SshSharp.Benchmarks`, not part of normal CI), with a short results
   section in the docs:
   - Measure throughput (exec channel, SCP), connect/handshake and small-command latency, allocations and GC counts per MB,
