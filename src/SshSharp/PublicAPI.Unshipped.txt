@@ -496,3 +496,11 @@ SshSharp.SshPortForwarder.DisposeAsync() -> System.Threading.Tasks.ValueTask
 SshSharp.SshPortForwarder.LocalEndPoint.get -> System.Net.IPEndPoint!
 SshSharp.SshPortForwarder.RemoteHost.get -> string!
 SshSharp.SshPortForwarder.RemotePort.get -> int
+SshSharp.SshClient.ForwardRemotePortAsync(string! bindAddress, int remotePort, string! localHost, int localPort, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SshSharp.SshRemotePortForwarder!>!
+SshSharp.SshRemotePortForwarder
+SshSharp.SshRemotePortForwarder.ActiveConnections.get -> int
+SshSharp.SshRemotePortForwarder.BindAddress.get -> string!
+SshSharp.SshRemotePortForwarder.DisposeAsync() -> System.Threading.Tasks.ValueTask
+SshSharp.SshRemotePortForwarder.LocalHost.get -> string!
+SshSharp.SshRemotePortForwarder.LocalPort.get -> int
+SshSharp.SshRemotePortForwarder.Port.get -> int

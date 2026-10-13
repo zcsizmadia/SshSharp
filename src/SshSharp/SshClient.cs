@@ -16,6 +16,7 @@ public sealed partial class SshClient : IAsyncDisposable
     private readonly bool _leaveOpen;
     private readonly IAsyncDisposable? _owner;
     private readonly ILogger _logger;
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<int, SshRemotePortForwarder> _remoteForwards = new();
     private int _disposed;
 
     private SshClient(SshConnection connection, SshClientOptions options, Stream stream, bool leaveOpen, IAsyncDisposable? owner, string serverIdentification, SshHostKey hostKey, ILogger logger)

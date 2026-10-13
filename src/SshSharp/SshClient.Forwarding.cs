@@ -58,6 +58,95 @@ public sealed partial class SshClient
         return Task.FromResult(forwarder);
     }
 
+    /// <summary>
+    /// Remote port forwarding (<c>ssh -R</c>): asks the server to listen on <paramref name="bindAddress"/>:<paramref name="remotePort"/> and
+    /// relays every connection made to it to <paramref name="localHost"/>:<paramref name="localPort"/>, as reached from this machine.
+    /// The bind address is <c>localhost</c> for the server's loopback only (what ssh uses by default), an address, or empty for every
+    /// address; sshd's <c>GatewayPorts</c> decides whether it honours anything but loopback. Port 0 lets the server pick one
+    /// (see <see cref="SshRemotePortForwarder.Port"/>).
+    /// </summary>
+    /// <exception cref="SshException">The server refused (sshd's <c>AllowTcpForwarding</c>, or the port is in use).</exception>
+    public async Task<SshRemotePortForwarder> ForwardRemotePortAsync(string bindAddress, int remotePort, string localHost, int localPort, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(bindAddress);
+        if (bindAddress.Any(char.IsControl))
+        {
+            throw new ArgumentException("The bind address must not contain control characters.", nameof(bindAddress));
+        }
+
+        ArgumentOutOfRangeException.ThrowIfNegative(remotePort);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(remotePort, 65535);
+        ValidateDestination(localHost, localPort);
+        ObjectDisposedException.ThrowIf(_disposed != 0, this);
+        EnsureChannelDispatch();
+
+        var reply = await _connection.SendGlobalRequestAsync("tcpip-forward", true, w =>
+        {
+            w.WriteString(bindAddress);
+            w.WriteUInt32((uint)remotePort);
+        }, cancellationToken).ConfigureAwait(false);
+        if (!reply.Success)
+        {
+            throw new SshException(SshFailureReason.ChannelClosed, $"The server refused to listen on port {remotePort} (forwarding not allowed, or the port is in use).");
+        }
+
+        // RFC 4254 section 7.1: with port 0 the reply carries the port the server picked.
+        var port = remotePort;
+        if (remotePort == 0)
+        {
+            port = reply.Data.Length >= 4 ? (int)System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(reply.Data) : 0;
+            if (port is < 1 or > 65535)
+            {
+                throw new SshProtocolException("The server accepted a remote forwarding on port 0 but did not say which port it picked.");
+            }
+        }
+
+        var forwarder = new SshRemotePortForwarder(bindAddress, port, localHost, localPort, _logger, CancelRemoteForwardAsync, _connection.Closed);
+        if (!_remoteForwards.TryAdd(port, forwarder))
+        {
+            throw new InvalidOperationException($"Port {port} is already forwarded on this connection.");
+        }
+
+        SshLog.RemoteForwardingStarted(_logger, port, localPort);
+        return forwarder;
+    }
+
+    private async Task CancelRemoteForwardAsync(SshRemotePortForwarder forwarder, CancellationToken cancellationToken)
+    {
+        // Stop accepting this port's channels first: anything the server opens from now on is refused.
+        _remoteForwards.TryRemove(new KeyValuePair<int, SshRemotePortForwarder>(forwarder.Port, forwarder));
+        if (_disposed == 0)
+        {
+            await _connection.SendGlobalRequestAsync("cancel-tcpip-forward", true, w =>
+            {
+                w.WriteString(forwarder.BindAddress);
+                w.WriteUInt32((uint)forwarder.Port);
+            }, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>Routes the channels the server opens (installed once, by the first feature that receives them).</summary>
+    private void EnsureChannelDispatch() => _connection.AcceptChannel ??= (type, data) =>
+    {
+        if (type != "forwarded-tcpip")
+        {
+            return null;
+        }
+
+        try
+        {
+            // RFC 4254 section 7.2: the address and port that were connected, then the originator's.
+            var reader = new SshReader(data);
+            reader.ReadUtf8String();
+            var port = (int)reader.ReadUInt32();
+            return _remoteForwards.TryGetValue(port, out var forwarder) ? forwarder.Accept : null;
+        }
+        catch (SshProtocolException)
+        {
+            return null;
+        }
+    };
+
     private static void ValidateDestination(string host, int port)
     {
         ArgumentException.ThrowIfNullOrEmpty(host);
