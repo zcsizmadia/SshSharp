@@ -33,3 +33,50 @@ jobs:
           name: coverage-${{ matrix.os }}
           path: TestResults/**
           if-no-files-found: ignore
+
+  interop:
+    name: interop (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+          dotnet-version: 8.0.x
+      - name: Start OpenSSH with a throwaway account
+        run: |
+          set -euo pipefail
+          PASSWORD="$(openssl rand -hex 16)"
+          echo "::add-mask::$PASSWORD"
+          echo "SSHSHARP_TEST_PASSWORD=$PASSWORD" >> "$GITHUB_ENV"
+          echo "SSHSHARP_TEST_USER=sshsharp" >> "$GITHUB_ENV"
+          echo "SSHSHARP_TEST_SSHD=127.0.0.1:2222" >> "$GITHUB_ENV"
+          sudo useradd -m -s /bin/bash sshsharp
+          echo "sshsharp:$PASSWORD" | sudo chpasswd
+          sudo ssh-keygen -A
+          sudo mkdir -p /run/sshd
+          cat <<EOF | sudo tee /tmp/sshd_config_test
+          Port 2222
+          ListenAddress 127.0.0.1
+          HostKey /etc/ssh/ssh_host_ed25519_key
+          HostKey /etc/ssh/ssh_host_rsa_key
+          HostKey /etc/ssh/ssh_host_ecdsa_key
+          PasswordAuthentication yes
+          UsePAM yes
+          MaxStartups 200:30:300
+          KexAlgorithms +diffie-hellman-group14-sha256,diffie-hellman-group16-sha512
+          LogLevel DEBUG1
+          EOF
+          sudo /usr/sbin/sshd -t -f /tmp/sshd_config_test
+          sudo /usr/sbin/sshd -f /tmp/sshd_config_test -E /tmp/sshd.log
+          sleep 1
+          ssh -V
+      - name: Interop tests against the real server
+        run: dotnet test --project tests/SshSharp.Tests -c Release -f net10.0 --treenode-filter "/*/*/*InteropTests/*"
+      - name: sshd log
+        if: failure()
+        run: sudo tail -n 80 /tmp/sshd.log
