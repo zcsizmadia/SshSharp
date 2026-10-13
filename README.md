@@ -54,12 +54,12 @@ Coming next: SFTP, as a separate package.
 |---|---|---|
 | Target frameworks | .NET 8, .NET 10 | .NET Framework 4.6.2+, .NET Standard 2.0, .NET 8+ |
 | API | Async-only network API; `CancellationToken` on every network operation | Mostly synchronous; async connect, commands and SFTP |
-| `ssh_config` (`Host`, `Match`, `Include`; connect by alias) | ✅ | — |
-| `known_hosts` verification (hashed hosts, `@cert-authority`, `@revoked`, `StrictHostKeyChecking`) | ✅ | — (verify in a `HostKeyReceived` handler) |
-| `UpdateHostKeys` (key rotation) | ✅ | — |
-| ProxyJump chains, ProxyCommand | ✅ | — (SOCKS4/5 and HTTP proxies) |
-| SSH agent (`ssh-agent`, Windows OpenSSH agent) | ✅ | — |
-| Agent forwarding | ✅ | — |
+| `ssh_config` (`Host`, `Match`, `Include`; connect by alias) | ✅ | ❌ |
+| `known_hosts` verification (hashed hosts, `@cert-authority`, `@revoked`, `StrictHostKeyChecking`) | ✅ | ❌ (verify in a `HostKeyReceived` handler) |
+| `UpdateHostKeys` (key rotation) | ✅ | ❌ |
+| ProxyJump chains, ProxyCommand | ✅ | ❌ (SOCKS4/5 and HTTP proxies) |
+| SSH agent (`ssh-agent`, Windows OpenSSH agent) | ✅ | ❌ |
+| Agent forwarding | ✅ | ❌ |
 | Password, public key, keyboard-interactive, multi-factor | ✅ | ✅ |
 | OpenSSH certificates | User and host | User (authentication) |
 | Private key formats | OpenSSH, PKCS#1/#8, SEC1, PuTTY `.ppk` | OpenSSH, PKCS#1/#8, PuTTY `.ppk`, ssh.com |
