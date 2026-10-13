@@ -15,6 +15,7 @@ M4 #5, M5 #6, M6 #7, plus individual issues).
 | Test framework | TUnit (Microsoft.Testing.Platform) |
 | Coverage | Target 95%+ line and branch per assembly; reported, **not a CI gate**; reviewed locally with `scripts/coverage.ps1` |
 | Versioning | MinVer: the version comes from `v*` git tags; untagged commits are `0.x` prereleases |
+| Strong naming | Not strong-named. .NET (Core) does not validate strong names, and the .NET Framework consumers who need them cannot use SshSharp. Because modern .NET does not check the public key token either, a strong name could still be added later without breaking consumers. |
 | License | MIT |
 
 ## Engineering principles
@@ -64,7 +65,9 @@ src/SshSharp/              # the library
 tests/SshSharp.Tests/      # TUnit: in-memory unit tests, Fuzz/ (mutation fuzzing of every parser),
                            #   Integration/ (env-gated tests against real servers)
 tests/SshSharp.Fuzz/       # coverage-guided SharpFuzz harness, run nightly
-tests/SshSharp.Benchmarks/ # BenchmarkDotNet, the Ed25519/X25519 timing test (--timing)
+tests/SshSharp.Benchmarks/ # BenchmarkDotNet, the SSH.NET comparison, the Ed25519/X25519 timing test (--timing)
+tests/SshSharp.AotSmoke/   # Native AOT smoke test against a real server
+samples/                   # an ssh-like sample tool, built with the solution
 docs/                      # guides, design notes, the API reference site (DocFX)
 ```
 
