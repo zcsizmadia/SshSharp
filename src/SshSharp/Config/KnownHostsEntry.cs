@@ -1,0 +1,181 @@
+using System.Diagnostics.CodeAnalysis;
+using System.Security.Cryptography;
+using System.Text;
+
+namespace SshSharp.Config;
+
+/// <summary>The optional marker in front of a <c>known_hosts</c> line.</summary>
+public enum KnownHostsMarker
+{
+    /// <summary>A plain host key.</summary>
+    None,
+
+    /// <summary><c>@cert-authority</c>: the key is a certificate authority trusted for the matching hosts.</summary>
+    CertAuthority,
+
+    /// <summary><c>@revoked</c>: the key must never be accepted for the matching hosts.</summary>
+    Revoked,
+}
+
+/// <summary>One parsed <c>known_hosts</c> line.</summary>
+public sealed class KnownHostsEntry
+{
+    private const string HashPrefix = "|1|";
+
+    /// <summary>Creates an entry.</summary>
+    /// <param name="hostPatterns">Comma-separated host patterns, or a single hashed host (<c>|1|salt|hash</c>).</param>
+    /// <param name="keyType">The key type, for example <c>ssh-ed25519</c>.</param>
+    /// <param name="publicKey">The public key blob (the decoded base64 field).</param>
+    /// <param name="marker">The optional marker.</param>
+    /// <param name="comment">The optional trailing comment.</param>
+    public KnownHostsEntry(string hostPatterns, string keyType, ReadOnlyMemory<byte> publicKey,
+        KnownHostsMarker marker = KnownHostsMarker.None, string? comment = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(hostPatterns);
+        ArgumentException.ThrowIfNullOrWhiteSpace(keyType);
+        HostPatterns = hostPatterns;
+        KeyType = keyType;
+        PublicKey = publicKey;
+        Marker = marker;
+        Comment = comment;
+    }
+
+    /// <summary>The marker (<c>@cert-authority</c>, <c>@revoked</c>) or <see cref="KnownHostsMarker.None"/>.</summary>
+    public KnownHostsMarker Marker { get; }
+
+    /// <summary>The raw host field: comma-separated patterns, or a single hashed host.</summary>
+    public string HostPatterns { get; }
+
+    /// <summary>The key type, for example <c>ssh-ed25519</c>.</summary>
+    public string KeyType { get; }
+
+    /// <summary>The public key blob.</summary>
+    public ReadOnlyMemory<byte> PublicKey { get; }
+
+    /// <summary>The trailing comment, if any.</summary>
+    public string? Comment { get; }
+
+    /// <summary>Whether the host field is hashed (<c>|1|salt|hash</c>).</summary>
+    public bool IsHashed => HostPatterns.StartsWith(HashPrefix, StringComparison.Ordinal);
+
+    /// <summary>Formats a host and port the way <c>known_hosts</c> stores them: <c>host</c>, or <c>[host]:port</c> for non-22 ports.</summary>
+    public static string FormatHost(string host, int port)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(host);
+        ArgumentOutOfRangeException.ThrowIfLessThan(port, 1);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(port, 65535);
+        return port == 22 ? host.ToLowerInvariant() : $"[{host.ToLowerInvariant()}]:{port}";
+    }
+
+    /// <summary>Creates a hashed host field (<c>|1|salt|hash</c>) for a host and port.</summary>
+    /// <param name="host">The host name or address.</param>
+    /// <param name="port">The port.</param>
+    /// <param name="salt">The 20-byte salt; random when omitted.</param>
+    [SuppressMessage("Security", "CA5350", Justification = "HMAC-SHA1 is mandated by the OpenSSH hashed known_hosts format; it is not used for security of the connection.")]
+    public static string HashHost(string host, int port, ReadOnlySpan<byte> salt = default)
+    {
+        Span<byte> salt20 = stackalloc byte[HMACSHA1.HashSizeInBytes];
+        if (salt.IsEmpty)
+        {
+            RandomNumberGenerator.Fill(salt20);
+        }
+        else if (salt.Length != salt20.Length)
+        {
+            throw new ArgumentException("The salt must be 20 bytes.", nameof(salt));
+        }
+        else
+        {
+            salt.CopyTo(salt20);
+        }
+
+        Span<byte> hash = stackalloc byte[HMACSHA1.HashSizeInBytes];
+        HMACSHA1.HashData(salt20, Encoding.UTF8.GetBytes(FormatHost(host, port)), hash);
+        return $"{HashPrefix}{Convert.ToBase64String(salt20)}|{Convert.ToBase64String(hash)}";
+    }
+
+    /// <summary>Whether this entry applies to a host and port.</summary>
+    public bool Matches(string host, int port = 22)
+    {
+        var name = FormatHost(host, port);
+        if (IsHashed)
+        {
+            return MatchesHashed(HostPatterns, name);
+        }
+
+        var matched = false;
+        var remaining = HostPatterns.AsSpan();
+        while (!remaining.IsEmpty)
+        {
+            var comma = remaining.IndexOf(',');
+            var pattern = comma < 0 ? remaining : remaining[..comma];
+            remaining = comma < 0 ? default : remaining[(comma + 1)..];
+            if (pattern.IsEmpty)
+            {
+                continue;
+            }
+
+            if (pattern[0] == '!')
+            {
+                if (Glob.IsMatch(pattern[1..], name))
+                {
+                    return false;
+                }
+            }
+            else if (Glob.IsMatch(pattern, name))
+            {
+                matched = true;
+            }
+        }
+
+        return matched;
+    }
+
+    /// <summary>Returns a copy with different host patterns.</summary>
+    internal KnownHostsEntry WithHostPatterns(string hostPatterns) => new(hostPatterns, KeyType, PublicKey, Marker, Comment);
+
+    /// <summary>Formats the entry as a <c>known_hosts</c> line (no line terminator).</summary>
+    public string ToLine()
+    {
+        var sb = new StringBuilder();
+        if (Marker == KnownHostsMarker.CertAuthority)
+        {
+            sb.Append("@cert-authority ");
+        }
+        else if (Marker == KnownHostsMarker.Revoked)
+        {
+            sb.Append("@revoked ");
+        }
+
+        sb.Append(HostPatterns).Append(' ').Append(KeyType).Append(' ').Append(Convert.ToBase64String(PublicKey.Span));
+        if (!string.IsNullOrEmpty(Comment))
+        {
+            sb.Append(' ').Append(Comment);
+        }
+
+        return sb.ToString();
+    }
+
+    [SuppressMessage("Security", "CA5350", Justification = "HMAC-SHA1 is mandated by the OpenSSH hashed known_hosts format; it is not used for security of the connection.")]
+    private static bool MatchesHashed(string field, string name)
+    {
+        // |1|<base64 salt>|<base64 hash>
+        var parts = field.Split('|');
+        if (parts.Length != 4 || parts[1] != "1")
+        {
+            return false;
+        }
+
+        try
+        {
+            var salt = Convert.FromBase64String(parts[2]);
+            var expected = Convert.FromBase64String(parts[3]);
+            Span<byte> actual = stackalloc byte[HMACSHA1.HashSizeInBytes];
+            HMACSHA1.HashData(salt, Encoding.UTF8.GetBytes(name), actual);
+            return CryptographicOperations.FixedTimeEquals(actual, expected);
+        }
+        catch (FormatException)
+        {
+            return false;
+        }
+    }
+}

@@ -10,4 +10,7 @@
     <PackageReference Include="Microsoft.Testing.Extensions.CodeCoverage" />
     <ProjectReference Include="../../src/SshSharp/SshSharp.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <None Include="Fixtures/**" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>
