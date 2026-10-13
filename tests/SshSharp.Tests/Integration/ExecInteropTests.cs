@@ -40,8 +40,8 @@ public class ExecInteropTests
             UserName = Environment.GetEnvironmentVariable("SSHSHARP_TEST_USER")!,
             Password = Environment.GetEnvironmentVariable("SSHSHARP_TEST_PASSWORD"),
             HostKeyVerifier = SshHostKeyVerifier.FromDelegate((_, _) => ValueTask.FromResult(true)),
-            KeepAliveInterval = TimeSpan.FromSeconds(1),
-            KeepAliveCountMax = 5,
+            KeepAliveInterval = TimeSpan.FromSeconds(2),
+            KeepAliveCountMax = 10, // 20 s of silence: a busy runner can stall the test process for seconds
         };
         await using var client = await SshClient.ConnectAsync(host, port, options, Timeout());
 

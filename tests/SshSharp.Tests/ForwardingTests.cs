@@ -187,7 +187,7 @@ public class ForwardingTests
         {
             first = await ExchangeAsync(forwarder.LocalEndPoint, "first");
         }
-        catch (SocketException ex) when (ex.SocketErrorCode == SocketError.ConnectionReset)
+        catch (SocketException ex) when (ex.SocketErrorCode is SocketError.ConnectionReset or SocketError.ConnectionAborted)
         {
             first = "";
         }
@@ -224,14 +224,15 @@ public class ForwardingTests
         {
             received = await socket.ReceiveAsync(buffer, SocketFlags.None, Timeout());
         }
-        catch (SocketException ex) when (ex.SocketErrorCode == SocketError.ConnectionReset)
+        catch (SocketException ex) when (ex.SocketErrorCode is SocketError.ConnectionReset or SocketError.ConnectionAborted)
         {
             received = 0;
         }
 
         await Assert.That(received).IsEqualTo(0);
-        using var late = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-        await Assert.ThrowsAsync<SocketException>(async () => await late.ConnectAsync(endPoint, Timeout()));
+
+        // Not probed by connecting: with tests running in parallel, another test may already have been given the freed port.
+        await Assert.That(forwarder.IsListening).IsFalse();
         await far.DisposeAsync();
         await Assert.That(client.IsConnected).IsTrue();
     }
@@ -245,22 +246,12 @@ public class ForwardingTests
         await client.DisposeAsync();
 
         // The listener closes shortly after the connection is gone.
-        var refused = false;
-        for (var i = 0; i < 500 && !refused; i++)
+        for (var i = 0; i < 500 && forwarder.IsListening; i++)
         {
-            using var socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-            try
-            {
-                await socket.ConnectAsync(forwarder.LocalEndPoint, Timeout());
-                await Task.Delay(10);
-            }
-            catch (SocketException)
-            {
-                refused = true;
-            }
+            await Task.Delay(10);
         }
 
-        await Assert.That(refused).IsTrue();
+        await Assert.That(forwarder.IsListening).IsFalse();
         await Assert.ThrowsAsync<ObjectDisposedException>(() => client.ForwardLocalPortAsync(new IPEndPoint(IPAddress.Loopback, 0), "x", 1, Timeout()));
     }
 

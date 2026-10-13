@@ -20,6 +20,7 @@ public sealed class SshPortForwarder : IAsyncDisposable
     private readonly HashSet<Task> _connections = [];
     private readonly string _localText;
     private int _disposed;
+    private volatile bool _listening = true;
 
     private SshPortForwarder(Socket listener, string remoteHost, int remotePort, ILogger logger,
         Func<IPEndPoint, CancellationToken, Task<SshChannel>> open, CancellationToken connectionClosed)
@@ -56,6 +57,9 @@ public sealed class SshPortForwarder : IAsyncDisposable
         }
     }
 
+    /// <summary>Whether the listening socket is still open (for tests: a freed port may be reused by someone else at once).</summary>
+    internal bool IsListening => _listening;
+
     internal static SshPortForwarder Start(IPEndPoint localEndPoint, string remoteHost, int remotePort, ILogger logger,
         Func<IPEndPoint, CancellationToken, Task<SshChannel>> open, CancellationToken connectionClosed)
     {
@@ -86,6 +90,7 @@ public sealed class SshPortForwarder : IAsyncDisposable
         {
             // Stopped (disposed, or the SSH connection ended): stop listening too, so new connections are refused, not left in the backlog.
             _listener.Dispose();
+            _listening = false;
         }
     }
 
