@@ -57,6 +57,9 @@ internal sealed class FakeSessionServer : IAsyncDisposable
         public bool CloseSent { get; set; }
 
         public SemaphoreSlim WindowChanged { get; } = new(0);
+
+        /// <summary>For a direct-tcpip channel: the connection the server relays the channel to.</summary>
+        public Stream? Tunnel { get; set; }
     }
 
     private readonly FakeSshServer _server;
@@ -104,6 +107,12 @@ internal sealed class FakeSessionServer : IAsyncDisposable
     public bool UnimplementedReceived { get; private set; }
 
     public bool GlobalFailureReceived { get; private set; }
+
+    /// <summary>Where direct-tcpip channels go: return a stream to relay to (for example another fake server), or null to refuse.</summary>
+    public Func<string, int, Stream?>? DirectTcpIp { get; set; }
+
+    /// <summary>The host:port of every direct-tcpip channel the client asked for.</summary>
+    public List<string> DirectTcpIpRequests { get; } = [];
 
     /// <summary>Names of the global requests the client sent, in order.</summary>
     public List<string> GlobalRequests { get; } = [];
@@ -300,10 +309,12 @@ internal sealed class FakeSessionServer : IAsyncDisposable
 
             case SshMessage.ChannelOpen:
             {
-                reader.ReadUtf8String();
+                var channelType = reader.ReadUtf8String();
                 var clientId = reader.ReadUInt32();
                 var window = reader.ReadUInt32();
                 var maxPacket = reader.ReadUInt32();
+                var tunnelHost = channelType == "direct-tcpip" ? reader.ReadUtf8String() : null;
+                var tunnelPort = channelType == "direct-tcpip" ? (int)reader.ReadUInt32() : 0;
                 if (RefuseChannels)
                 {
                     await _server.SendAsync(Build(w =>
@@ -322,7 +333,31 @@ internal sealed class FakeSessionServer : IAsyncDisposable
                     await hold.WaitAsync(_cts.Token);
                 }
 
-                var channel = new ServerChannel(_nextId++) { ClientId = clientId, ClientWindow = window, ClientMaxPacket = maxPacket };
+                // direct-tcpip (RFC 4254 section 7.2): connect to host:port and relay, like sshd does for ProxyJump.
+                Stream? tunnel = null;
+                if (tunnelHost is not null)
+                {
+                    lock (DirectTcpIpRequests)
+                    {
+                        DirectTcpIpRequests.Add($"{tunnelHost}:{tunnelPort}");
+                    }
+
+                    tunnel = DirectTcpIp?.Invoke(tunnelHost, tunnelPort);
+                    if (tunnel is null)
+                    {
+                        await _server.SendAsync(Build(w =>
+                        {
+                            w.WriteByte(SshMessage.ChannelOpenFailure);
+                            w.WriteUInt32(clientId);
+                            w.WriteUInt32(2);
+                            w.WriteString("connect failed");
+                            w.WriteString(string.Empty);
+                        }));
+                        break;
+                    }
+                }
+
+                var channel = new ServerChannel(_nextId++) { ClientId = clientId, ClientWindow = window, ClientMaxPacket = maxPacket, Tunnel = tunnel };
                 lock (_channels)
                 {
                     _channels[channel.Id] = channel;
@@ -336,6 +371,12 @@ internal sealed class FakeSessionServer : IAsyncDisposable
                     w.WriteUInt32(ServerWindow);
                     w.WriteUInt32(ServerMaxPacket);
                 }));
+
+                if (tunnel is not null)
+                {
+                    _ = Task.Run(() => PumpTunnelAsync(channel, tunnel));
+                }
+
                 break;
             }
 
@@ -391,10 +432,18 @@ internal sealed class FakeSessionServer : IAsyncDisposable
 
             case SshMessage.ChannelData:
             {
-                Find(reader.ReadUInt32());
+                var channel = Find(reader.ReadUInt32());
+                var data = reader.ReadString().ToArray();
+                if (channel.Tunnel is { } tunnel)
+                {
+                    await tunnel.WriteAsync(data);
+                    await tunnel.FlushAsync();
+                    break;
+                }
+
                 lock (ReceivedData)
                 {
-                    ReceivedData.Add(reader.ReadString().ToArray());
+                    ReceivedData.Add(data);
                 }
 
                 break;
@@ -407,6 +456,12 @@ internal sealed class FakeSessionServer : IAsyncDisposable
             {
                 var channel = Find(reader.ReadUInt32());
                 channel.CloseReceived = true;
+                if (channel.Tunnel is { } closing)
+                {
+                    channel.Tunnel = null;
+                    await closing.DisposeAsync();
+                }
+
                 if (!channel.CloseSent)
                 {
                     await SendChannelAsync(SshMessage.ChannelClose, channel);
@@ -422,6 +477,29 @@ internal sealed class FakeSessionServer : IAsyncDisposable
                 }
 
                 break;
+        }
+    }
+
+    /// <summary>Relays what the tunnel's far end sends back to the client as channel data, then EOF and CLOSE when it ends.</summary>
+    private async Task PumpTunnelAsync(ServerChannel channel, Stream tunnel)
+    {
+        var buffer = new byte[16 * 1024];
+        try
+        {
+            while (await tunnel.ReadAsync(buffer, _cts.Token) is var read and > 0)
+            {
+                await SendDataAsync(channel, buffer[..read], extended: false);
+            }
+
+            await SendChannelAsync(SshMessage.ChannelEof, channel);
+            if (!channel.CloseSent)
+            {
+                await SendChannelAsync(SshMessage.ChannelClose, channel);
+            }
+        }
+        catch (Exception ex) when (ex is OperationCanceledException or ObjectDisposedException or IOException or InvalidOperationException or SshException)
+        {
+            // The client or the far end went away.
         }
     }
 

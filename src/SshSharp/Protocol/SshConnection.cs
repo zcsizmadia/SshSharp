@@ -170,11 +170,44 @@ internal sealed class SshConnection : IAsyncDisposable
     public ValueTask SendAsync(ReadOnlyMemory<byte> payload, CancellationToken cancellationToken) => SendAsync(payload, null, cancellationToken);
 
     /// <summary>Sends a message; <paramref name="onCommitted"/> runs once the message has its place on the wire.</summary>
-    public ValueTask SendAsync(ReadOnlyMemory<byte> payload, Action? onCommitted, CancellationToken cancellationToken) =>
-        _failure is { } failure ? throw failure : _transport.SendAsync(payload, onCommitted, cancellationToken);
+    public async ValueTask SendAsync(ReadOnlyMemory<byte> payload, Action? onCommitted, CancellationToken cancellationToken)
+    {
+        if (_failure is { } failure)
+        {
+            throw failure;
+        }
+
+        try
+        {
+            await _transport.SendAsync(payload, onCommitted, cancellationToken).ConfigureAwait(false);
+        }
+        catch (IOException ex)
+        {
+            throw ConnectionLost(ex);
+        }
+    }
+
+    /// <summary>A failure of the underlying stream, as the <see cref="SshException"/> callers handle.</summary>
+    internal static SshException ConnectionLost(Exception inner) =>
+        new(SshFailureReason.ConnectionClosed, "The connection was lost: " + inner.Message, inner);
 
     /// <summary>Opens a <c>session</c> channel.</summary>
-    public async Task<SshChannel> OpenSessionAsync(CancellationToken cancellationToken)
+    public Task<SshChannel> OpenSessionAsync(CancellationToken cancellationToken) => OpenChannelAsync("session", null, cancellationToken);
+
+    /// <summary>
+    /// Opens a <c>direct-tcpip</c> channel (RFC 4254 section 7.2): the server connects to <paramref name="host"/>:<paramref name="port"/>
+    /// and relays. This is what ProxyJump and local port forwarding use.
+    /// </summary>
+    public Task<SshChannel> OpenDirectTcpIpAsync(string host, int port, string originatorAddress, int originatorPort, CancellationToken cancellationToken) =>
+        OpenChannelAsync("direct-tcpip", w =>
+        {
+            w.WriteString(host);
+            w.WriteUInt32((uint)port);
+            w.WriteString(originatorAddress);
+            w.WriteUInt32((uint)originatorPort);
+        }, cancellationToken);
+
+    private async Task<SshChannel> OpenChannelAsync(string type, Action<SshWriter>? typeSpecificData, CancellationToken cancellationToken)
     {
         if (_failure is { } failure)
         {
@@ -193,7 +226,7 @@ internal sealed class SshConnection : IAsyncDisposable
 
         try
         {
-            await channel.OpenAsync("session", cancellationToken).ConfigureAwait(false);
+            await channel.OpenAsync(type, typeSpecificData, cancellationToken).ConfigureAwait(false);
             if (channel.TryMarkOpen())
             {
                 SshTelemetry.Channels.Add(1);
@@ -282,7 +315,7 @@ internal sealed class SshConnection : IAsyncDisposable
         {
             // Window adjustments and CLOSE replies can no longer be sent, so every channel would stall: end the connection now.
             SshLog.ConnectionFailed(_logger, ex);
-            Fail(ex);
+            Fail(ex is IOException ? ConnectionLost(ex) : ex);
             try
             {
                 await _stop.CancelAsync().ConfigureAwait(false);
@@ -323,7 +356,12 @@ internal sealed class SshConnection : IAsyncDisposable
                 SshLog.ConnectionFailed(_logger, ex);
             }
 
-            Fail(ex is OperationCanceledException ? new SshException(SshFailureReason.ConnectionClosed, "The connection was closed.") : ex);
+            Fail(ex switch
+            {
+                OperationCanceledException => new SshException(SshFailureReason.ConnectionClosed, "The connection was closed."),
+                IOException => ConnectionLost(ex),
+                _ => ex,
+            });
         }
     }
 

@@ -8,17 +8,17 @@ using SshSharp.Protocol;
 namespace SshSharp;
 
 /// <summary>An authenticated SSH client connection: run commands over it. Create one with <see cref="ConnectAsync(Stream, SshClientOptions, bool, CancellationToken)"/>.</summary>
-public sealed class SshClient : IAsyncDisposable
+public sealed partial class SshClient : IAsyncDisposable
 {
     private readonly SshConnection _connection;
     private readonly SshClientOptions _options;
     private readonly Stream _stream;
     private readonly bool _leaveOpen;
-    private readonly IDisposable? _owner;
+    private readonly IAsyncDisposable? _owner;
     private readonly ILogger _logger;
     private int _disposed;
 
-    private SshClient(SshConnection connection, SshClientOptions options, Stream stream, bool leaveOpen, IDisposable? owner, string serverIdentification, SshHostKey hostKey, ILogger logger)
+    private SshClient(SshConnection connection, SshClientOptions options, Stream stream, bool leaveOpen, IAsyncDisposable? owner, string serverIdentification, SshHostKey hostKey, ILogger logger)
     {
         _logger = logger;
         _connection = connection;
@@ -70,7 +70,7 @@ public sealed class SshClient : IAsyncDisposable
                 throw new SshException(SshFailureReason.ConnectFailed, $"Could not connect to the server: {ex.SocketErrorCode}.", ex);
             }
 
-            return await ConnectCoreAsync(tcp.GetStream(), options, leaveOpen: false, owner: tcp, host, port, cancellationToken).ConfigureAwait(false);
+            return await ConnectCoreAsync(tcp.GetStream(), options, leaveOpen: false, owner: new Owned(tcp), host, port, cancellationToken).ConfigureAwait(false);
         }
         catch
         {
@@ -159,10 +159,13 @@ public sealed class SshClient : IAsyncDisposable
             await _stream.DisposeAsync().ConfigureAwait(false);
         }
 
-        _owner?.Dispose();
+        if (_owner is not null)
+        {
+            await _owner.DisposeAsync().ConfigureAwait(false);
+        }
     }
 
-    private static async Task<SshClient> ConnectCoreAsync(Stream stream, SshClientOptions options, bool leaveOpen, IDisposable? owner, string? host, int port, CancellationToken cancellationToken)
+    private static async Task<SshClient> ConnectCoreAsync(Stream stream, SshClientOptions options, bool leaveOpen, IAsyncDisposable? owner, string? host, int port, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(stream);
         ArgumentNullException.ThrowIfNull(options);
@@ -221,10 +224,25 @@ public sealed class SshClient : IAsyncDisposable
         catch (Exception ex)
         {
             activity?.SetStatus(ActivityStatusCode.Error, ex.GetType().Name);
-            await transport.DisposeAsync().ConfigureAwait(false);
-            if (!leaveOpen)
+
+            // Cleanup must not replace the real error with one from a stream that is already broken.
+            try
             {
-                await stream.DisposeAsync().ConfigureAwait(false);
+                await transport.DisposeAsync().ConfigureAwait(false);
+                if (!leaveOpen)
+                {
+                    await stream.DisposeAsync().ConfigureAwait(false);
+                }
+            }
+            catch (Exception cleanup) when (cleanup is IOException or ObjectDisposedException)
+            {
+                // Already broken.
+            }
+
+            // The stream failing (socket reset, a ProxyCommand that exited) is a lost connection, reported as an SshException.
+            if (ex is IOException)
+            {
+                throw SshConnection.ConnectionLost(ex);
             }
 
             throw;

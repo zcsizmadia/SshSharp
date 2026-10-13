@@ -212,7 +212,15 @@ internal sealed class SshTransport : IAsyncDisposable
         _disposed = true;
         Abort();
         FailRekeyWaiters(new SshException(SshFailureReason.ConnectionClosed, "The connection was closed."));
-        await _writer.CompleteAsync().ConfigureAwait(false);
+        try
+        {
+            await _writer.CompleteAsync().ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is IOException or ObjectDisposedException or OperationCanceledException)
+        {
+            // The stream is already broken; there is nothing left to flush to.
+        }
+
         await _reader.CompleteAsync().ConfigureAwait(false);
         _sendProtector.Dispose();
         _receiveProtector.Dispose();

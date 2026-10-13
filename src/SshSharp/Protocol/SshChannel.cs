@@ -93,7 +93,7 @@ internal sealed class SshChannel
 
     // ---- opening and closing ----
 
-    public async Task OpenAsync(string type, CancellationToken cancellationToken)
+    public async Task OpenAsync(string type, Action<SshWriter>? typeSpecificData, CancellationToken cancellationToken)
     {
         var payload = Build(w =>
         {
@@ -102,6 +102,7 @@ internal sealed class SshChannel
             w.WriteUInt32(LocalId);
             w.WriteUInt32(LocalWindowSize);
             w.WriteUInt32(LocalMaxPacketSize);
+            typeSpecificData?.Invoke(w);
         });
         await _connection.SendAsync(payload, cancellationToken).ConfigureAwait(false);
         await _confirmed.Task.WaitAsync(cancellationToken).ConfigureAwait(false);

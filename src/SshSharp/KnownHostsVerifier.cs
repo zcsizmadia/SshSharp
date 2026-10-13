@@ -68,7 +68,9 @@ public sealed class KnownHostsVerifier : SshHostKeyVerifier
 
     /// <summary>The files, policy and hashing from a resolved <c>ssh_config</c> (<c>UserKnownHostsFile</c>, <c>GlobalKnownHostsFile</c>,
     /// <c>StrictHostKeyChecking</c>, <c>HashKnownHosts</c>).</summary>
-    public static KnownHostsVerifier FromConfig(SshHostConfig config)
+    public static KnownHostsVerifier FromConfig(SshHostConfig config) => FromConfig(config, ask: null);
+
+    internal static KnownHostsVerifier FromConfig(SshHostConfig config, Func<SshHostKeyPrompt, CancellationToken, ValueTask<bool>>? ask)
     {
         ArgumentNullException.ThrowIfNull(config);
         var hash = config.Options.TryGetValue("hashknownhosts", out var value) && value.Count > 0
@@ -77,6 +79,7 @@ public sealed class KnownHostsVerifier : SshHostKeyVerifier
         {
             Policy = config.StrictHostKeyChecking,
             HashNewEntries = hash,
+            Ask = ask,
         };
     }
 

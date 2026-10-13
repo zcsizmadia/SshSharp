@@ -52,4 +52,7 @@ internal static partial class SshLog
 
     [LoggerMessage(EventId = 16, Level = LogLevel.Debug, Message = "Disconnecting")]
     public static partial void Disconnecting(ILogger logger);
+
+    [LoggerMessage(EventId = 17, Level = LogLevel.Information, Message = "Identity file {FileName} was skipped: {Reason}")]
+    public static partial void IdentitySkipped(ILogger logger, string fileName, string reason);
 }

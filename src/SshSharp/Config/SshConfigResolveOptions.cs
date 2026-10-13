@@ -37,4 +37,18 @@ public sealed class SshConfigResolveOptions
 
     /// <summary>A tag given by the caller (<c>ssh -P</c>), matched by <c>Match tagged</c>; overrides <c>Tag</c> in the file.</summary>
     public string? Tag { get; init; }
+
+    /// <summary>A copy with the user and port overridden where given (from a destination like <c>user@host:port</c>).</summary>
+    internal SshConfigResolveOptions With(string? user, int? port) => new()
+    {
+        User = user ?? User,
+        Port = port ?? Port,
+        LocalUser = LocalUser,
+        HomeDirectory = HomeDirectory,
+        LocalHostName = LocalHostName,
+        GetEnvironmentVariable = GetEnvironmentVariable,
+        ExecMatcher = ExecMatcher,
+        HostCanonicalizer = HostCanonicalizer,
+        Tag = Tag,
+    };
 }
