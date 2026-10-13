@@ -66,6 +66,25 @@ Connecting by `ssh_config` alias uses the agent automatically, as `ssh` does: `I
 Agent keys that match an `IdentityFile` come first (and an encrypted identity file is not opened at all), and
 `IdentitiesOnly yes` leaves the agent's other keys out. `UseAgent = false` turns it off.
 
+### Agent forwarding
+
+`ForwardAgent` (`ssh -A`) offers your agent to the server, so programs there (`ssh`, `git`) can authenticate onward with your
+keys while you are connected:
+
+```csharp
+var options = new SshClientOptions
+{
+    UserName = "deploy",
+    PrivateKeys = keys,
+    HostKeyVerifier = verifier,
+    ForwardAgent = agent,
+};
+```
+
+Each session asks the server for it, and the agent connections the server opens are relayed to the local agent. Forward only to
+servers you trust: while you are connected, anyone with enough rights on the server can make your agent sign (they cannot read
+the keys). Connecting by `ssh_config` alias follows `ForwardAgent yes`.
+
 Pageant is not discovered automatically yet; it works through `IdentityAgent` when it exposes an OpenSSH-compatible pipe.
 
 ## Keyboard-interactive

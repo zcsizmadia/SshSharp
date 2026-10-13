@@ -26,8 +26,8 @@ Console.WriteLine(result.StandardOutputText);
 - **OpenSSH configuration:** `ssh_config` (`Host`, `Match`, `Include`, tokens) and `known_hosts` (hashed hosts,
   `@cert-authority`, `@revoked`), resolved like `ssh -G`.
 - **Authentication:** password, public keys (OpenSSH, PKCS#8, PKCS#1/SEC1 and PuTTY `.ppk` formats, encrypted too),
-  OpenSSH user certificates, ssh-agent (Unix sockets and the Windows OpenSSH agent), keyboard-interactive (one-time codes,
-  PAM), and multi-factor chains.
+  OpenSSH user certificates, ssh-agent (Unix sockets and the Windows OpenSSH agent) and agent forwarding,
+  keyboard-interactive (one-time codes, PAM), and multi-factor chains.
 - **Host verification:** `StrictHostKeyChecking` policies, host certificates, `UpdateHostKeys`, key pinning, or your own
   verifier. There is no "accept anything" default.
 - **Connections:** ProxyJump chains, ProxyCommand, connect over any `Stream`, keep-alive and dead-connection detection;
@@ -38,7 +38,7 @@ Console.WriteLine(result.StandardOutputText);
   AES-CTR with HMAC-SHA2 ETM; Ed25519, ECDSA and RSA (SHA-2) keys; strict key exchange (Terrapin) always on; a FIPS mode.
 - **Observability:** `ILogger` logging, `ActivitySource` tracing and `Meter` metrics, with no secrets recorded.
 
-Coming next: agent forwarding, forwardings from `ssh_config`, and SCP; then SFTP as a separate package.
+Coming next: forwardings from `ssh_config` and SCP; then SFTP as a separate package.
 
 ## Install
 

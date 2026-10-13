@@ -193,6 +193,12 @@ public sealed partial class SshClient
     /// <summary>Routes the channels the server opens (installed once, by the first feature that receives them).</summary>
     private void EnsureChannelDispatch() => _connection.AcceptChannel ??= (type, data) =>
     {
+        if (type == "auth-agent@openssh.com")
+        {
+            // Agent forwarding: only when this client forwards an agent (the server asks for it after auth-agent-req@openssh.com).
+            return _options.ForwardAgent is { } agent ? channel => _ = RelayAgentAsync(channel, agent) : null;
+        }
+
         if (type != "forwarded-tcpip")
         {
             return null;
@@ -211,6 +217,28 @@ public sealed partial class SshClient
             return null;
         }
     };
+
+    /// <summary>Relays one forwarded agent connection: the server's requests to the local agent and its answers back.</summary>
+    private async Task RelayAgentAsync(SshChannel channel, SshAgent agent)
+    {
+        Stream stream;
+        try
+        {
+            stream = await agent.OpenStreamAsync(_connection.Closed).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is SshException or OperationCanceledException or ObjectDisposedException)
+        {
+            SshLog.AgentUnavailable(_logger, ex.Message);
+            await channel.CloseAsync(CancellationToken.None).ConfigureAwait(false);
+            channel.DiscardUnread();
+            return;
+        }
+
+        await using (stream.ConfigureAwait(false))
+        {
+            await StreamChannelRelay.RunAsync(stream, channel, _connection.Closed).ConfigureAwait(false);
+        }
+    }
 
     private static void ValidateDestination(string host, int port)
     {

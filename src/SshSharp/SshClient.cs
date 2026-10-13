@@ -179,7 +179,7 @@ public sealed partial class SshClient : IAsyncDisposable
         {
             channel.SplitExtended = true;
 
-            // In ssh's order: the terminal, then the environment, then the program.
+            // In ssh's order: the terminal, agent forwarding, then the environment, then the program.
             if (terminal is not null && !await channel.RequestAsync("pty-req", true, w =>
             {
                 w.WriteString(terminal.TerminalType);
@@ -191,6 +191,13 @@ public sealed partial class SshClient : IAsyncDisposable
             }, cancellationToken).ConfigureAwait(false))
             {
                 throw new SshException(SshFailureReason.ChannelClosed, "The server refused to allocate a terminal.");
+            }
+
+            if (_options.ForwardAgent is not null)
+            {
+                // No reply, as ssh sends it: a server that does not forward agents just ignores it.
+                EnsureChannelDispatch();
+                await channel.RequestAsync("auth-agent-req@openssh.com", false, null, cancellationToken).ConfigureAwait(false);
             }
 
             foreach (var (name, value) in environment)

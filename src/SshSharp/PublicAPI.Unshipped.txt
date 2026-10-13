@@ -509,3 +509,5 @@ SshSharp.SshSocksProxy
 SshSharp.SshSocksProxy.ActiveConnections.get -> int
 SshSharp.SshSocksProxy.DisposeAsync() -> System.Threading.Tasks.ValueTask
 SshSharp.SshSocksProxy.LocalEndPoint.get -> System.Net.IPEndPoint!
+SshSharp.SshClientOptions.ForwardAgent.get -> SshSharp.SshAgent?
+SshSharp.SshClientOptions.ForwardAgent.init -> void

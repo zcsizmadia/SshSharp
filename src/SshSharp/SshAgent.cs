@@ -153,6 +153,19 @@ public sealed class SshAgent
         }
     }
 
+    /// <summary>A raw connection to the agent, for agent forwarding (the server speaks the agent protocol itself).</summary>
+    internal async ValueTask<Stream> OpenStreamAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await _connect(cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is IOException or SocketException or UnauthorizedAccessException or TimeoutException)
+        {
+            throw new SshException(SshFailureReason.AgentFailed, $"Could not reach the SSH agent: {ex.Message}", ex);
+        }
+    }
+
     /// <summary>One request and its reply over a fresh connection, each framed as <c>uint32 length || message</c>.</summary>
     private async Task<byte[]> RequestAsync(ReadOnlyMemory<byte> message, CancellationToken cancellationToken)
     {

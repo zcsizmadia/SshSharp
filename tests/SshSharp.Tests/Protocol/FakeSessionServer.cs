@@ -210,7 +210,20 @@ internal sealed class FakeSessionServer : IAsyncDisposable
     /// Plays a connection arriving at a remotely forwarded port: opens a forwarded-tcpip channel to the client and returns the far end of
     /// it, or null when the client refuses the channel.
     /// </summary>
-    public async Task<Stream?> ConnectForwardedAsync(int port, string connectedAddress = "localhost", string originator = "203.0.113.7", int originatorPort = 50123)
+    public Task<Stream?> ConnectForwardedAsync(int port, string connectedAddress = "localhost", string originator = "203.0.113.7", int originatorPort = 50123) =>
+        OpenChannelToClientAsync("forwarded-tcpip", w =>
+        {
+            w.WriteString(connectedAddress);
+            w.WriteUInt32((uint)port);
+            w.WriteString(originator);
+            w.WriteUInt32((uint)originatorPort);
+        });
+
+    /// <summary>Plays a program on the server using the forwarded agent: opens an auth-agent@openssh.com channel, or null when refused.</summary>
+    public Task<Stream?> OpenAgentChannelAsync() => OpenChannelToClientAsync("auth-agent@openssh.com", null);
+
+    /// <summary>Opens a channel to the client and returns its far end as a stream, or null when the client refuses it.</summary>
+    private async Task<Stream?> OpenChannelToClientAsync(string type, Action<SshWriter>? data)
     {
         // The tunnel is attached before the open is sent: the client may confirm and close at once (nothing listening locally), and a
         // CLOSE handled before the tunnel was attached would leave the far end waiting forever.
@@ -224,14 +237,11 @@ internal sealed class FakeSessionServer : IAsyncDisposable
         await _server.SendAsync(Build(w =>
         {
             w.WriteByte(SshMessage.ChannelOpen);
-            w.WriteString("forwarded-tcpip");
+            w.WriteString(type);
             w.WriteUInt32(channel.Id);
             w.WriteUInt32(ServerWindow);
             w.WriteUInt32(ServerMaxPacket);
-            w.WriteString(connectedAddress);
-            w.WriteUInt32((uint)port);
-            w.WriteString(originator);
-            w.WriteUInt32((uint)originatorPort);
+            data?.Invoke(w);
         }));
         if (!await channel.Opened!.Task.WaitAsync(TimeSpan.FromSeconds(30)))
         {
