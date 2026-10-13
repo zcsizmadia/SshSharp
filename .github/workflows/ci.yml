@@ -317,6 +317,8 @@ jobs:
             'MaxStartups 200:30:300'
             'MaxSessions 64'
             'AllowTcpForwarding yes'
+            'SyslogFacility LOCAL0' # log to a file (logs\sshd.log), not the event log
+            'LogLevel DEBUG1'
             'KexAlgorithms +diffie-hellman-group14-sha256,diffie-hellman-group16-sha512'
           ) + (Get-Content $config | Where-Object { $_ -notmatch '^\s*(Port|ListenAddress|PasswordAuthentication|Match|AuthorizedKeysFile|AllowGroups|AllowUsers|DenyGroups|DenyUsers)\b' -and $_ -notmatch '^\s+' }) |
             Set-Content $config -Encoding ascii
@@ -343,4 +345,4 @@ jobs:
       - name: Server log
         if: failure()
         shell: pwsh
-        run: Get-WinEvent -LogName OpenSSH/Operational -MaxEvents 80 -ErrorAction SilentlyContinue | Format-Table TimeCreated, Message -Wrap
+        run: Get-Content "$env:ProgramData\ssh\logs\sshd.log" -Tail 400 -ErrorAction SilentlyContinue
