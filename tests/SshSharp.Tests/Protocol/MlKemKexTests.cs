@@ -45,15 +45,23 @@ public class MlKemKexTests
 
         server.OnExec = async script =>
         {
-            for (var i = 0; i < 10; i++)
+            for (var i = 0; i < 3; i++)
             {
                 await script.StdoutAsync(new byte[32 * 1024]);
             }
 
             await script.FinishAsync(0);
         };
-        var result = await client.RunCommandAsync("cat big", Timeout());
-        await Assert.That(result.StandardOutput.Length).IsEqualTo(10 * 32 * 1024);
+
+        // Each command moves more than the 64 KiB limit, so each starts a re-exchange. The next command's channel open waits for that
+        // exchange to finish, so the count does not depend on how the data and the re-exchange interleave (which made one long transfer
+        // flaky on slower runners).
+        for (var round = 0; round < 4; round++)
+        {
+            var result = await client.RunCommandAsync("cat big", Timeout());
+            await Assert.That(result.StandardOutput.Length).IsEqualTo(3 * 32 * 1024);
+        }
+
         await Assert.That(server.Raw.KeyExchangeCount).IsGreaterThan(2);
         await Assert.That(server.Raw.Negotiated!.Kex).IsEqualTo(SshAlgorithms.MlKem768X25519Sha256);
     }
