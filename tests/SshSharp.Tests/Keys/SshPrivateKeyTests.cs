@@ -116,7 +116,7 @@ public class SshPrivateKeyTests
         await Assert.That(() => SshPrivateKey.Parse(small.ExportPkcs8PrivateKeyPem())).Throws<FormatException>().WithMessageContaining("2048");
         await Assert.That(() => SshPrivateKey.Parse(TestKeys.OpenSshRsa(1024, out _))).Throws<FormatException>().WithMessageContaining("2048");
 
-        await Assert.That(() => SshPrivateKey.Parse("PuTTY-User-Key-File-3: ssh-ed25519\n")).Throws<FormatException>().WithMessageContaining("PuTTY");
+        await Assert.That(() => SshPrivateKey.Parse("PuTTY-User-Key-File-3: ssh-ed25519\n")).Throws<FormatException>().WithMessageContaining(".ppk");
         const string legacy = "-----BEGIN RSA PRIVATE KEY-----\nProc-Type: 4,ENCRYPTED\nDEK-Info: AES-128-CBC,00\n\nAAAA\n-----END RSA PRIVATE KEY-----\n";
         await Assert.That(() => SshPrivateKey.Parse(legacy)).Throws<FormatException>().WithMessageContaining("Proc-Type");
         await Assert.That(() => SshPrivateKey.Parse("ssh-ed25519 AAAA user@host")).Throws<FormatException>();
@@ -157,6 +157,43 @@ public class SshPrivateKeyTests
         // A wrong passphrase shows up as differing check values (CTR) or a failed tag (GCM).
         var wrong = Assert.Throws<FormatException>(() => SshPrivateKey.Parse(pem, "battery staple"));
         await Assert.That(wrong.Message).Contains("passphrase");
+    }
+
+    [Test]
+    [Arguments(2, "ssh-ed25519", null)]
+    [Arguments(2, "ecdsa-sha2-nistp256", "pw")]
+    [Arguments(2, "ssh-rsa", "pw")]
+    [Arguments(3, "ssh-ed25519", "pw")]
+    [Arguments(3, "ecdsa-sha2-nistp256", null)]
+    [Arguments(3, "ssh-rsa", null)]
+    public async Task PuttyKeys_Version2And3_PlainAndEncrypted(int version, string keyType, string? passphrase)
+    {
+        var ppk = TestKeys.Ppk(version, keyType, out var blob, passphrase);
+        using (var key = SshPrivateKey.Parse(ppk, passphrase))
+        {
+            await Assert.That(key.KeyType).IsEqualTo(keyType);
+            await Assert.That(key.Comment).IsEqualTo("ppk-test");
+            await AssertSignsAndVerifies(key, blob);
+        }
+
+        if (passphrase is not null)
+        {
+            await Assert.That(() => SshPrivateKey.Parse(ppk)).Throws<FormatException>().WithMessageContaining("passphrase is required");
+            await Assert.That(() => SshPrivateKey.Parse(ppk, "wrong")).Throws<FormatException>().WithMessageContaining("passphrase is wrong");
+        }
+
+        // Windows line endings are fine; a changed MAC (or any edit) is not.
+        using (var crlf = SshPrivateKey.Parse(ppk.Replace("\n", "\r\n", StringComparison.Ordinal), passphrase))
+        {
+            await Assert.That(crlf.PublicKey.ToArray()).IsEquivalentTo(blob);
+        }
+
+        var overflow = ppk.Replace("Public-Lines: ", "Public-Lines: 99999999999", StringComparison.Ordinal);
+        await Assert.That(() => SshPrivateKey.Parse(overflow, passphrase)).Throws<FormatException>();
+
+        var tampered = TestKeys.Ppk(version, keyType, out _, passphrase, corruptMac: true);
+        await Assert.That(() => SshPrivateKey.Parse(tampered, passphrase)).Throws<FormatException>();
+        await Assert.That(() => SshPrivateKey.Parse(ppk.Replace("Comment: ppk-test", "Comment: edited", StringComparison.Ordinal), passphrase)).Throws<FormatException>();
     }
 
     [Test]

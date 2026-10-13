@@ -120,6 +120,18 @@ jobs:
           done
           ssh-keygen -q -t rsa -b 2048 -N "$PHRASE" -f "$KEYS/rsa_encrypted_default"
           ssh-keygen -q -t ecdsa -b 384 -a 4 -N "$PHRASE" -f "$KEYS/ecdsa_encrypted_rounds4"
+          # The same keys as PuTTY .ppk files, written by PuTTY's own puttygen: versions 2 and 3, plain and encrypted.
+          sudo apt-get install -y -qq putty-tools > /dev/null
+          puttygen --version
+          printf '%s' "$PHRASE" > "$RUNNER_TEMP/phrase"
+          for key in ed25519 ecdsa256 rsa; do
+            puttygen "$KEYS/$key" -O private -o "$KEYS/${key}_ppk3.ppk"
+            puttygen "$KEYS/$key" -O private --ppk-param version=2 -o "$KEYS/${key}_ppk2.ppk"
+            puttygen "$KEYS/$key" -O private --new-passphrase "$RUNNER_TEMP/phrase" -o "$KEYS/${key}_ppk3_encrypted.ppk"
+            puttygen "$KEYS/$key" -O private --ppk-param version=2 --new-passphrase "$RUNNER_TEMP/phrase" -o "$KEYS/${key}_ppk2_encrypted.ppk"
+            for ppk in "$KEYS/${key}"_ppk*.ppk; do cp "$KEYS/$key.pub" "$ppk.pub"; done
+          done
+          rm "$RUNNER_TEMP/phrase"
           sudo install -d -m 700 -o sshsharp -g sshsharp /home/sshsharp/.ssh
           cat "$KEYS"/*.pub | sudo install -m 600 -o sshsharp -g sshsharp /dev/stdin /home/sshsharp/.ssh/authorized_keys
           echo "SSHSHARP_TEST_KEYDIR=$KEYS" >> "$GITHUB_ENV"
@@ -131,4 +143,6 @@ jobs:
         run: dotnet test --project tests/SshSharp.Tests -c Release -f net10.0 --no-build --treenode-filter "/*/*/*InteropTests/*"
       - name: sshd log
         if: failure()
-        run: sudo tail -n 80 /tmp/sshd.log
+        run: |
+          sudo grep -E "rtype|global_request|Disconnect|fatal" /tmp/sshd.log | tail -n 40 || true
+          sudo tail -n 80 /tmp/sshd.log
