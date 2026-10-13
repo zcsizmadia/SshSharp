@@ -208,7 +208,12 @@ public class SshObservabilityTests
             await client.RunCommandAsync("failing", Timeout());
         }
 
-        var mine = stopped.Where(a => a.TraceId == root.TraceId).ToList();
+        // The listener sees every test's activities, and tests run in parallel: snapshot under the lock before reading.
+        List<Activity> mine;
+        lock (lockObject)
+        {
+            mine = stopped.Where(a => a.TraceId == root.TraceId).ToList();
+        }
         var connect = mine.Single(a => a.OperationName == "SshSharp.Connect");
         await Assert.That(connect.GetTagItem("ssh.kex")).IsEqualTo("curve25519-sha256");
         await Assert.That(connect.GetTagItem("ssh.cipher")).IsEqualTo("chacha20-poly1305@openssh.com");
@@ -238,7 +243,11 @@ public class SshObservabilityTests
         _ = server.StartAsync();
         await Assert.That(async () => await SshClient.ConnectAsync(server.ClientStream, Options(password: "wrong"), true, Timeout())).Throws<SshException>();
 
-        var connect = stopped.Single(a => a.TraceId == root.TraceId && a.OperationName == "SshSharp.Connect");
+        Activity connect;
+        lock (lockObject)
+        {
+            connect = stopped.Single(a => a.TraceId == root.TraceId && a.OperationName == "SshSharp.Connect");
+        }
         await Assert.That(connect.Status).IsEqualTo(ActivityStatusCode.Error);
         await Assert.That(connect.StatusDescription).IsEqualTo(nameof(SshException));
     }
