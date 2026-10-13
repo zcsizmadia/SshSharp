@@ -22,49 +22,73 @@ public sealed partial class SshClient
         }
 
         // The announcement arrives on the receive loop, which must not wait: the update runs on its own.
-        connection.HostKeysAnnounced = keys => _ = Task.Run(() => UpdateHostKeysAsync(connection, knownHosts, name, lookupPort, keys, logger));
+        var current = hostKey.PublicKey.ToArray();
+        connection.HostKeysAnnounced = keys => _ = Task.Run(() => UpdateHostKeysAsync(connection, knownHosts, name, lookupPort, current, keys, logger));
     }
 
     /// <summary>
     /// PROTOCOL 2.5: asks the server to prove it holds the announced keys that known_hosts does not have (a signature over the request
     /// name, the session id and the key), and records the ones it proves. Any invalid proof cancels the whole update.
     /// </summary>
-    private static async Task UpdateHostKeysAsync(SshConnection connection, KnownHostsVerifier knownHosts, string name, int port,
+    private static async Task UpdateHostKeysAsync(SshConnection connection, KnownHostsVerifier knownHosts, string name, int port, byte[] current,
         IReadOnlyList<byte[]> announced, ILogger logger)
     {
         try
         {
             var supported = announced.Where(IsSupportedKey).ToList();
+            if (supported.Count == 0)
+            {
+                return; // nothing usable announced: no reason to touch known_hosts, least of all to remove from it
+            }
+
+            // The key this connection was verified with stays, whatever the announcement says.
+            supported.Add(current);
             var unknown = await knownHosts.UnknownHostKeysAsync(name, port, supported, connection.Closed).ConfigureAwait(false);
-            if (unknown.Count == 0)
+            var stale = await knownHosts.StaleHostKeysAsync(name, port, supported, connection.Closed).ConfigureAwait(false);
+            if (unknown.Count == 0 && stale.Count == 0)
             {
                 return;
             }
 
-            var reply = await connection.SendGlobalRequestAsync(ProveRequest, wantReply: true, w =>
+            List<byte[]> proven = [];
+            if (unknown.Count > 0)
             {
-                foreach (var key in unknown)
+                var reply = await connection.SendGlobalRequestAsync(ProveRequest, wantReply: true, w =>
                 {
-                    w.WriteString(key);
+                    foreach (var key in unknown)
+                    {
+                        w.WriteString(key);
+                    }
+                }, connection.Closed).ConfigureAwait(false);
+                if (!reply.Success)
+                {
+                    SshLog.HostKeyUpdateSkipped(logger, "the server declined to prove its keys");
+                    return;
                 }
-            }, connection.Closed).ConfigureAwait(false);
-            if (!reply.Success)
+
+                if (ProvenKeys(unknown, reply.Data, connection.SessionId.ToArray()) is not { } verified)
+                {
+                    SshLog.HostKeyUpdateSkipped(logger, "a proof did not verify"); // nothing is trusted, and nothing removed either
+                    return;
+                }
+
+                proven = verified;
+            }
+
+            if (proven.Count == 0 && stale.Count == 0)
             {
-                SshLog.HostKeyUpdateSkipped(logger, "the server declined to prove its keys");
                 return;
             }
 
-            if (ProvenKeys(unknown, reply.Data, connection.SessionId.ToArray()) is not { } proven)
+            if (knownHosts.ConfirmHostKeyUpdate is { } confirm
+                && !await confirm(new SshHostKeyUpdate(name, port, [.. proven.Select(Describe)], [.. stale.Select(Describe)]), connection.Closed).ConfigureAwait(false))
             {
-                SshLog.HostKeyUpdateSkipped(logger, "a proof did not verify");
+                SshLog.HostKeyUpdateSkipped(logger, "not confirmed");
                 return;
             }
 
-            if (proven.Count > 0)
-            {
-                await knownHosts.RecordProvenAsync(name, port, proven, connection.Closed).ConfigureAwait(false);
-                SshLog.HostKeysUpdated(logger, proven.Count);
-            }
+            await knownHosts.ApplyHostKeyUpdateAsync(name, port, proven, stale, connection.Closed).ConfigureAwait(false);
+            SshLog.HostKeysUpdated(logger, proven.Count, stale.Count);
         }
         catch (Exception ex) when (ex is SshException or IOException or OperationCanceledException or ObjectDisposedException or FormatException
             or UnauthorizedAccessException)
@@ -110,7 +134,14 @@ public sealed partial class SshClient
         return reader.IsEmpty ? proven : null;
     }
 
-    private static bool IsSupportedKey(byte[] blob)
+    /// <summary>A key as <c>ssh-keygen -l</c> names it: type and SHA-256 fingerprint.</summary>
+    private static string Describe(byte[] blob)
+    {
+        var key = SshPublicKey.Parse(blob);
+        return $"{key.KeyType} SHA256:{Convert.ToBase64String(System.Security.Cryptography.SHA256.HashData(blob)).TrimEnd('=')}";
+    }
+
+    internal static bool IsSupportedKey(byte[] blob)
     {
         try
         {

@@ -65,6 +65,9 @@ public sealed class SshConfigConnectOptions
     /// <summary>Answers <c>StrictHostKeyChecking ask</c> for an unknown host key (see <see cref="KnownHostsVerifier.Ask"/>). Not called in <c>BatchMode</c>.</summary>
     public Func<SshHostKeyPrompt, CancellationToken, ValueTask<bool>>? AskHostKey { get; init; }
 
+    /// <summary>Confirms known_hosts changes under <c>UpdateHostKeys ask</c> (see <see cref="KnownHostsVerifier.ConfirmHostKeyUpdate"/>). Without it, <c>ask</c> leaves known_hosts alone. Not called in <c>BatchMode</c>.</summary>
+    public Func<SshHostKeyUpdate, CancellationToken, ValueTask<bool>>? ConfirmHostKeyUpdate { get; init; }
+
     /// <summary>Whether a configured <c>ProxyCommand</c> may be run (it is a local shell command, as in OpenSSH). Default true.</summary>
     public bool AllowProxyCommand { get; init; } = true;
 
