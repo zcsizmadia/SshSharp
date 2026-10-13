@@ -69,7 +69,7 @@ public class ExecInteropTests
         var result = await client.RunCommandAsync("echo hello", Timeout());
         await Assert.That(result.StandardOutputText).IsEqualTo("hello\n");
         await Assert.That(result.ExitStatus).IsEqualTo(0);
-        await Assert.That(client.ServerIdentification).StartsWith("SSH-2.0-OpenSSH");
+        await Assert.That(client.ServerIdentification).StartsWith("SSH-2.0-" + RealServer.Software, StringComparison.OrdinalIgnoreCase);
     }
 
     [Test]

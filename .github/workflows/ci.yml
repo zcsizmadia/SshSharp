@@ -157,3 +157,83 @@ jobs:
         run: |
           sudo grep -E "rtype|global_request|Disconnect|fatal" /tmp/sshd.log | tail -n 40 || true
           sudo tail -n 80 /tmp/sshd.log
+
+  # Older and other servers, each in a throwaway container: OpenSSH before strict KEX and from several eras, and Dropbear.
+  # Password-only: the tests that need keys, certificates or ProxyJump skip themselves here.
+  interop-matrix:
+    name: interop (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: OpenSSH, Alpine 3.6
+            image: alpine@sha256:66790a2b79e1ea3e1dabac43990c54aca5d1ddf268d9a5a0285e4167c8b24475
+            server: openssh
+            software: OpenSSH
+            strict: '0'
+          - name: OpenSSH, Alpine 3.13
+            image: alpine@sha256:469b6e04ee185740477efa44ed5bdd64a07bbdd6c7e5f5d169e540889597b911
+            server: openssh
+            software: OpenSSH
+            strict: '0'
+          - name: OpenSSH, Alpine 3.19
+            image: alpine@sha256:6baf43584bcb78f2e5847d1de515f23499913ac9f12bdf834811a3145eb11ca1
+            server: openssh
+            software: OpenSSH
+            strict: '1'
+          - name: OpenSSH, Alpine 3.22
+            image: alpine@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8
+            server: openssh
+            software: OpenSSH
+            strict: '1'
+          - name: Dropbear, Alpine 3.13
+            image: alpine@sha256:469b6e04ee185740477efa44ed5bdd64a07bbdd6c7e5f5d169e540889597b911
+            server: dropbear
+            software: dropbear
+            strict: '0'
+          - name: Dropbear, Alpine 3.22
+            image: alpine@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8
+            server: dropbear
+            software: dropbear
+            strict: '1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+        with:
+          global-json-file: global.json
+          dotnet-version: 8.0.x
+          cache: true
+          cache-dependency-path: '**/packages.lock.json'
+      - name: Start the server container
+        run: |
+          set -euo pipefail
+          PASSWORD="$(openssl rand -hex 16)"
+          echo "::add-mask::$PASSWORD"
+          docker build -q -t sshsharp-interop --build-arg BASE="${{ matrix.image }}" --build-arg SERVER="${{ matrix.server }}" tests/docker
+          docker run -d --name server -p 127.0.0.1:2200:22 -e TEST_PASSWORD="$PASSWORD" sshsharp-interop
+          for i in $(seq 1 30); do
+            if timeout 2 bash -c 'exec 3<>/dev/tcp/127.0.0.1/2200 && head -c 64 <&3' 2>/dev/null | grep -q '^SSH-'; then break; fi
+            sleep 1
+          done
+          BANNER="$(timeout 2 bash -c 'exec 3<>/dev/tcp/127.0.0.1/2200 && head -n 1 <&3' | tr -d '\r')"
+          echo "Server: $BANNER"
+          echo "Server: \`$BANNER\`" >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "SSHSHARP_TEST_SSHD=127.0.0.1:2200"
+            echo "SSHSHARP_TEST_USER=sshsharp"
+            echo "SSHSHARP_TEST_PASSWORD=$PASSWORD"
+            echo "SSHSHARP_TEST_SERVER=${{ matrix.software }}"
+            echo "SSHSHARP_TEST_SERVER_STRICTKEX=${{ matrix.strict }}"
+          } >> "$GITHUB_ENV"
+          if [ "${{ matrix.server }}" = "openssh" ]; then echo "SSHSHARP_TEST_SSHD_REKEY=1" >> "$GITHUB_ENV"; fi
+      - run: dotnet restore --locked-mode
+      - run: dotnet build -c Release --no-restore
+      - name: Interop tests against the container
+        run: dotnet test --project tests/SshSharp.Tests -c Release -f net10.0 --no-build --treenode-filter "/*/*/*InteropTests/*"
+      - name: Server log
+        if: failure()
+        run: docker logs server 2>&1 | tail -n 100
