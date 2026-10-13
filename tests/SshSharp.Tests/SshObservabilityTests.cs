@@ -95,6 +95,13 @@ public class SshObservabilityTests
         await using var client = await ConnectAsync(server, Options(logger, rekeyBytes: 50_000));
         await client.RunCommandAsync("bulk", Timeout());
 
+        // The command can finish while a re-exchange is still in flight: completion is logged when the server's NEWKEYS arrives on
+        // the receive loop, so wait for it (bounded) instead of assuming it already happened.
+        for (var i = 0; i < 500 && !logger.Entries.Any(e => e.Message.Contains("Key exchange 2 completed")); i++)
+        {
+            await Task.Delay(20);
+        }
+
         var messages = logger.Entries.Select(e => e.Message).ToList();
         await Assert.That(messages.Any(m => m.Contains("Starting a key re-exchange (size or time threshold reached)"))).IsTrue();
         await Assert.That(messages.Any(m => m.Contains("Key exchange 2 completed"))).IsTrue();
