@@ -145,18 +145,16 @@ internal sealed class SshTransport : IAsyncDisposable
         }
     }
 
-    /// <summary>Replies <c>SSH_MSG_UNIMPLEMENTED</c> (RFC 4253 section 11.4) for the message that was just received.</summary>
-    public ValueTask SendUnimplementedAsync(CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Builds <c>SSH_MSG_UNIMPLEMENTED</c> (RFC 4253 section 11.4) for the message that was just received. It quotes that message's sequence
+    /// number, so it must be built right away; sending it can be deferred.
+    /// </summary>
+    public byte[] BuildUnimplemented() => Serialize(output =>
     {
-        var payload = Serialize(output =>
-        {
-            var writer = new SshWriter(output);
-            writer.WriteByte(SshMessage.Unimplemented);
-            writer.WriteUInt32(_receiveSequence - 1);
-        });
-        return SendPacketAsync(payload, kexMessage: true, cancellationToken);
-    }
-
+        var writer = new SshWriter(output);
+        writer.WriteByte(SshMessage.Unimplemented);
+        writer.WriteUInt32(_receiveSequence - 1);
+    });
     /// <summary>Tells the server we are leaving (<c>SSH_MSG_DISCONNECT</c>), best effort.</summary>
     public async ValueTask DisconnectAsync(DisconnectReason reason, string description, CancellationToken cancellationToken = default)
     {
