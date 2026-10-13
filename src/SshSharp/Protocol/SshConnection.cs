@@ -51,6 +51,8 @@ internal sealed class SshConnection : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        // Everything still waiting (commands, channel opens, window waits) fails now with a clear reason, not with a disposed-object error.
+        Fail(new SshException(SshFailureReason.ConnectionClosed, "The connection was closed by the client."));
         await _stop.CancelAsync().ConfigureAwait(false);
         try
         {

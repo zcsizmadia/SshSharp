@@ -117,7 +117,7 @@ internal sealed class SshChannel
                 w.WriteUInt32(RemoteId);
             }), cancellationToken).ConfigureAwait(false);
         }
-        catch (SshException)
+        catch (Exception ex) when (ex is SshException or ObjectDisposedException or IOException)
         {
             // The connection is already gone; the channel is failed by the connection.
         }
