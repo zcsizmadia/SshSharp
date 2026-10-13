@@ -7,7 +7,7 @@ namespace SshSharp.Tests.Integration;
 /// </summary>
 public class RekeyInteropTests
 {
-    private const string BulkOutputCommand = "head -c 3000000 /dev/zero | base64 -w 76";
+    private const string BulkOutputCommand = "head -c 3000000 /dev/zero | base64";
 
     private static bool Configured =>
         RealServer.IsAvailable

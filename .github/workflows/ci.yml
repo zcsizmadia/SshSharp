@@ -233,7 +233,8 @@ jobs:
       - run: dotnet restore --locked-mode
       - run: dotnet build -c Release --no-restore
       - name: Interop tests against the container
-        run: dotnet test --project tests/SshSharp.Tests -c Release -f net10.0 --no-build --treenode-filter "/*/*/*InteropTests/*"
+        # Few tests at a time: Dropbear limits unauthenticated connections per address (a compile-time setting).
+        run: dotnet test --project tests/SshSharp.Tests -c Release -f net10.0 --no-build --treenode-filter "/*/*/*InteropTests/*" --maximum-parallel-tests 4
       - name: Server log
         if: failure()
         run: docker logs server 2>&1 | tail -n 100

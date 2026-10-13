@@ -99,7 +99,8 @@ public class ExecInteropTests
         }
 
         await using var client = await ConnectAsync(Timeout());
-        var result = await client.RunCommandAsync("sh -c 'kill -9 $$'", Timeout());
+        // The login shell kills itself: busybox ash does not exec a nested shell's last command, so 'sh -c kill' would exit 137 instead.
+        var result = await client.RunCommandAsync("kill -9 $$", Timeout());
         await Assert.That(result.ExitStatus).IsNull();
         await Assert.That(result.ExitSignal).IsEqualTo("KILL");
     }
@@ -114,7 +115,7 @@ public class ExecInteropTests
 
         await using var client = await ConnectAsync(Timeout());
         // ~6.7 MB of base64 text: well over the 2 MiB window, so it only finishes if window adjustment works against OpenSSH.
-        var result = await client.RunCommandAsync("head -c 5000000 /dev/zero | base64 -w 76", Timeout());
+        var result = await client.RunCommandAsync("head -c 5000000 /dev/zero | base64", Timeout());
         var lines = result.StandardOutputText.Split('\n', StringSplitOptions.RemoveEmptyEntries);
         await Assert.That(result.ExitStatus).IsEqualTo(0);
         await Assert.That(lines.Length).IsGreaterThan(65_000);
