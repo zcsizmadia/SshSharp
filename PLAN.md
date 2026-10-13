@@ -13,6 +13,15 @@ Managed-only, async-first SSH client library for .NET with OpenSSH `known_hosts`
 | API style | Async-first, `CancellationToken` everywhere, `IAsyncDisposable` |
 | License | MIT |
 | Repo | github.com/zcsizmadia/SshSharp (private until M5), commit email `zcsizmadia@gmail.com` |
+| No `netstandard2.0` | The design depends on `Span`/`Memory` in the BCL APIs, Pipelines, `AesGcm`, `TimeProvider`, `SearchValues` and modern ECDH/RSA APIs. .NET Framework and Windows PowerShell 5.1 users stay on SSH.NET. |
+| Public API is tracked | `PublicAPI.Shipped/Unshipped.txt` (PublicApiAnalyzers); every public change shows in review. Package validation on pack. |
+
+### Open decisions
+
+- **Sync API and SSH.NET migration.** Option A: async-only, plus a migration guide mapping SSH.NET calls to SshSharp.
+  Option B: a separate `SshSharp.Compat` package with SSH.NET-shaped synchronous wrappers (`RunCommand`, `ConnectionInfo`,
+  `PrivateKeyFile`). Recommendation: A for 1.0 (sync-over-async in the core is ruled out either way), and revisit B once the
+  async API is stable. This needs deciding before the M3 public types settle.
 
 ## Engineering principles
 
@@ -63,10 +72,10 @@ Directory.Build.props      # TFMs, nullable, analyzers, warnings-as-errors, dete
 Directory.Packages.props   # central package versions
 src/SshSharp/              # core library (transport, auth, channels, config, forwarding, agent, SCP)
 src/SshSharp.Sftp/         # SFTP client, separate package (M6), uses only the core's public API
-tests/SshSharp.Tests/      # TUnit unit tests (in-memory, no network)
+tests/SshSharp.Tests/      # TUnit tests: in-memory unit tests, Fuzz/ (mutation fuzzing of every parser, always on),
+                           #   Integration/ (env-gated tests against a real sshd; CI starts one on the Linux runners)
 tests/SshSharp.Sftp.Tests/ # TUnit tests for SshSharp.Sftp (M6)
-tests/SshSharp.Integration/# TUnit tests against OpenSSH in Docker (Testcontainers)
-tests/SshSharp.Fuzz/       # parser/packet fuzz harness (not part of the coverage target)
+tests/SshSharp.Fuzz/       # coverage-guided SharpFuzz harness for nightly runs (M3; not part of the coverage target)
 tests/SshSharp.Benchmarks/ # BenchmarkDotNet; allocation checks (M2) and the SSH.NET comparison (M5)
 docs/
 ```
@@ -78,15 +87,20 @@ docs/
   them locally from time to time (`scripts/coverage.ps1`, which writes an HTML report) and fix gaps as part of regular work.
   Only generated code and clearly marked platform glue may be excluded, with `[ExcludeFromCodeCoverage]` plus a justification.
 - **Design for testability from day one:**
-  - `ITransport` (in-memory duplex pipe) so the whole protocol stack runs without sockets.
-  - `TimeProvider` for rekey timers and timeouts; an injectable random source for deterministic test vectors.
-  - Filesystem, environment, and `exec` Match calls behind small interfaces.
+  - The protocol stack runs over any `Stream`; tests use in-memory duplex pipes and scripted fake servers
+    (`FakeSshServer`, `FakeSessionServer`), so nothing needs sockets.
+  - `TimeProvider` for rekey timers and timeouts. Randomness comes straight from `RandomNumberGenerator` (no injectable
+    source); deterministic KEX transcripts are tested through known-answer vectors instead.
+  - Filesystem, environment, and `exec` Match calls behind small delegates.
 - **Layer 1, unit tests (no network):** known-answer vectors (RFC/crypto), parser corpus (OpenSSH regress tests), protocol
-  tests against a scripted in-memory fake server, property and fuzz tests for the packet decoder and both config parsers.
-- **Layer 2, Docker integration tests (Testcontainers, Linux only):** several OpenSSH versions and Dropbear, a multi-hop
-  ProxyJump chain, every KEX/cipher/MAC/key type, rekeying with data in flight, SCP, forwarding, host-key change and
-  revoked keys, and fault injection (Toxiproxy: drops, delays, half-closed connections). Image digests are pinned.
-  Tests skip with a clear message when Docker is unavailable; `docker compose` file for local use.
+  tests against a scripted in-memory fake server, and mutation fuzzing of every parser that reads untrusted input
+  (`tests/SshSharp.Tests/Fuzz`, a few seconds per run).
+- **Layer 2, real-server interop:** today, an `sshd` started on the Linux CI runners (amd64 and arm64) with a throwaway
+  account; the env-gated tests in `Integration/` run against it on net8.0 and net10.0. From M3: a pinned-digest container
+  matrix on Linux (OpenSSH 7.4, 8.x and latest, plus Dropbear) as service containers, CI-generated user keys and a host
+  certificate for publickey and certificate tests, Windows OpenSSH Server on `windows-latest`, a multi-hop ProxyJump chain,
+  every KEX/cipher/MAC/key type, host-key change and revoked keys, and fault injection (drops, delays, half-closed
+  connections). A script under `scripts/` starts the same server locally.
 - **Layer 3, platform matrix (GitHub Actions):** each cell runs on net8.0 and net10.0.
 
   | Runner | Arch | Runs |
@@ -99,10 +113,13 @@ docs/
 
   No macOS Intel runner. Docker tests run on Linux only (Windows and macOS runners cannot run Linux containers).
   arm64 runners are free only for public repos, so while the repo is private they may be limited to nightly or release builds.
-- **Workflows:** on PR, Linux amd64 unit and integration tests plus Windows and macOS unit tests; nightly, the full matrix,
-  the long fuzz run and the old/new server matrix; on release tag, everything plus `dotnet pack` and package checks.
-- **Rules:** no code merges without tests. Timing-dependent tests use the fake clock, not real sleeps; flaky tests are
-  tracked, not hidden.
+- **Workflows:** on PR, the unit tests on the whole platform matrix plus Linux interop; nightly (from M3), the long
+  coverage-guided fuzz run and the old/new server matrix; on release tag, everything plus `dotnet pack` and package checks.
+- **Supply chain:** actions pinned by commit SHA, Dependabot for NuGet and Actions, `packages.lock.json` restored in locked
+  mode, NuGet audit failing the build on vulnerable packages, per-job timeouts. CodeQL once the repo is public (code
+  scanning on a private personal repo needs GitHub Advanced Security).
+- **Rules:** no code merges without tests. Timing-dependent tests use the fake clock or wait on a signal, not real sleeps;
+  real-time delays are only allowed for negative checks and bounded polling. Flaky tests are fixed or tracked, not hidden.
 
 ## Milestones
 
@@ -140,26 +157,50 @@ docs/
 - Zero-copy check: a small BenchmarkDotNet project (`tests/SshSharp.Benchmarks`) and allocation-assert tests on the hot path
   (encrypt, send, receive), so allocation regressions show up early.
 - **Done when:** `RunCommandAsync` works against OpenSSH and the in-memory fake server, and a local coverage check is near the 95% target.
+- **Status:** done (#1–#25). A four-part review after M2 (crypto, transport, config/API, plan/CI) led to hardening PRs
+  #26–#30: cancellation-safe sends and channel opens, packet-count rekey, Ed25519/RSA key validation, shell-safe config
+  inputs and OpenSSH-accurate resolution (checked with `ssh -G`), no user names in logs, supply-chain CI, public API
+  tracking, and parser mutation fuzzing.
 
 ### M3: Config-driven connect and host verification
+- **API groundwork first** (before the public types grow):
+  - Host key verification gets a context (host, port, alias, key, certificate) and returns a result rather than a bool;
+    ready-made verifiers for `known_hosts` and each `StrictHostKeyChecking` policy (`yes`, `accept-new`, `no`, `ask`),
+    `UpdateHostKeys`, and "another key type is already known for this host" reported, to stop downgrades.
+  - Exception types: authentication (with the allowed methods), host key, connection; socket errors wrapped.
+  - Authentication dispatcher per method (publickey `PK_OK`, keyboard-interactive later), partial success, banner callback;
+    global request reply FIFO (keep-alive, `hostkeys-00@openssh.com`, later `tcpip-forward`); `IsConnected` and a
+    disconnected event.
 - `SshClient.ConnectAsync("alias", config, options, ct)`.
-- `IHostKeyVerifier` with `StrictHostKeyChecking` policies (`yes`, `accept-new`, `no`, `ask`) and `UpdateHostKeys`.
 - OpenSSH certificates (user and host), `@cert-authority` verification.
 - ProxyJump chains and `ProxyCommand`. Key loading: OpenSSH new format (encrypted too), PEM/PKCS#8, PuTTY `.ppk`.
+  Publickey authentication, choosing `rsa-sha2-*` from `server-sig-algs`.
 - Reliable keep-alive and dead-connection detection: `ServerAliveInterval`/`ServerAliveCountMax` from config,
   responding to server keep-alive requests, `IsConnected` that reflects the real state.
+- **Moved up from M5:**
+  - A constant-time review of the managed Ed25519 signing path (it signs with users' long-term keys from M3 on), with a
+    dudect-style timing test, before publickey auth ships.
+  - Coverage-guided fuzzing (`tests/SshSharp.Fuzz`, SharpFuzz) for the key, PEM, `.ppk` and certificate parsers, nightly.
+  - The interop container matrix described under "Testing and CI".
+  - Versioning (MinVer or Nerdbank.GitVersioning, 0.x prereleases), `dotnet pack` with package validation in CI, and
+    reserving the NuGet ID.
 - **Done when:** a connect through a two-hop ProxyJump to a Docker target succeeds using only an `ssh_config` alias.
 
-### M4: Agent, SCP, forwarding, interactive
+### M4a: Agent and interactive sessions
 - ssh-agent: Unix `SSH_AUTH_SOCK`, Windows OpenSSH named pipe, Pageant.
+- Shell + PTY, keyboard-interactive.
+
+### M4b: Forwarding and SCP
 - SCP upload/download (recursive, progress, `CancellationToken`).
-- Local/remote port forwarding, `direct-streamlocal`, shell + PTY, keyboard-interactive.
+- Local/remote port forwarding, `direct-streamlocal`.
 - Dynamic forwarding: a SOCKS5 proxy (`DynamicForward`), with `LocalForward`/`RemoteForward` taken from `ssh_config`.
 - Agent forwarding (`ForwardAgent`), in addition to using an agent for auth.
 
 ### M5: Hardening and release
-- Fuzzing, interop matrix (OpenSSH versions, Dropbear, Windows OpenSSH), timing/side-channel review of the managed crypto.
-- Docs, samples, NuGet package metadata, SourceLink, symbols, versioning.
+- Outside review of the managed crypto (X25519, Ed25519, Poly1305, ChaCha20) before 1.0; mutation testing (Stryker.NET)
+  on `Crypto/`, `PacketCodec` and `Config/`; an AOT-published smoke app in CI to prove trimming/AOT compatibility.
+- CodeQL and the threat model reviewed when the repo goes public; `SECURITY.md` is already in place.
+- Docs, samples, NuGet package metadata, SourceLink, symbols. Decide on strong naming.
 - **Benchmark against SSH.NET** (BenchmarkDotNet, `tests/SshSharp.Benchmarks`, not part of normal CI), with a short results
   section in the docs:
   - Measure throughput (exec channel, SCP), connect/handshake and small-command latency, allocations and GC counts per MB,
@@ -182,7 +223,10 @@ docs/
 ## Risks
 
 - **Managed X25519/Ed25519** is the riskiest code. It needs test vectors, a review, and a README note. Prefer the BCL where
-  it provides the primitive on both target frameworks.
+  it provides the primitive on both target frameworks. Signing with long-term user keys (M3) raises the stakes: a timing
+  leak there leaks the key, so the constant-time review comes before publickey auth ships.
+- **`ssh_config` runs commands** (`Match exec`, `ProxyCommand`). Inputs from the caller are validated, `Match exec` is
+  opt-in, and the threat model (`docs/threat-model.md`) records what is trusted.
 - **Reaching 95% coverage on network code** depends on the in-memory transport and fake server. Build those in M2 before writing
   much protocol code, or coverage will lag behind.
 - **TUnit** is Microsoft.Testing.Platform based, so `dotnet test` and coverage collection need the right SDK settings
