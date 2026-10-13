@@ -43,11 +43,14 @@ The first run showed two problems that are now fixed:
 
 | Operation | Time | Allocated |
 |---|---:|---|
-| X25519 agree | 0.92 ms | 0 B |
-| Ed25519 sign | 3.1 ms | 337 B |
-| Ed25519 verify | 3.3 ms | 169 B |
+| X25519 agree | 228 µs | 0 B |
+| Ed25519 sign | 607 µs | 336 B |
+| Ed25519 verify | 264 µs | 168 B |
 
-These run once per connection (key exchange and host key check), so they are not on the transfer path.
+These run once per connection (key exchange and host key check), so they are not on the transfer path, but they are a visible part of
+the connect time. The first version used TweetNaCl's field arithmetic (16 limbs of 16 bits) and measured 0.92 ms, 3.1 ms and 3.3 ms.
+The field now uses 5 limbs of 51 bits with 128-bit products, and verification uses a joint double-scalar multiplication (its inputs
+are public), which made X25519 4x and verification 12x faster.
 
 ## Comparing with SSH.NET
 
