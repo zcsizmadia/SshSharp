@@ -24,7 +24,9 @@ internal sealed class SshConnection : IAsyncDisposable
     // Replies generated while receiving (CLOSE, request replies, window adjustments, UNIMPLEMENTED) are queued here and sent by their own task.
     // The receive loop must never wait on a send: while a key re-exchange is running, application sends wait for it to finish, and only the
     // receive loop can finish it, so a loop that sent directly would wait on itself (or on a peer that is blocked the same way).
-    private readonly Channel<byte[]> _outbox = Channel.CreateUnbounded<byte[]>(new UnboundedChannelOptions { SingleReader = true });
+    private readonly Channel<(byte[] Payload, Func<bool>? Condition)> _outbox =
+        Channel.CreateUnbounded<(byte[] Payload, Func<bool>? Condition)>(new UnboundedChannelOptions { SingleReader = true });
+
     private Task? _outboxLoop;
 
     // Global requests are answered in order (RFC 4254 section 4), so waiters are queued exactly when their request is committed to the wire.
@@ -170,7 +172,10 @@ internal sealed class SshConnection : IAsyncDisposable
     }
 
     /// <summary>Queues a message to be sent without waiting. For use from the receive loop and from synchronous callbacks.</summary>
-    internal void Post(byte[] payload) => _outbox.Writer.TryWrite(payload);
+    internal void Post(byte[] payload) => _outbox.Writer.TryWrite((payload, null));
+
+    /// <summary>Queues a message that is sent only if <paramref name="condition"/> still holds when its turn comes (see <see cref="SendIfAsync"/>).</summary>
+    internal void PostIf(byte[] payload, Func<bool> condition) => _outbox.Writer.TryWrite((payload, condition));
 
     /// <summary>Sends a message, or throws if the connection has failed.</summary>
     public ValueTask SendAsync(ReadOnlyMemory<byte> payload, CancellationToken cancellationToken) => SendAsync(payload, null, cancellationToken);
@@ -345,9 +350,16 @@ internal sealed class SshConnection : IAsyncDisposable
     {
         try
         {
-            await foreach (var payload in _outbox.Reader.ReadAllAsync(_stop.Token).ConfigureAwait(false))
+            await foreach (var (payload, condition) in _outbox.Reader.ReadAllAsync(_stop.Token).ConfigureAwait(false))
             {
-                await _transport.SendAsync(payload, _stop.Token).ConfigureAwait(false);
+                if (condition is null)
+                {
+                    await _transport.SendAsync(payload, _stop.Token).ConfigureAwait(false);
+                }
+                else
+                {
+                    await _transport.SendIfAsync(payload, condition, _stop.Token).ConfigureAwait(false);
+                }
             }
         }
         catch (OperationCanceledException) when (_stop.IsCancellationRequested)
@@ -358,7 +370,7 @@ internal sealed class SshConnection : IAsyncDisposable
         {
             // Window adjustments and CLOSE replies can no longer be sent, so every channel would stall: end the connection now.
             SshLog.ConnectionFailed(_logger, ex);
-            Fail(ex is IOException ? ConnectionLost(ex) : ex);
+            Fail(ex as SshException ?? ConnectionLost(ex));
             try
             {
                 await _stop.CancelAsync().ConfigureAwait(false);
@@ -402,8 +414,8 @@ internal sealed class SshConnection : IAsyncDisposable
             Fail(ex switch
             {
                 OperationCanceledException => new SshException(SshFailureReason.ConnectionClosed, "The connection was closed."),
-                IOException => ConnectionLost(ex),
-                _ => ex,
+                SshException => ex,
+                _ => ConnectionLost(ex), // IOException, or ObjectDisposedException when a caller-owned stream is disposed underneath
             });
         }
     }
@@ -411,6 +423,9 @@ internal sealed class SshConnection : IAsyncDisposable
     private void Fail(Exception exception)
     {
         Interlocked.CompareExchange(ref _failure, exception, null);
+
+        // Senders waiting for a key re-exchange that can no longer finish are released, and later sends refused.
+        _transport.Fail(exception);
         foreach (var channel in _channels.Values)
         {
             ChannelGone(channel);

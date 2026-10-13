@@ -132,8 +132,14 @@ internal sealed class SshUserAuth(SshTransport transport, string userName, Func<
                     w.WriteString(response ?? "");
                 }
             });
-            await transport.SendAsync(message, cancellationToken).ConfigureAwait(false);
-            CryptographicOperations.ZeroMemory(message); // the responses are usually secrets
+            try
+            {
+                await transport.SendAsync(message, cancellationToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(message); // the responses are usually secrets, whether the send worked or not
+            }
             outcome = await ReceiveReplyAsync(Reply.InfoRequest, cancellationToken).ConfigureAwait(false);
         }
 
@@ -182,8 +188,14 @@ internal sealed class SshUserAuth(SshTransport transport, string userName, Func<
             w.WriteString(method);
             body?.Invoke(w);
         });
-        await transport.SendAsync(message, cancellationToken).ConfigureAwait(false);
-        CryptographicOperations.ZeroMemory(message); // a password request carries the password
+        try
+        {
+            await transport.SendAsync(message, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(message); // a password request carries the password, whether the send worked or not
+        }
         return await ReceiveReplyAsync(reply, cancellationToken).ConfigureAwait(false);
     }
 

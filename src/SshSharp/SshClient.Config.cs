@@ -50,15 +50,18 @@ public sealed partial class SshClient
 
         // Everything this connection needs released when it ends (or fails to start): keys, then the socket, process or tunnel.
         Owned? owner = new();
-        var keys = await LoadIdentitiesAsync(hostConfig, options, logger, token).ConfigureAwait(false);
-        owner.Add(keys);
         try
         {
+            var keys = await LoadIdentitiesAsync(hostConfig, options, logger, token).ConfigureAwait(false);
+            owner.Add(keys);
+
             Stream stream;
             if (via is not null)
             {
+                // Each hop owns the one before it, so disposing the destination tears down the whole chain (ProxyJump a,b: the client
+                // owns b, and b owns a).
                 Owned tunnel;
-                (stream, tunnel) = await TunnelAsync(via, hostConfig, ownsVia: false, token).ConfigureAwait(false);
+                (stream, tunnel) = await TunnelAsync(via, hostConfig, ownsVia: true, token).ConfigureAwait(false);
                 owner.Add(tunnel);
             }
             else if (hostConfig.ProxyJump.Count > 0)
@@ -220,6 +223,25 @@ public sealed partial class SshClient
     private static async Task<List<SshPrivateKey>> LoadIdentitiesAsync(SshHostConfig hostConfig, SshConfigConnectOptions options, ILogger logger, CancellationToken cancellationToken)
     {
         var keys = new List<SshPrivateKey>();
+        try
+        {
+            return await LoadIdentitiesAsync(keys, hostConfig, options, logger, cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            // Cancelled, timed out, or a passphrase provider that threw: the keys loaded so far are wiped, not left to the collector.
+            foreach (var key in keys)
+            {
+                key.Dispose();
+            }
+
+            throw;
+        }
+    }
+
+    private static async Task<List<SshPrivateKey>> LoadIdentitiesAsync(List<SshPrivateKey> keys, SshHostConfig hostConfig, SshConfigConnectOptions options,
+        ILogger logger, CancellationToken cancellationToken)
+    {
         var paths = new List<string>();
         if (!hostConfig.PubkeyAuthentication)
         {
@@ -248,7 +270,17 @@ public sealed partial class SshClient
             }
 
             var fileName = Path.GetFileName(path); // never the full path: it contains the user name
-            var text = await File.ReadAllTextAsync(path, cancellationToken).ConfigureAwait(false);
+            string text;
+            try
+            {
+                text = await File.ReadAllTextAsync(path, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                SshLog.IdentitySkipped(logger, fileName, "the file cannot be read"); // as ssh: an unreadable identity file is skipped
+                continue;
+            }
+
             try
             {
                 keys.Add(SshPrivateKey.Parse(text));

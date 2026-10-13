@@ -113,6 +113,7 @@ internal sealed class SshChannelStream(SshChannel channel) : Stream
         }
 
         await Channel.CloseAsync(CancellationToken.None).ConfigureAwait(false);
+        Channel.DiscardUnread(); // data that arrived but was never read goes back to the buffer pool
         await base.DisposeAsync().ConfigureAwait(false);
     }
 
@@ -123,6 +124,7 @@ internal sealed class SshChannelStream(SshChannel channel) : Stream
             // Synchronous disposal cannot wait for the network; queue the CLOSE.
             ReleaseCurrent();
             _ = Channel.CloseAsync(CancellationToken.None).AsTask();
+            Channel.DiscardUnread();
         }
 
         base.Dispose(disposing);
