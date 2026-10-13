@@ -43,6 +43,39 @@ Console.WriteLine(result.StandardOutputText);
 
 Coming next: SFTP, as a separate package.
 
+## Why not SSH.NET?
+
+[SSH.NET](https://github.com/sshnet/SSH.NET) is the established .NET SSH library, and for some projects it is the better choice
+(see below). SshSharp is for applications that should behave like OpenSSH's `ssh`: connect by `ssh_config` alias, trust what
+`known_hosts` says, sign with the user's agent, hop through jump hosts, and do all of it asynchronously.
+
+| | SshSharp | SSH.NET 2026.0 |
+|---|---|---|
+| Target frameworks | .NET 8, .NET 10 | .NET Framework 4.6.2+, .NET Standard 2.0, .NET 8+ |
+| API | Async-only; `CancellationToken` on every operation | Mostly synchronous; async connect, commands and SFTP |
+| `ssh_config` (`Host`, `Match`, `Include`; connect by alias) | ✅ | — |
+| `known_hosts` verification (hashed hosts, `@cert-authority`, `@revoked`, `StrictHostKeyChecking`) | ✅ | — (verify in a `HostKeyReceived` handler) |
+| `UpdateHostKeys` (key rotation) | ✅ | — |
+| ProxyJump chains, ProxyCommand | ✅ | — (SOCKS4/5 and HTTP proxies) |
+| SSH agent (`ssh-agent`, Windows OpenSSH agent) | ✅ | — |
+| Agent forwarding | ✅ | — |
+| Password, public key, keyboard-interactive, multi-factor | ✅ | ✅ |
+| OpenSSH certificates | User and host | User (authentication) |
+| Private key formats | OpenSSH, PKCS#1/#8, SEC1, PuTTY `.ppk` | OpenSSH, PKCS#1/#8, PuTTY `.ppk`, ssh.com |
+| Post-quantum key exchange | `mlkem768x25519-sha256` (.NET 10 with platform ML-KEM) | `mlkem768x25519-sha256`, `sntrup761x25519-sha512` |
+| Strict key exchange (Terrapin fix) | ✅ | ✅ |
+| Legacy algorithms (CBC, 3DES, SHA-1, `ssh-rsa`, DH group 1, zlib) | — (by design) | ✅ |
+| Commands, shells with a terminal | ✅ | ✅ |
+| Local, remote and dynamic port forwarding | ✅ (also Unix-socket tunnels, and from `ssh_config`) | ✅ |
+| SCP | ✅ | ✅ |
+| SFTP | Planned (`SshSharp.Sftp`) | ✅ |
+| Native AOT | ✅ (AOT-compiled smoke test in CI) | Marked trimmable, not AOT-compatible |
+| Diagnostics | `ILogger`, `ActivitySource` tracing, `Meter` metrics | `ILogger` |
+| Maturity | New, pre-1.0; managed crypto awaiting an outside review | More than a decade of production use |
+
+**Use SSH.NET instead** when you need .NET Framework or .NET Standard, SFTP today, servers that only speak legacy algorithms,
+a connection through an HTTP or SOCKS proxy, or a long track record.
+
 ## Install
 
 ```
