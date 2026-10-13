@@ -16,8 +16,20 @@ public sealed class SshConfigConnectOptions
     /// <summary>Inputs for resolution (home directory, environment, <c>Match exec</c> runner, ...). Default: the current process's.</summary>
     public SshConfigResolveOptions? ResolveOptions { get; init; }
 
-    /// <summary>The password, used if the server accepts password authentication and <c>PasswordAuthentication</c> is not <c>no</c>.</summary>
+    /// <summary>
+    /// The password, sent with the <c>password</c> method unless <c>PasswordAuthentication</c> is <c>no</c>, or through
+    /// keyboard-interactive (see <see cref="SshClientOptions.Password"/>) unless <c>KbdInteractiveAuthentication</c> is <c>no</c>.
+    /// </summary>
     public string? Password { get; init; }
+
+    /// <summary>
+    /// Answers keyboard-interactive authentication (see <see cref="SshClientOptions.KeyboardInteractive"/>). Not called in <c>BatchMode</c>
+    /// or with <c>KbdInteractiveAuthentication no</c>.
+    /// </summary>
+    public Func<SshKeyboardInteractiveRequest, CancellationToken, ValueTask<IReadOnlyList<string>?>>? KeyboardInteractive { get; init; }
+
+    /// <summary>Receives the server's pre-authentication banner (see <see cref="SshClientOptions.AuthenticationBanner"/>).</summary>
+    public Func<string, CancellationToken, ValueTask>? AuthenticationBanner { get; init; }
 
     /// <summary>
     /// Asked for the passphrase of an encrypted <c>IdentityFile</c> (the argument is the file's path). Return null to skip that key.

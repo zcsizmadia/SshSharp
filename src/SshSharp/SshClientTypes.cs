@@ -23,8 +23,28 @@ public sealed class SshClientOptions
     /// <summary>The user to authenticate as.</summary>
     public required string UserName { get; init; }
 
-    /// <summary>The password for password authentication, if used. Tried after <see cref="PrivateKeys"/>.</summary>
+    /// <summary>
+    /// The password, if used. Tried after <see cref="PrivateKeys"/> and <see cref="KeyboardInteractive"/> with the <c>password</c> method.
+    /// When the server offers only <c>keyboard-interactive</c> (common with PAM) and there is no handler, it answers a round that asks
+    /// for exactly one hidden input.
+    /// </summary>
     public string? Password { get; init; }
+
+    /// <summary>
+    /// Answers keyboard-interactive authentication (RFC 4256): one-time codes, PAM prompts, or a password the server asks for this way.
+    /// Called once per round with the server's questions; return one answer per prompt, or null to give up on the method. Tried after
+    /// <see cref="PrivateKeys"/> and before <see cref="Password"/>, like ssh.
+    /// </summary>
+    public Func<SshKeyboardInteractiveRequest, CancellationToken, ValueTask<IReadOnlyList<string>?>>? KeyboardInteractive { get; init; }
+
+    /// <summary>
+    /// Receives the server's pre-authentication banner (<c>SSH_MSG_USERAUTH_BANNER</c>, sshd's <c>Banner</c>), for example a legal notice.
+    /// The text comes from the server: strip control characters before showing it in a terminal.
+    /// </summary>
+    public Func<string, CancellationToken, ValueTask>? AuthenticationBanner { get; init; }
+
+    /// <summary>The methods to try and their order (ssh's <c>PreferredAuthentications</c>); null for publickey, keyboard-interactive, password.</summary>
+    internal IReadOnlyList<string>? AuthenticationOrder { get; init; }
 
     /// <summary>
     /// Keys for public-key authentication, tried in order (load them with <see cref="SshPrivateKey.LoadFileAsync"/>). The client does not
