@@ -108,7 +108,8 @@ docs/
   No macOS Intel runner. Docker tests run on Linux only (Windows and macOS runners cannot run Linux containers).
   arm64 runners are free only for public repos, so while the repo is private they may be limited to nightly or release builds.
 - **Workflows:** on PR, the unit tests on the whole platform matrix plus Linux interop; nightly (from M3), the long
-  coverage-guided fuzz run and the old/new server matrix; on release tag, everything plus `dotnet pack` and package checks.
+  coverage-guided fuzz run and the old/new server matrix; on a version tag on main (`v0.1.0`, `v1.0.0-preview.1`, ...),
+  `publish.yml` tests, packs and pushes to nuget.org with trusted publishing (OIDC, no stored API key; user `zcsizmadia`).
 - **Supply chain:** actions pinned by commit SHA, Dependabot for NuGet and Actions, central package versions,
   NuGet audit failing the build on vulnerable packages, per-job timeouts. CodeQL once the repo is public (code
   scanning on a private personal repo needs GitHub Advanced Security).
