@@ -54,5 +54,54 @@ are public), which made X25519 4x and verification 12x faster.
 
 ## Comparing with SSH.NET
 
-That comparison (throughput, latency, allocations, threads, peak memory, against the same OpenSSH container) is part of milestone M5, so it
-can run on the final implementation.
+`ComparisonBenchmarks` runs the same operations through SshSharp and SSH.NET 2026.0.0 against the same OpenSSH server, with the same
+algorithms forced on both (`curve25519-sha256`, `aes256-gcm@openssh.com`, `ssh-ed25519`) and password authentication. The
+`--peak` mode streams a large output through one library in a fresh process and reports its throughput, CPU and memory.
+
+`scripts/bench-lanes.sh` runs everything on one Linux machine in parallel lanes. Each lane has its own OpenSSH container (the CI
+image) and its own CPU cores, split between client and server, so the lanes don't compete:
+
+```
+scripts/bench-lanes.sh [cores-per-side] [peak-mebibytes]    # for example: 8 4096, which needs 112 cores
+```
+
+Machine: AMD EPYC 7543 (128 logical cores), Ubuntu 22.04, .NET 10.0.12, OpenSSH on Alpine 3.22 in Docker, 8 client and 8 server
+cores per lane, BenchmarkDotNet 0.15.8 in-process.
+
+| Benchmark | SSH.NET | SshSharp | SshSharp time | Allocated (SSH.NET / SshSharp) |
+|---|---:|---:|---:|---|
+| Connect and authenticate | 23.4 ms | 26.2 ms | 1.12x | 68.5 KB / 57.9 KB |
+| Run a command (`echo hi`) on an open connection | 1.71 ms | 1.69 ms | 0.99x | 12.1 KB / 8.2 KB |
+| 8 commands (`echo hi`) in parallel on one connection | 5.90 ms | 3.93 ms | 0.67x | 84.6 KB / 61.6 KB |
+| Download 32 MiB (command output) | 82.3 ms | 74.7 ms | 0.91x | 613 KB / 837 KB |
+| SCP upload 32 MiB | 367 ms | 174 ms | 0.48x | 345 KB / 264 KB |
+
+Streaming 2 GiB of command output (`--peak`), client on 8 cores:
+
+| | SSH.NET | SshSharp |
+|---|---:|---:|
+| Throughput | 432 MiB/s | 428 MiB/s |
+| Client CPU per GiB | 4.88 s | 5.57 s |
+| ... with thread-pool spinning off | 2.69 s | 2.40 s |
+| Throughput with the client on 1 core | 265 MiB/s | 434 MiB/s |
+| Peak working set (4 GiB run) | 80 MiB | 78 MiB |
+
+For reference, OpenSSH's own `ssh` client reaches 397 MiB/s on the same setup: the server's single encryption thread sets the pace,
+so on many cores both libraries keep up with it. The CPU each library spends per GiB, and how it does on one core, are what tell
+them apart.
+
+Most of the client CPU in the 8-core run is the .NET thread pool spin-waiting for work between packets, not SSH work. It affects
+both libraries, and setting `DOTNET_ThreadPool_UnfairSemaphoreSpinLimit=0` removes it without costing throughput. SshSharp's
+CPU per GiB is lower than SSH.NET's once spinning is excluded. On one core, SshSharp keeps the full rate and SSH.NET slows to
+265 MiB/s.
+
+### What the comparison found
+
+* **Connect** first measured 2.2x SSH.NET's time. Profiling each phase showed the key exchange took 12 ms, mostly in the
+  managed X25519 and Ed25519. The faster field arithmetic (see above) brought the whole connect within 12% of SSH.NET.
+  The rest is the server (process start, password check), the same for both libraries.
+* **Setup pitfalls** that made early numbers meaningless, and that the scripts now avoid:
+  * The CI image renews keys every 32 KiB (`RekeyLimit 32K`, to test rekeying), which held every transfer to about 2 MiB/s. The
+    benchmark containers set `REKEY_LIMIT="default none"`.
+  * BusyBox `head -c` caps its output at about 130 MiB/s, so the benchmarks use `dd if=/dev/zero bs=1048576`.
+  * Docker's userland proxy for published ports adds its own ceiling, so the lanes connect to each container's address directly.
