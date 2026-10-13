@@ -26,6 +26,9 @@ public enum SshFailureReason
 
     /// <summary>An operation timed out.</summary>
     Timeout,
+
+    /// <summary>The network connection to the server could not be established.</summary>
+    ConnectFailed,
 }
 
 /// <summary>The base class for errors raised by SshSharp when talking SSH.</summary>
@@ -51,4 +54,29 @@ public sealed class SshProtocolException : SshException
         : base(SshFailureReason.ProtocolError, message)
     {
     }
+}
+/// <summary>The server's host key was not trusted, changed, or revoked, or the server could not prove it holds the key.</summary>
+public sealed class SshHostKeyException : SshException
+{
+    /// <summary>Creates an exception.</summary>
+    /// <param name="message">A description.</param>
+    /// <param name="hostKey">The key the server presented, if it got that far.</param>
+    public SshHostKeyException(string message, SshHostKey? hostKey = null)
+        : base(SshFailureReason.HostKeyRejected, message) => HostKey = hostKey;
+
+    /// <summary>The key the server presented, when known.</summary>
+    public SshHostKey? HostKey { get; }
+}
+
+/// <summary>The server refused every authentication method that was tried.</summary>
+public sealed class SshAuthenticationException : SshException
+{
+    /// <summary>Creates an exception.</summary>
+    /// <param name="message">A description.</param>
+    /// <param name="allowedMethods">The methods the server said it still accepts.</param>
+    public SshAuthenticationException(string message, IReadOnlyList<string> allowedMethods)
+        : base(SshFailureReason.AuthenticationFailed, message) => AllowedMethods = allowedMethods;
+
+    /// <summary>The methods the server still accepts (from its last <c>USERAUTH_FAILURE</c>), for example <c>publickey</c>.</summary>
+    public IReadOnlyList<string> AllowedMethods { get; }
 }

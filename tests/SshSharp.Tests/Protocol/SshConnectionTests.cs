@@ -11,7 +11,7 @@ public class SshConnectionTests
     {
         UserName = "tester",
         Password = "secret",
-        HostKeyVerifier = (_, _) => ValueTask.FromResult(true),
+        HostKeyVerifier = SshHostKeyVerifier.FromDelegate((_, _) => ValueTask.FromResult(true)),
     };
 
     private static async Task<SshClient> ConnectAsync(FakeSessionServer server, Stream? stream = null)

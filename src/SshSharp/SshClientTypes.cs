@@ -20,10 +20,17 @@ public sealed class SshClientOptions
     public string? Password { get; init; }
 
     /// <summary>
-    /// Decides whether to trust the server's host key. There is deliberately no default: accepting unknown keys silently would
-    /// defeat the purpose of host authentication.
+    /// Decides whether to trust the server's host key: a <see cref="KnownHostsVerifier"/>, <see cref="SshHostKeyVerifier.Pinned"/>,
+    /// or your own (<see cref="SshHostKeyVerifier.FromDelegate"/>). There is deliberately no default: accepting unknown keys silently
+    /// would defeat the purpose of host authentication.
     /// </summary>
-    public required Func<SshHostKey, CancellationToken, ValueTask<bool>> HostKeyVerifier { get; init; }
+    public required SshHostKeyVerifier HostKeyVerifier { get; init; }
+
+    /// <summary>
+    /// The name to look the host key up under (OpenSSH's <c>HostKeyAlias</c>), instead of the host name. Needed to use
+    /// <c>known_hosts</c> when connecting over a <see cref="Stream"/>, where the host name is not known.
+    /// </summary>
+    public string? HostKeyAlias { get; init; }
 
     /// <summary>The most output (stdout plus stderr) <see cref="SshClient.RunCommandAsync"/> will collect before failing. Default 128 MiB.</summary>
     public long MaxCommandOutputBytes { get; init; } = 128L * 1024 * 1024;

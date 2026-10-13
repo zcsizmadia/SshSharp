@@ -25,7 +25,7 @@ public class RekeyInteropTests
         {
             UserName = Environment.GetEnvironmentVariable("SSHSHARP_TEST_USER")!,
             Password = Environment.GetEnvironmentVariable("SSHSHARP_TEST_PASSWORD"),
-            HostKeyVerifier = (_, _) => ValueTask.FromResult(true),
+            HostKeyVerifier = SshHostKeyVerifier.FromDelegate((_, _) => ValueTask.FromResult(true)),
             RekeyAfterBytes = rekeyAfterBytes,
         }, Timeout());
     }

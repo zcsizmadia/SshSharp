@@ -10,7 +10,7 @@ public class ExecInteropTests
     {
         UserName = Environment.GetEnvironmentVariable("SSHSHARP_TEST_USER")!,
         Password = password ?? Environment.GetEnvironmentVariable("SSHSHARP_TEST_PASSWORD"),
-        HostKeyVerifier = (_, _) => ValueTask.FromResult(true),
+        HostKeyVerifier = SshHostKeyVerifier.FromDelegate((_, _) => ValueTask.FromResult(true)),
     };
 
     private static bool Configured =>

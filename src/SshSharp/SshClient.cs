@@ -43,11 +43,22 @@ public sealed class SshClient : IAsyncDisposable
     public static async Task<SshClient> ConnectAsync(string host, int port, SshClientOptions options, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(host);
+        ArgumentOutOfRangeException.ThrowIfLessThan(port, 1);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(port, 65535);
         var tcp = new TcpClient { NoDelay = true };
         try
         {
-            await tcp.ConnectAsync(host, port, cancellationToken).ConfigureAwait(false);
-            return await ConnectCoreAsync(tcp.GetStream(), options, leaveOpen: false, owner: tcp, cancellationToken).ConfigureAwait(false);
+            try
+            {
+                await tcp.ConnectAsync(host, port, cancellationToken).ConfigureAwait(false);
+            }
+            catch (SocketException ex)
+            {
+                // The host name stays out of the message (exception text often ends up in logs); it is in the caller's hands already.
+                throw new SshException(SshFailureReason.ConnectFailed, $"Could not connect to the server: {ex.SocketErrorCode}.", ex);
+            }
+
+            return await ConnectCoreAsync(tcp.GetStream(), options, leaveOpen: false, owner: tcp, host, port, cancellationToken).ConfigureAwait(false);
         }
         catch
         {
@@ -62,7 +73,7 @@ public sealed class SshClient : IAsyncDisposable
     /// <param name="leaveOpen">Whether to leave <paramref name="stream"/> open when the client is disposed.</param>
     /// <param name="cancellationToken">Cancels the connection attempt.</param>
     public static Task<SshClient> ConnectAsync(Stream stream, SshClientOptions options, bool leaveOpen = false, CancellationToken cancellationToken = default) =>
-        ConnectCoreAsync(stream, options, leaveOpen, owner: null, cancellationToken);
+        ConnectCoreAsync(stream, options, leaveOpen, owner: null, host: null, port: 22, cancellationToken);
 
     /// <summary>Runs <paramref name="command"/> on the server and collects its output and exit status.</summary>
     /// <exception cref="SshException">The server refused the command or the connection failed.</exception>
@@ -139,7 +150,7 @@ public sealed class SshClient : IAsyncDisposable
         _owner?.Dispose();
     }
 
-    private static async Task<SshClient> ConnectCoreAsync(Stream stream, SshClientOptions options, bool leaveOpen, IDisposable? owner, CancellationToken cancellationToken)
+    private static async Task<SshClient> ConnectCoreAsync(Stream stream, SshClientOptions options, bool leaveOpen, IDisposable? owner, string? host, int port, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(stream);
         ArgumentNullException.ThrowIfNull(options);
@@ -157,13 +168,15 @@ public sealed class SshClient : IAsyncDisposable
             Logger = logger,
             VerifyHostKey = async (info, ct) =>
             {
-                var accepted = await options.HostKeyVerifier(new SshHostKey(info.Algorithm, info.KeyType, info.Fingerprint, info.Blob, info.KeySizeBits), ct).ConfigureAwait(false);
-                if (!accepted)
+                var key = new SshHostKey(info.Algorithm, info.KeyType, info.Fingerprint, info.Blob, info.KeySizeBits);
+                var verdict = await options.HostKeyVerifier.VerifyAsync(new SshHostKeyContext(host, port, options.HostKeyAlias, key), ct).ConfigureAwait(false);
+                if (!verdict.IsAccepted)
                 {
                     SshLog.HostKeyRejected(logger, info.Fingerprint);
+                    throw new SshHostKeyException(verdict.Reason ?? $"The host key {info.Fingerprint} was not accepted.", key);
                 }
 
-                return accepted;
+                return true;
             },
         };
         var transport = new SshTransport(stream, transportOptions);
@@ -233,8 +246,6 @@ public sealed class SshClient : IAsyncDisposable
         }
 
         SshLog.AuthenticationFailed(logger, string.Join(", ", methods));
-        throw new SshException(
-            SshFailureReason.AuthenticationFailed,
-            $"Authentication failed. The server accepts: {string.Join(", ", methods)}.");
+        throw new SshAuthenticationException($"Authentication failed. The server accepts: {string.Join(", ", methods)}.", methods);
     }
 }

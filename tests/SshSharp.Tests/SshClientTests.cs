@@ -8,11 +8,11 @@ public class SshClientTests
 {
     private static CancellationToken Timeout() => new CancellationTokenSource(TimeSpan.FromSeconds(60)).Token;
 
-    private static SshClientOptions Options(string? password = "secret", Func<SshHostKey, CancellationToken, ValueTask<bool>>? verify = null, long maxOutput = 128L * 1024 * 1024) => new()
+    private static SshClientOptions Options(string? password = "secret", Func<SshHostKeyContext, CancellationToken, ValueTask<bool>>? verify = null, long maxOutput = 128L * 1024 * 1024) => new()
     {
         UserName = "tester",
         Password = password,
-        HostKeyVerifier = verify ?? ((_, _) => ValueTask.FromResult(true)),
+        HostKeyVerifier = SshHostKeyVerifier.FromDelegate(verify ?? ((_, _) => ValueTask.FromResult(true))),
         MaxCommandOutputBytes = maxOutput,
     };
 
@@ -185,7 +185,7 @@ public class SshClientTests
         var tracked = new TrackingStream(server.ClientStream);
         var ex = await Assert.ThrowsAsync<SshException>(async () => await SshClient.ConnectAsync(
             tracked,
-            Options(verify: (key, _) => { seen = key; return ValueTask.FromResult(false); }),
+            Options(verify: (context, _) => { seen = context.HostKey; return ValueTask.FromResult(false); }),
             leaveOpen: false,
             Timeout()));
         await Assert.That(ex!.Reason).IsEqualTo(SshFailureReason.HostKeyRejected);
@@ -430,10 +430,66 @@ public class SshClientTests
     }
 
     [Test]
-    public async Task TcpConnectFailureReleasesTheSocket()
+    public async Task TcpConnectFailure_IsAnSshExceptionWithTheSocketErrorInside()
     {
         // Port 1 on loopback is closed everywhere we run.
-        await Assert.That(async () => await SshClient.ConnectAsync("127.0.0.1", 1, Options(), Timeout())).Throws<System.Net.Sockets.SocketException>();
+        var ex = await Assert.ThrowsAsync<SshException>(async () => await SshClient.ConnectAsync("127.0.0.1", 1, Options(), Timeout()));
+        await Assert.That(ex!.Reason).IsEqualTo(SshFailureReason.ConnectFailed);
+        await Assert.That(ex.InnerException).IsTypeOf<System.Net.Sockets.SocketException>();
+        await Assert.That(ex.Message).DoesNotContain("127.0.0.1");
+        await Assert.That(async () => await SshClient.ConnectAsync("127.0.0.1", 0, Options(), Timeout())).Throws<ArgumentOutOfRangeException>();
+    }
+
+    [Test]
+    public async Task FailedAuthentication_ReportsTheMethodsTheServerAccepts()
+    {
+        await using var server = new FakeSessionServer { AdvertisedMethods = ["publickey", "password"] };
+        _ = server.StartAsync();
+        var ex = await Assert.ThrowsAsync<SshAuthenticationException>(async () =>
+            await SshClient.ConnectAsync(server.ClientStream, Options(password: "wrong"), leaveOpen: true, Timeout()));
+        await Assert.That(ex!.Reason).IsEqualTo(SshFailureReason.AuthenticationFailed);
+        await Assert.That(ex.AllowedMethods).IsEquivalentTo(new[] { "publickey", "password" });
+    }
+
+    [Test]
+    public async Task ARejectedHostKey_IsAnSshHostKeyException_WithTheVerifiersReason_AndContext()
+    {
+        await using var server = new FakeSessionServer();
+        _ = server.StartAsync();
+        SshHostKeyContext? seen = null;
+        var verifier = new RecordingVerifier(context => { seen = context; return SshHostKeyVerdict.Reject("not on my list"); });
+        var options = new SshClientOptions { UserName = "tester", Password = "secret", HostKeyVerifier = verifier, HostKeyAlias = "my-alias" };
+
+        var ex = await Assert.ThrowsAsync<SshHostKeyException>(async () => await SshClient.ConnectAsync(server.ClientStream, options, leaveOpen: true, Timeout()));
+        await Assert.That(ex!.Message).IsEqualTo("not on my list");
+        await Assert.That(ex.HostKey!.Fingerprint).StartsWith("SHA256:");
+        await Assert.That(seen!.Host).IsNull(); // over a stream the host is not known
+        await Assert.That(seen.HostKeyAlias).IsEqualTo("my-alias");
+        await Assert.That(seen.KnownHostsLookup).IsEqualTo(("my-alias", 22));
+    }
+
+    [Test]
+    public async Task PinnedFingerprints_AcceptOnlyThoseKeys()
+    {
+        string? fingerprint = null;
+        await using (var first = new FakeSessionServer())
+        {
+            await using var client = await ConnectAsync(first, Options(verify: (c, _) => { fingerprint = c.HostKey.Fingerprint; return ValueTask.FromResult(true); }));
+        }
+
+        // A new fake server has a new random host key; pinning the earlier fingerprint refuses it, pinning its own accepts it.
+        await using var second = new FakeSessionServer();
+        _ = second.StartAsync();
+        var pinned = new SshClientOptions { UserName = "tester", Password = "secret", HostKeyVerifier = SshHostKeyVerifier.Pinned(fingerprint!) };
+        var ex = await Assert.ThrowsAsync<SshHostKeyException>(async () => await SshClient.ConnectAsync(second.ClientStream, pinned, leaveOpen: true, Timeout()));
+        await Assert.That(ex!.Message).Contains("pinned");
+        await Assert.That(() => SshHostKeyVerifier.Pinned()).Throws<ArgumentException>();
+    }
+
+    private sealed class RecordingVerifier(Func<SshHostKeyContext, SshHostKeyVerdict> decide) : SshHostKeyVerifier
+    {
+        public override ValueTask<SshHostKeyVerdict> VerifyAsync(SshHostKeyContext context, CancellationToken cancellationToken) =>
+            ValueTask.FromResult(decide(context));
     }
 
     private static byte[] Build(Action<SshWriter> body)
