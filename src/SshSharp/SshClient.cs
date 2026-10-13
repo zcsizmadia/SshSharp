@@ -260,58 +260,128 @@ public sealed partial class SshClient : IAsyncDisposable
         }
     }
 
+    /// <summary>ssh's default order, less the methods SshSharp does not implement (gssapi-with-mic, hostbased).</summary>
+    internal static readonly string[] DefaultAuthenticationOrder = ["publickey", "keyboard-interactive", "password"];
+
+    /// <summary>Walks of the method order; each one after the first needs a partial success, so this bounds a server that never finishes.</summary>
+    private const int MaxAuthenticationPasses = 8;
+
     private static async Task AuthenticateAsync(SshTransport transport, SshClientOptions options, ILogger logger, CancellationToken cancellationToken)
     {
-        await SshUserAuth.RequestServiceAsync(transport, cancellationToken).ConfigureAwait(false);
+        var auth = new SshUserAuth(transport, options.UserName, options.AuthenticationBanner);
+        await auth.RequestServiceAsync(cancellationToken).ConfigureAwait(false);
 
         // Like ssh: "none" first (it succeeds only on servers that allow anonymous access, and otherwise lists the methods the server
-        // accepts), then each key, then the password. After a partial success the server lists what it still wants.
+        // accepts), then each method in order. After a partial success the server lists what it still wants, which may be a method
+        // earlier in the order (AuthenticationMethods password,publickey), so the order is walked again.
         SshLog.Authenticating(logger, "none");
-        var outcome = await SshUserAuth.NoneAsync(transport, options.UserName, cancellationToken).ConfigureAwait(false);
+        var outcome = await auth.NoneAsync(cancellationToken).ConfigureAwait(false);
         if (outcome.Success)
         {
             SshLog.Authenticated(logger, "none");
             return;
         }
 
+        var order = options.AuthenticationOrder ?? DefaultAuthenticationOrder;
         var methods = outcome.RemainingMethods;
-        foreach (var key in options.PrivateKeys)
+        var passes = 0;
+        bool progressed;
+        do
         {
-            if (!methods.Contains("publickey"))
+            progressed = false;
+            for (var step = 0; step < order.Count; step++)
             {
-                break;
-            }
+                AuthOutcome? result = null;
+                switch (order[step])
+                {
+                    case "publickey":
+                        foreach (var key in options.PrivateKeys)
+                        {
+                            if (!methods.Contains("publickey"))
+                            {
+                                break;
+                            }
 
-            if (SshUserAuth.ChooseSignatureAlgorithm(key, transport.ServerExtensions) is not { } algorithm)
-            {
-                continue; // the server accepts no signature algorithm this key can make (for example an RSA key and no rsa-sha2-*)
-            }
+                            if (SshUserAuth.ChooseSignatureAlgorithm(key, transport.ServerExtensions) is not { } algorithm)
+                            {
+                                continue; // the server accepts no signature algorithm this key can make (for example an RSA key and no rsa-sha2-*)
+                            }
 
-            SshLog.Authenticating(logger, "publickey");
-            outcome = await SshUserAuth.PublicKeyAsync(transport, options.UserName, key, algorithm, cancellationToken).ConfigureAwait(false);
-            if (outcome.Success)
-            {
-                SshLog.Authenticated(logger, "publickey");
-                return;
-            }
+                            SshLog.Authenticating(logger, "publickey");
+                            result = await auth.PublicKeyAsync(key, algorithm, cancellationToken).ConfigureAwait(false);
+                            if (result.Success || result.PartialSuccess)
+                            {
+                                break;
+                            }
 
-            methods = outcome.RemainingMethods;
+                            methods = result.RemainingMethods;
+                        }
+
+                        break;
+
+                    case "keyboard-interactive" when methods.Contains("keyboard-interactive"):
+                        var respond = options.KeyboardInteractive;
+                        if (respond is null && options.Password is { } secret && !(methods.Contains("password") && order.Skip(step + 1).Contains("password")))
+                        {
+                            respond = AnswerWithPassword(secret); // a server that takes passwords only this way (PAM)
+                        }
+
+                        if (respond is not null)
+                        {
+                            SshLog.Authenticating(logger, "keyboard-interactive");
+                            result = await auth.KeyboardInteractiveAsync(respond, cancellationToken).ConfigureAwait(false);
+                        }
+
+                        break;
+
+                    case "password" when options.Password is { } password && methods.Contains("password"):
+                        SshLog.Authenticating(logger, "password");
+                        result = await auth.PasswordAsync(password, cancellationToken).ConfigureAwait(false);
+                        break;
+                }
+
+                if (result is null)
+                {
+                    continue;
+                }
+
+                if (result.Success)
+                {
+                    SshLog.Authenticated(logger, order[step]);
+                    return;
+                }
+
+                methods = result.RemainingMethods;
+                progressed |= result.PartialSuccess;
+            }
         }
-
-        if (options.Password is { } password && methods.Contains("password"))
-        {
-            SshLog.Authenticating(logger, "password");
-            outcome = await SshUserAuth.PasswordAsync(transport, options.UserName, password, cancellationToken).ConfigureAwait(false);
-            if (outcome.Success)
-            {
-                SshLog.Authenticated(logger, "password");
-                return;
-            }
-
-            methods = outcome.RemainingMethods;
-        }
+        while (progressed && ++passes < MaxAuthenticationPasses);
 
         SshLog.AuthenticationFailed(logger, string.Join(", ", methods));
         throw new SshAuthenticationException($"Authentication failed. The server accepts: {string.Join(", ", methods)}.", methods);
+    }
+
+    /// <summary>
+    /// Answers keyboard-interactive with the password: a round with no questions gets no answers, and the first round that asks for exactly
+    /// one hidden input gets the password. Anything else (a second password round, a one-time code, a visible question) ends the attempt.
+    /// </summary>
+    private static Func<SshKeyboardInteractiveRequest, CancellationToken, ValueTask<IReadOnlyList<string>?>> AnswerWithPassword(string password)
+    {
+        var answered = false;
+        return (request, _) =>
+        {
+            if (request.Prompts.Count == 0)
+            {
+                return new ValueTask<IReadOnlyList<string>?>([]);
+            }
+
+            if (answered || request.Prompts.Count != 1 || request.Prompts[0].Echo)
+            {
+                return new ValueTask<IReadOnlyList<string>?>((IReadOnlyList<string>?)null);
+            }
+
+            answered = true;
+            return new ValueTask<IReadOnlyList<string>?>([password]);
+        };
     }
 }

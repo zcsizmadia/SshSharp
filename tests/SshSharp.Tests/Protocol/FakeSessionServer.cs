@@ -143,6 +143,33 @@ internal sealed class FakeSessionServer : IAsyncDisposable
 
     private bool _publicKeyDone;
 
+    /// <summary>
+    /// Methods that must all succeed in this order, like sshd's <c>AuthenticationMethods</c>: each one but the last gets a partial success,
+    /// and failures list only the next method.
+    /// </summary>
+    public string[]? AuthenticationChain { get; init; }
+
+    private int _chainStep;
+
+    /// <summary>One keyboard-interactive round: what the server asks, and the answers it accepts.</summary>
+    public sealed record KeyboardRound(string Name, string Instruction, (string Text, bool Echo)[] Prompts, string[] Answers);
+
+    /// <summary>The keyboard-interactive rounds; the method succeeds when every round is answered as expected.</summary>
+    public List<KeyboardRound> KeyboardInteractiveRounds { get; init; } = [];
+
+    /// <summary>Keep sending this round forever (a server that never finishes).</summary>
+    public bool EndlessKeyboardInteractive { get; init; }
+
+    /// <summary>The answers the client sent, one list per round.</summary>
+    public List<string[]> KeyboardInteractiveAnswers { get; } = [];
+
+    private int _keyboardRound = -1;
+
+    /// <summary>Sent as SSH_MSG_USERAUTH_BANNER before the first authentication reply.</summary>
+    public string? AuthenticationBanner { get; init; }
+
+    private bool _bannerSent;
+
     /// <summary>When set, channel opens are answered only after this task completes (to race the client's cancellation).</summary>
     public Task? HoldChannelOpen { get; set; }
 
@@ -216,6 +243,13 @@ internal sealed class FakeSessionServer : IAsyncDisposable
     private async Task HandleAsync(ReadOnlyMemory<byte> payloadMemory)
     {
         var payload = payloadMemory.ToArray();
+        if (payload[0] == SshMessage.UserAuthRequest && AuthenticationBanner is { } bannerText && !_bannerSent)
+        {
+            // Before the first authentication reply, like sshd's Banner.
+            _bannerSent = true;
+            await _server.SendAsync(Build(w => { w.WriteByte(SshMessage.UserAuthBanner); w.WriteString(bannerText); w.WriteString(""); }));
+        }
+
         var reader = new SshReader(payload);
         var type = reader.ReadByte();
         switch (type)
@@ -237,7 +271,23 @@ internal sealed class FakeSessionServer : IAsyncDisposable
                     AuthAttempts.Add(method);
                 }
 
+                _keyboardRound = -1; // a new request abandons a keyboard-interactive exchange in progress (RFC 4252 section 5)
                 bool ok;
+                if (method == "keyboard-interactive")
+                {
+                    reader.ReadUtf8String(); // language tag
+                    reader.ReadUtf8String(); // submethods
+                    if (user != UserName || KeyboardInteractiveRounds.Count == 0)
+                    {
+                        await FinishAuthAsync(method, ok: false);
+                        break;
+                    }
+
+                    _keyboardRound = 0;
+                    await SendKeyboardRoundAsync(KeyboardInteractiveRounds[0]);
+                    break;
+                }
+
                 if (method == "publickey")
                 {
                     var hasSignature = reader.ReadBoolean();
@@ -253,7 +303,7 @@ internal sealed class FakeSessionServer : IAsyncDisposable
                         }
                         else
                         {
-                            await SendAuthFailureAsync(AdvertisedMethods, partial: false);
+                            await SendAuthFailureAsync(CurrentMethods(), partial: false);
                         }
 
                         break;
@@ -282,29 +332,50 @@ internal sealed class FakeSessionServer : IAsyncDisposable
                         || (method == "password" && PasswordMatches(ref reader) && (!RequirePasswordAfterPublicKey || _publicKeyDone)));
                 }
 
-                if (ok)
+                await FinishAuthAsync(method, ok);
+                break;
+            }
+
+            case SshMessage.UserAuthInfoResponse:
+            {
+                if (_keyboardRound < 0)
                 {
-                    await _server.SendAsync(new byte[] { SshMessage.UserAuthSuccess });
-                    if (AnnouncedHostKeys is { } announced)
-                    {
-                        // Like sshd with UpdateHostKeys clients: list every host key right after authentication.
-                        await _server.SendAsync(Build(w =>
-                        {
-                            w.WriteByte(SshMessage.GlobalRequest);
-                            w.WriteString("hostkeys-00@openssh.com");
-                            w.WriteBoolean(false);
-                            foreach (var key in announced)
-                            {
-                                w.WriteString(key.Blob);
-                            }
-                        }));
-                    }
-                }
-                else
-                {
-                    await SendAuthFailureAsync(RequirePasswordAfterPublicKey && _publicKeyDone ? ["password"] : AdvertisedMethods, partial: false);
+                    throw new InvalidOperationException("INFO_RESPONSE without a keyboard-interactive exchange.");
                 }
 
+                var answers = new string[reader.ReadUInt32()];
+                for (var i = 0; i < answers.Length; i++)
+                {
+                    answers[i] = reader.ReadUtf8String();
+                }
+
+                lock (KeyboardInteractiveAnswers)
+                {
+                    KeyboardInteractiveAnswers.Add(answers);
+                }
+
+                var round = KeyboardInteractiveRounds[_keyboardRound];
+                if (EndlessKeyboardInteractive)
+                {
+                    await SendKeyboardRoundAsync(round);
+                    break;
+                }
+
+                if (!answers.SequenceEqual(round.Answers))
+                {
+                    _keyboardRound = -1;
+                    await FinishAuthAsync("keyboard-interactive", ok: false);
+                    break;
+                }
+
+                if (++_keyboardRound < KeyboardInteractiveRounds.Count)
+                {
+                    await SendKeyboardRoundAsync(KeyboardInteractiveRounds[_keyboardRound]);
+                    break;
+                }
+
+                _keyboardRound = -1;
+                await FinishAuthAsync("keyboard-interactive", ok: true);
                 break;
             }
 
@@ -561,6 +632,69 @@ internal sealed class FakeSessionServer : IAsyncDisposable
             // The client or the far end went away.
         }
     }
+
+    /// <summary>The methods a failure lists: the next one in <see cref="AuthenticationChain"/>, or the advertised ones.</summary>
+    private string[] CurrentMethods() =>
+        AuthenticationChain is { } chain ? [chain[Math.Min(_chainStep, chain.Length - 1)]]
+        : RequirePasswordAfterPublicKey && _publicKeyDone ? ["password"]
+        : AdvertisedMethods;
+
+    /// <summary>Answers a finished attempt: success, a partial success when <see cref="AuthenticationChain"/> wants more, or failure.</summary>
+    private async Task FinishAuthAsync(string method, bool ok)
+    {
+        if (ok && AuthenticationChain is { } chain)
+        {
+            if (_chainStep < chain.Length && chain[_chainStep] == method)
+            {
+                if (++_chainStep < chain.Length)
+                {
+                    await SendAuthFailureAsync([chain[_chainStep]], partial: true);
+                    return;
+                }
+            }
+            else
+            {
+                ok = false; // valid, but not the method the chain wants now
+            }
+        }
+
+        if (!ok)
+        {
+            await SendAuthFailureAsync(CurrentMethods(), partial: false);
+            return;
+        }
+
+        await _server.SendAsync(new byte[] { SshMessage.UserAuthSuccess });
+        if (AnnouncedHostKeys is { } announced)
+        {
+            // Like sshd with UpdateHostKeys clients: list every host key right after authentication.
+            await _server.SendAsync(Build(w =>
+            {
+                w.WriteByte(SshMessage.GlobalRequest);
+                w.WriteString("hostkeys-00@openssh.com");
+                w.WriteBoolean(false);
+                foreach (var key in announced)
+                {
+                    w.WriteString(key.Blob);
+                }
+            }));
+        }
+    }
+
+    private Task SendKeyboardRoundAsync(KeyboardRound round) =>
+        _server.SendAsync(Build(w =>
+        {
+            w.WriteByte(SshMessage.UserAuthInfoRequest);
+            w.WriteString(round.Name);
+            w.WriteString(round.Instruction);
+            w.WriteString(""); // language tag
+            w.WriteUInt32((uint)round.Prompts.Length);
+            foreach (var (text, echo) in round.Prompts)
+            {
+                w.WriteString(text);
+                w.WriteBoolean(echo);
+            }
+        })).AsTask();
 
     private Task SendAuthFailureAsync(string[] methods, bool partial) =>
         _server.SendAsync(Build(w => { w.WriteByte(SshMessage.UserAuthFailure); w.WriteNameList(methods); w.WriteBoolean(partial); })).AsTask();

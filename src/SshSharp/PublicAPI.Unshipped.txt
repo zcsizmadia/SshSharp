@@ -360,3 +360,29 @@ static SshSharp.SshPrivateKey.Parse(string! text, string? passphrase = null) -> 
 static SshSharp.SshSharpInfo.SoftwareVersion.get -> string!
 ~override SshSharp.SshHostKeyVerdict.Equals(object obj) -> bool
 ~override SshSharp.SshHostKeyVerdict.ToString() -> string
+override SshSharp.SshAuthenticationPrompt.Equals(object? obj) -> bool
+override SshSharp.SshAuthenticationPrompt.GetHashCode() -> int
+override SshSharp.SshAuthenticationPrompt.ToString() -> string!
+SshSharp.SshAuthenticationPrompt
+SshSharp.SshAuthenticationPrompt.<Clone>$() -> SshSharp.SshAuthenticationPrompt!
+SshSharp.SshAuthenticationPrompt.Deconstruct(out string! Text, out bool Echo) -> void
+SshSharp.SshAuthenticationPrompt.Echo.get -> bool
+SshSharp.SshAuthenticationPrompt.Echo.init -> void
+SshSharp.SshAuthenticationPrompt.Equals(SshSharp.SshAuthenticationPrompt? other) -> bool
+SshSharp.SshAuthenticationPrompt.SshAuthenticationPrompt(string! Text, bool Echo) -> void
+SshSharp.SshAuthenticationPrompt.Text.get -> string!
+SshSharp.SshAuthenticationPrompt.Text.init -> void
+SshSharp.SshClientOptions.AuthenticationBanner.get -> System.Func<string!, System.Threading.CancellationToken, System.Threading.Tasks.ValueTask>?
+SshSharp.SshClientOptions.AuthenticationBanner.init -> void
+SshSharp.SshClientOptions.KeyboardInteractive.get -> System.Func<SshSharp.SshKeyboardInteractiveRequest!, System.Threading.CancellationToken, System.Threading.Tasks.ValueTask<System.Collections.Generic.IReadOnlyList<string!>?>>?
+SshSharp.SshClientOptions.KeyboardInteractive.init -> void
+SshSharp.SshConfigConnectOptions.AuthenticationBanner.get -> System.Func<string!, System.Threading.CancellationToken, System.Threading.Tasks.ValueTask>?
+SshSharp.SshConfigConnectOptions.AuthenticationBanner.init -> void
+SshSharp.SshConfigConnectOptions.KeyboardInteractive.get -> System.Func<SshSharp.SshKeyboardInteractiveRequest!, System.Threading.CancellationToken, System.Threading.Tasks.ValueTask<System.Collections.Generic.IReadOnlyList<string!>?>>?
+SshSharp.SshConfigConnectOptions.KeyboardInteractive.init -> void
+SshSharp.SshKeyboardInteractiveRequest
+SshSharp.SshKeyboardInteractiveRequest.Instruction.get -> string!
+SshSharp.SshKeyboardInteractiveRequest.Name.get -> string!
+SshSharp.SshKeyboardInteractiveRequest.Prompts.get -> System.Collections.Generic.IReadOnlyList<SshSharp.SshAuthenticationPrompt!>!
+static SshSharp.SshAuthenticationPrompt.operator !=(SshSharp.SshAuthenticationPrompt? left, SshSharp.SshAuthenticationPrompt? right) -> bool
+static SshSharp.SshAuthenticationPrompt.operator ==(SshSharp.SshAuthenticationPrompt? left, SshSharp.SshAuthenticationPrompt? right) -> bool

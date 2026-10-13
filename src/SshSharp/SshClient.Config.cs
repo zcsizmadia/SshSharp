@@ -113,8 +113,11 @@ public sealed partial class SshClient
             var clientOptions = new SshClientOptions
             {
                 UserName = hostConfig.User,
-                Password = hostConfig.PasswordAuthentication ? options.Password : null,
+                Password = hostConfig.PasswordAuthentication || hostConfig.KbdInteractiveAuthentication ? options.Password : null,
                 PrivateKeys = hostConfig.PubkeyAuthentication ? [.. options.PrivateKeys, .. keys] : [],
+                KeyboardInteractive = hostConfig.BatchMode ? null : options.KeyboardInteractive,
+                AuthenticationBanner = options.AuthenticationBanner,
+                AuthenticationOrder = AuthenticationOrder(hostConfig),
                 HostKeyVerifier = options.HostKeyVerifier ?? KnownHostsVerifier.FromConfig(hostConfig, hostConfig.BatchMode ? null : options.AskHostKey),
                 HostKeyAlias = hostConfig.HostKeyAlias,
                 KeepAliveInterval = hostConfig.ServerAliveInterval,
@@ -276,6 +279,22 @@ public sealed partial class SshClient
         }
 
         return [.. certified, .. keys];
+    }
+
+    /// <summary>
+    /// The methods to try, as ssh picks them: <c>PreferredAuthentications</c> (or the default order), without the ones this library does not
+    /// implement and the ones turned off by <c>PubkeyAuthentication</c>, <c>KbdInteractiveAuthentication</c> or <c>PasswordAuthentication</c>.
+    /// </summary>
+    internal static IReadOnlyList<string> AuthenticationOrder(SshHostConfig hostConfig)
+    {
+        var preferred = hostConfig.PreferredAuthentications.Count > 0 ? hostConfig.PreferredAuthentications : DefaultAuthenticationOrder;
+        return [.. preferred.Distinct(StringComparer.Ordinal).Where(method => method switch
+        {
+            "publickey" => hostConfig.PubkeyAuthentication,
+            "keyboard-interactive" => hostConfig.KbdInteractiveAuthentication,
+            "password" => hostConfig.PasswordAuthentication,
+            _ => false,
+        })];
     }
 
     /// <summary>Parses <c>[user@]host</c>, or <c>ssh://[user@]host[:port]</c> (the only form that carries a port, as with ssh).</summary>

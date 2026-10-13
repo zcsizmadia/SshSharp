@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Security.Cryptography;
 
 namespace SshSharp.Protocol;
 
@@ -9,14 +10,20 @@ namespace SshSharp.Protocol;
 /// <param name="KeyAcceptable">For a publickey query: the server would accept this key with a signature (<c>SSH_MSG_USERAUTH_PK_OK</c>).</param>
 internal sealed record AuthOutcome(bool Success, IReadOnlyList<string> RemainingMethods, bool PartialSuccess, bool KeyAcceptable = false);
 
-/// <summary>Client side of user authentication (RFC 4252).</summary>
-internal static class SshUserAuth
+/// <summary>Client side of user authentication (RFC 4252) for one connection.</summary>
+internal sealed class SshUserAuth(SshTransport transport, string userName, Func<string, CancellationToken, ValueTask>? banner)
 {
     private const string ServiceName = "ssh-userauth";
     private const string ConnectionService = "ssh-connection";
 
+    /// <summary>OpenSSH's limit on prompts in one keyboard-interactive round.</summary>
+    internal const int MaxPrompts = 100;
+
+    /// <summary>Rounds of keyboard-interactive before the client gives up on a server that keeps asking.</summary>
+    internal const int MaxRounds = 32;
+
     /// <summary>Asks the server to start the <c>ssh-userauth</c> service.</summary>
-    public static async Task RequestServiceAsync(SshTransport transport, CancellationToken cancellationToken)
+    public async Task RequestServiceAsync(CancellationToken cancellationToken)
     {
         await transport.SendAsync(Build(w =>
         {
@@ -34,30 +41,30 @@ internal static class SshUserAuth
     }
 
     /// <summary>The <c>none</c> method: usually fails, but tells us which methods the server accepts.</summary>
-    public static Task<AuthOutcome> NoneAsync(SshTransport transport, string userName, CancellationToken cancellationToken) =>
-        RequestAsync(transport, userName, "none", null, acceptsPkOk: false, cancellationToken);
+    public Task<AuthOutcome> NoneAsync(CancellationToken cancellationToken) =>
+        RequestAsync("none", null, Reply.None, cancellationToken);
 
     /// <summary>The <c>password</c> method (RFC 4252 section 8).</summary>
-    public static Task<AuthOutcome> PasswordAsync(SshTransport transport, string userName, string password, CancellationToken cancellationToken) =>
-        RequestAsync(transport, userName, "password", w =>
+    public Task<AuthOutcome> PasswordAsync(string password, CancellationToken cancellationToken) =>
+        RequestAsync("password", w =>
         {
             w.WriteBoolean(false); // not a password change
             w.WriteString(password);
-        }, acceptsPkOk: false, cancellationToken);
+        }, Reply.None, cancellationToken);
 
     /// <summary>
     /// The <c>publickey</c> method (RFC 4252 section 7). First asks whether the server would accept the key at all (no signature, so a
     /// refused key costs no private-key operation), then signs: session id, the request, and the chosen algorithm and public key.
     /// </summary>
-    public static async Task<AuthOutcome> PublicKeyAsync(SshTransport transport, string userName, SshPrivateKey key, string algorithm, CancellationToken cancellationToken)
+    public async Task<AuthOutcome> PublicKeyAsync(SshPrivateKey key, string algorithm, CancellationToken cancellationToken)
     {
         var publicKey = key.PublicKey;
-        var query = await RequestAsync(transport, userName, "publickey", w =>
+        var query = await RequestAsync("publickey", w =>
         {
             w.WriteBoolean(false);
             w.WriteString(algorithm);
             w.WriteString(publicKey.Span);
-        }, acceptsPkOk: true, cancellationToken).ConfigureAwait(false);
+        }, Reply.PkOk, cancellationToken).ConfigureAwait(false);
         if (!query.KeyAcceptable)
         {
             // Refused (or, oddly, accepted without a signature): nothing to sign.
@@ -76,13 +83,61 @@ internal static class SshUserAuth
             w.WriteString(publicKey.Span);
         });
         var signature = key.Sign(algorithm, signed);
-        return await RequestAsync(transport, userName, "publickey", w =>
+        return await RequestAsync("publickey", w =>
         {
             w.WriteBoolean(true);
             w.WriteString(algorithm);
             w.WriteString(publicKey.Span);
             w.WriteString(signature);
-        }, acceptsPkOk: false, cancellationToken).ConfigureAwait(false);
+        }, Reply.None, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// The <c>keyboard-interactive</c> method (RFC 4256): the server sends rounds of prompts and <paramref name="respond"/> answers each.
+    /// Returns null when <paramref name="respond"/> gives up; the server drops the attempt when the next request arrives.
+    /// </summary>
+    public async Task<AuthOutcome?> KeyboardInteractiveAsync(
+        Func<SshKeyboardInteractiveRequest, CancellationToken, ValueTask<IReadOnlyList<string>?>> respond, CancellationToken cancellationToken)
+    {
+        var outcome = await RequestCoreAsync("keyboard-interactive", w =>
+        {
+            w.WriteString(""); // language tag (deprecated)
+            w.WriteString(""); // submethods: let the server choose
+        }, Reply.InfoRequest, cancellationToken).ConfigureAwait(false);
+
+        for (var round = 0; outcome.Request is { } request; round++)
+        {
+            if (round == MaxRounds)
+            {
+                throw new SshException(SshFailureReason.AuthenticationFailed, $"The server asked more than {MaxRounds} rounds of keyboard-interactive questions.");
+            }
+
+            var responses = await respond(request, cancellationToken).ConfigureAwait(false);
+            if (responses is null)
+            {
+                return null;
+            }
+
+            if (responses.Count != request.Prompts.Count)
+            {
+                throw new InvalidOperationException($"The keyboard-interactive handler returned {responses.Count} responses for {request.Prompts.Count} prompts.");
+            }
+
+            var message = Build(w =>
+            {
+                w.WriteByte(SshMessage.UserAuthInfoResponse);
+                w.WriteUInt32((uint)responses.Count);
+                foreach (var response in responses)
+                {
+                    w.WriteString(response ?? "");
+                }
+            });
+            await transport.SendAsync(message, cancellationToken).ConfigureAwait(false);
+            CryptographicOperations.ZeroMemory(message); // the responses are usually secrets
+            outcome = await ReceiveReplyAsync(Reply.InfoRequest, cancellationToken).ConfigureAwait(false);
+        }
+
+        return outcome.Outcome;
     }
 
     /// <summary>
@@ -101,46 +156,112 @@ internal static class SshUserAuth
         return key.SignatureAlgorithms.FirstOrDefault(a => accepted.Contains(SshCertificate.BaseAlgorithm(a), StringComparer.Ordinal));
     }
 
-    private static async Task<AuthOutcome> RequestAsync(SshTransport transport, string userName, string method, Action<SshWriter>? body, bool acceptsPkOk, CancellationToken cancellationToken)
+    /// <summary>What message 60 means for the request in flight: it is PK_OK, PASSWD_CHANGEREQ and INFO_REQUEST depending on the method.</summary>
+    private enum Reply
     {
-        await transport.SendAsync(Build(w =>
+        None,
+        PkOk,
+        InfoRequest,
+    }
+
+    private readonly record struct Received(AuthOutcome? Outcome, SshKeyboardInteractiveRequest? Request);
+
+    private async Task<AuthOutcome> RequestAsync(string method, Action<SshWriter>? body, Reply reply, CancellationToken cancellationToken)
+    {
+        var received = await RequestCoreAsync(method, body, reply, cancellationToken).ConfigureAwait(false);
+        return received.Outcome!; // only Reply.InfoRequest yields a request instead
+    }
+
+    private async Task<Received> RequestCoreAsync(string method, Action<SshWriter>? body, Reply reply, CancellationToken cancellationToken)
+    {
+        var message = Build(w =>
         {
             w.WriteByte(SshMessage.UserAuthRequest);
             w.WriteString(userName);
             w.WriteString(ConnectionService);
             w.WriteString(method);
             body?.Invoke(w);
-        }), cancellationToken).ConfigureAwait(false);
+        });
+        await transport.SendAsync(message, cancellationToken).ConfigureAwait(false);
+        CryptographicOperations.ZeroMemory(message); // a password request carries the password
+        return await ReceiveReplyAsync(reply, cancellationToken).ConfigureAwait(false);
+    }
 
+    private async Task<Received> ReceiveReplyAsync(Reply reply, CancellationToken cancellationToken)
+    {
         while (true)
         {
-            using var reply = await transport.ReceiveAsync(cancellationToken).ConfigureAwait(false);
-            var reader = new SshReader(reply.Payload.Span);
-            var type = reader.ReadByte();
-            switch (type)
+            string? bannerText = null;
+            Received? result = null;
+            using (var message = await transport.ReceiveAsync(cancellationToken).ConfigureAwait(false))
             {
-                case SshMessage.UserAuthBanner:
-                    continue; // shown to the user by interactive clients; ignored here
-                case SshMessage.UserAuthSuccess:
-                    return new AuthOutcome(true, [], false);
-                case SshMessage.UserAuthFailure:
-                    var methods = reader.ReadNameList();
-                    return new AuthOutcome(false, methods, reader.ReadBoolean());
-                case SshMessage.UserAuthPkOk when acceptsPkOk:
-                    return new AuthOutcome(false, [], false, KeyAcceptable: true);
-                case SshMessage.UserAuthPkOk when method == "password":
-                    // SSH_MSG_USERAUTH_PASSWD_CHANGEREQ shares the number 60.
-                    throw new SshException(SshFailureReason.AuthenticationFailed, "The server requires the password to be changed.");
-                default:
-                    throw new SshProtocolException($"Unexpected message {type} during user authentication.");
+                var reader = new SshReader(message.Payload.Span);
+                var type = reader.ReadByte();
+                switch (type)
+                {
+                    case SshMessage.UserAuthBanner:
+                        bannerText = reader.ReadUtf8String();
+                        break;
+                    case SshMessage.UserAuthSuccess:
+                        result = new Received(new AuthOutcome(true, [], false), null);
+                        break;
+                    case SshMessage.UserAuthFailure:
+                        var methods = reader.ReadNameList();
+                        result = new Received(new AuthOutcome(false, methods, reader.ReadBoolean()), null);
+                        break;
+                    case SshMessage.UserAuthPkOk when reply == Reply.PkOk:
+                        result = new Received(new AuthOutcome(false, [], false, KeyAcceptable: true), null);
+                        break;
+                    case SshMessage.UserAuthInfoRequest when reply == Reply.InfoRequest:
+                        result = new Received(null, ReadInfoRequest(ref reader));
+                        break;
+                    case SshMessage.UserAuthPkOk:
+                        // SSH_MSG_USERAUTH_PASSWD_CHANGEREQ shares the number 60.
+                        throw new SshException(SshFailureReason.AuthenticationFailed, "The server requires the password to be changed.");
+                    default:
+                        throw new SshProtocolException($"Unexpected message {type} during user authentication.");
+                }
+            }
+
+            if (result is { } done)
+            {
+                return done;
+            }
+
+            // A banner (RFC 4252 section 5.4) can arrive at any point before success; shown by interactive clients.
+            if (banner is not null)
+            {
+                await banner(bannerText!, cancellationToken).ConfigureAwait(false);
             }
         }
+    }
+
+    private static SshKeyboardInteractiveRequest ReadInfoRequest(ref SshReader reader)
+    {
+        var name = reader.ReadUtf8String();
+        var instruction = reader.ReadUtf8String();
+        reader.ReadUtf8String(); // language tag
+        var count = reader.ReadUInt32();
+        if (count > MaxPrompts)
+        {
+            throw new SshProtocolException($"The server sent {count} keyboard-interactive prompts; at most {MaxPrompts} are accepted.");
+        }
+
+        var prompts = new SshAuthenticationPrompt[count];
+        for (var i = 0; i < prompts.Length; i++)
+        {
+            prompts[i] = new SshAuthenticationPrompt(reader.ReadUtf8String(), reader.ReadBoolean());
+        }
+
+        return new SshKeyboardInteractiveRequest(name, instruction, prompts);
     }
 
     private static byte[] Build(Action<SshWriter> body)
     {
         var buffer = new ArrayBufferWriter<byte>(128);
         body(new SshWriter(buffer));
-        return buffer.WrittenSpan.ToArray();
+        var message = buffer.WrittenSpan.ToArray();
+        buffer.Clear(); // zeroes the written bytes, which may include a password
+        return message;
     }
 }
