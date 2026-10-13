@@ -49,8 +49,12 @@ internal sealed class SshConnection : IAsyncDisposable
     /// <summary>Queues a message to be sent without waiting. For use from the receive loop and from synchronous callbacks.</summary>
     internal void Post(byte[] payload) => _outbox.Writer.TryWrite(payload);
 
-    public ValueTask SendAsync(ReadOnlyMemory<byte> payload, CancellationToken cancellationToken) =>
-        _failure is { } failure ? throw failure : _transport.SendAsync(payload, cancellationToken);
+    /// <summary>Sends a message, or throws if the connection has failed.</summary>
+    public ValueTask SendAsync(ReadOnlyMemory<byte> payload, CancellationToken cancellationToken) => SendAsync(payload, null, cancellationToken);
+
+    /// <summary>Sends a message; <paramref name="onCommitted"/> runs once the message has its place on the wire.</summary>
+    public ValueTask SendAsync(ReadOnlyMemory<byte> payload, Action? onCommitted, CancellationToken cancellationToken) =>
+        _failure is { } failure ? throw failure : _transport.SendAsync(payload, onCommitted, cancellationToken);
 
     /// <summary>Opens a <c>session</c> channel.</summary>
     public async Task<SshChannel> OpenSessionAsync(CancellationToken cancellationToken)
@@ -62,6 +66,14 @@ internal sealed class SshConnection : IAsyncDisposable
 
         var channel = new SshChannel(this, Interlocked.Increment(ref _nextChannelId) - 1);
         _channels[channel.LocalId] = channel;
+
+        // Fail sets _failure before it walks _channels: if it ran before the add above, it missed this channel, so check again.
+        if (Volatile.Read(ref _failure) is { } late)
+        {
+            _channels.TryRemove(channel.LocalId, out _);
+            throw late;
+        }
+
         try
         {
             await channel.OpenAsync("session", cancellationToken).ConfigureAwait(false);
@@ -72,6 +84,12 @@ internal sealed class SshConnection : IAsyncDisposable
             }
 
             return channel;
+        }
+        catch (OperationCanceledException)
+        {
+            // The server may still confirm the open: keep the channel registered so its messages are recognised, and close it when it does.
+            channel.Abandon();
+            throw;
         }
         catch
         {
@@ -87,38 +105,46 @@ internal sealed class SshConnection : IAsyncDisposable
         Fail(new SshException(SshFailureReason.ConnectionClosed, "The connection was closed by the client."));
         _outbox.Writer.TryComplete();
         await _stop.CancelAsync().ConfigureAwait(false);
-        try
-        {
-            await _transport.DisconnectAsync(DisconnectReason.ByApplication, "disconnected by user").ConfigureAwait(false);
-        }
-        catch (SshException)
-        {
-            // Already disconnected.
-        }
-        catch (IOException)
-        {
-            // The socket is gone.
-        }
 
-        await _transport.DisposeAsync().ConfigureAwait(false);
-        if (_loop is not null)
+        // Saying goodbye is best effort: a peer that stopped reading must not keep us here.
+        using (var timeout = new CancellationTokenSource(DisconnectTimeout))
         {
             try
             {
-                await _loop.ConfigureAwait(false);
+                await _transport.DisconnectAsync(DisconnectReason.ByApplication, "disconnected by user", timeout.Token).ConfigureAwait(false);
             }
-            catch (OperationCanceledException)
+            catch (Exception ex) when (ex is SshException or IOException or OperationCanceledException or ObjectDisposedException or InvalidOperationException)
             {
-                // Expected on shutdown.
+                // Already disconnected, the socket is gone, or the peer is not reading.
             }
         }
 
-        if (_outboxLoop is not null)
+        // Stop pending reads and flushes, wait for both loops to leave the transport, and only then release it.
+        _transport.Abort();
+        await WaitQuietlyAsync(_loop).ConfigureAwait(false);
+        await WaitQuietlyAsync(_outboxLoop).ConfigureAwait(false);
+        await _transport.DisposeAsync().ConfigureAwait(false);
+        _stop.Dispose();
+    }
+
+    /// <summary>How long <see cref="DisposeAsync"/> waits to send <c>SSH_MSG_DISCONNECT</c>.</summary>
+    internal static TimeSpan DisconnectTimeout { get; set; } = TimeSpan.FromSeconds(2);
+
+    private static async Task WaitQuietlyAsync(Task? task)
+    {
+        if (task is null)
         {
-            await _outboxLoop.ConfigureAwait(false);
+            return;
         }
 
-        _stop.Dispose();
+        try
+        {
+            await task.ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            // Expected on shutdown.
+        }
     }
 
     private async Task RunOutboxAsync()
@@ -130,9 +156,23 @@ internal sealed class SshConnection : IAsyncDisposable
                 await _transport.SendAsync(payload, _stop.Token).ConfigureAwait(false);
             }
         }
-        catch (Exception ex) when (ex is OperationCanceledException or SshException or ObjectDisposedException or IOException or InvalidOperationException)
+        catch (OperationCanceledException) when (_stop.IsCancellationRequested)
         {
-            // The connection is going away; the receive loop reports the reason to whoever is waiting.
+            // Shutting down.
+        }
+        catch (Exception ex)
+        {
+            // Window adjustments and CLOSE replies can no longer be sent, so every channel would stall: end the connection now.
+            SshLog.ConnectionFailed(_logger, ex);
+            Fail(ex);
+            try
+            {
+                await _stop.CancelAsync().ConfigureAwait(false);
+            }
+            catch (ObjectDisposedException)
+            {
+                // Already disposed.
+            }
         }
     }
 
@@ -170,7 +210,7 @@ internal sealed class SshConnection : IAsyncDisposable
 
     private void Fail(Exception exception)
     {
-        _failure ??= exception;
+        Interlocked.CompareExchange(ref _failure, exception, null);
         foreach (var channel in _channels.Values)
         {
             ChannelGone(channel);
@@ -252,7 +292,9 @@ internal sealed class SshConnection : IAsyncDisposable
 
                 if (dataType != 1)
                 {
-                    return false; // Only stderr (1) is defined; ignore anything else.
+                    // Only stderr (1) is defined. Drop anything else, but give the window back or the peer stalls.
+                    channel.OnDiscardedData((int)length);
+                    return false;
                 }
 
                 channel.OnData(packet, offset, (int)length, isExtended: true);
@@ -278,6 +320,16 @@ internal sealed class SshConnection : IAsyncDisposable
                 var requestType = reader.ReadUtf8String();
                 var wantReply = reader.ReadBoolean();
                 channel.OnRequest(requestType, wantReply, memory[(memory.Length - reader.Remaining.Length)..]);
+                return false;
+            }
+
+            case SshMessage.ChannelOpen:
+            {
+                // The server wants to open a channel to us (forwarded-tcpip, x11, auth-agent): none are accepted yet. RFC 4254 section 5.1
+                // requires an answer, so refuse it rather than leaving the server's channel half-open.
+                reader.ReadUtf8String();
+                var senderChannel = reader.ReadUInt32();
+                Post(SshChannel.BuildOpenFailure(senderChannel, ChannelOpenFailureReason.AdministrativelyProhibited, "Channel type not supported."));
                 return false;
             }
 

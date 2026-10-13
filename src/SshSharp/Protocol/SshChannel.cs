@@ -63,6 +63,9 @@ internal sealed class SshChannel
     private uint _remoteMaxPacket;
     private bool _closeSent;
     private bool _remoteClosed;
+    private bool _openConfirmed;
+    private volatile bool _abandoned;
+    private Exception? _repliesFailure;
 
     public SshChannel(SshConnection connection, uint localId)
     {
@@ -139,31 +142,54 @@ internal sealed class SshChannel
     /// <summary>Sends a channel request. When <paramref name="wantReply"/> is set, returns whether the peer accepted it.</summary>
     public async Task<bool> RequestAsync(string type, bool wantReply, Action<SshWriter>? body, CancellationToken cancellationToken)
     {
-        TaskCompletionSource<bool>? reply = null;
-        if (wantReply)
-        {
-            reply = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-            lock (_lock)
+        // Replies arrive in request order, so the waiter is queued exactly when the request takes its place on the wire: a request
+        // cancelled before that leaves nothing behind to swallow the reply meant for the next one.
+        TaskCompletionSource<bool>? reply = wantReply ? new(TaskCreationOptions.RunContinuationsAsynchronously) : null;
+        await _connection.SendAsync(
+            Build(w =>
             {
-                _pendingReplies.Enqueue(reply);
-            }
-        }
-
-        await _connection.SendAsync(Build(w =>
-        {
-            w.WriteByte(SshMessage.ChannelRequest);
-            w.WriteUInt32(RemoteId);
-            w.WriteString(type);
-            w.WriteBoolean(wantReply);
-            body?.Invoke(w);
-        }), cancellationToken).ConfigureAwait(false);
+                w.WriteByte(SshMessage.ChannelRequest);
+                w.WriteUInt32(RemoteId);
+                w.WriteString(type);
+                w.WriteBoolean(wantReply);
+                body?.Invoke(w);
+            }),
+            reply is null ? null : () => EnqueueReply(reply),
+            cancellationToken).ConfigureAwait(false);
 
         return reply is null || await reply.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
     }
 
+    private void EnqueueReply(TaskCompletionSource<bool> reply)
+    {
+        lock (_lock)
+        {
+            if (_repliesFailure is { } failure)
+            {
+                reply.TrySetException(failure);
+                return;
+            }
+
+            _pendingReplies.Enqueue(reply);
+        }
+    }
+
+    /// <summary>The most data we put in one packet, whatever the peer allows: keeps every packet within <see cref="PacketCodec.MaxPacketLength"/>.</summary>
+    internal const int MaxDataPerPacket = PacketCodec.MaxPacketLength - 1024;
+
     /// <summary>Sends data, split to the peer's maximum packet size and paced by its window.</summary>
     public async ValueTask SendDataAsync(ReadOnlyMemory<byte> data, CancellationToken cancellationToken)
     {
+        if (Volatile.Read(ref _closeSent))
+        {
+            throw new InvalidOperationException("The channel is closed for sending.");
+        }
+
+        if (!data.IsEmpty && _remoteMaxPacket == 0)
+        {
+            throw new InvalidOperationException("The peer does not accept data on this channel (maximum packet size 0).");
+        }
+
         while (!data.IsEmpty)
         {
             var count = await _sendWindow.AcquireAsync((int)Math.Min(data.Length, _remoteMaxPacket), cancellationToken).ConfigureAwait(false);
@@ -235,11 +261,81 @@ internal sealed class SshChannel
 
     internal void OnOpenConfirmed(uint remoteId, uint window, uint maxPacket)
     {
-        RemoteId = remoteId;
-        _remoteMaxPacket = Math.Min(maxPacket, SshReader.MaxStringLength);
-        _sendWindow = new SendWindow(window);
+        bool abandoned;
+        lock (_lock)
+        {
+            if (_openConfirmed)
+            {
+                throw new SshProtocolException($"Channel {LocalId} was confirmed twice.");
+            }
+
+            RemoteId = remoteId;
+            _remoteMaxPacket = Math.Min(maxPacket, (uint)MaxDataPerPacket);
+            _sendWindow = new SendWindow(window);
+            _openConfirmed = true;
+            abandoned = _abandoned;
+        }
+
+        if (abandoned)
+        {
+            PostCloseOnce();
+        }
+
         _confirmed.TrySetResult();
     }
+
+    /// <summary>
+    /// The opener gave up (cancelled) before the server answered. The channel stays registered: when the confirmation arrives it is
+    /// closed straight away, and anything received meanwhile is dropped.
+    /// </summary>
+    internal void Abandon()
+    {
+        lock (_lock)
+        {
+            _abandoned = true;
+            if (!_openConfirmed)
+            {
+                return;
+            }
+        }
+
+        PostCloseOnce();
+    }
+
+    private void PostCloseOnce()
+    {
+        lock (_lock)
+        {
+            if (_closeSent)
+            {
+                return;
+            }
+
+            _closeSent = true;
+        }
+
+        _connection.Post(Build(w =>
+        {
+            w.WriteByte(SshMessage.ChannelClose);
+            w.WriteUInt32(RemoteId);
+        }));
+    }
+
+    /// <summary>Data the peer sent that we do not deliver (an unknown extended data type): it still used the window, so give it back.</summary>
+    internal void OnDiscardedData(int length)
+    {
+        Reserve(length);
+        Consumed(length);
+    }
+
+    internal static byte[] BuildOpenFailure(uint recipientChannel, ChannelOpenFailureReason reason, string description) => Build(w =>
+    {
+        w.WriteByte(SshMessage.ChannelOpenFailure);
+        w.WriteUInt32(recipientChannel);
+        w.WriteUInt32((uint)reason);
+        w.WriteString(description);
+        w.WriteString(string.Empty);
+    });
 
     internal void OnOpenFailed(uint reason, string description) =>
         _confirmed.TrySetException(new SshException(SshFailureReason.ChannelClosed, $"The server refused to open the channel (reason {reason}): {description}"));
@@ -248,17 +344,32 @@ internal sealed class SshChannel
 
     internal void OnData(DecodedPacket packet, int offset, int length, bool isExtended)
     {
-        if (length > LocalMaxPacketSize || length > Interlocked.Read(ref _localWindow))
+        try
+        {
+            Reserve(length);
+        }
+        catch
         {
             packet.Dispose();
+            throw;
+        }
+
+        // Nobody will read an abandoned channel; don't hold its buffers until it closes.
+        if (_abandoned || !_incoming.Writer.TryWrite(new ChannelData(this, packet, offset, length, isExtended)))
+        {
+            packet.Dispose();
+        }
+    }
+
+    /// <summary>Takes received bytes out of our window, or fails if the peer sent more than it allows.</summary>
+    private void Reserve(int length)
+    {
+        if (length > LocalMaxPacketSize || length > Interlocked.Read(ref _localWindow))
+        {
             throw new SshProtocolException("The peer sent more channel data than the window or maximum packet size allows.");
         }
 
         Interlocked.Add(ref _localWindow, -length);
-        if (!_incoming.Writer.TryWrite(new ChannelData(this, packet, offset, length, isExtended)))
-        {
-            packet.Dispose();
-        }
     }
 
     internal void OnEof() => _incoming.Writer.TryComplete();
@@ -343,12 +454,17 @@ internal sealed class SshChannel
         _sendWindow.Fail(exception);
         FailReplies(exception);
         _closed.TrySetException(exception);
+
+        // Nobody may be waiting on these; mark the exceptions observed so they are not reported as unobserved.
+        _ = _confirmed.Task.Exception;
+        _ = _closed.Task.Exception;
     }
 
     private void FailReplies(Exception exception)
     {
         lock (_lock)
         {
+            _repliesFailure ??= exception;
             while (_pendingReplies.TryDequeue(out var reply))
             {
                 reply.TrySetException(exception);

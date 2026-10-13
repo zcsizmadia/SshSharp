@@ -130,11 +130,22 @@ public class KexNegotiationTests
         {
             Server(kex: ["diffie-hellman-group1-sha1"]),
             Server(hostKeys: ["ssh-dss"]),
-            Server(macs: ["hmac-md5"]),
+            Server(ciphers: ["aes256-ctr"], macs: ["hmac-md5"]),
         })
         {
             await Assert.That(() => AlgorithmNegotiator.Negotiate(KexInitMessage.ForClient(new AlgorithmPreferences()), server)).Throws<SshException>();
         }
+    }
+
+    [Test]
+    public async Task Negotiate_AnAeadCipherDoesNotNeedAMatchingMac()
+    {
+        // Like OpenSSH: the MAC is unused with an AEAD cipher, so a MAC list without a match must not fail the connection.
+        var client = KexInitMessage.ForClient(new AlgorithmPreferences { Ciphers = ["chacha20-poly1305@openssh.com"] });
+        var negotiated = AlgorithmNegotiator.Negotiate(client, Server(macs: ["umac-128-etm@openssh.com"]));
+        await Assert.That(negotiated.CipherClientToServer).IsEqualTo("chacha20-poly1305@openssh.com");
+        await Assert.That(negotiated.MacClientToServer).IsEqualTo(string.Empty);
+        await Assert.That(negotiated.MacServerToClient).IsEqualTo(string.Empty);
     }
 
     [Test]
