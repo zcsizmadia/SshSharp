@@ -1,0 +1,28 @@
+- name: Guides
+  items:
+    - name: Getting started
+      href: getting-started.md
+    - name: Connecting
+      href: connecting.md
+    - name: Authentication
+      href: authentication.md
+    - name: Host keys
+      href: host-keys.md
+    - name: Commands and shells
+      href: sessions.md
+    - name: Configuration files
+      href: config-files.md
+    - name: Errors and diagnostics
+      href: diagnostics.md
+- name: API reference
+  href: api/
+- name: Project
+  items:
+    - name: Design notes
+      href: design.md
+    - name: Threat model
+      href: threat-model.md
+    - name: Cryptography review
+      href: crypto-review.md
+    - name: Benchmarks
+      href: benchmarks.md
