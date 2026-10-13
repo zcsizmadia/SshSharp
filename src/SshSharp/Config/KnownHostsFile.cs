@@ -215,11 +215,45 @@ public sealed class KnownHostsFile
         try
         {
             await File.WriteAllTextAsync(temp, ToString(), cancellationToken).ConfigureAwait(false);
-            File.Move(temp, path, overwrite: true);
+            KeepMode(path, temp);
+            for (var attempt = 1; !TryReplace(temp, path, attempt); attempt++)
+            {
+                await Task.Delay(ReplaceRetryDelay * attempt, cancellationToken).ConfigureAwait(false);
+            }
         }
         finally
         {
             File.Delete(temp);
+        }
+    }
+
+    private const int ReplaceAttempts = 8;
+
+    private static readonly TimeSpan ReplaceRetryDelay = TimeSpan.FromMilliseconds(25);
+
+    /// <summary>
+    /// Replaces <paramref name="path"/> with <paramref name="temp"/>. On Windows the replace fails while another process has the file open
+    /// (ssh reading it, an editor, a backup tool): a sharing violation that passes, so it is retried a few times before giving up.
+    /// </summary>
+    private static bool TryReplace(string temp, string path, int attempt)
+    {
+        try
+        {
+            File.Move(temp, path, overwrite: true);
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException && attempt < ReplaceAttempts)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>The rewritten file keeps the permissions of the one it replaces (a 0600 known_hosts stays 0600).</summary>
+    private static void KeepMode(string path, string temp)
+    {
+        if (!OperatingSystem.IsWindows() && File.Exists(path))
+        {
+            File.SetUnixFileMode(temp, File.GetUnixFileMode(path));
         }
     }
 
@@ -231,7 +265,11 @@ public sealed class KnownHostsFile
         try
         {
             File.WriteAllText(temp, ToString());
-            File.Move(temp, path, overwrite: true);
+            KeepMode(path, temp);
+            for (var attempt = 1; !TryReplace(temp, path, attempt); attempt++)
+            {
+                Thread.Sleep(ReplaceRetryDelay * attempt);
+            }
         }
         finally
         {
