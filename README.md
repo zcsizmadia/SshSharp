@@ -31,14 +31,15 @@ Console.WriteLine(result.StandardOutputText);
   PAM), and multi-factor chains.
 - **Host verification:** `StrictHostKeyChecking` policies, host certificates, `UpdateHostKeys`, key pinning, or your own
   verifier. There is no "accept anything" default.
-- **Connections:** ProxyJump chains, ProxyCommand, connect over any `Stream`, keep-alive and dead-connection detection.
+- **Connections:** ProxyJump chains, ProxyCommand, connect over any `Stream`, keep-alive and dead-connection detection;
+  TCP and Unix-socket tunnels and local port forwarding (`ssh -L`).
 - **Sessions:** run commands, stream stdin/stdout/stderr, interactive shells with a pseudo-terminal, environment variables,
   signals and window resizing.
 - **Modern algorithms:** `curve25519-sha256`, ECDH and DH group 14/16 key exchange; ChaCha20-Poly1305, AES-GCM and
   AES-CTR with HMAC-SHA2 ETM; Ed25519, ECDSA and RSA (SHA-2) keys; strict key exchange (Terrapin) always on; a FIPS mode.
 - **Observability:** `ILogger` logging, `ActivitySource` tracing and `Meter` metrics, with no secrets recorded.
 
-Coming next: port forwarding (local, remote, SOCKS5), agent forwarding and SCP, then SFTP as a separate package.
+Coming next: remote and dynamic (SOCKS5) port forwarding, agent forwarding and SCP, then SFTP as a separate package.
 
 ## Install
 

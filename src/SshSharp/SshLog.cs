@@ -73,4 +73,13 @@ internal static partial class SshLog
 
     [LoggerMessage(EventId = 23, Level = LogLevel.Debug, Message = "The SSH agent was not used: {Reason}")]
     public static partial void AgentUnavailable(ILogger logger, string reason);
+
+    [LoggerMessage(EventId = 24, Level = LogLevel.Information, Message = "Forwarding {LocalEndPoint} to remote port {RemotePort}")]
+    public static partial void ForwardingStarted(ILogger logger, string localEndPoint, int remotePort);
+
+    [LoggerMessage(EventId = 25, Level = LogLevel.Information, Message = "Stopped forwarding {LocalEndPoint}")]
+    public static partial void ForwardingStopped(ILogger logger, string localEndPoint);
+
+    [LoggerMessage(EventId = 26, Level = LogLevel.Warning, Message = "A connection forwarded to remote port {RemotePort} was refused: {Reason}")]
+    public static partial void ForwardingRefused(ILogger logger, int remotePort, string reason);
 }

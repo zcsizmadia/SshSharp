@@ -213,6 +213,18 @@ internal sealed class SshConnection : IAsyncDisposable
             w.WriteUInt32((uint)originatorPort);
         }, cancellationToken);
 
+    /// <summary>
+    /// Opens a <c>direct-streamlocal@openssh.com</c> channel (OpenSSH PROTOCOL 2.4): the server connects to the Unix domain socket at
+    /// <paramref name="path"/> and relays.
+    /// </summary>
+    public Task<SshChannel> OpenDirectStreamLocalAsync(string path, CancellationToken cancellationToken) =>
+        OpenChannelAsync("direct-streamlocal@openssh.com", w =>
+        {
+            w.WriteString(path);
+            w.WriteString(string.Empty); // reserved
+            w.WriteUInt32(0); // reserved
+        }, cancellationToken);
+
     private async Task<SshChannel> OpenChannelAsync(string type, Action<SshWriter>? typeSpecificData, CancellationToken cancellationToken)
     {
         if (_failure is { } failure)

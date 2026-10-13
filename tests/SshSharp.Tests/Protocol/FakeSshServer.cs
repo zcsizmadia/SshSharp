@@ -37,6 +37,17 @@ internal sealed class DuplexStream(Stream read, Stream write) : Stream
 
     public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default) => write.WriteAsync(buffer, cancellationToken);
 
+    /// <summary>Ends the writing direction only (the reader on the other side sees end-of-stream), like a socket's shutdown(SHUT_WR).</summary>
+    public void CloseWrite() => write.Dispose();
+
+    /// <summary>Two connected ends: what one writes, the other reads.</summary>
+    public static (DuplexStream A, DuplexStream B) CreatePair()
+    {
+        var aToB = new System.IO.Pipelines.Pipe();
+        var bToA = new System.IO.Pipelines.Pipe();
+        return (new DuplexStream(bToA.Reader.AsStream(), aToB.Writer.AsStream()), new DuplexStream(aToB.Reader.AsStream(), bToA.Writer.AsStream()));
+    }
+
     protected override void Dispose(bool disposing)
     {
         if (disposing)
