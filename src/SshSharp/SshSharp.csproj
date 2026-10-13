@@ -16,10 +16,16 @@
 
     <!-- The public API is tracked in PublicAPI.*.txt (RS0016/RS0017), and packing validates it against earlier versions. -->
     <EnablePackageValidation>true</EnablePackageValidation>
+
+    <!-- The version comes from git tags (v0.1.0, v1.0.0-preview.1, ...): MinVer gives untagged commits a 0.x prerelease version. -->
+    <MinVerTagPrefix>v</MinVerTagPrefix>
+    <MinVerDefaultPreReleaseIdentifiers>preview.0</MinVerDefaultPreReleaseIdentifiers>
+    <MinVerMinimumMajorMinor>0.1</MinVerMinimumMajorMinor>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.SourceLink.GitHub" PrivateAssets="All" />
     <PackageReference Include="Microsoft.CodeAnalysis.PublicApiAnalyzers" PrivateAssets="All" />
+    <PackageReference Include="MinVer" PrivateAssets="All" />
     <PackageReference Include="System.IO.Pipelines" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
     <None Include="../../README.md" Pack="true" PackagePath="/" />

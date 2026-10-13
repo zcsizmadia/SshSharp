@@ -25,6 +25,8 @@ jobs:
         os: [ubuntu-latest, ubuntu-24.04-arm, windows-latest, windows-11-arm, macos-latest]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0 # MinVer computes the version from tags and history
       - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
         with:
           global-json-file: global.json
@@ -43,6 +45,17 @@ jobs:
           dotnet tool install --global dotnet-reportgenerator-globaltool --version 5.5.11
           reportgenerator -reports:"TestResults/**/coverage.cobertura.xml" -targetdir:coverage-report -reporttypes:MarkdownSummaryGithub -assemblyfilters:"+SshSharp"
           cat coverage-report/SummaryGithub.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Pack (with package validation)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          dotnet pack src/SshSharp -c Release --no-build -o packages
+          ls packages
+          echo "Package: $(ls packages/*.nupkg)" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: matrix.os == 'ubuntu-latest'
+        with:
+          name: packages
+          path: packages/*
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
@@ -60,6 +73,8 @@ jobs:
         os: [ubuntu-latest, ubuntu-24.04-arm]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0 # MinVer computes the version from tags and history
       - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
         with:
           global-json-file: global.json
