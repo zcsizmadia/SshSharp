@@ -119,6 +119,10 @@ jobs:
           KexAlgorithms +diffie-hellman-group14-sha256,diffie-hellman-group16-sha512
           LogLevel DEBUG1
           EOF
+          # OpenSSH 9.8+ shuts out an address after failed or unauthenticated connections, which the tests make on purpose.
+          if sudo /usr/sbin/sshd -T -f /tmp/sshd_config_test 2>/dev/null | grep -qi '^persourcepenalties '; then
+            echo "PerSourcePenalties no" | sudo tee -a /tmp/sshd_config_test
+          fi
           sudo /usr/sbin/sshd -t -f /tmp/sshd_config_test
           sudo /usr/sbin/sshd -f /tmp/sshd_config_test -E /tmp/sshd.log
           sleep 1
@@ -252,4 +256,6 @@ jobs:
         run: dotnet test --project tests/SshSharp.Tests -c Release -f net10.0 --no-build --treenode-filter "/*/*/*InteropTests/*" --maximum-parallel-tests 4
       - name: Server log
         if: failure()
-        run: docker logs server 2>&1 | tail -n 100
+        # Without the rekey test's per-packet lines, which would fill the tail.
+        run: |
+          docker logs server 2>&1 | grep -vE 'debug1: (enqueue packet|dequeue packet|ssh_set_newkeys)' | tail -n 300
