@@ -28,8 +28,14 @@ public sealed class SshClientOptions
     /// <summary>The most output (stdout plus stderr) <see cref="SshClient.RunCommandAsync"/> will collect before failing. Default 128 MiB.</summary>
     public long MaxCommandOutputBytes { get; init; } = 128L * 1024 * 1024;
 
-    /// <summary>Negotiate new keys after this many bytes have been transferred under the current ones. Default 1 GiB (RFC 4253 section 9).</summary>
+    /// <summary>
+    /// Negotiate new keys after this many bytes have been transferred under the current ones. Default 1 GiB (RFC 4253 section 9).
+    /// Values above 64 GiB (2^32 cipher blocks, the limit OpenSSH applies) are capped, and keys are also renewed every 2^31 packets.
+    /// </summary>
     public long RekeyAfterBytes { get; init; } = 1L << 30;
+
+    /// <summary>The largest effective <see cref="RekeyAfterBytes"/>: 2^32 blocks of a 128-bit cipher.</summary>
+    internal const long MaxRekeyAfterBytes = 1L << 36;
 
     /// <summary>Negotiate new keys after the current ones have been in use this long. Default 1 hour (RFC 4253 section 9).</summary>
     public TimeSpan RekeyAfterTime { get; init; } = TimeSpan.FromHours(1);

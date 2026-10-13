@@ -87,8 +87,15 @@ internal static class Ed25519
             return false;
         }
 
+        // Everything here is public, so these checks may take variable time. A non-canonical or small-order key would let a signature
+        // verify without the matching private key (the attacker picks the key, but a pinned fingerprint should still mean one signer).
+        if (!IsCanonicalEncoding(publicKey))
+        {
+            return false;
+        }
+
         Span<long> q = stackalloc long[64];
-        if (!UnpackNegated(q, publicKey))
+        if (!UnpackNegated(q, publicKey) || HasSmallOrder(q))
         {
             return false;
         }
@@ -276,14 +283,51 @@ internal static class Ed25519
             return false;
         }
 
+        // RFC 8032 section 5.1.3: x = 0 with the sign bit set is not a valid encoding.
+        Span<long> zero = stackalloc long[16];
+        if ((p[31] >> 7) == 1 && !Field25519.NotEqual(r0, zero))
+        {
+            return false;
+        }
+
         if (Field25519.Parity(r0) == (p[31] >> 7))
         {
-            Span<long> zero = stackalloc long[16];
             Field25519.Sub(r0, zero, r0);
         }
 
         Field25519.Multiply(r3, r0, r1);
         return true;
+    }
+
+    /// <summary>Whether the encoded y coordinate (sign bit cleared) is below p = 2^255 - 19.</summary>
+    private static bool IsCanonicalEncoding(ReadOnlySpan<byte> encoded)
+    {
+        // y >= p only when y is 2^255 - 19 .. 2^255 - 1: top byte 0x7f, all middle bytes 0xff, low byte >= 0xed.
+        if ((encoded[31] & 0x7f) != 0x7f || encoded[0] < 0xed)
+        {
+            return true;
+        }
+
+        return encoded[1..31].ContainsAnyExcept((byte)0xff);
+    }
+
+    /// <summary>Whether 8·P is the identity, i.e. P lies in the small (torsion) subgroup.</summary>
+    private static bool HasSmallOrder(ReadOnlySpan<long> point)
+    {
+        Span<long> p = stackalloc long[64];
+        point.CopyTo(p);
+        Span<long> copy = stackalloc long[64];
+        for (var i = 0; i < 3; i++)
+        {
+            p.CopyTo(copy);
+            Add(p, copy);
+        }
+
+        Span<byte> encoded = stackalloc byte[32];
+        Pack(encoded, p);
+
+        // The identity (0, 1) encodes as 01 00 ... 00.
+        return encoded[0] == 1 && !encoded[1..].ContainsAnyExcept((byte)0);
     }
 
     // ---- Scalars modulo L ----

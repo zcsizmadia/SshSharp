@@ -229,6 +229,10 @@ internal sealed class DhKeyExchange : ClientKeyExchange
         var bytes = RandomNumberGenerator.GetBytes(group.ExponentBits / 8);
         bytes[0] |= 0x80;
         _x = new BigInteger(bytes, isUnsigned: true, isBigEndian: true);
+        CryptographicOperations.ZeroMemory(bytes);
+
+        // BigInteger.ModPow is not constant-time and its internals cannot be wiped. The exponent is ephemeral and used for one
+        // exchange, so remote timing attacks are impractical; curve25519 and ECDH are preferred over DH by default anyway.
         _e = BigInteger.ModPow(ModpGroup.Generator, _x, group.Prime);
     }
 

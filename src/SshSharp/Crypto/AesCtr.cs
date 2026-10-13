@@ -26,7 +26,10 @@ internal sealed class AesCtr : IDisposable
             throw new ArgumentException("The initial counter block must be 16 bytes.", nameof(initialCounter));
         }
 
-        _aes.Key = key.ToArray();
+        // The setter keeps its own copy; wipe ours.
+        var keyCopy = key.ToArray();
+        _aes.Key = keyCopy;
+        CryptographicOperations.ZeroMemory(keyCopy);
         _aes.Mode = CipherMode.ECB;
         _aes.Padding = PaddingMode.None;
         _encryptor = _aes.CreateEncryptor();

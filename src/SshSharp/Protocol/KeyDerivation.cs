@@ -51,33 +51,31 @@ internal static class KeyDerivation
             return result;
         }
 
-        var prefix = new ArrayBufferWriter<byte>();
+        // Sized up front so the writer never grows and leaves an unwiped copy of K behind (Clear zeroes what was written).
+        var prefix = new ArrayBufferWriter<byte>(sharedSecret.Length + exchangeHash.Length + 8);
         new SshWriter(prefix).WriteMpint(sharedSecret);
         prefix.Write(exchangeHash);
 
         using var hasher = IncrementalHash.CreateHash(hash);
-        var block = new byte[hasher.HashLengthInBytes];
+        var hashLength = hasher.HashLengthInBytes;
+
+        // K1 || K2 || ... : each further block hashes everything generated so far (RFC 4253 section 7.2).
+        var generated = new byte[(length + hashLength - 1) / hashLength * hashLength];
         hasher.AppendData(prefix.WrittenSpan);
         hasher.AppendData([(byte)letter]);
         hasher.AppendData(sessionId);
-        hasher.GetHashAndReset(block);
+        hasher.GetHashAndReset(generated.AsSpan(0, hashLength));
 
-        var produced = Math.Min(block.Length, length);
-        block.AsSpan(0, produced).CopyTo(result);
-        var generated = new List<byte>(block);
-        while (produced < length)
+        for (var produced = hashLength; produced < length; produced += hashLength)
         {
             hasher.AppendData(prefix.WrittenSpan);
-            hasher.AppendData([.. generated]);
-            hasher.GetHashAndReset(block);
-            var take = Math.Min(block.Length, length - produced);
-            block.AsSpan(0, take).CopyTo(result.AsSpan(produced));
-            generated.AddRange(block);
-            produced += take;
+            hasher.AppendData(generated.AsSpan(0, produced));
+            hasher.GetHashAndReset(generated.AsSpan(produced, hashLength));
         }
 
+        generated.AsSpan(0, length).CopyTo(result);
         prefix.Clear();
-        CryptographicOperations.ZeroMemory(block);
+        CryptographicOperations.ZeroMemory(generated);
         return result;
     }
 

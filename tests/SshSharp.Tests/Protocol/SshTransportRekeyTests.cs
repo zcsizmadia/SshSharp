@@ -18,10 +18,11 @@ public class SshTransportRekeyTests
 
     private static CancellationToken Timeout() => new CancellationTokenSource(TimeSpan.FromSeconds(60)).Token;
 
-    private static SshTransportOptions ClientOptions(long rekeyBytes = long.MaxValue, TimeProvider? time = null, TimeSpan? interval = null) => new()
+    private static SshTransportOptions ClientOptions(long rekeyBytes = long.MaxValue, TimeProvider? time = null, TimeSpan? interval = null, long rekeyPackets = long.MaxValue) => new()
     {
         VerifyHostKey = (_, _) => ValueTask.FromResult(true),
         RekeyBytes = rekeyBytes,
+        RekeyPackets = rekeyPackets,
         RekeyInterval = interval ?? TimeSpan.FromHours(1),
         TimeProvider = time ?? TimeProvider.System,
     };
@@ -125,6 +126,33 @@ public class SshTransportRekeyTests
 
             await WaitUntilAsync(() => client.KeyExchangeCount >= 4 && server.KeyExchangeCount == client.KeyExchangeCount);
             await Assert.That(Convert.ToHexString(client.SessionId!)).IsEqualTo(sessionId);
+            await Assert.That(clientPump.Error).IsNull();
+            await Assert.That(serverPump.Error).IsNull();
+            await clientPump.StopAsync();
+            await serverPump.StopAsync();
+        }
+    }
+
+    [Test]
+    public async Task PacketThreshold_TriggersRekeys_EvenWhenFewBytesMove()
+    {
+        // Tiny packets barely move the byte counter, but sequence numbers (the ChaCha20-Poly1305 nonce) must never wrap under one key.
+        var (client, server, clientPump, serverPump) = await StartAsync(client: ClientOptions(rekeyPackets: 25));
+        await using (client)
+        await using (server)
+        {
+            for (var i = 0; i < 100; i++)
+            {
+                await client.SendAsync(Message(90, i, 8), Timeout());
+            }
+
+            for (var i = 0; i < 100; i++)
+            {
+                var received = await serverPump.NextAsync();
+                await Assert.That(received.AsSpan().SequenceEqual(Message(90, i, 8))).IsTrue();
+            }
+
+            await WaitUntilAsync(() => client.KeyExchangeCount >= 4 && server.KeyExchangeCount == client.KeyExchangeCount);
             await Assert.That(clientPump.Error).IsNull();
             await Assert.That(serverPump.Error).IsNull();
             await clientPump.StopAsync();
