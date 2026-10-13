@@ -1,4 +1,3 @@
-using System.Buffers;
 using System.Net;
 using System.Net.Sockets;
 using Microsoft.Extensions.Logging;
@@ -13,8 +12,6 @@ namespace SshSharp;
 /// </summary>
 public sealed class SshPortForwarder : IAsyncDisposable
 {
-    private const int BufferSize = 32 * 1024;
-
     private readonly Socket _listener;
     private readonly ILogger _logger;
     private readonly Func<IPEndPoint, CancellationToken, Task<SshChannel>> _open;
@@ -23,6 +20,8 @@ public sealed class SshPortForwarder : IAsyncDisposable
     private readonly HashSet<Task> _connections = [];
     private readonly string _localText;
     private int _disposed;
+    private int _active;
+    private volatile bool _listening = true;
 
     private SshPortForwarder(Socket listener, string remoteHost, int remotePort, ILogger logger,
         Func<IPEndPoint, CancellationToken, Task<SshChannel>> open, CancellationToken connectionClosed)
@@ -52,12 +51,12 @@ public sealed class SshPortForwarder : IAsyncDisposable
     {
         get
         {
-            lock (_connections)
-            {
-                return _connections.Count;
-            }
+            return Volatile.Read(ref _active);
         }
     }
+
+    /// <summary>Whether the listening socket is still open (for tests: a freed port may be reused by someone else at once).</summary>
+    internal bool IsListening => _listening;
 
     internal static SshPortForwarder Start(IPEndPoint localEndPoint, string remoteHost, int remotePort, ILogger logger,
         Func<IPEndPoint, CancellationToken, Task<SshChannel>> open, CancellationToken connectionClosed)
@@ -89,6 +88,7 @@ public sealed class SshPortForwarder : IAsyncDisposable
         {
             // Stopped (disposed, or the SSH connection ended): stop listening too, so new connections are refused, not left in the backlog.
             _listener.Dispose();
+            _listening = false;
         }
     }
 
@@ -110,7 +110,8 @@ public sealed class SshPortForwarder : IAsyncDisposable
             Task connection;
             lock (_connections)
             {
-                connection = ForwardAsync(socket);
+                Interlocked.Increment(ref _active);
+            connection = ForwardAsync(socket);
                 _connections.Add(connection);
             }
 
@@ -127,7 +128,20 @@ public sealed class SshPortForwarder : IAsyncDisposable
     }
 
     /// <summary>Relays one accepted connection over a new channel until both sides have finished or either side fails or closes.</summary>
+    /// <summary>Counts the connection until it has finished, so <see cref="ActiveConnections"/> is exact once it is awaited.</summary>
     private async Task ForwardAsync(Socket socket)
+    {
+        try
+        {
+            await ForwardCoreAsync(socket).ConfigureAwait(false);
+        }
+        finally
+        {
+            Interlocked.Decrement(ref _active);
+        }
+    }
+
+    private async Task ForwardCoreAsync(Socket socket)
     {
         await Task.Yield(); // off the accept loop
         using (socket)
@@ -144,82 +158,8 @@ public sealed class SshPortForwarder : IAsyncDisposable
                 return;
             }
 
-            using var teardown = CancellationTokenSource.CreateLinkedTokenSource(_stop.Token);
-            var toServer = GuardAsync(() => ToServerAsync(socket, channel, teardown.Token), teardown);
-            var toClient = GuardAsync(() => ToClientAsync(socket, channel, teardown.Token), teardown);
-
-            // Done when both directions have ended, the server closed the channel, or something failed (which cancels teardown).
-            var closed = channel.WaitClosedAsync(teardown.Token);
-            var first = await Task.WhenAny(Task.WhenAll(toServer, toClient), closed).ConfigureAwait(false);
-            _ = closed.Exception; // observed: a failed connection faults it
-            if (first == closed && closed.IsCompletedSuccessfully)
-            {
-                // The server closed: what it sent before CLOSE is still queued, and the queue has ended, so deliver it before tearing down.
-                await toClient.ConfigureAwait(false);
-            }
-
-            await teardown.CancelAsync().ConfigureAwait(false);
-            await channel.CloseAsync(CancellationToken.None).ConfigureAwait(false);
-            socket.Dispose();
-            await Task.WhenAll(toServer, toClient).ConfigureAwait(false);
-            channel.DiscardUnread();
+            await SocketChannelRelay.RunAsync(socket, channel, _stop.Token).ConfigureAwait(false);
         }
-    }
-
-    private static async Task GuardAsync(Func<Task> pump, CancellationTokenSource teardown)
-    {
-        try
-        {
-            await pump().ConfigureAwait(false);
-        }
-        catch (Exception ex) when (ex is SocketException or SshException or IOException or OperationCanceledException or ObjectDisposedException or InvalidOperationException)
-        {
-            // A reset socket, a closed channel or the connection ending: stop both directions.
-            await teardown.CancelAsync().ConfigureAwait(false);
-        }
-    }
-
-    /// <summary>Local socket to channel; the local end-of-stream becomes channel EOF (a half-close, as ssh relays it).</summary>
-    private static async Task ToServerAsync(Socket socket, SshChannel channel, CancellationToken cancellationToken)
-    {
-        var buffer = ArrayPool<byte>.Shared.Rent(BufferSize);
-        try
-        {
-            while (await socket.ReceiveAsync(buffer, SocketFlags.None, cancellationToken).ConfigureAwait(false) is var read and > 0)
-            {
-                await channel.SendDataAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
-            }
-
-            await channel.SendEofAsync(cancellationToken).ConfigureAwait(false);
-        }
-        finally
-        {
-            ArrayPool<byte>.Shared.Return(buffer);
-        }
-    }
-
-    /// <summary>Channel to local socket, straight from the received packets; channel EOF shuts down the socket's sending side.</summary>
-    private static async Task ToClientAsync(Socket socket, SshChannel channel, CancellationToken cancellationToken)
-    {
-        while (await channel.ReadAsync(cancellationToken).ConfigureAwait(false) is { } chunk)
-        {
-            using (chunk)
-            {
-                if (chunk.IsExtended)
-                {
-                    continue; // a TCP stream has no stderr
-                }
-
-                var data = chunk.Data;
-                while (!data.IsEmpty)
-                {
-                    var sent = await socket.SendAsync(data, SocketFlags.None, cancellationToken).ConfigureAwait(false);
-                    data = data[sent..];
-                }
-            }
-        }
-
-        socket.Shutdown(SocketShutdown.Send);
     }
 
     /// <summary>Stops listening and closes every forwarded connection.</summary>

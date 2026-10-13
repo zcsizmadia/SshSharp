@@ -63,6 +63,38 @@ public class ForwardingInteropTests
     }
 
     [Test]
+    public async Task RemoteForwarding_BringsTheServersConnectionsBackHere()
+    {
+        await using var client = await ConnectAsync();
+        if (client is null)
+        {
+            Skip.Test("SSHSHARP_TEST_SSHD and SSHSHARP_TEST_USER with a password or key are needed.");
+            return;
+        }
+
+        // A local service; the server listens on a port of its own and sends its connections back to it.
+        using var service = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+        service.Bind(new IPEndPoint(IPAddress.Loopback, 0));
+        service.Listen();
+        var serviceTask = Task.Run(async () =>
+        {
+            using var accepted = await service.AcceptAsync(Timeout());
+            await accepted.SendAsync("hello from here\n"u8.ToArray(), SocketFlags.None, Timeout());
+            accepted.Shutdown(SocketShutdown.Send);
+        });
+
+        // A fixed high port rather than 0: not every server reports the port it picked.
+        var port = 41000 + Random.Shared.Next(2000);
+        await using var forwarder = await client.ForwardRemotePortAsync("localhost", port, "127.0.0.1", ((IPEndPoint)service.LocalEndPoint!).Port, Timeout());
+
+        // Reach the forwarded port from the server's side through a tunnel: here -> server -> its forwarded port -> back here.
+        await using var tunnel = await client.OpenTcpTunnelAsync("127.0.0.1", forwarder.Port, Timeout());
+        var line = await ReadLineAsync(buffer => tunnel.ReadAsync(buffer, Timeout()));
+        await Assert.That(line).IsEqualTo("hello from here");
+        await serviceTask;
+    }
+
+    [Test]
     public async Task LocalForwarding_ReachesTheServersOwnSshd()
     {
         await using var client = await ConnectAsync();

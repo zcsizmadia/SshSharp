@@ -90,6 +90,20 @@ address unless other machines should use the tunnel. Forwarding stops when the f
 connection ends. A server that does not allow forwarding (sshd's `AllowTcpForwarding no`) refuses each connection, and
 `OpenTcpTunnelAsync` throws an `SshException` with `SshFailureReason.ChannelClosed`.
 
+Remote port forwarding (`ssh -R 8080:localhost:3000`) is the other direction: the server listens, and each connection made
+to it is relayed to a host and port reached from this machine.
+
+```csharp
+await using var remote = await client.ForwardRemotePortAsync(
+    "localhost", 8080,          // where the server listens: "localhost" (its loopback), an address, or "" for every address
+    "127.0.0.1", 3000);         // where its connections go, from here
+Console.WriteLine($"The server forwards its port {remote.Port}");
+```
+
+Port 0 asks the server to pick a free port (`remote.Port` has it). Whether the server honours a bind address other than its
+loopback is up to it (sshd's `GatewayPorts`). Disposing the forwarder cancels the forwarding on the server and closes its
+connections; a connection the server forwards while nothing listens locally is closed straight away.
+
 ## Keep-alive and connection state
 
 ```csharp

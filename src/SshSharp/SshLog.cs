@@ -82,4 +82,10 @@ internal static partial class SshLog
 
     [LoggerMessage(EventId = 26, Level = LogLevel.Warning, Message = "A connection forwarded to remote port {RemotePort} was refused: {Reason}")]
     public static partial void ForwardingRefused(ILogger logger, int remotePort, string reason);
+
+    [LoggerMessage(EventId = 27, Level = LogLevel.Information, Message = "The server forwards its port {RemotePort} to local port {LocalPort}")]
+    public static partial void RemoteForwardingStarted(ILogger logger, int remotePort, int localPort);
+
+    [LoggerMessage(EventId = 28, Level = LogLevel.Warning, Message = "A connection forwarded to local port {LocalPort} could not be made: {Reason}")]
+    public static partial void RemoteForwardingConnectFailed(ILogger logger, int localPort, string reason);
 }

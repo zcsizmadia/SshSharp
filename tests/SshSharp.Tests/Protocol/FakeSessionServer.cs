@@ -104,6 +104,13 @@ internal sealed class FakeSessionServer : IAsyncDisposable
         /// <summary>Serializes the server's messages on this channel with its CLOSE handling.</summary>
         public SemaphoreSlim SendGate { get; } = new(1, 1);
 
+        public volatile bool EofSent;
+
+        public volatile bool EofReceived;
+
+        /// <summary>For a channel the server opened: completes with whether the client accepted it.</summary>
+        public TaskCompletionSource<bool>? Opened { get; init; }
+
         /// <summary>Data the client sent (stdin), completed at its EOF.</summary>
         public System.Threading.Channels.Channel<byte[]> Input { get; } = System.Threading.Channels.Channel.CreateUnbounded<byte[]>();
 
@@ -189,6 +196,50 @@ internal sealed class FakeSessionServer : IAsyncDisposable
 
     /// <summary>The socket path of every direct-streamlocal channel the client asked for.</summary>
     public List<string> DirectStreamLocalRequests { get; } = [];
+
+    /// <summary>Refuse tcpip-forward (sshd's AllowTcpForwarding no).</summary>
+    public bool RefuseRemoteForwarding { get; init; }
+
+    /// <summary>Ports the client asked the server to listen on (tcpip-forward), with their bind addresses.</summary>
+    public Dictionary<int, string> RemoteForwards { get; } = [];
+
+    /// <summary>Ports the client cancelled (cancel-tcpip-forward).</summary>
+    public List<int> CancelledRemoteForwards { get; } = [];
+
+    /// <summary>
+    /// Plays a connection arriving at a remotely forwarded port: opens a forwarded-tcpip channel to the client and returns the far end of
+    /// it, or null when the client refuses the channel.
+    /// </summary>
+    public async Task<Stream?> ConnectForwardedAsync(int port, string connectedAddress = "localhost", string originator = "203.0.113.7", int originatorPort = 50123)
+    {
+        var channel = new ServerChannel(_nextId++) { Opened = new(TaskCreationOptions.RunContinuationsAsynchronously) };
+        lock (_channels)
+        {
+            _channels[channel.Id] = channel;
+        }
+
+        await _server.SendAsync(Build(w =>
+        {
+            w.WriteByte(SshMessage.ChannelOpen);
+            w.WriteString("forwarded-tcpip");
+            w.WriteUInt32(channel.Id);
+            w.WriteUInt32(ServerWindow);
+            w.WriteUInt32(ServerMaxPacket);
+            w.WriteString(connectedAddress);
+            w.WriteUInt32((uint)port);
+            w.WriteString(originator);
+            w.WriteUInt32((uint)originatorPort);
+        }));
+        if (!await channel.Opened!.Task.WaitAsync(TimeSpan.FromSeconds(30)))
+        {
+            return null;
+        }
+
+        var (near, far) = DuplexStream.CreatePair();
+        channel.Tunnel = near;
+        _ = Task.Run(() => PumpTunnelAsync(channel, near));
+        return far;
+    }
 
     /// <summary>Host keys announced after authentication (hostkeys-00@openssh.com) and proven on request (UpdateHostKeys).</summary>
     public List<FakeHostKey>? AnnouncedHostKeys { get; init; }
@@ -496,10 +547,84 @@ internal sealed class FakeSessionServer : IAsyncDisposable
                     break;
                 }
 
+                if (name is "tcpip-forward" or "cancel-tcpip-forward")
+                {
+                    // RFC 4254 section 7.1: listen (port 0: pick one, and say which), or stop listening.
+                    var address = reader.ReadUtf8String();
+                    var port = (int)reader.ReadUInt32();
+                    var ok = !RefuseRemoteForwarding;
+                    var picked = 0;
+                    lock (RemoteForwards)
+                    {
+                        if (name == "tcpip-forward" && ok)
+                        {
+                            picked = port == 0 ? 40000 + RemoteForwards.Count : port;
+                            ok = RemoteForwards.TryAdd(picked, address);
+                        }
+                        else if (name == "cancel-tcpip-forward")
+                        {
+                            ok = RemoteForwards.Remove(port);
+                            CancelledRemoteForwards.Add(port);
+                        }
+                    }
+
+                    if (wantReply)
+                    {
+                        await _server.SendAsync(Build(w =>
+                        {
+                            w.WriteByte(ok ? SshMessage.RequestSuccess : SshMessage.RequestFailure);
+                            if (ok && name == "tcpip-forward" && port == 0)
+                            {
+                                w.WriteUInt32((uint)picked);
+                            }
+                        }));
+                    }
+
+                    break;
+                }
+
                 // Like OpenSSH: unknown requests (keepalive@openssh.com included) get a failure, which is still an answer.
                 if (wantReply && !IgnoreGlobalRequests)
                 {
                     await _server.SendAsync(new byte[] { SshMessage.RequestFailure });
+                }
+
+                break;
+            }
+
+            case SshMessage.ChannelOpenConfirmation:
+            {
+                // The client accepted a channel we opened (forwarded-tcpip).
+                var channel = Find(reader.ReadUInt32());
+                channel.ClientId = reader.ReadUInt32();
+                lock (channel)
+                {
+                    channel.ClientWindow = reader.ReadUInt32();
+                }
+
+                channel.ClientMaxPacket = reader.ReadUInt32();
+                channel.Opened?.TrySetResult(true);
+                break;
+            }
+
+            case SshMessage.ChannelOpenFailure:
+            {
+                // An answer to ConnectForwardedAsync, or (for a raw open a test sent) recorded like any unexpected message.
+                ServerChannel? channel;
+                lock (_channels)
+                {
+                    _channels.Remove(reader.ReadUInt32(), out channel);
+                }
+
+                if (channel?.Opened is { } opened)
+                {
+                    opened.TrySetResult(false);
+                    break;
+                }
+
+                lock (Unrecognized)
+                {
+                    Unrecognized.Add(payload);
                 }
 
                 break;
@@ -730,7 +855,16 @@ internal sealed class FakeSessionServer : IAsyncDisposable
             {
                 var channel = Find(reader.ReadUInt32());
                 channel.Input.Writer.TryComplete();
-                (channel.Tunnel as DuplexStream)?.CloseWrite(); // relay the half-close, as sshd does with shutdown(SHUT_WR)
+                channel.EofReceived = true;
+                if (channel.Tunnel is { } tunnel)
+                {
+                    (tunnel as DuplexStream)?.CloseWrite(); // relay the half-close, as sshd does with shutdown(SHUT_WR)
+                    if (channel.EofSent)
+                    {
+                        await SendChannelAsync(SshMessage.ChannelClose, channel, fromScript: true); // both directions are done
+                    }
+                }
+
                 break;
             }
 
@@ -775,10 +909,13 @@ internal sealed class FakeSessionServer : IAsyncDisposable
                 await SendDataAsync(channel, buffer[..read], extended: false);
             }
 
-            await SendChannelAsync(SshMessage.ChannelEof, channel);
-            if (!channel.CloseSent)
+            // Like sshd: the far end finished writing, which is EOF; CLOSE follows once the client has finished too (a half-close
+            // leaves the other direction open).
+            await SendChannelAsync(SshMessage.ChannelEof, channel, fromScript: true);
+            channel.EofSent = true;
+            if (channel.EofReceived)
             {
-                await SendChannelAsync(SshMessage.ChannelClose, channel);
+                await SendChannelAsync(SshMessage.ChannelClose, channel, fromScript: true);
             }
         }
         catch (Exception ex) when (ex is OperationCanceledException or ObjectDisposedException or IOException or InvalidOperationException or SshException)
