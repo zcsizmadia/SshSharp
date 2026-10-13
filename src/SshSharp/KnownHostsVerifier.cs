@@ -83,6 +83,30 @@ public sealed class KnownHostsVerifier : SshHostKeyVerifier
         };
     }
 
+    /// <summary>The clock for certificate validity; replaceable in tests.</summary>
+    internal TimeProvider Clock { get; init; } = TimeProvider.System;
+
+    /// <inheritdoc/>
+    internal override async ValueTask<bool> PrefersCertificatesAsync(string? host, int port, string? hostKeyAlias, CancellationToken cancellationToken)
+    {
+        var lookup = hostKeyAlias is not null ? (hostKeyAlias, 22) : host is not null ? (host, port) : default((string, int)?);
+        if (lookup is not var (name, lookupPort))
+        {
+            return false;
+        }
+
+        foreach (var path in _userFiles.Concat(_globalFiles))
+        {
+            var file = await KnownHostsFile.LoadAsync(path, cancellationToken).ConfigureAwait(false);
+            if (file.FindCertificateAuthorities(name, lookupPort).Any())
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     /// <inheritdoc/>
     public override async ValueTask<SshHostKeyVerdict> VerifyAsync(SshHostKeyContext context, CancellationToken cancellationToken)
     {
@@ -92,6 +116,13 @@ public sealed class KnownHostsVerifier : SshHostKeyVerifier
             return SshHostKeyVerdict.Reject("There is no host name to look up in known_hosts; set SshClientOptions.HostKeyAlias when connecting over a stream.");
         }
 
+        if (context.HostKey.Certificate is { } certificate
+            && await VerifyCertificateAsync(certificate, name, port, cancellationToken).ConfigureAwait(false) is { } certificateVerdict)
+        {
+            return certificateVerdict;
+        }
+
+        // No trusted authority for the certificate: like ssh, check the certified key as a plain key.
         var key = context.HostKey;
         var revoked = false;
         var matched = false;
@@ -155,6 +186,43 @@ public sealed class KnownHostsVerifier : SshHostKeyVerifier
                 break;
         }
 
+        return await RecordAsync(name, port, key, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Checks a host certificate against the <c>@cert-authority</c> lines for the host. Returns null when no listed authority signed it
+    /// (the caller then falls back to the plain key), or the verdict: trusted, or refused with the reason.
+    /// </summary>
+    private async ValueTask<SshHostKeyVerdict?> VerifyCertificateAsync(SshCertificate certificate, string name, int port, CancellationToken cancellationToken)
+    {
+        var trusted = false;
+        foreach (var path in _userFiles.Concat(_globalFiles))
+        {
+            var file = await KnownHostsFile.LoadAsync(path, cancellationToken).ConfigureAwait(false);
+            foreach (var entry in file.Find(name, port))
+            {
+                var isAuthority = entry.PublicKey.Span.SequenceEqual(certificate.AuthorityKey.Span);
+                if (entry.Marker == KnownHostsMarker.Revoked && (isAuthority || entry.PublicKey.Span.SequenceEqual(certificate.PublicKey.Span)))
+                {
+                    return SshHostKeyVerdict.Reject($"The host certificate's {(isAuthority ? "authority" : "key")} is marked @revoked in known_hosts.");
+                }
+
+                trusted |= entry.Marker == KnownHostsMarker.CertAuthority && isAuthority;
+            }
+        }
+
+        if (!trusted)
+        {
+            return null;
+        }
+
+        return certificate.CheckForHost(name, Clock.GetUtcNow()) is { } problem
+            ? SshHostKeyVerdict.Reject($"The host certificate (key id '{certificate.KeyId}', authority {certificate.AuthorityFingerprint}) is not acceptable: {problem}.")
+            : SshHostKeyVerdict.Accept();
+    }
+
+    private async ValueTask<SshHostKeyVerdict> RecordAsync(string name, int port, SshHostKey key, CancellationToken cancellationToken)
+    {
         if (_userFiles.Count > 0)
         {
             await KnownHostsFile.AppendAsync(_userFiles[0], name, port, key.KeyType, key.PublicKey, HashNewEntries, cancellationToken).ConfigureAwait(false);

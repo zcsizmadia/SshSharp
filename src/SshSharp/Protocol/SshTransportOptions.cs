@@ -6,10 +6,12 @@ namespace SshSharp.Protocol;
 /// <summary>What a host key verifier is shown: the key the server proved possession of.</summary>
 /// <param name="Algorithm">The negotiated host key signature algorithm, for example <c>rsa-sha2-512</c>.</param>
 /// <param name="KeyType">The key type, for example <c>ssh-rsa</c>.</param>
-/// <param name="Blob">The key as sent on the wire (compare with a known_hosts entry).</param>
 /// <param name="Fingerprint">The OpenSSH SHA-256 fingerprint.</param>
 /// <param name="KeySizeBits">The key size in bits.</param>
-internal sealed record HostKeyInfo(string Algorithm, string KeyType, ReadOnlyMemory<byte> Blob, string Fingerprint, int KeySizeBits);
+/// <param name="Blob">The plain public key (for a certificate, the certified key).</param>
+/// <param name="Presented">What the server sent: the key, or its certificate.</param>
+/// <param name="Certificate">The host certificate, when the server presented one.</param>
+internal sealed record HostKeyInfo(string Algorithm, string KeyType, ReadOnlyMemory<byte> Blob, string Fingerprint, int KeySizeBits, ReadOnlyMemory<byte> Presented, SshCertificate? Certificate);
 
 /// <summary>Settings for <see cref="SshTransport"/>.</summary>
 internal sealed class SshTransportOptions

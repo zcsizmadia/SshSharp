@@ -174,9 +174,16 @@ public sealed partial class SshClient : IAsyncDisposable
         using var activity = SshTelemetry.Activities.StartActivity("SshSharp.Connect");
         var started = Stopwatch.GetTimestamp();
 
+        var preferences = options.AlgorithmPreferences ?? (options.FipsMode ? AlgorithmPreferences.Fips() : new AlgorithmPreferences());
+        if (await options.HostKeyVerifier.PrefersCertificatesAsync(host, port, options.HostKeyAlias, cancellationToken).ConfigureAwait(false))
+        {
+            // A certificate authority is trusted for this host: ask for its certificate first, as ssh does.
+            preferences = preferences.WithCertificateHostKeysFirst();
+        }
+
         var transportOptions = new SshTransportOptions
         {
-            Preferences = options.AlgorithmPreferences ?? (options.FipsMode ? AlgorithmPreferences.Fips() : new AlgorithmPreferences()),
+            Preferences = preferences,
             MinimumRsaBits = options.MinimumRsaBits,
             RekeyBytes = Math.Min(options.RekeyAfterBytes, SshClientOptions.MaxRekeyAfterBytes),
             RekeyInterval = options.RekeyAfterTime,
@@ -184,7 +191,7 @@ public sealed partial class SshClient : IAsyncDisposable
             TimeProvider = options.TimeProvider,
             VerifyHostKey = async (info, ct) =>
             {
-                var key = new SshHostKey(info.Algorithm, info.KeyType, info.Fingerprint, info.Blob, info.KeySizeBits);
+                var key = new SshHostKey(info.Algorithm, info.KeyType, info.Fingerprint, info.Blob, info.KeySizeBits) { Certificate = info.Certificate };
                 var verdict = await options.HostKeyVerifier.VerifyAsync(new SshHostKeyContext(host, port, options.HostKeyAlias, key), ct).ConfigureAwait(false);
                 if (!verdict.IsAccepted)
                 {
@@ -219,7 +226,7 @@ public sealed partial class SshClient : IAsyncDisposable
 
             return new SshClient(
                 connection, options, stream, leaveOpen, owner, transport.ServerIdentification!.Line,
-                new SshHostKey(hostKey.Algorithm, hostKey.KeyType, hostKey.Fingerprint, hostKey.Blob, hostKey.KeySizeBits), logger);
+                new SshHostKey(hostKey.Algorithm, hostKey.KeyType, hostKey.Fingerprint, hostKey.Blob, hostKey.KeySizeBits) { Certificate = hostKey.Certificate }, logger);
         }
         catch (Exception ex)
         {
