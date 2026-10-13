@@ -21,7 +21,7 @@ Console.WriteLine(result.StandardOutputText);
 
 - **Pure managed C#**, no native dependencies; .NET 8 and .NET 10, tested on Windows and Linux (x64 and Arm64) and macOS
   (Arm64); trimming- and Native AOT-compatible, with an AOT-compiled smoke test against a real server in CI.
-- **Async all the way:** `CancellationToken` on every operation, `IAsyncDisposable`, `System.IO.Pipelines` I/O with zero-copy
+- **Async all the way:** `CancellationToken` on every network operation, `IAsyncDisposable`, `System.IO.Pipelines` I/O with zero-copy
   packet handling.
 - **OpenSSH configuration:** `ssh_config` (`Host`, `Match`, `Include`, tokens) and `known_hosts` (hashed hosts,
   `@cert-authority`, `@revoked`), resolved like `ssh -G`.
@@ -53,13 +53,13 @@ Coming next: SFTP, as a separate package.
 | | SshSharp | SSH.NET 2026.0 |
 |---|---|---|
 | Target frameworks | .NET 8, .NET 10 | .NET Framework 4.6.2+, .NET Standard 2.0, .NET 8+ |
-| API | Async-only; `CancellationToken` on every operation | Mostly synchronous; async connect, commands and SFTP |
-| `ssh_config` (`Host`, `Match`, `Include`; connect by alias) | ✅ | — |
-| `known_hosts` verification (hashed hosts, `@cert-authority`, `@revoked`, `StrictHostKeyChecking`) | ✅ | — (verify in a `HostKeyReceived` handler) |
-| `UpdateHostKeys` (key rotation) | ✅ | — |
-| ProxyJump chains, ProxyCommand | ✅ | — (SOCKS4/5 and HTTP proxies) |
-| SSH agent (`ssh-agent`, Windows OpenSSH agent) | ✅ | — |
-| Agent forwarding | ✅ | — |
+| API | Async-only network API; `CancellationToken` on every network operation | Mostly synchronous; async connect, commands and SFTP |
+| `ssh_config` (`Host`, `Match`, `Include`; connect by alias) | ✅ | ❌ |
+| `known_hosts` verification (hashed hosts, `@cert-authority`, `@revoked`, `StrictHostKeyChecking`) | ✅ | ❌ (verify in a `HostKeyReceived` handler) |
+| `UpdateHostKeys` (key rotation) | ✅ | ❌ |
+| ProxyJump chains, ProxyCommand | ✅ | ❌ (SOCKS4/5 and HTTP proxies) |
+| SSH agent (`ssh-agent`, Windows OpenSSH agent) | ✅ | ❌ |
+| Agent forwarding | ✅ | ❌ |
 | Password, public key, keyboard-interactive, multi-factor | ✅ | ✅ |
 | OpenSSH certificates | User and host | User (authentication) |
 | Private key formats | OpenSSH, PKCS#1/#8, SEC1, PuTTY `.ppk` | OpenSSH, PKCS#1/#8, PuTTY `.ppk`, ssh.com |

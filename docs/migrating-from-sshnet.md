@@ -6,7 +6,7 @@ need (see "Why not SSH.NET?" in the README): it targets .NET 8 and later only, h
 
 The main differences:
 
-- **Async only.** Every operation is `async` and takes a `CancellationToken`. Clients, sessions and forwarders are
+- **Async only.** Every network operation is `async` and takes a `CancellationToken`. Clients, sessions and forwarders are
   `IAsyncDisposable`, so use `await using`.
 - **Connecting is one call.** `SshClient.ConnectAsync` returns a client that is already connected and authenticated. There is no
   separate constructor, `Connect` or `Disconnect`; disposing the client disconnects.
@@ -60,7 +60,7 @@ See [Connecting](connecting.md) for streams, jump hosts and timeouts.
 | `client.Disconnect()`, `Dispose()` | `await client.DisposeAsync()` |
 | `ConnectionInfo.Timeout` | a `CancellationToken` (for example `new CancellationTokenSource(TimeSpan.FromSeconds(10))`), or `ConnectTimeout` in `ssh_config` |
 | `client.KeepAliveInterval` | `SshClientOptions.KeepAliveInterval` and `KeepAliveCountMax` (`ServerAliveInterval` in `ssh_config`) |
-| `ConnectionInfo.Encryptions` / `KeyExchangeAlgorithms` / `HostKeyAlgorithms` (removing entries) | `SshClientOptions.AlgorithmPreferences`, or `Ciphers`, `KexAlgorithms`, `HostKeyAlgorithms` in `ssh_config` |
+| `ConnectionInfo.Encryptions` / `KeyExchangeAlgorithms` / `HostKeyAlgorithms` (removing entries) | `Ciphers`, `KexAlgorithms`, `HostKeyAlgorithms` in `ssh_config` (the defaults are modern only; `SshClientOptions.FipsMode` restricts them to FIPS algorithms) |
 | `ConnectionInfo.ProxyType` (SOCKS, HTTP) | not supported; use `ProxyJump`, `ProxyCommand`, or `SshClient.ConnectAsync(Stream, ...)` over a stream you open yourself |
 | `client.IsConnected` | `client.IsConnected`; `client.ConnectionClosed` (a `CancellationToken`) fires when the connection drops |
 | `client.ErrorOccurred` event | `client.ConnectionClosed` and `client.ConnectionError` |

@@ -10,7 +10,7 @@ M4 #5, M5 #6, M6 #7, plus individual issues).
 | Target frameworks | `net8.0` and `net10.0` only |
 | No `netstandard2.0` | The design depends on `Span`/`Memory` in the BCL APIs, Pipelines, `AesGcm`, `TimeProvider`, `SearchValues` and modern ECDH/RSA APIs. .NET Framework and Windows PowerShell 5.1 users stay on SSH.NET. |
 | Protocol | Pure managed C#, no native dependencies |
-| API style | Async-only for now: `CancellationToken` everywhere, `IAsyncDisposable`, no synchronous methods and no sync-over-async. An SSH.NET-shaped `SshSharp.Compat` package with synchronous wrappers may be revisited once the async API is stable. |
+| API style | Async-only for now: `CancellationToken` everywhere, `IAsyncDisposable`, no synchronous network methods and no sync-over-async (parsing local files such as `ssh_config` and `known_hosts` has synchronous helpers too). An SSH.NET-shaped `SshSharp.Compat` package with synchronous wrappers may be revisited once the async API is stable. |
 | Public API | Tracked in `PublicAPI.Shipped/Unshipped.txt` (PublicApiAnalyzers), so every public change shows in review; package validation on pack |
 | Test framework | TUnit (Microsoft.Testing.Platform) |
 | Coverage | Target 95%+ line and branch per assembly; reported, **not a CI gate**; reviewed locally with `scripts/coverage.ps1` |

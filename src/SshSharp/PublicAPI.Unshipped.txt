@@ -54,7 +54,7 @@ SshSharp.Config.SshConfig
 SshSharp.Config.SshConfig.Blocks.get -> System.Collections.Generic.IReadOnlyList<SshSharp.Config.SshConfigBlock!>!
 SshSharp.Config.SshConfig.Resolve(string! host, SshSharp.Config.SshConfigResolveOptions? options = null) -> SshSharp.Config.SshHostConfig!
 SshSharp.Config.SshConfigBlock
-SshSharp.Config.SshConfigBlock.Directives.get -> System.Collections.Generic.IList<SshSharp.Config.SshConfigDirective!>!
+SshSharp.Config.SshConfigBlock.Directives.get -> System.Collections.Generic.IReadOnlyList<SshSharp.Config.SshConfigDirective!>!
 SshSharp.Config.SshConfigBlock.HostPatterns.get -> System.Collections.Generic.IReadOnlyList<string!>?
 SshSharp.Config.SshConfigBlock.IsMatch.get -> bool
 SshSharp.Config.SshConfigBlock.MatchCriteria.get -> System.Collections.Generic.IReadOnlyList<string!>!

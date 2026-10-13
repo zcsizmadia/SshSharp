@@ -264,13 +264,13 @@ public sealed partial class SshClient
     private readonly List<SshSocksProxy> _dynamicForwardings = [];
 
     /// <summary>The <c>LocalForward</c> forwardings started from ssh_config (<see cref="SshConfigConnectOptions.StartForwardings"/>); disposed with the client.</summary>
-    public IReadOnlyList<SshPortForwarder> LocalForwardings => _localForwardings;
+    public IReadOnlyList<SshPortForwarder> LocalForwardings => _localForwardings.AsReadOnly();
 
     /// <summary>The <c>RemoteForward</c> forwardings started from ssh_config; disposed with the client.</summary>
-    public IReadOnlyList<SshRemotePortForwarder> RemoteForwardings => _remoteForwardings;
+    public IReadOnlyList<SshRemotePortForwarder> RemoteForwardings => _remoteForwardings.AsReadOnly();
 
     /// <summary>The <c>DynamicForward</c> SOCKS proxies started from ssh_config; disposed with the client.</summary>
-    public IReadOnlyList<SshSocksProxy> DynamicForwardings => _dynamicForwardings;
+    public IReadOnlyList<SshSocksProxy> DynamicForwardings => _dynamicForwardings.AsReadOnly();
 
     /// <summary>
     /// Starts the forwardings ssh_config names for this host. One that cannot be set up (a port in use, refused by the server, a form

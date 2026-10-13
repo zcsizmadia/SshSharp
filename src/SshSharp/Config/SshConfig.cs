@@ -32,7 +32,11 @@ public sealed class SshConfigBlock
     public IReadOnlyList<string> MatchCriteria { get; }
 
     /// <summary>The directives in this section, in order.</summary>
-    public IList<SshConfigDirective> Directives { get; } = [];
+    public IReadOnlyList<SshConfigDirective> Directives => _directives;
+
+    private readonly List<SshConfigDirective> _directives = [];
+
+    internal void Add(SshConfigDirective directive) => _directives.Add(directive);
 
     /// <summary>
     /// Whether a <c>Host</c> (or the global) section applies to <paramref name="host"/>: a positive pattern matches and no negated
@@ -98,7 +102,7 @@ public sealed class SshConfig
                 }
                 else
                 {
-                    blocks[^1].Directives.Add(new SshConfigDirective(keyword, args, rawValue, lineNumber));
+                    blocks[^1].Add(new SshConfigDirective(keyword, args, rawValue, lineNumber));
                 }
             }
             catch (FormatException ex)

@@ -15,6 +15,19 @@ public sealed record SshHostKey(string Algorithm, string KeyType, string Fingerp
     /// describe the certified key, which is what a plain known_hosts entry or a pinned fingerprint refers to.
     /// </summary>
     public SshCertificate? Certificate { get; init; }
+
+    /// <summary>Equal when they describe the same key: the key bytes are compared, not the buffers that hold them.</summary>
+    public bool Equals(SshHostKey? other) =>
+        other is not null
+        && Algorithm == other.Algorithm
+        && KeyType == other.KeyType
+        && Fingerprint == other.Fingerprint
+        && KeySizeBits == other.KeySizeBits
+        && PublicKey.Span.SequenceEqual(other.PublicKey.Span)
+        && Equals(Certificate, other.Certificate);
+
+    /// <inheritdoc/>
+    public override int GetHashCode() => HashCode.Combine(Algorithm, KeyType, Fingerprint, KeySizeBits);
 }
 
 /// <summary>Options for <see cref="SshClient"/>.</summary>
