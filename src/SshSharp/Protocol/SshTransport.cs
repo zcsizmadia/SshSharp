@@ -121,6 +121,8 @@ internal sealed class SshTransport : IAsyncDisposable
     /// <c>UNIMPLEMENTED</c> are skipped, <c>EXT_INFO</c> is recorded, a key re-exchange is carried out, and <c>DISCONNECT</c> raises an
     /// <see cref="SshException"/>. The caller must dispose the returned packet.
     /// </summary>
+    // Pooled: completes asynchronously for nearly every packet, and would otherwise allocate a state machine box each time.
+    [System.Runtime.CompilerServices.AsyncMethodBuilder(typeof(System.Runtime.CompilerServices.PoolingAsyncValueTaskMethodBuilder<>))]
     public async ValueTask<DecodedPacket> ReceiveAsync(CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -499,6 +501,8 @@ internal sealed class SshTransport : IAsyncDisposable
         _ = _rekeyDone.Task.Exception; // mark observed: nobody may be waiting
     }
 
+    // Pooled: completes asynchronously for nearly every packet, and would otherwise allocate a state machine box each time.
+    [System.Runtime.CompilerServices.AsyncMethodBuilder(typeof(System.Runtime.CompilerServices.PoolingAsyncValueTaskMethodBuilder<>))]
     private async ValueTask<DecodedPacket> ReadPacketAsync(CancellationToken cancellationToken)
     {
         while (true)

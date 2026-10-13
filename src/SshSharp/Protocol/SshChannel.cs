@@ -236,6 +236,8 @@ internal sealed class SshChannel
     /// <summary>With <see cref="SplitExtended"/>: the next chunk of stderr, or null at its end.</summary>
     public ValueTask<ChannelData?> ReadExtendedAsync(CancellationToken cancellationToken) => ReadQueueAsync(_extended, cancellationToken);
 
+    // Pooled: completes asynchronously for nearly every packet, and would otherwise allocate a state machine box each time.
+    [System.Runtime.CompilerServices.AsyncMethodBuilder(typeof(System.Runtime.CompilerServices.PoolingAsyncValueTaskMethodBuilder<>))]
     private static async ValueTask<ChannelData?> ReadQueueAsync(Channel<ChannelData> queue, CancellationToken cancellationToken)
     {
         while (await queue.Reader.WaitToReadAsync(cancellationToken).ConfigureAwait(false))
@@ -279,13 +281,16 @@ internal sealed class SshChannel
         }
 
         Interlocked.Add(ref _localWindow, adjust);
-        _connection.Post(Build(w =>
-        {
-            w.WriteByte(SshMessage.ChannelWindowAdjust);
-            w.WriteUInt32(RemoteId);
-            w.WriteUInt32((uint)adjust);
-        }));
+        PostWindowAdjust((uint)adjust);
     }
+
+    // A method of its own: a lambda capturing `adjust` in Consumed would allocate its closure on every call, which is every packet.
+    private void PostWindowAdjust(uint adjust) => _connection.Post(Build(w =>
+    {
+        w.WriteByte(SshMessage.ChannelWindowAdjust);
+        w.WriteUInt32(RemoteId);
+        w.WriteUInt32(adjust);
+    }));
 
     // ---- events from the connection's receive loop ----
 
