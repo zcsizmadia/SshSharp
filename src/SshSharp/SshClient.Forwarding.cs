@@ -51,12 +51,77 @@ public sealed partial class SshClient
         ValidateDestination(remoteHost, remotePort);
         ObjectDisposedException.ThrowIf(_disposed != 0, this);
         cancellationToken.ThrowIfCancellationRequested();
-        var forwarder = SshPortForwarder.Start(
-            localEndPoint, remoteHost, remotePort, _logger,
-            (origin, ct) => _connection.OpenDirectTcpIpAsync(remoteHost, remotePort, origin.Address.ToString(), origin.Port, ct),
-            _connection.Closed);
-        return Task.FromResult(forwarder);
+        var listener = LocalListener.Start(localEndPoint, (socket, ct) => OpenForwardedAsync(socket, remoteHost, remotePort, ct), _connection.Closed);
+        var bound = listener.LocalEndPoint.ToString();
+        SshLog.ForwardingStarted(_logger, bound, remotePort);
+        return Task.FromResult(new SshPortForwarder(listener, remoteHost, remotePort));
     }
+
+    /// <summary>
+    /// Dynamic port forwarding (<c>ssh -D</c>): runs a SOCKS proxy on <paramref name="localEndPoint"/> (SOCKS 4, 4a and 5, CONNECT,
+    /// no authentication). Each application connection names its destination, and the server makes the connection, so host names are
+    /// resolved on the server's side. Use a loopback address: the proxy has no authentication, so anyone who can reach it can use the
+    /// server's network.
+    /// </summary>
+    /// <exception cref="SocketException">The local endpoint could not be bound (for example the port is in use).</exception>
+    public Task<SshSocksProxy> ForwardDynamicPortAsync(IPEndPoint localEndPoint, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(localEndPoint);
+        ObjectDisposedException.ThrowIf(_disposed != 0, this);
+        cancellationToken.ThrowIfCancellationRequested();
+        var listener = LocalListener.Start(localEndPoint, OpenSocksAsync, _connection.Closed);
+        var bound = listener.LocalEndPoint.ToString();
+        SshLog.ForwardingStarted(_logger, bound, 0);
+        return Task.FromResult(new SshSocksProxy(listener));
+    }
+
+    /// <summary>The channel for one locally forwarded connection, or null (logged) when the server refuses it.</summary>
+    private async Task<SshChannel?> OpenForwardedAsync(Socket socket, string host, int port, CancellationToken cancellationToken)
+    {
+        var origin = (IPEndPoint)socket.RemoteEndPoint!;
+        try
+        {
+            return await _connection.OpenDirectTcpIpAsync(host, port, origin.Address.ToString(), origin.Port, cancellationToken).ConfigureAwait(false);
+        }
+        catch (SshException ex) when (ex.Reason == SshFailureReason.ChannelClosed)
+        {
+            // The target is unreachable, or forwarding is not allowed: drop this connection only.
+            SshLog.ForwardingRefused(_logger, port, ex.Message);
+            return null;
+        }
+    }
+
+    /// <summary>Reads a SOCKS request, opens the channel it names, and answers the application.</summary>
+    private async Task<SshChannel?> OpenSocksAsync(Socket socket, CancellationToken cancellationToken)
+    {
+        SocksRequest? request;
+        using (var handshake = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
+        {
+            handshake.CancelAfter(SocksHandshakeTimeout); // an application that connects and says nothing does not hold a slot forever
+            request = await SocksHandshake.ReadRequestAsync(socket, handshake.Token).ConfigureAwait(false);
+        }
+
+        if (request is not { } target)
+        {
+            return null;
+        }
+
+        var channel = await OpenForwardedAsync(socket, target.Host, target.Port, cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await SocksHandshake.ReplyAsync(socket, target, success: channel is not null, cancellationToken).ConfigureAwait(false);
+        }
+        catch when (channel is not null)
+        {
+            await channel.CloseAsync(CancellationToken.None).ConfigureAwait(false);
+            throw;
+        }
+
+        return channel;
+    }
+
+    /// <summary>How long a SOCKS application has to send its request.</summary>
+    internal static readonly TimeSpan SocksHandshakeTimeout = TimeSpan.FromSeconds(30);
 
     /// <summary>
     /// Remote port forwarding (<c>ssh -R</c>): asks the server to listen on <paramref name="bindAddress"/>:<paramref name="remotePort"/> and

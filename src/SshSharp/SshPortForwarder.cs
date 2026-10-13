@@ -1,6 +1,4 @@
 using System.Net;
-using System.Net.Sockets;
-using Microsoft.Extensions.Logging;
 using SshSharp.Protocol;
 
 namespace SshSharp;
@@ -12,33 +10,17 @@ namespace SshSharp;
 /// </summary>
 public sealed class SshPortForwarder : IAsyncDisposable
 {
-    private readonly Socket _listener;
-    private readonly ILogger _logger;
-    private readonly Func<IPEndPoint, CancellationToken, Task<SshChannel>> _open;
-    private readonly CancellationTokenSource _stop;
-    private readonly Task _acceptLoop;
-    private readonly HashSet<Task> _connections = [];
-    private readonly string _localText;
-    private int _disposed;
-    private int _active;
-    private volatile bool _listening = true;
+    private readonly LocalListener _listener;
 
-    private SshPortForwarder(Socket listener, string remoteHost, int remotePort, ILogger logger,
-        Func<IPEndPoint, CancellationToken, Task<SshChannel>> open, CancellationToken connectionClosed)
+    internal SshPortForwarder(LocalListener listener, string remoteHost, int remotePort)
     {
         _listener = listener;
-        _logger = logger;
-        _open = open;
-        LocalEndPoint = (IPEndPoint)listener.LocalEndPoint!;
-        _localText = LocalEndPoint.ToString();
         RemoteHost = remoteHost;
         RemotePort = remotePort;
-        _stop = CancellationTokenSource.CreateLinkedTokenSource(connectionClosed);
-        _acceptLoop = Task.Run(AcceptLoopAsync, CancellationToken.None); // the loop watches _stop itself
     }
 
     /// <summary>The local address and port being listened on (with the actual port when 0 was asked for).</summary>
-    public IPEndPoint LocalEndPoint { get; }
+    public IPEndPoint LocalEndPoint => _listener.LocalEndPoint;
 
     /// <summary>Where the server connects each forwarded connection to.</summary>
     public string RemoteHost { get; }
@@ -47,141 +29,33 @@ public sealed class SshPortForwarder : IAsyncDisposable
     public int RemotePort { get; }
 
     /// <summary>How many forwarded connections are open now.</summary>
-    public int ActiveConnections
-    {
-        get
-        {
-            return Volatile.Read(ref _active);
-        }
-    }
+    public int ActiveConnections => _listener.ActiveConnections;
 
-    /// <summary>Whether the listening socket is still open (for tests: a freed port may be reused by someone else at once).</summary>
-    internal bool IsListening => _listening;
-
-    internal static SshPortForwarder Start(IPEndPoint localEndPoint, string remoteHost, int remotePort, ILogger logger,
-        Func<IPEndPoint, CancellationToken, Task<SshChannel>> open, CancellationToken connectionClosed)
-    {
-        var listener = new Socket(localEndPoint.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
-        try
-        {
-            listener.Bind(localEndPoint);
-            listener.Listen(128);
-        }
-        catch
-        {
-            listener.Dispose();
-            throw;
-        }
-
-        var forwarder = new SshPortForwarder(listener, remoteHost, remotePort, logger, open, connectionClosed);
-        SshLog.ForwardingStarted(logger, forwarder._localText, remotePort);
-        return forwarder;
-    }
-
-    private async Task AcceptLoopAsync()
-    {
-        try
-        {
-            await AcceptConnectionsAsync().ConfigureAwait(false);
-        }
-        finally
-        {
-            // Stopped (disposed, or the SSH connection ended): stop listening too, so new connections are refused, not left in the backlog.
-            _listener.Dispose();
-            _listening = false;
-        }
-    }
-
-    private async Task AcceptConnectionsAsync()
-    {
-        while (!_stop.IsCancellationRequested)
-        {
-            Socket socket;
-            try
-            {
-                socket = await _listener.AcceptAsync(_stop.Token).ConfigureAwait(false);
-            }
-            catch (Exception ex) when (ex is OperationCanceledException or ObjectDisposedException or SocketException)
-            {
-                return;
-            }
-
-            socket.NoDelay = true;
-            Task connection;
-            lock (_connections)
-            {
-                Interlocked.Increment(ref _active);
-            connection = ForwardAsync(socket);
-                _connections.Add(connection);
-            }
-
-            _ = connection.ContinueWith(
-                done =>
-                {
-                    lock (_connections)
-                    {
-                        _connections.Remove(done);
-                    }
-                },
-                CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
-        }
-    }
-
-    /// <summary>Relays one accepted connection over a new channel until both sides have finished or either side fails or closes.</summary>
-    /// <summary>Counts the connection until it has finished, so <see cref="ActiveConnections"/> is exact once it is awaited.</summary>
-    private async Task ForwardAsync(Socket socket)
-    {
-        try
-        {
-            await ForwardCoreAsync(socket).ConfigureAwait(false);
-        }
-        finally
-        {
-            Interlocked.Decrement(ref _active);
-        }
-    }
-
-    private async Task ForwardCoreAsync(Socket socket)
-    {
-        await Task.Yield(); // off the accept loop
-        using (socket)
-        {
-            SshChannel channel;
-            try
-            {
-                channel = await _open((IPEndPoint)socket.RemoteEndPoint!, _stop.Token).ConfigureAwait(false);
-            }
-            catch (Exception ex) when (ex is SshException or OperationCanceledException or ObjectDisposedException)
-            {
-                // Refused by the server (the target is unreachable, or forwarding is not allowed): drop this connection only.
-                SshLog.ForwardingRefused(_logger, RemotePort, ex.Message);
-                return;
-            }
-
-            await SocketChannelRelay.RunAsync(socket, channel, _stop.Token).ConfigureAwait(false);
-        }
-    }
+    internal bool IsListening => _listener.IsListening;
 
     /// <summary>Stops listening and closes every forwarded connection.</summary>
-    public async ValueTask DisposeAsync()
-    {
-        if (Interlocked.Exchange(ref _disposed, 1) != 0)
-        {
-            return;
-        }
+    public ValueTask DisposeAsync() => _listener.DisposeAsync();
+}
 
-        await _stop.CancelAsync().ConfigureAwait(false);
-        _listener.Dispose();
-        await _acceptLoop.ConfigureAwait(false);
+/// <summary>
+/// A SOCKS proxy (dynamic forwarding, <c>ssh -D</c>) started by <see cref="SshClient.ForwardDynamicPortAsync"/>: applications connect to
+/// <see cref="LocalEndPoint"/> as a SOCKS 4, 4a or 5 proxy (CONNECT, no authentication), and each connection is made by the server to
+/// the address the application asked for. Dispose it to stop listening and close the connections.
+/// </summary>
+public sealed class SshSocksProxy : IAsyncDisposable
+{
+    private readonly LocalListener _listener;
 
-        Task[] open;
-        lock (_connections)
-        {
-            open = [.. _connections];
-        }
+    internal SshSocksProxy(LocalListener listener) => _listener = listener;
 
-        await Task.WhenAll(open).ConfigureAwait(false);
-        _stop.Dispose();
-        SshLog.ForwardingStopped(_logger, _localText);
-    }
+    /// <summary>The local address and port being listened on (with the actual port when 0 was asked for).</summary>
+    public IPEndPoint LocalEndPoint => _listener.LocalEndPoint;
+
+    /// <summary>How many proxied connections are open now.</summary>
+    public int ActiveConnections => _listener.ActiveConnections;
+
+    internal bool IsListening => _listener.IsListening;
+
+    /// <summary>Stops listening and closes every proxied connection.</summary>
+    public ValueTask DisposeAsync() => _listener.DisposeAsync();
 }

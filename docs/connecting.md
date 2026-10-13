@@ -90,6 +90,16 @@ address unless other machines should use the tunnel. Forwarding stops when the f
 connection ends. A server that does not allow forwarding (sshd's `AllowTcpForwarding no`) refuses each connection, and
 `OpenTcpTunnelAsync` throws an `SshException` with `SshFailureReason.ChannelClosed`.
 
+Dynamic forwarding (`ssh -D 1080`) runs a SOCKS proxy: applications name their destination, and the server makes each
+connection (and resolves the host names). SOCKS 4, 4a and 5 are supported, with CONNECT and no authentication.
+
+```csharp
+await using var proxy = await client.ForwardDynamicPortAsync(new IPEndPoint(IPAddress.Loopback, 1080));
+// for example: curl --socks5-hostname 127.0.0.1:1080 http://intranet.internal/
+```
+
+The proxy has no authentication, so anyone who can reach it can use the server's network: keep it on a loopback address.
+
 Remote port forwarding (`ssh -R 8080:localhost:3000`) is the other direction: the server listens, and each connection made
 to it is relayed to a host and port reached from this machine.
 
