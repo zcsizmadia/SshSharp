@@ -15,4 +15,8 @@ RekeyLimit 32K
 KexAlgorithms +diffie-hellman-group14-sha256,diffie-hellman-group16-sha512
 LogLevel DEBUG1
 CONFIG
+# OpenSSH 9.8+ shuts out an address after failed or unauthenticated connections, which the tests make on purpose.
+if /usr/sbin/sshd -T 2>/dev/null | grep -qi '^persourcepenalties '; then
+  echo "PerSourcePenalties no" >> /etc/ssh/sshd_config
+fi
 exec /usr/sbin/sshd -D -e
