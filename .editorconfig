@@ -25,3 +25,8 @@ dotnet_sort_system_directives_first = true
 # Underscores in test names are readable and conventional.
 dotnet_diagnostic.CA1707.severity = none
 dotnet_diagnostic.CA1861.severity = none
+
+[tests/SshSharp.Benchmarks/**.cs]
+# BenchmarkDotNet needs instance methods and public classes.
+dotnet_diagnostic.CA1822.severity = none
+dotnet_diagnostic.CA1812.severity = none
