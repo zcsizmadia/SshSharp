@@ -1,3 +1,6 @@
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+
 namespace SshSharp.Protocol;
 
 /// <summary>What a host key verifier is shown: the key the server proved possession of.</summary>
@@ -31,6 +34,9 @@ internal sealed class SshTransportOptions
 
     /// <summary>Start a new key exchange after the current keys have been in use this long (RFC 4253 section 9 recommends 1 hour).</summary>
     public TimeSpan RekeyInterval { get; init; } = TimeSpan.FromHours(1);
+
+    /// <summary>Where diagnostics go. Never receives secrets.</summary>
+    public ILogger Logger { get; init; } = NullLogger.Instance;
 
     /// <summary>The clock used for <see cref="RekeyInterval"/>; replaceable in tests.</summary>
     public TimeProvider TimeProvider { get; init; } = TimeProvider.System;

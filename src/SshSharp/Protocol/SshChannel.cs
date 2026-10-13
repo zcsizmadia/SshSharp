@@ -72,6 +72,14 @@ internal sealed class SshChannel
 
     public uint LocalId { get; }
 
+    private int _state; // 0 = not open yet, 1 = open, 2 = gone
+
+    /// <summary>Records that the channel is open. True the first time only.</summary>
+    internal bool TryMarkOpen() => Interlocked.CompareExchange(ref _state, 1, 0) == 0;
+
+    /// <summary>Records that an open channel is gone (closed or failed). True once, and only for channels that were open.</summary>
+    internal bool TryMarkGone() => Interlocked.CompareExchange(ref _state, 2, 1) == 1;
+
     public uint RemoteId { get; private set; }
 
     /// <summary>The command's exit status, from the peer's <c>exit-status</c> request.</summary>
@@ -215,24 +223,12 @@ internal sealed class SshChannel
         }
 
         Interlocked.Add(ref _localWindow, adjust);
-        _ = SendWindowAdjustAsync((uint)adjust);
-    }
-
-    private async Task SendWindowAdjustAsync(uint bytes)
-    {
-        try
+        _connection.Post(Build(w =>
         {
-            await _connection.SendAsync(Build(w =>
-            {
-                w.WriteByte(SshMessage.ChannelWindowAdjust);
-                w.WriteUInt32(RemoteId);
-                w.WriteUInt32(bytes);
-            }), CancellationToken.None).ConfigureAwait(false);
-        }
-        catch (SshException)
-        {
-            // The connection failed; nothing left to adjust.
-        }
+            w.WriteByte(SshMessage.ChannelWindowAdjust);
+            w.WriteUInt32(RemoteId);
+            w.WriteUInt32((uint)adjust);
+        }));
     }
 
     // ---- events from the connection's receive loop ----
@@ -267,16 +263,35 @@ internal sealed class SshChannel
 
     internal void OnEof() => _incoming.Writer.TryComplete();
 
-    internal async ValueTask OnCloseAsync()
+    internal void OnClose()
     {
         _remoteClosed = true;
         _incoming.Writer.TryComplete();
-        await CloseAsync().ConfigureAwait(false); // reply to the peer's CLOSE
+
+        // Reply to the peer's CLOSE (once), without waiting: this runs on the receive loop.
+        var reply = false;
+        lock (_lock)
+        {
+            if (!_closeSent)
+            {
+                _closeSent = true;
+                reply = true;
+            }
+        }
+
+        if (reply)
+        {
+            _connection.Post(Build(w =>
+            {
+                w.WriteByte(SshMessage.ChannelClose);
+                w.WriteUInt32(RemoteId);
+            }));
+        }
+
         _sendWindow.Fail(new SshException(SshFailureReason.ChannelClosed, "The channel is closed."));
         FailReplies(new SshException(SshFailureReason.ChannelClosed, "The channel was closed before the request was answered."));
         _closed.TrySetResult();
     }
-
     internal void OnReply(bool success)
     {
         TaskCompletionSource<bool>? reply;
@@ -288,7 +303,7 @@ internal sealed class SshChannel
         reply?.TrySetResult(success);
     }
 
-    internal async ValueTask OnRequestAsync(string type, bool wantReply, ReadOnlyMemory<byte> body)
+    internal void OnRequest(string type, bool wantReply, ReadOnlyMemory<byte> body)
     {
         var handled = false;
         try
@@ -313,14 +328,13 @@ internal sealed class SshChannel
 
         if (wantReply)
         {
-            await _connection.SendAsync(Build(w =>
+            _connection.Post(Build(w =>
             {
                 w.WriteByte(handled ? SshMessage.ChannelSuccess : SshMessage.ChannelFailure);
                 w.WriteUInt32(RemoteId);
-            }), CancellationToken.None).ConfigureAwait(false);
+            }));
         }
     }
-
     /// <summary>The connection failed: wake everything that is waiting.</summary>
     internal void Fail(Exception exception)
     {

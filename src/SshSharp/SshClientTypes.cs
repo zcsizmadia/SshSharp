@@ -1,3 +1,5 @@
+using Microsoft.Extensions.Logging;
+
 namespace SshSharp;
 
 /// <summary>The host key the server proved possession of during key exchange. Decide whether to trust it in <see cref="SshClientOptions.HostKeyVerifier"/>.</summary>
@@ -31,6 +33,15 @@ public sealed class SshClientOptions
 
     /// <summary>Negotiate new keys after the current ones have been in use this long. Default 1 hour (RFC 4253 section 9).</summary>
     public TimeSpan RekeyAfterTime { get; init; } = TimeSpan.FromHours(1);
+
+    /// <summary>Receives diagnostics (connection, algorithms, authentication outcome, channels, rekeys). Never receives passwords or command text. Default: no logging.</summary>
+    public ILogger? Logger { get; init; }
+
+    /// <summary>
+    /// Restrict key exchange, host key, cipher and MAC algorithms to FIPS-approved ones (NIST curves and DH groups, RSA/ECDSA, AES, HMAC-SHA2).
+    /// Curve25519, Ed25519 and ChaCha20-Poly1305 are excluded. This limits what is negotiated; it does not make the process FIPS-validated.
+    /// </summary>
+    public bool FipsMode { get; init; }
 
     internal Protocol.AlgorithmPreferences? AlgorithmPreferences { get; init; }
 

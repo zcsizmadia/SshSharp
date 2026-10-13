@@ -76,6 +76,7 @@ internal sealed class SshTransport : IAsyncDisposable
         _options.ClientIdentification.Write(_writer);
         await _writer.FlushAsync(cancellationToken).ConfigureAwait(false);
         ServerIdentification = await SshIdentification.ReadAsync(_reader, cancellationToken).ConfigureAwait(false);
+        SshLog.ServerIdentified(_options.Logger, ServerIdentification.Line);
 
         var clientInit = KexInitMessage.ForClient(_options.Preferences);
         var clientInitPayload = Serialize(clientInit.Write);
@@ -133,23 +134,27 @@ internal sealed class SshTransport : IAsyncDisposable
                     await RekeyFromPeerAsync(serverInit, cancellationToken).ConfigureAwait(false);
                     continue;
                 default:
+                    // A connection that mostly receives (a big download) must also re-key on its own: the threshold counts both directions.
+                    if (_connected && !_rekeying && RekeyDue())
+                    {
+                        await StartRekeyAsync(cancellationToken).ConfigureAwait(false);
+                    }
+
                     return packet;
             }
         }
     }
 
-    /// <summary>Replies <c>SSH_MSG_UNIMPLEMENTED</c> (RFC 4253 section 11.4) for the message that was just received.</summary>
-    public ValueTask SendUnimplementedAsync(CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Builds <c>SSH_MSG_UNIMPLEMENTED</c> (RFC 4253 section 11.4) for the message that was just received. It quotes that message's sequence
+    /// number, so it must be built right away; sending it can be deferred.
+    /// </summary>
+    public byte[] BuildUnimplemented() => Serialize(output =>
     {
-        var payload = Serialize(output =>
-        {
-            var writer = new SshWriter(output);
-            writer.WriteByte(SshMessage.Unimplemented);
-            writer.WriteUInt32(_receiveSequence - 1);
-        });
-        return SendPacketAsync(payload, kexMessage: true, cancellationToken);
-    }
-
+        var writer = new SshWriter(output);
+        writer.WriteByte(SshMessage.Unimplemented);
+        writer.WriteUInt32(_receiveSequence - 1);
+    });
     /// <summary>Tells the server we are leaving (<c>SSH_MSG_DISCONNECT</c>), best effort.</summary>
     public async ValueTask DisconnectAsync(DisconnectReason reason, string description, CancellationToken cancellationToken = default)
     {
@@ -214,6 +219,7 @@ internal sealed class SshTransport : IAsyncDisposable
 
         Algorithms = negotiated with { StrictKex = _strictKex };
         var strict = _strictKex;
+        SshLog.Negotiated(_options.Logger, negotiated.Kex, negotiated.HostKey, negotiated.CipherClientToServer, negotiated.CipherServerToClient, strict);
 
         if (negotiated.ServerGuessedWrong)
         {
@@ -279,6 +285,8 @@ internal sealed class SshTransport : IAsyncDisposable
         }
 
         KeyExchangeCount++;
+        SshTelemetry.KeyExchanges.Add(1);
+        SshLog.KeyExchangeCompleted(_options.Logger, KeyExchangeCount);
     }
 
     private bool RekeyDue() =>
@@ -296,6 +304,7 @@ internal sealed class SshTransport : IAsyncDisposable
                 return;
             }
 
+            SshLog.RekeyStarting(_options.Logger, "size or time threshold reached");
             await SendClientKexInitLockedAsync(cancellationToken).ConfigureAwait(false);
         }
         finally
@@ -314,6 +323,7 @@ internal sealed class SshTransport : IAsyncDisposable
         {
             if (!_rekeying)
             {
+                SshLog.RekeyStarting(_options.Logger, "requested by the server");
                 await SendClientKexInitLockedAsync(cancellationToken).ConfigureAwait(false);
             }
 
@@ -379,6 +389,7 @@ internal sealed class SshTransport : IAsyncDisposable
                     PacketCodec.Encode(_writer, payload.Span, _sendProtector, _sendSequence++);
                     await _writer.FlushAsync(cancellationToken).ConfigureAwait(false);
                     Interlocked.Add(ref _bytesSinceKex, payload.Length);
+                    SshTelemetry.BytesSent.Add(payload.Length);
                     return;
                 }
             }
@@ -408,6 +419,7 @@ internal sealed class SshTransport : IAsyncDisposable
                 }
 
                 Interlocked.Add(ref _bytesSinceKex, packet.Payload.Length);
+                SshTelemetry.BytesReceived.Add(packet.Payload.Length);
                 return packet;
             }
 
