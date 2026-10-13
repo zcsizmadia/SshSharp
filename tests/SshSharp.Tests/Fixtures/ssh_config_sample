@@ -1,0 +1,31 @@
+# global defaults before any Host
+ServerAliveInterval 30
+Host web
+  HostName web.example.com
+  User deploy
+  Port 2222
+  IdentityFile ~/.ssh/web_key
+  IdentityFile ~/.ssh/web_key2
+  IdentitiesOnly yes
+  ForwardAgent yes
+  LocalForward 8080 localhost:80
+  ProxyJump jump1,jump2:2200
+  SendEnv LANG LC_*
+  SetEnv A=1 B=two
+Host *.internal !secret.internal
+  User internal
+  StrictHostKeyChecking accept-new
+  ConnectTimeout 1m30s
+Host web
+  User ignored
+  Port 1
+  SetEnv A=9 C=3
+  IdentityFile %d/.ssh/%h_key
+Host *
+  User fallback
+  Ciphers +aes128-ctr
+  UserKnownHostsFile ~/.ssh/kh1 ~/.ssh/kh2
+  ProxyCommand ssh -W %h:%p "gate way"
+  AddressFamily inet
+  RequestTTY force
+  ServerAliveInterval 99
