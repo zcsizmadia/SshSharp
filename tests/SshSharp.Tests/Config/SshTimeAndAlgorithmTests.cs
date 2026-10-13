@@ -24,6 +24,8 @@ public class SshTimeAndAlgorithmTests
     [Arguments("")]
     [Arguments("abc")]
     [Arguments("5x")]
+    [Arguments("99999999999999w")] // found by the fuzzer: overflowed TimeSpan
+    [Arguments("2147483648")]
     [Arguments("m5")]
     [Arguments("-1")]
     [Arguments("99999999999999999999")]
