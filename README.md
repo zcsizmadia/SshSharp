@@ -70,7 +70,7 @@ Coming next: SFTP, as a separate package.
 | Local, remote and dynamic port forwarding | ✅ (also Unix-socket tunnels, and from `ssh_config`) | ✅ |
 | SCP | ✅ | ✅ |
 | SFTP | Planned (`SshSharp.Sftp`) | ✅ |
-| Native AOT | ✅ (AOT-compiled smoke test in CI) | Marked trimmable, not AOT-compatible |
+| Native AOT | ✅ (an AOT-compiled binary connects to a real server in CI) | ✅ (AOT-compatible; an AOT publish is checked in CI) |
 | Diagnostics | `ILogger`, `ActivitySource` tracing, `Meter` metrics | `ILogger` |
 | Maturity | New, pre-1.0; managed crypto awaiting an outside review | More than a decade of production use |
 
