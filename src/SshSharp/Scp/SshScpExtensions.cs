@@ -402,14 +402,36 @@ public static class SshScpExtensions
     /// A name from (or for) a control line must be a single path component: not empty, <c>.</c> or <c>..</c>, without separators (either
     /// kind, whatever this system uses), drive colons or control characters. This is what keeps a malicious server's names inside the target.
     /// </summary>
-    internal static string CheckName(string name)
+    internal static string CheckName(string name) => CheckName(name, OperatingSystem.IsWindows());
+
+    /// <summary>
+    /// <see cref="CheckName(string)"/>, with Windows' rules too when <paramref name="windows"/> is set: no device names (<c>CON</c>,
+    /// <c>NUL</c>, <c>COM1</c>, ..., with or without an extension), which would write to a device instead of a file, and no trailing dot
+    /// or space, which Windows strips (so <c>a.</c> would overwrite <c>a</c>).
+    /// </summary>
+    internal static string CheckName(string name, bool windows)
     {
-        if (name.Length == 0 || name is "." or ".." || name.Any(c => c is '/' or '\\' or ':' || char.IsControl(c)))
+        if (name.Length == 0 || name is "." or ".." || name.Any(c => c is '/' or '\\' or ':' || char.IsControl(c))
+            || (windows && (name[^1] is '.' or ' ' || IsWindowsDeviceName(name))))
         {
             throw new SshException(SshFailureReason.TransferFailed, $"'{name}' is not an acceptable file name.");
         }
 
         return name;
+    }
+
+    private static bool IsWindowsDeviceName(string name)
+    {
+        // The part before the first dot decides ("nul.txt" is NUL too); trailing spaces are ignored there as well.
+        var stem = name.Split('.')[0].TrimEnd(' ').ToUpperInvariant();
+        if (stem is "CON" or "PRN" or "AUX" or "NUL" or "CONIN$" or "CONOUT$")
+        {
+            return true;
+        }
+
+        // COM0-COM9 and LPT0-LPT9, including the superscript digits Windows also treats as device numbers.
+        return stem.Length == 4 && (stem.StartsWith("COM", StringComparison.Ordinal) || stem.StartsWith("LPT", StringComparison.Ordinal))
+            && stem[3] is (>= '0' and <= '9') or '¹' or '²' or '³';
     }
 
     /// <summary><c>Cmmmm size name</c> or <c>Dmmmm 0 name</c>, without the type letter; null when malformed.</summary>

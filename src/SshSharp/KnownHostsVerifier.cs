@@ -329,6 +329,12 @@ public sealed class KnownHostsVerifier : SshHostKeyVerifier
 
     private async ValueTask<SshHostKeyVerdict> RecordAsync(string name, int port, SshHostKey key, CancellationToken cancellationToken)
     {
+        if (!KnownHostsEntry.IsLiteralHost(name))
+        {
+            // Recorded as is, the name would be a pattern (or extra hosts or lines) trusting this key for other hosts.
+            return SshHostKeyVerdict.Reject("The host name cannot be recorded in known_hosts (it contains white space, ',', '*', '?' or '!').");
+        }
+
         if (_userFiles.Count > 0)
         {
             await KnownHostsFile.AppendAsync(_userFiles[0], name, port, key.KeyType, key.PublicKey, HashNewEntries, cancellationToken).ConfigureAwait(false);

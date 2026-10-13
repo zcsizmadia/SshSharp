@@ -22,6 +22,8 @@ public class SshConfigHardeningTests
     [Arguments("-oProxyCommand=evil")]
     [Arguments("a\nb")]
     [Arguments("a'b")]
+    [Arguments("x -e sh")] // a space would split %h into extra arguments
+    [Arguments("x\t-e")]
     public async Task HostNamesThatWouldBeShellSyntax_AreRefused(string host)
     {
         // %h/%n go into Match exec and ProxyCommand, which run in a shell (CVE-2023-51385).
