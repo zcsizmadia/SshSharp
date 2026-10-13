@@ -10,9 +10,9 @@ public class FaultInteropTests
 {
     private static CancellationToken Timeout() => new CancellationTokenSource(TimeSpan.FromSeconds(90)).Token;
 
-    private static async Task<(FaultyProxy Proxy, SshClientOptions Options)?> SetUpAsync(TimeSpan? keepAlive = null)
+    private static async Task<(FaultyProxy Proxy, SshClientOptions Options)?> SetUpAsync(TimeSpan? keepAlive = null, int keepAliveCountMax = 3)
     {
-        if (await RealServer.OptionsAsync(keepAlive: keepAlive) is not { } options)
+        if (await RealServer.OptionsAsync(keepAlive: keepAlive, keepAliveCountMax: keepAliveCountMax) is not { } options)
         {
             return null;
         }
@@ -49,7 +49,9 @@ public class FaultInteropTests
     [Test]
     public async Task ASilentNetwork_IsDetectedByKeepAlive()
     {
-        if (await SetUpAsync(keepAlive: TimeSpan.FromSeconds(1)) is not var (proxy, options))
+        // A busy CI runner's sshd has gone 4 s without answering anything (1 s x 3 declared a healthy connection dead before the stall):
+        // 2 s x 4 needs 10 s of silence, and still detects the stall well within the test's time.
+        if (await SetUpAsync(keepAlive: TimeSpan.FromSeconds(2), keepAliveCountMax: 4) is not var (proxy, options))
         {
             Skip.Test("SSHSHARP_TEST_SSHD and an account are needed.");
             return;
