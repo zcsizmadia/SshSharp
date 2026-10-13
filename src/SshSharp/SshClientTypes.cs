@@ -26,6 +26,12 @@ public sealed class SshClientOptions
     /// <summary>The most output (stdout plus stderr) <see cref="SshClient.RunCommandAsync"/> will collect before failing. Default 128 MiB.</summary>
     public long MaxCommandOutputBytes { get; init; } = 128L * 1024 * 1024;
 
+    /// <summary>Negotiate new keys after this many bytes have been transferred under the current ones. Default 1 GiB (RFC 4253 section 9).</summary>
+    public long RekeyAfterBytes { get; init; } = 1L << 30;
+
+    /// <summary>Negotiate new keys after the current ones have been in use this long. Default 1 hour (RFC 4253 section 9).</summary>
+    public TimeSpan RekeyAfterTime { get; init; } = TimeSpan.FromHours(1);
+
     internal Protocol.AlgorithmPreferences? AlgorithmPreferences { get; init; }
 
     internal int MinimumRsaBits { get; init; } = 2048;

@@ -25,4 +25,13 @@ internal sealed class SshTransportOptions
 
     /// <summary>RSA host keys smaller than this are rejected.</summary>
     public int MinimumRsaBits { get; init; } = 2048;
+
+    /// <summary>Start a new key exchange after this many payload bytes have been sent and received under the current keys (RFC 4253 section 9 recommends 1 GiB).</summary>
+    public long RekeyBytes { get; init; } = 1L << 30;
+
+    /// <summary>Start a new key exchange after the current keys have been in use this long (RFC 4253 section 9 recommends 1 hour).</summary>
+    public TimeSpan RekeyInterval { get; init; } = TimeSpan.FromHours(1);
+
+    /// <summary>The clock used for <see cref="RekeyInterval"/>; replaceable in tests.</summary>
+    public TimeProvider TimeProvider { get; init; } = TimeProvider.System;
 }

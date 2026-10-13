@@ -55,6 +55,7 @@ jobs:
           echo "SSHSHARP_TEST_PASSWORD=$PASSWORD" >> "$GITHUB_ENV"
           echo "SSHSHARP_TEST_USER=sshsharp" >> "$GITHUB_ENV"
           echo "SSHSHARP_TEST_SSHD=127.0.0.1:2222" >> "$GITHUB_ENV"
+          echo "SSHSHARP_TEST_SSHD_REKEY=1" >> "$GITHUB_ENV"
           sudo useradd -m -s /bin/bash sshsharp
           echo "sshsharp:$PASSWORD" | sudo chpasswd
           sudo ssh-keygen -A
@@ -69,6 +70,7 @@ jobs:
           UsePAM yes
           MaxStartups 200:30:300
           MaxSessions 64
+          RekeyLimit 32K
           KexAlgorithms +diffie-hellman-group14-sha256,diffie-hellman-group16-sha512
           LogLevel DEBUG1
           EOF

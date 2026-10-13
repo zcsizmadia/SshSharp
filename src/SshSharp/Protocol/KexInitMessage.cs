@@ -87,8 +87,11 @@ internal sealed class KexInitMessage
         writer.WriteUInt32(0);
     }
 
-    /// <summary>Builds a client KEXINIT from preferences, with a fresh random cookie and the strict-KEX and ext-info markers.</summary>
-    public static KexInitMessage ForClient(AlgorithmPreferences preferences)
+    /// <summary>
+    /// Builds a client KEXINIT from preferences, with a fresh random cookie. The first exchange of a connection also carries the strict-KEX and ext-info markers;
+    /// later ones (re-exchanges) must not.
+    /// </summary>
+    public static KexInitMessage ForClient(AlgorithmPreferences preferences, bool initial = true)
     {
         ArgumentNullException.ThrowIfNull(preferences);
         var cookie = new byte[CookieSize];
@@ -96,7 +99,7 @@ internal sealed class KexInitMessage
         return new KexInitMessage
         {
             Cookie = cookie,
-            KexAlgorithms = [.. preferences.Kex, SshAlgorithms.ExtInfoClient, SshAlgorithms.StrictKexClient],
+            KexAlgorithms = initial ? [.. preferences.Kex, SshAlgorithms.ExtInfoClient, SshAlgorithms.StrictKexClient] : [.. preferences.Kex],
             ServerHostKeyAlgorithms = preferences.HostKeys,
             EncryptionClientToServer = preferences.Ciphers,
             EncryptionServerToClient = preferences.Ciphers,
