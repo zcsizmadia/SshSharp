@@ -504,3 +504,8 @@ SshSharp.SshRemotePortForwarder.DisposeAsync() -> System.Threading.Tasks.ValueTa
 SshSharp.SshRemotePortForwarder.LocalHost.get -> string!
 SshSharp.SshRemotePortForwarder.LocalPort.get -> int
 SshSharp.SshRemotePortForwarder.Port.get -> int
+SshSharp.SshClient.ForwardDynamicPortAsync(System.Net.IPEndPoint! localEndPoint, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SshSharp.SshSocksProxy!>!
+SshSharp.SshSocksProxy
+SshSharp.SshSocksProxy.ActiveConnections.get -> int
+SshSharp.SshSocksProxy.DisposeAsync() -> System.Threading.Tasks.ValueTask
+SshSharp.SshSocksProxy.LocalEndPoint.get -> System.Net.IPEndPoint!

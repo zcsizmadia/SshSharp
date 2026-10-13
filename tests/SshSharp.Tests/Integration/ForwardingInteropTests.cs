@@ -95,6 +95,40 @@ public class ForwardingInteropTests
     }
 
     [Test]
+    public async Task TheSocksProxy_ReachesTheServersOwnSshd()
+    {
+        await using var client = await ConnectAsync();
+        if (client is null)
+        {
+            Skip.Test("SSHSHARP_TEST_SSHD and SSHSHARP_TEST_USER with a password or key are needed.");
+            return;
+        }
+
+        await using var proxy = await client.ForwardDynamicPortAsync(new IPEndPoint(IPAddress.Loopback, 0), Timeout());
+        using var socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+        await socket.ConnectAsync(proxy.LocalEndPoint, Timeout());
+
+        // SOCKS 5, no authentication, CONNECT by name: "localhost" is resolved by the server.
+        await socket.SendAsync(new byte[] { 5, 1, 0 }, SocketFlags.None, Timeout());
+        var choice = new byte[2];
+        await socket.ReceiveAsync(choice, SocketFlags.None, Timeout());
+        var name = "localhost"u8.ToArray();
+        var port = ServerSidePort;
+        await socket.SendAsync((byte[])[5, 1, 0, 3, (byte)name.Length, .. name, (byte)(port >> 8), (byte)port], SocketFlags.None, Timeout());
+        var reply = new byte[10];
+        var read = 0;
+        while (read < reply.Length)
+        {
+            read += await socket.ReceiveAsync(reply.AsMemory(read), SocketFlags.None, Timeout());
+        }
+
+        await Assert.That(choice).IsEquivalentTo(new byte[] { 5, 0 });
+        await Assert.That(reply[1]).IsEqualTo((byte)0); // succeeded
+        var identification = await ReadLineAsync(buffer => socket.ReceiveAsync(buffer, SocketFlags.None, Timeout()));
+        await Assert.That(identification).StartsWith("SSH-2.0-");
+    }
+
+    [Test]
     public async Task LocalForwarding_ReachesTheServersOwnSshd()
     {
         await using var client = await ConnectAsync();

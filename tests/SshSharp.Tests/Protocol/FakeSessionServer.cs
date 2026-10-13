@@ -212,7 +212,10 @@ internal sealed class FakeSessionServer : IAsyncDisposable
     /// </summary>
     public async Task<Stream?> ConnectForwardedAsync(int port, string connectedAddress = "localhost", string originator = "203.0.113.7", int originatorPort = 50123)
     {
-        var channel = new ServerChannel(_nextId++) { Opened = new(TaskCreationOptions.RunContinuationsAsynchronously) };
+        // The tunnel is attached before the open is sent: the client may confirm and close at once (nothing listening locally), and a
+        // CLOSE handled before the tunnel was attached would leave the far end waiting forever.
+        var (near, far) = DuplexStream.CreatePair();
+        var channel = new ServerChannel(_nextId++) { Opened = new(TaskCreationOptions.RunContinuationsAsynchronously), Tunnel = near };
         lock (_channels)
         {
             _channels[channel.Id] = channel;
@@ -232,11 +235,11 @@ internal sealed class FakeSessionServer : IAsyncDisposable
         }));
         if (!await channel.Opened!.Task.WaitAsync(TimeSpan.FromSeconds(30)))
         {
+            await near.DisposeAsync();
+            await far.DisposeAsync();
             return null;
         }
 
-        var (near, far) = DuplexStream.CreatePair();
-        channel.Tunnel = near;
         _ = Task.Run(() => PumpTunnelAsync(channel, near));
         return far;
     }
