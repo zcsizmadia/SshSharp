@@ -57,6 +57,23 @@ public class NistCurveTests
     }
 
     [Test]
+    [MethodDataSource(nameof(Curves))]
+    public async Task TheCurveConstantMatchesPointsGeneratedByThePlatform(string name)
+    {
+        // For y^2 = x^3 - 3x + b, any valid point determines b. This checks the typed-in b (and p) on every platform.
+        var curve = NistCurve.FromSshName(name);
+        for (var i = 0; i < 5; i++)
+        {
+            var (xBytes, yBytes) = NewPoint(curve);
+            var x = new System.Numerics.BigInteger(xBytes, isUnsigned: true, isBigEndian: true);
+            var y = new System.Numerics.BigInteger(yBytes, isUnsigned: true, isBigEndian: true);
+            var p = curve.Prime;
+            var b = (((y * y) - (x * x * x) + (3 * x)) % p + p) % p;
+            await Assert.That(b).IsEqualTo(curve.B);
+        }
+    }
+
+    [Test]
     public async Task KnownGeneratorOfP256IsOnTheCurve()
     {
         var gx = Convert.FromHexString("6B17D1F2E12C4247F8BCE6E563A440F277037D812DEB33A0F4A13945D898C296");
