@@ -150,14 +150,17 @@ public sealed class KnownHostsFile
     /// host patterns only this host's pattern is removed. Lines that match only through a wildcard are kept, because they also cover
     /// other hosts, and <c>@cert-authority</c>/<c>@revoked</c> lines are never touched. Returns the number of entries changed or removed.
     /// </summary>
-    public int Remove(string host, int port = 22)
+    public int Remove(string host, int port = 22) => Remove(host, port, _ => true);
+
+    /// <summary>Like <see cref="Remove(string, int)"/>, limited to the entries <paramref name="which"/> selects (by key, for example).</summary>
+    internal int Remove(string host, int port, Func<KnownHostsEntry, bool> which)
     {
         var name = KnownHostsEntry.FormatHost(host, port);
         var count = 0;
         for (var i = _lines.Count - 1; i >= 0; i--)
         {
             var entry = _lines[i].Entry;
-            if (entry is null || entry.Marker != KnownHostsMarker.None || !entry.Matches(host, port))
+            if (entry is null || entry.Marker != KnownHostsMarker.None || !entry.Matches(host, port) || !which(entry))
             {
                 continue;
             }

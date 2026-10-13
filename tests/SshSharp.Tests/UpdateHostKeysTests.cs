@@ -148,6 +148,154 @@ public sealed class UpdateHostKeysTests : IDisposable
         await Assert.That(KnownHostsVerifier.FromConfig(SshConfig.Parse("Port 22\n").Resolve("h", resolve)).UpdateHostKeys).IsFalse();
     }
 
+    private async Task<SshClient> ConnectAsync(FakeSessionServer server, Func<SshHostKeyUpdate, CancellationToken, ValueTask<bool>>? confirm)
+    {
+        _ = server.StartAsync();
+        return await SshClient.ConnectAsync(server.ClientStream, new SshClientOptions
+        {
+            UserName = "tester",
+            Password = "secret",
+            HostKeyAlias = Host,
+            HostKeyVerifier = new KnownHostsVerifier([KnownHosts]) { Policy = StrictHostKeyChecking.Yes, UpdateHostKeys = true, ConfirmHostKeyUpdate = confirm },
+        }, leaveOpen: true, Timeout());
+    }
+
+    /// <summary>All lines of the file once it has the expected number, read safely while the update may still be writing.</summary>
+    private async Task<string[]> WaitForLinesAsync(Func<string[], bool> done)
+    {
+        string[] lines = [];
+        for (var i = 0; i < 500; i++)
+        {
+            try
+            {
+                using var stream = new FileStream(KnownHosts, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                using var reader = new StreamReader(stream);
+                lines = [.. (await reader.ReadToEndAsync()).Split('\n').Where(l => l.Length > 0)];
+                if (done(lines))
+                {
+                    return lines;
+                }
+            }
+            catch (IOException)
+            {
+                // Mid-replace.
+            }
+
+            await Task.Delay(10);
+        }
+
+        return lines;
+    }
+
+    [Test]
+    public async Task KeysTheServerNoLongerAnnounces_AreRemoved_AndOtherLinesKept()
+    {
+        var current = FakeHostKey.Ed25519();
+        var retired = FakeHostKey.Ecdsa(256);
+        var added = FakeHostKey.Rsa(2048);
+        var wildcardKey = FakeHostKey.Ecdsa(384);
+        File.WriteAllText(KnownHosts, string.Join(string.Empty,
+            "# keys for the rotating host\n",
+            Line(current),
+            Line(retired),
+            $"*.example.com {wildcardKey.KeyType} {Convert.ToBase64String(wildcardKey.Blob)}\n", // also about other hosts: kept
+            $"@revoked {Host} {retired.KeyType} {Convert.ToBase64String(retired.Blob)}\n", // a marker line: kept
+            $"{KnownHostsEntry.HashHost(Host, 22)} {retired.KeyType} {Convert.ToBase64String(retired.Blob)}\n")); // hashed, this host: removed
+        await using var server = new FakeSessionServer(new FakeServerOptions { HostKey = current }) { AnnouncedHostKeys = [current, added] };
+        await using var client = await ConnectAsync(server, update: true);
+
+        var lines = await WaitForLinesAsync(l => l.Any(x => x.Contains(added.KeyType, StringComparison.Ordinal)) && l.Length == 5);
+        await Assert.That(lines).IsEquivalentTo(new[]
+        {
+            "# keys for the rotating host",
+            Line(current).TrimEnd(),
+            $"*.example.com {wildcardKey.KeyType} {Convert.ToBase64String(wildcardKey.Blob)}",
+            $"@revoked {Host} {retired.KeyType} {Convert.ToBase64String(retired.Blob)}",
+            Line(added).TrimEnd(),
+        });
+    }
+
+    [Test]
+    public async Task TheKeyInUse_IsKept_EvenWhenTheServerLeavesItOut()
+    {
+        var current = FakeHostKey.Ed25519();
+        var other = FakeHostKey.Ecdsa(256);
+        File.WriteAllText(KnownHosts, Line(current) + Line(other));
+        await using var server = new FakeSessionServer(new FakeServerOptions { HostKey = current }) { AnnouncedHostKeys = [other] };
+        await using var client = await ConnectAsync(server, update: true);
+        await client.RunCommandAsync("sync", Timeout());
+        await Task.Delay(200);
+        await Assert.That(Recorded()).IsEquivalentTo(new[] { Line(current).TrimEnd(), Line(other).TrimEnd() });
+    }
+
+    [Test]
+    public async Task AnUpdate_WaitsForConfirmation_WithTheFingerprints()
+    {
+        var current = FakeHostKey.Ed25519();
+        var retired = FakeHostKey.Ecdsa(256);
+        var added = FakeHostKey.Ecdsa(384);
+        var original = Line(current) + Line(retired);
+
+        // Declined: nothing changes.
+        File.WriteAllText(KnownHosts, original);
+        var asked = new TaskCompletionSource<SshHostKeyUpdate>();
+        await using (var server = new FakeSessionServer(new FakeServerOptions { HostKey = current }) { AnnouncedHostKeys = [current, added] })
+        await using (var client = await ConnectAsync(server, (update, _) =>
+        {
+            asked.TrySetResult(update);
+            return ValueTask.FromResult(false);
+        }))
+        {
+            var update = await asked.Task.WaitAsync(Timeout());
+            await Assert.That(update.Host).IsEqualTo(Host);
+            await Assert.That(update.Port).IsEqualTo(22);
+            await Assert.That(update.Added.Single()).IsEqualTo($"ecdsa-sha2-nistp384 {Fingerprint(added)}");
+            await Assert.That(update.Removed.Single()).IsEqualTo($"ecdsa-sha2-nistp256 {Fingerprint(retired)}");
+            await Task.Delay(200);
+            await Assert.That(File.ReadAllText(KnownHosts)).IsEqualTo(original);
+        }
+
+        // Confirmed: applied.
+        await using (var server = new FakeSessionServer(new FakeServerOptions { HostKey = current }) { AnnouncedHostKeys = [current, added] })
+        await using (var client = await ConnectAsync(server, (_, _) => ValueTask.FromResult(true)))
+        {
+            var lines = await WaitForLinesAsync(l => l.Length == 2 && l.Any(x => x.Contains("nistp384", StringComparison.Ordinal)));
+            await Assert.That(lines).IsEquivalentTo(new[] { Line(current).TrimEnd(), Line(added).TrimEnd() });
+        }
+    }
+
+    [Test]
+    public async Task AnAnnouncementWithNothingUsable_ChangesNothing()
+    {
+        var current = FakeHostKey.Ed25519();
+        var other = FakeHostKey.Ecdsa(256);
+        File.WriteAllText(KnownHosts, Line(current) + Line(other));
+        await using var server = new FakeSessionServer(new FakeServerOptions { HostKey = current }) { AnnouncedHostKeys = [] };
+        await using var client = await ConnectAsync(server, update: true);
+        await client.RunCommandAsync("sync", Timeout());
+        await Task.Delay(200);
+        await Assert.That(Recorded().Length).IsEqualTo(2);
+    }
+
+    [Test]
+    public async Task SshConfig_UpdateHostKeysAsk_IsOnOnlyWithAConfirmation()
+    {
+        var resolve = new SshConfigResolveOptions { LocalUser = "l", HomeDirectory = _dir };
+        var config = SshConfig.Parse("UpdateHostKeys ask\n").Resolve("h", resolve);
+        await Assert.That(KnownHostsVerifier.FromConfig(config, ask: null, confirmUpdate: null).UpdateHostKeys).IsFalse();
+        var withConfirm = KnownHostsVerifier.FromConfig(config, ask: null, confirmUpdate: (_, _) => ValueTask.FromResult(true));
+        await Assert.That(withConfirm.UpdateHostKeys).IsTrue();
+        await Assert.That(withConfirm.ConfirmHostKeyUpdate is not null).IsTrue();
+
+        // With "yes", a confirmation callback is not used: yes means without asking.
+        var yes = KnownHostsVerifier.FromConfig(SshConfig.Parse("UpdateHostKeys yes\n").Resolve("h", resolve), ask: null, confirmUpdate: (_, _) => ValueTask.FromResult(false));
+        await Assert.That(yes.UpdateHostKeys).IsTrue();
+        await Assert.That(yes.ConfirmHostKeyUpdate is null).IsTrue();
+    }
+
+    private static string Fingerprint(FakeHostKey key) =>
+        "SHA256:" + Convert.ToBase64String(System.Security.Cryptography.SHA256.HashData(key.Blob)).TrimEnd('=');
+
     private static bool Proved(FakeSessionServer server)
     {
         lock (server.GlobalRequests)

@@ -2,6 +2,30 @@ using SshSharp.Config;
 
 namespace SshSharp;
 
+/// <summary>A change to known_hosts that <see cref="KnownHostsVerifier.UpdateHostKeys"/> is about to make, for <see cref="KnownHostsVerifier.ConfirmHostKeyUpdate"/>.</summary>
+public sealed class SshHostKeyUpdate
+{
+    internal SshHostKeyUpdate(string host, int port, IReadOnlyList<string> added, IReadOnlyList<string> removed)
+    {
+        Host = host;
+        Port = port;
+        Added = added;
+        Removed = removed;
+    }
+
+    /// <summary>The host (or <c>HostKeyAlias</c>) the keys are recorded under.</summary>
+    public string Host { get; }
+
+    /// <summary>The port the keys are recorded for.</summary>
+    public int Port { get; }
+
+    /// <summary>The keys to add (type and SHA-256 fingerprint, as <c>ssh-keygen -l</c> prints them), each proven by the server.</summary>
+    public IReadOnlyList<string> Added { get; }
+
+    /// <summary>The keys to remove, which the server no longer announces.</summary>
+    public IReadOnlyList<string> Removed { get; }
+}
+
 /// <summary>Why a <see cref="KnownHostsVerifier"/> in <see cref="StrictHostKeyChecking.Ask"/> mode is asking.</summary>
 public sealed class SshHostKeyPrompt
 {
@@ -68,30 +92,35 @@ public sealed class KnownHostsVerifier : SshHostKeyVerifier
 
     /// <summary>The files, policy and hashing from a resolved <c>ssh_config</c> (<c>UserKnownHostsFile</c>, <c>GlobalKnownHostsFile</c>,
     /// <c>StrictHostKeyChecking</c>, <c>HashKnownHosts</c>).</summary>
-    public static KnownHostsVerifier FromConfig(SshHostConfig config) => FromConfig(config, ask: null);
+    public static KnownHostsVerifier FromConfig(SshHostConfig config) => FromConfig(config, ask: null, confirmUpdate: null);
 
-    internal static KnownHostsVerifier FromConfig(SshHostConfig config, Func<SshHostKeyPrompt, CancellationToken, ValueTask<bool>>? ask)
+    internal static KnownHostsVerifier FromConfig(SshHostConfig config, Func<SshHostKeyPrompt, CancellationToken, ValueTask<bool>>? ask,
+        Func<SshHostKeyUpdate, CancellationToken, ValueTask<bool>>? confirmUpdate)
     {
         ArgumentNullException.ThrowIfNull(config);
         var hash = config.Options.TryGetValue("hashknownhosts", out var value) && value.Count > 0
             && value[0].ToLowerInvariant() is "yes" or "true";
-        // UpdateHostKeys "ask" needs a person to confirm each key; a library treats it like "no".
-        var update = config.Options.TryGetValue("updatehostkeys", out var updateValue) && updateValue.Count > 0
-            && updateValue[0].ToLowerInvariant() is "yes" or "true";
+
+        // UpdateHostKeys "ask" needs someone to confirm: it is on only when there is a callback to ask.
+        var setting = config.Options.TryGetValue("updatehostkeys", out var updateValue) && updateValue.Count > 0 ? updateValue[0].ToLowerInvariant() : "no";
+        var update = setting is "yes" or "true" || (setting == "ask" && confirmUpdate is not null);
         return new KnownHostsVerifier(config.UserKnownHostsFiles, config.GlobalKnownHostsFiles)
         {
             Policy = config.StrictHostKeyChecking,
             HashNewEntries = hash,
             Ask = ask,
             UpdateHostKeys = update,
+            ConfirmHostKeyUpdate = setting == "ask" ? confirmUpdate : null,
         };
     }
 
     /// <summary>
-    /// Record new host keys a server announces after authentication, once it has proven it holds them (OpenSSH's <c>UpdateHostKeys</c>).
-    /// This lets a server rotate its keys without users seeing "host key changed". Keys are only added, to the first user file;
-    /// connections authenticated with a host certificate are not used for updates. Default false (<c>UpdateHostKeys yes</c> in
-    /// ssh_config turns it on through <see cref="FromConfig(SshHostConfig)"/>).
+    /// Keep known_hosts in step with the host keys a server announces after authentication (OpenSSH's <c>UpdateHostKeys</c>): new keys are
+    /// added once the server has proven it holds them, and this host's keys it no longer announces are removed. This lets a server rotate
+    /// its keys without users seeing "host key changed". Only the first user file changes, only lines for exactly this host (not wildcard
+    /// lines, not <c>@cert-authority</c> or <c>@revoked</c> ones), and connections authenticated with a host certificate are not used.
+    /// Default false (<c>UpdateHostKeys yes</c> in ssh_config turns it on through <see cref="FromConfig(SshHostConfig)"/>; see
+    /// <see cref="ConfirmHostKeyUpdate"/> for <c>ask</c>).
     /// </summary>
     public bool UpdateHostKeys { get; init; }
 
@@ -111,20 +140,54 @@ public sealed class KnownHostsVerifier : SshHostKeyVerifier
         })];
     }
 
-    /// <summary>Appends keys the server has proven it holds.</summary>
-    internal async ValueTask RecordProvenAsync(string name, int port, IEnumerable<byte[]> keys, CancellationToken cancellationToken)
+    /// <summary>
+    /// This host's keys in the first user file that the server no longer announces: plain entries for exactly this host (lines matched
+    /// only through a wildcard, global files and marked lines are left alone), of key types this client understands.
+    /// </summary>
+    internal async ValueTask<List<byte[]>> StaleHostKeysAsync(string name, int port, IReadOnlyList<byte[]> announced, CancellationToken cancellationToken)
+    {
+        if (_userFiles.Count == 0)
+        {
+            return [];
+        }
+
+        var file = await KnownHostsFile.LoadAsync(_userFiles[0], cancellationToken).ConfigureAwait(false);
+        var host = KnownHostsEntry.FormatHost(name, port);
+        return [.. file.Find(name, port)
+            .Where(e => e.Marker == KnownHostsMarker.None && (e.IsHashed || e.HostPatterns.Split(',').Contains(host, StringComparer.OrdinalIgnoreCase)))
+            .Where(e => SshClient.IsSupportedKey(e.PublicKey.ToArray()) && !announced.Any(a => a.AsSpan().SequenceEqual(e.PublicKey.Span)))
+            .Select(e => e.PublicKey.ToArray())];
+    }
+
+    /// <summary>Appends keys the server has proven it holds, then removes the ones it no longer announces.</summary>
+    internal async ValueTask ApplyHostKeyUpdateAsync(string name, int port, IReadOnlyList<byte[]> added, IReadOnlyList<byte[]> removed, CancellationToken cancellationToken)
     {
         if (_userFiles.Count == 0)
         {
             return;
         }
 
-        foreach (var blob in keys)
+        foreach (var blob in added)
         {
             var keyType = new Protocol.SshReader(blob).ReadUtf8String();
             await KnownHostsFile.AppendAsync(_userFiles[0], name, port, keyType, blob, HashNewEntries, cancellationToken).ConfigureAwait(false);
         }
+
+        if (removed.Count > 0)
+        {
+            var file = await KnownHostsFile.LoadAsync(_userFiles[0], cancellationToken).ConfigureAwait(false);
+            if (file.Remove(name, port, e => removed.Any(r => r.AsSpan().SequenceEqual(e.PublicKey.Span))) > 0)
+            {
+                await file.SaveAsync(_userFiles[0], cancellationToken).ConfigureAwait(false);
+            }
+        }
     }
+
+    /// <summary>
+    /// Asked before known_hosts is changed by <see cref="UpdateHostKeys"/> (ssh's <c>UpdateHostKeys ask</c>): return true to apply the
+    /// update. Without it, updates are applied without asking (<c>UpdateHostKeys yes</c>).
+    /// </summary>
+    public Func<SshHostKeyUpdate, CancellationToken, ValueTask<bool>>? ConfirmHostKeyUpdate { get; init; }
 
     /// <summary>The clock for certificate validity; replaceable in tests.</summary>
     internal TimeProvider Clock { get; init; } = TimeProvider.System;

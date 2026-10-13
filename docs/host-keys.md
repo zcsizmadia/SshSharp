@@ -46,8 +46,20 @@ var verifier = new KnownHostsVerifier([knownHostsPath])
 };
 ```
 
-`UpdateHostKeys = true` (`UpdateHostKeys yes`) records the other host keys the server proves it holds after login, so a
-key rotation does not break the next connection. Keys the server stops announcing are not removed yet (#60).
+`UpdateHostKeys = true` (`UpdateHostKeys yes`) keeps `known_hosts` in step with the keys the server announces after login:
+keys it proves it holds are added, and this host's keys it no longer announces are removed, so a key rotation does not break
+the next connection. Only the first user file changes, only lines for exactly this host (wildcard lines and `@cert-authority`
+or `@revoked` lines are left alone), and never the key the connection was verified with. To confirm changes first (as
+`UpdateHostKeys ask`), set `ConfirmHostKeyUpdate`:
+
+```csharp
+var verifier = new KnownHostsVerifier([knownHostsPath])
+{
+    UpdateHostKeys = true,
+    ConfirmHostKeyUpdate = (update, ct) => ValueTask.FromResult(
+        Confirm($"Update known_hosts for {update.Host}: add {string.Join(", ", update.Added)}; remove {string.Join(", ", update.Removed)}?")),
+};
+```
 
 ## Pinning
 

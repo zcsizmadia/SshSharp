@@ -556,3 +556,12 @@ static SshSharp.Scp.SshScpExtensions.UploadDirectoryAsync(this SshSharp.SshClien
 static SshSharp.Scp.SshScpExtensions.UploadFileAsync(this SshSharp.SshClient! client, string! localPath, string! remotePath, SshSharp.Scp.SshScpOptions? options = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
 static SshSharp.Scp.SshScpProgress.operator !=(SshSharp.Scp.SshScpProgress left, SshSharp.Scp.SshScpProgress right) -> bool
 static SshSharp.Scp.SshScpProgress.operator ==(SshSharp.Scp.SshScpProgress left, SshSharp.Scp.SshScpProgress right) -> bool
+SshSharp.KnownHostsVerifier.ConfirmHostKeyUpdate.get -> System.Func<SshSharp.SshHostKeyUpdate!, System.Threading.CancellationToken, System.Threading.Tasks.ValueTask<bool>>?
+SshSharp.KnownHostsVerifier.ConfirmHostKeyUpdate.init -> void
+SshSharp.SshConfigConnectOptions.ConfirmHostKeyUpdate.get -> System.Func<SshSharp.SshHostKeyUpdate!, System.Threading.CancellationToken, System.Threading.Tasks.ValueTask<bool>>?
+SshSharp.SshConfigConnectOptions.ConfirmHostKeyUpdate.init -> void
+SshSharp.SshHostKeyUpdate
+SshSharp.SshHostKeyUpdate.Added.get -> System.Collections.Generic.IReadOnlyList<string!>!
+SshSharp.SshHostKeyUpdate.Host.get -> string!
+SshSharp.SshHostKeyUpdate.Port.get -> int
+SshSharp.SshHostKeyUpdate.Removed.get -> System.Collections.Generic.IReadOnlyList<string!>!
