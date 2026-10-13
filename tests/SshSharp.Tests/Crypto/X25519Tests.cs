@@ -40,6 +40,24 @@ public class X25519Tests
     }
 
     [Test]
+    public async Task Rfc7748_Section52_ThousandIterations()
+    {
+        var k = new byte[32];
+        var u = new byte[32];
+        k[0] = 9;
+        u[0] = 9;
+        var result = new byte[32];
+        for (var i = 0; i < 1000; i++)
+        {
+            X25519.TryAgree(k, u, result);
+            k.CopyTo(u);
+            result.CopyTo(k);
+        }
+
+        await Assert.That(Convert.ToHexString(k).ToLowerInvariant()).IsEqualTo("684cf59ba83309552800ef566f2f4d3c1c3887c49360e3875f2eb94d99532c51");
+    }
+
+    [Test]
     public async Task Rfc7748_Section61_AliceAndBob()
     {
         const string alicePrivate = "77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a";
