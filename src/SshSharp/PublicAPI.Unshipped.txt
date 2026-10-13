@@ -223,6 +223,26 @@ SshSharp.SshCommandResult.StandardError.get -> System.ReadOnlyMemory<byte>
 SshSharp.SshCommandResult.StandardErrorText.get -> string!
 SshSharp.SshCommandResult.StandardOutput.get -> System.ReadOnlyMemory<byte>
 SshSharp.SshCommandResult.StandardOutputText.get -> string!
+SshSharp.SshConfigConnectOptions
+SshSharp.SshConfigConnectOptions.AllowProxyCommand.get -> bool
+SshSharp.SshConfigConnectOptions.AllowProxyCommand.init -> void
+SshSharp.SshConfigConnectOptions.AskHostKey.get -> System.Func<SshSharp.SshHostKeyPrompt!, System.Threading.CancellationToken, System.Threading.Tasks.ValueTask<bool>>?
+SshSharp.SshConfigConnectOptions.AskHostKey.init -> void
+SshSharp.SshConfigConnectOptions.Config.get -> SshSharp.Config.SshConfig?
+SshSharp.SshConfigConnectOptions.Config.init -> void
+SshSharp.SshConfigConnectOptions.HostKeyVerifier.get -> SshSharp.SshHostKeyVerifier?
+SshSharp.SshConfigConnectOptions.HostKeyVerifier.init -> void
+SshSharp.SshConfigConnectOptions.Logger.get -> Microsoft.Extensions.Logging.ILogger?
+SshSharp.SshConfigConnectOptions.Logger.init -> void
+SshSharp.SshConfigConnectOptions.PassphraseProvider.get -> System.Func<string!, System.Threading.CancellationToken, System.Threading.Tasks.ValueTask<string?>>?
+SshSharp.SshConfigConnectOptions.PassphraseProvider.init -> void
+SshSharp.SshConfigConnectOptions.Password.get -> string?
+SshSharp.SshConfigConnectOptions.Password.init -> void
+SshSharp.SshConfigConnectOptions.PrivateKeys.get -> System.Collections.Generic.IReadOnlyList<SshSharp.SshPrivateKey!>!
+SshSharp.SshConfigConnectOptions.PrivateKeys.init -> void
+SshSharp.SshConfigConnectOptions.ResolveOptions.get -> SshSharp.Config.SshConfigResolveOptions?
+SshSharp.SshConfigConnectOptions.ResolveOptions.init -> void
+SshSharp.SshConfigConnectOptions.SshConfigConnectOptions() -> void
 SshSharp.SshException
 SshSharp.SshException.Reason.get -> SshSharp.SshFailureReason
 SshSharp.SshException.SshException(SshSharp.SshFailureReason reason, string! message, System.Exception? innerException = null) -> void
@@ -298,6 +318,7 @@ static SshSharp.Config.SshConfigDirective.operator ==(SshSharp.Config.SshConfigD
 static SshSharp.Config.SshExecMatcher.RunShell(string! command) -> bool
 static SshSharp.KnownHostsVerifier.ForCurrentUser(SshSharp.Config.StrictHostKeyChecking policy = SshSharp.Config.StrictHostKeyChecking.Ask) -> SshSharp.KnownHostsVerifier!
 static SshSharp.KnownHostsVerifier.FromConfig(SshSharp.Config.SshHostConfig! config) -> SshSharp.KnownHostsVerifier!
+static SshSharp.SshClient.ConnectAsync(string! destination, SshSharp.SshConfigConnectOptions? options = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SshSharp.SshClient!>!
 static SshSharp.SshClient.ConnectAsync(string! host, int port, SshSharp.SshClientOptions! options, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SshSharp.SshClient!>!
 static SshSharp.SshClient.ConnectAsync(System.IO.Stream! stream, SshSharp.SshClientOptions! options, bool leaveOpen = false, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SshSharp.SshClient!>!
 static SshSharp.SshHostKey.operator !=(SshSharp.SshHostKey? left, SshSharp.SshHostKey? right) -> bool

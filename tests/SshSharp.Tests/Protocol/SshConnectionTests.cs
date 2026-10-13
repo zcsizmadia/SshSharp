@@ -55,6 +55,19 @@ public class SshConnectionTests
     }
 
     [Test]
+    public async Task AStreamThatBreaks_IsReportedAsALostConnection_NotARawIOException()
+    {
+        await using var server = new FakeSessionServer();
+        var breaking = new BreakingStream(server.ClientStream);
+        await using var client = await ConnectAsync(server, breaking);
+
+        breaking.Break();
+        var ex = await Assert.ThrowsAsync<SshException>(async () => await client.RunCommandAsync("x", Timeout()));
+        await Assert.That(ex!.Reason).IsEqualTo(SshFailureReason.ConnectionClosed);
+        await Assert.That(ex.InnerException).IsTypeOf<IOException>();
+    }
+
+    [Test]
     public async Task DisposingWhileThePeerHasStoppedReading_FinishesPromptly()
     {
         await using var server = new FakeSessionServer();
@@ -211,6 +224,41 @@ public class SshConnectionTests
         var buffer = new System.Buffers.ArrayBufferWriter<byte>();
         body(new SshWriter(buffer));
         return buffer.WrittenSpan.ToArray();
+    }
+
+    /// <summary>A stream whose writes start failing with <see cref="IOException"/> (a reset socket) once broken.</summary>
+    private sealed class BreakingStream(Stream inner) : Stream
+    {
+        private volatile bool _broken;
+
+        public void Break() => _broken = true;
+
+        public override bool CanRead => true;
+
+        public override bool CanSeek => false;
+
+        public override bool CanWrite => true;
+
+        public override long Length => throw new NotSupportedException();
+
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+
+        public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default) =>
+            _broken ? throw new IOException("Connection reset by peer.") : inner.WriteAsync(buffer, cancellationToken);
+
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) => inner.ReadAsync(buffer, cancellationToken);
+
+        public override Task FlushAsync(CancellationToken cancellationToken) => inner.FlushAsync(cancellationToken);
+
+        public override void Flush() => inner.Flush();
+
+        public override int Read(byte[] buffer, int offset, int count) => inner.Read(buffer, offset, count);
+
+        public override void Write(byte[] buffer, int offset, int count) => inner.Write(buffer, offset, count);
+
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+
+        public override void SetLength(long value) => throw new NotSupportedException();
     }
 
     /// <summary>
