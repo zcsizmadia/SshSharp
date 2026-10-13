@@ -105,6 +105,17 @@ internal sealed class FakeSessionServer : IAsyncDisposable
 
     public bool GlobalFailureReceived { get; private set; }
 
+    /// <summary>Public keys (SSH wire format) the server accepts for <see cref="UserName"/>.</summary>
+    public List<byte[]> AuthorizedKeys { get; init; } = [];
+
+    /// <summary>Require publickey and then password (partial success after the key), like <c>AuthenticationMethods publickey,password</c>.</summary>
+    public bool RequirePasswordAfterPublicKey { get; init; }
+
+    /// <summary>Every authentication method the client tried, in order; signed publickey attempts add "publickey-signed:alg".</summary>
+    public List<string> AuthAttempts { get; } = [];
+
+    private bool _publicKeyDone;
+
     /// <summary>When set, channel opens are answered only after this task completes (to race the client's cancellation).</summary>
     public Task? HoldChannelOpen { get; set; }
 
@@ -194,14 +205,63 @@ internal sealed class FakeSessionServer : IAsyncDisposable
                 var user = reader.ReadUtf8String();
                 reader.ReadUtf8String();
                 var method = reader.ReadUtf8String();
-                var ok = user == UserName && ((method == "none" && AllowNone) || (method == "password" && PasswordMatches(ref reader)));
+                lock (AuthAttempts)
+                {
+                    AuthAttempts.Add(method);
+                }
+
+                bool ok;
+                if (method == "publickey")
+                {
+                    var hasSignature = reader.ReadBoolean();
+                    var algorithm = reader.ReadUtf8String();
+                    var blob = reader.ReadString().ToArray();
+                    var authorized = user == UserName && AuthorizedKeys.Any(k => k.AsSpan().SequenceEqual(blob));
+                    if (!hasSignature)
+                    {
+                        // RFC 4252 section 7: PK_OK says "this key would do; now sign".
+                        if (authorized)
+                        {
+                            await _server.SendAsync(Build(w => { w.WriteByte(SshMessage.UserAuthPkOk); w.WriteString(algorithm); w.WriteString(blob); }));
+                        }
+                        else
+                        {
+                            await SendAuthFailureAsync(AdvertisedMethods, partial: false);
+                        }
+
+                        break;
+                    }
+
+                    var signature = reader.ReadString().ToArray();
+                    ok = authorized && SignatureValid(user, algorithm, blob, signature);
+                    if (ok)
+                    {
+                        lock (AuthAttempts)
+                        {
+                            AuthAttempts.Add("publickey-signed:" + algorithm);
+                        }
+                    }
+
+                    if (ok && RequirePasswordAfterPublicKey && !_publicKeyDone)
+                    {
+                        _publicKeyDone = true;
+                        await SendAuthFailureAsync(["password"], partial: true);
+                        break;
+                    }
+                }
+                else
+                {
+                    ok = user == UserName && ((method == "none" && AllowNone)
+                        || (method == "password" && PasswordMatches(ref reader) && (!RequirePasswordAfterPublicKey || _publicKeyDone)));
+                }
+
                 if (ok)
                 {
                     await _server.SendAsync(new byte[] { SshMessage.UserAuthSuccess });
                 }
                 else
                 {
-                    await _server.SendAsync(Build(w => { w.WriteByte(SshMessage.UserAuthFailure); w.WriteNameList(AdvertisedMethods); w.WriteBoolean(false); }));
+                    await SendAuthFailureAsync(RequirePasswordAfterPublicKey && _publicKeyDone ? ["password"] : AdvertisedMethods, partial: false);
                 }
 
                 break;
@@ -348,6 +408,33 @@ internal sealed class FakeSessionServer : IAsyncDisposable
                 }
 
                 break;
+        }
+    }
+
+    private Task SendAuthFailureAsync(string[] methods, bool partial) =>
+        _server.SendAsync(Build(w => { w.WriteByte(SshMessage.UserAuthFailure); w.WriteNameList(methods); w.WriteBoolean(partial); })).AsTask();
+
+    /// <summary>Checks a publickey signature exactly as a server must: over the session id and the request.</summary>
+    private bool SignatureValid(string user, string algorithm, byte[] blob, byte[] signature)
+    {
+        var signed = Build(w =>
+        {
+            w.WriteString(_server.SessionId!);
+            w.WriteByte(SshMessage.UserAuthRequest);
+            w.WriteString(user);
+            w.WriteString("ssh-connection");
+            w.WriteString("publickey");
+            w.WriteBoolean(true);
+            w.WriteString(algorithm);
+            w.WriteString(blob);
+        });
+        try
+        {
+            return SshSharp.Keys.SshPublicKey.Parse(blob).VerifySignature(algorithm, signature, signed);
+        }
+        catch (SshProtocolException)
+        {
+            return false;
         }
     }
 

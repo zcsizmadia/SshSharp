@@ -122,6 +122,33 @@ public class ParserRobustnessTests
     }
 
     [Test]
+    public async Task PrivateKeyParsing_OnlyEverFailsWithAFormatError()
+    {
+        // Mutate the decoded OpenSSH key and re-wrap it, so the binary parser is exercised rather than the base64 decoder.
+        static byte[] Body(string pem) => Convert.FromBase64String(string.Concat(pem.Split('\n').Where(l => l.Length > 0 && !l.StartsWith("-----", StringComparison.Ordinal))));
+        byte[][] seeds =
+        [
+            Body(Keys.TestKeys.OpenSshEd25519(out _)),
+            Body(Keys.TestKeys.OpenSshEcdsa(ECCurve.NamedCurves.nistP256, "nistp256", out _)),
+            Body(Keys.TestKeys.OpenSshRsa(2048, out _)),
+        ];
+        var failures = Run(seeds, input =>
+        {
+            var pem = "-----BEGIN OPENSSH PRIVATE KEY-----\n" + Convert.ToBase64String(input) + "\n-----END OPENSSH PRIVATE KEY-----\n";
+            using var key = SshPrivateKey.Parse(pem);
+            key.Sign(key.SignatureAlgorithms[0], "m"u8);
+        }, FormatErrors, iterations: 1500);
+
+        // PEM: corrupt DER inside a valid PEM frame.
+        using var ecdsa = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        failures.AddRange(Run([ecdsa.ExportPkcs8PrivateKey(), ecdsa.ExportECPrivateKey()], input =>
+        {
+            using var key = SshPrivateKey.Parse(PemEncoding.WriteString("PRIVATE KEY", input));
+        }, FormatErrors, iterations: 500));
+        await Assert.That(failures).IsEmpty();
+    }
+
+    [Test]
     public async Task TheHarness_ReportsUnexpectedExceptions_AndMutates()
     {
         // A harness that silently swallowed everything would make every test above pass.

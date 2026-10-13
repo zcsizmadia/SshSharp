@@ -218,27 +218,47 @@ public sealed class SshClient : IAsyncDisposable
     {
         await SshUserAuth.RequestServiceAsync(transport, cancellationToken).ConfigureAwait(false);
 
-        IReadOnlyList<string> methods;
-        if (options.Password is { } password)
+        // Like ssh: "none" first (it succeeds only on servers that allow anonymous access, and otherwise lists the methods the server
+        // accepts), then each key, then the password. After a partial success the server lists what it still wants.
+        SshLog.Authenticating(logger, "none");
+        var outcome = await SshUserAuth.NoneAsync(transport, options.UserName, cancellationToken).ConfigureAwait(false);
+        if (outcome.Success)
         {
-            SshLog.Authenticating(logger, "password");
-            var outcome = await SshUserAuth.PasswordAsync(transport, options.UserName, password, cancellationToken).ConfigureAwait(false);
+            SshLog.Authenticated(logger, "none");
+            return;
+        }
+
+        var methods = outcome.RemainingMethods;
+        foreach (var key in options.PrivateKeys)
+        {
+            if (!methods.Contains("publickey"))
+            {
+                break;
+            }
+
+            if (SshUserAuth.ChooseSignatureAlgorithm(key, transport.ServerExtensions) is not { } algorithm)
+            {
+                continue; // the server accepts no signature algorithm this key can make (for example an RSA key and no rsa-sha2-*)
+            }
+
+            SshLog.Authenticating(logger, "publickey");
+            outcome = await SshUserAuth.PublicKeyAsync(transport, options.UserName, key, algorithm, cancellationToken).ConfigureAwait(false);
             if (outcome.Success)
             {
-                SshLog.Authenticated(logger, "password");
+                SshLog.Authenticated(logger, "publickey");
                 return;
             }
 
             methods = outcome.RemainingMethods;
         }
-        else
+
+        if (options.Password is { } password && methods.Contains("password"))
         {
-            // No credentials: "none" succeeds only on servers that allow anonymous access, and otherwise reveals the accepted methods.
-            SshLog.Authenticating(logger, "none");
-            var outcome = await SshUserAuth.NoneAsync(transport, options.UserName, cancellationToken).ConfigureAwait(false);
+            SshLog.Authenticating(logger, "password");
+            outcome = await SshUserAuth.PasswordAsync(transport, options.UserName, password, cancellationToken).ConfigureAwait(false);
             if (outcome.Success)
             {
-                SshLog.Authenticated(logger, "none");
+                SshLog.Authenticated(logger, "password");
                 return;
             }
 

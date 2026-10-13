@@ -1,0 +1,62 @@
+namespace SshSharp.Tests.Integration;
+
+/// <summary>
+/// Keys made by the real <c>ssh-keygen</c>. SSHSHARP_TEST_KEYDIR names a directory of private key files, each with its <c>.pub</c>
+/// next to it (CI generates Ed25519, ECDSA and RSA keys in OpenSSH, PEM and PKCS#8 formats). With SSHSHARP_TEST_SSHD and
+/// SSHSHARP_TEST_USER too, and the keys in that user's authorized_keys, each key is also used to log in. Skipped when not set.
+/// </summary>
+public class PublicKeyInteropTests
+{
+    private static string? KeyDirectory => Environment.GetEnvironmentVariable("SSHSHARP_TEST_KEYDIR") is { Length: > 0 } dir ? dir : null;
+
+    private static CancellationToken Timeout() => new CancellationTokenSource(TimeSpan.FromSeconds(90)).Token;
+
+    private static IEnumerable<string> PrivateKeyFiles(string directory) =>
+        Directory.EnumerateFiles(directory).Where(f => !f.EndsWith(".pub", StringComparison.Ordinal) && File.Exists(f + ".pub")).Order(StringComparer.Ordinal);
+
+    [Test]
+    public async Task KeysFromSshKeygen_ParseAndMatchTheirPublicKeys()
+    {
+        if (KeyDirectory is not { } directory)
+        {
+            Skip.Test("SSHSHARP_TEST_KEYDIR is not set.");
+            return;
+        }
+
+        var files = PrivateKeyFiles(directory).ToList();
+        await Assert.That(files).IsNotEmpty();
+        foreach (var file in files)
+        {
+            using var key = await SshPrivateKey.LoadFileAsync(file);
+            var expected = (await File.ReadAllTextAsync(file + ".pub")).Split(' ');
+            await Assert.That(key.KeyType).IsEqualTo(expected[0]);
+            await Assert.That(Convert.ToBase64String(key.PublicKey.Span)).IsEqualTo(expected[1]);
+        }
+    }
+
+    [Test]
+    public async Task EachKeyLogsInToTheRealServer_WithoutAPassword()
+    {
+        var user = Environment.GetEnvironmentVariable("SSHSHARP_TEST_USER");
+        if (KeyDirectory is not { } directory || !RealServer.IsAvailable || string.IsNullOrEmpty(user))
+        {
+            Skip.Test("SSHSHARP_TEST_KEYDIR, SSHSHARP_TEST_SSHD and SSHSHARP_TEST_USER are needed.");
+            return;
+        }
+
+        var (host, port) = RealServer.Endpoint!.Value;
+        foreach (var file in PrivateKeyFiles(directory))
+        {
+            using var key = await SshPrivateKey.LoadFileAsync(file);
+            var options = new SshClientOptions
+            {
+                UserName = user,
+                PrivateKeys = [key],
+                HostKeyVerifier = SshHostKeyVerifier.FromDelegate((_, _) => ValueTask.FromResult(true)),
+            };
+            await using var client = await SshClient.ConnectAsync(host, port, options, Timeout());
+            var result = await client.RunCommandAsync("echo key-ok", Timeout());
+            await Assert.That(result.StandardOutputText).IsEqualTo("key-ok\n");
+        }
+    }
+}
