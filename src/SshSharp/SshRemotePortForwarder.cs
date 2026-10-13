@@ -16,6 +16,7 @@ public sealed class SshRemotePortForwarder : IAsyncDisposable
     private readonly CancellationTokenSource _stop;
     private readonly HashSet<Task> _connections = [];
     private int _disposed;
+    private int _active;
 
     internal SshRemotePortForwarder(string bindAddress, int port, string localHost, int localPort, ILogger logger,
         Func<SshRemotePortForwarder, CancellationToken, Task> cancel, CancellationToken connectionClosed)
@@ -46,10 +47,7 @@ public sealed class SshRemotePortForwarder : IAsyncDisposable
     {
         get
         {
-            lock (_connections)
-            {
-                return _connections.Count;
-            }
+            return Volatile.Read(ref _active);
         }
     }
 
@@ -59,6 +57,7 @@ public sealed class SshRemotePortForwarder : IAsyncDisposable
         Task connection;
         lock (_connections)
         {
+            Interlocked.Increment(ref _active);
             connection = ServeAsync(channel);
             _connections.Add(connection);
         }
@@ -74,7 +73,20 @@ public sealed class SshRemotePortForwarder : IAsyncDisposable
             CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
     }
 
+    /// <summary>Counts the connection until it has finished, so <see cref="ActiveConnections"/> is exact once it is awaited.</summary>
     private async Task ServeAsync(SshChannel channel)
+    {
+        try
+        {
+            await ServeCoreAsync(channel).ConfigureAwait(false);
+        }
+        finally
+        {
+            Interlocked.Decrement(ref _active);
+        }
+    }
+
+    private async Task ServeCoreAsync(SshChannel channel)
     {
         await Task.Yield();
         var socket = new Socket(SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };

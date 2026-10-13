@@ -20,6 +20,7 @@ public sealed class SshPortForwarder : IAsyncDisposable
     private readonly HashSet<Task> _connections = [];
     private readonly string _localText;
     private int _disposed;
+    private int _active;
     private volatile bool _listening = true;
 
     private SshPortForwarder(Socket listener, string remoteHost, int remotePort, ILogger logger,
@@ -50,10 +51,7 @@ public sealed class SshPortForwarder : IAsyncDisposable
     {
         get
         {
-            lock (_connections)
-            {
-                return _connections.Count;
-            }
+            return Volatile.Read(ref _active);
         }
     }
 
@@ -112,7 +110,8 @@ public sealed class SshPortForwarder : IAsyncDisposable
             Task connection;
             lock (_connections)
             {
-                connection = ForwardAsync(socket);
+                Interlocked.Increment(ref _active);
+            connection = ForwardAsync(socket);
                 _connections.Add(connection);
             }
 
@@ -129,7 +128,20 @@ public sealed class SshPortForwarder : IAsyncDisposable
     }
 
     /// <summary>Relays one accepted connection over a new channel until both sides have finished or either side fails or closes.</summary>
+    /// <summary>Counts the connection until it has finished, so <see cref="ActiveConnections"/> is exact once it is awaited.</summary>
     private async Task ForwardAsync(Socket socket)
+    {
+        try
+        {
+            await ForwardCoreAsync(socket).ConfigureAwait(false);
+        }
+        finally
+        {
+            Interlocked.Decrement(ref _active);
+        }
+    }
+
+    private async Task ForwardCoreAsync(Socket socket)
     {
         await Task.Yield(); // off the accept loop
         using (socket)
