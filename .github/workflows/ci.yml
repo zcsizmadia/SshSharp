@@ -321,21 +321,10 @@ jobs:
             'SyslogFacility LOCAL0' # log to a file (logs\sshd.log), not the event log
             'LogLevel DEBUG1'
             'KexAlgorithms +diffie-hellman-group14-sha256,diffie-hellman-group16-sha512'
-            # The account's profile (and ~/.ssh) only exists after its first logon, so its key lives here.
-            'AuthorizedKeysFile __PROGRAMDATA__/ssh/authorized_keys_%u'
           ) + (Get-Content $config | Where-Object { $_ -notmatch '^\s*(Port|ListenAddress|PasswordAuthentication|Match|AuthorizedKeysFile|AllowGroups|AllowUsers|DenyGroups|DenyUsers)\b' -and $_ -notmatch '^\s+' }) |
             Set-Content $config -Encoding ascii
           & "$env:WINDIR\System32\OpenSSH\sshd.exe" -t
           if ($LASTEXITCODE -ne 0) { throw "sshd_config is invalid" }
-
-          # A throwaway key for the account; sshd requires the key file to be writable only by SYSTEM and Administrators.
-          $keys = "$env:RUNNER_TEMP\keys"
-          New-Item -ItemType Directory $keys | Out-Null
-          & ssh-keygen -q -t ed25519 -N '""' -f "$keys\ed25519"
-          if ($LASTEXITCODE -ne 0) { throw "ssh-keygen failed" }
-          $authorized = "$env:ProgramData\ssh\authorized_keys_sshsharp"
-          Copy-Item "$keys\ed25519.pub" $authorized
-          & icacls $authorized /inheritance:r /grant 'SYSTEM:F' /grant 'BUILTIN\Administrators:F' | Out-Null
           Start-Service sshd
 
           $client = [System.Net.Sockets.TcpClient]::new('127.0.0.1', 2222)
@@ -355,10 +344,17 @@ jobs:
         shell: pwsh
         continue-on-error: true
         run: |
-          $start = Get-Date
-          & ssh -i "$env:RUNNER_TEMP\keys\ed25519" -p 2222 -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=NUL `
-            -o ServerAliveInterval=1 -o ServerAliveCountMax=3 sshsharp@127.0.0.1 'sleep 6; echo survived'
-          "ssh exit code $LASTEXITCODE after $([int]((Get-Date) - $start).TotalSeconds) s"
+          # The password through SSH_ASKPASS (ssh has no option for it); the helper reads it from the masked environment variable.
+          $askpass = "$env:RUNNER_TEMP\askpass.cmd"
+          Set-Content $askpass '@echo %SSHSHARP_TEST_PASSWORD%' -Encoding ascii
+          $env:SSH_ASKPASS = $askpass
+          $env:SSH_ASKPASS_REQUIRE = 'force'
+          foreach ($round in 1..3) {
+            $start = Get-Date
+            & ssh -p 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile=NUL -o PubkeyAuthentication=no -o NumberOfPasswordPrompts=1 `
+              -o ServerAliveInterval=1 -o ServerAliveCountMax=3 sshsharp@127.0.0.1 'sleep 6; echo survived'
+            "round ${round}: ssh exit code $LASTEXITCODE after $([int]((Get-Date) - $start).TotalSeconds) s"
+          }
       - run: dotnet restore
       - run: dotnet build -c Release --no-restore
       - name: Interop tests against OpenSSH for Windows
