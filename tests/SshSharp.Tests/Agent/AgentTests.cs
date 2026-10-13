@@ -164,6 +164,11 @@ public sealed class AgentTests : IDisposable
         var error = await Assert.ThrowsAsync<SshException>(() => missing.GetKeysAsync(Timeout()));
         await Assert.That(error!.Reason).IsEqualTo(SshFailureReason.AgentFailed);
 
+        // Longer than any platform allows for a socket path (macOS: 104 bytes): reported the same way, not as an argument error.
+        var tooLong = new SshAgent(Path.Combine(_dir, new string('a', 120)));
+        error = await Assert.ThrowsAsync<SshException>(() => tooLong.GetKeysAsync(Timeout()));
+        await Assert.That(error!.Reason).IsEqualTo(SshFailureReason.AgentFailed);
+
         // A pipe that does not exist fails at once (on other systems, pipes are not a transport at all).
         var pipe = new SshAgent(@"\\.\pipe\sshsharp-no-such-agent-" + Guid.NewGuid().ToString("N"));
         var started = System.Diagnostics.Stopwatch.StartNew();

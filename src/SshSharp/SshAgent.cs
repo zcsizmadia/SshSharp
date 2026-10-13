@@ -224,10 +224,21 @@ public sealed class SshAgent
             }
         }
 
+        UnixDomainSocketEndPoint endPoint;
+        try
+        {
+            endPoint = new UnixDomainSocketEndPoint(path);
+        }
+        catch (ArgumentException ex)
+        {
+            // Longer than the platform allows (104 bytes on macOS, 108 on Linux): no agent can listen there.
+            throw new IOException($"'{path}' cannot be a socket path here: {ex.Message}", ex);
+        }
+
         var socket = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
         try
         {
-            await socket.ConnectAsync(new UnixDomainSocketEndPoint(path), cancellationToken).ConfigureAwait(false);
+            await socket.ConnectAsync(endPoint, cancellationToken).ConfigureAwait(false);
             return new NetworkStream(socket, ownsSocket: true);
         }
         catch
