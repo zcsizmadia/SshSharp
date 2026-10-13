@@ -153,6 +153,12 @@ public sealed class SshHostConfig
     /// <summary><c>DynamicForward</c> specifications, as written (<c>[bind:]port</c>).</summary>
     public IReadOnlyList<string> DynamicForwards { get; init; } = [];
 
+    /// <summary>Whether local forwardings may listen on every address, not only loopback, when the bind address says so (<c>GatewayPorts</c>).</summary>
+    public bool GatewayPorts { get; init; }
+
+    /// <summary>Whether a forwarding that cannot be set up fails the connection (<c>ExitOnForwardFailure</c>).</summary>
+    public bool ExitOnForwardFailure { get; init; }
+
     /// <summary>All directives that applied, by lower-case keyword, with the arguments of the first (or all, for accumulating ones) occurrence. Includes keywords this library has no typed property for.</summary>
     public IReadOnlyDictionary<string, IReadOnlyList<string>> Options { get; init; } = new Dictionary<string, IReadOnlyList<string>>();
 }

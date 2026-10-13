@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Sockets;
+using SshSharp.Config;
 using SshSharp.Protocol;
 
 namespace SshSharp;
@@ -237,6 +238,109 @@ public sealed partial class SshClient
         await using (stream.ConfigureAwait(false))
         {
             await StreamChannelRelay.RunAsync(stream, channel, _connection.Closed).ConfigureAwait(false);
+        }
+    }
+
+    private readonly List<SshPortForwarder> _localForwardings = [];
+    private readonly List<SshRemotePortForwarder> _remoteForwardings = [];
+    private readonly List<SshSocksProxy> _dynamicForwardings = [];
+
+    /// <summary>The <c>LocalForward</c> forwardings started from ssh_config (<see cref="SshConfigConnectOptions.StartForwardings"/>); disposed with the client.</summary>
+    public IReadOnlyList<SshPortForwarder> LocalForwardings => _localForwardings;
+
+    /// <summary>The <c>RemoteForward</c> forwardings started from ssh_config; disposed with the client.</summary>
+    public IReadOnlyList<SshRemotePortForwarder> RemoteForwardings => _remoteForwardings;
+
+    /// <summary>The <c>DynamicForward</c> SOCKS proxies started from ssh_config; disposed with the client.</summary>
+    public IReadOnlyList<SshSocksProxy> DynamicForwardings => _dynamicForwardings;
+
+    /// <summary>
+    /// Starts the forwardings ssh_config names for this host. One that cannot be set up (a port in use, refused by the server, a form
+    /// this library does not support such as Unix sockets) is logged and skipped, or fails the connection with <c>ExitOnForwardFailure</c>.
+    /// </summary>
+    internal async Task StartConfiguredForwardingsAsync(SshHostConfig hostConfig, CancellationToken cancellationToken)
+    {
+        foreach (var spec in hostConfig.LocalForwards)
+        {
+            await TryForwardAsync("LocalForward", spec, async () =>
+            {
+                var (listen, target) = ForwardSpec.ParseForward(spec) ?? throw new FormatException("only [bind:]port host:hostport is supported");
+                _localForwardings.Add(await ForwardLocalPortAsync(LocalBind(listen, hostConfig.GatewayPorts), target.Host, target.Port, cancellationToken).ConfigureAwait(false));
+            }).ConfigureAwait(false);
+        }
+
+        foreach (var spec in hostConfig.RemoteForwards)
+        {
+            await TryForwardAsync("RemoteForward", spec, async () =>
+            {
+                var (listen, target) = ForwardSpec.ParseForward(spec) ?? throw new FormatException("only [bind:]port host:hostport is supported");
+
+                // ssh asks for the server's loopback when no address is given; "*" means every address.
+                var bind = listen.Bind switch { null => "localhost", "*" => "", var given => given };
+                _remoteForwardings.Add(await ForwardRemotePortAsync(bind, listen.Port, target.Host, target.Port, cancellationToken).ConfigureAwait(false));
+            }).ConfigureAwait(false);
+        }
+
+        foreach (var spec in hostConfig.DynamicForwards)
+        {
+            await TryForwardAsync("DynamicForward", spec, async () =>
+            {
+                var listen = ForwardSpec.ParseListen(spec) ?? throw new FormatException("only [bind:]port is supported");
+                _dynamicForwardings.Add(await ForwardDynamicPortAsync(LocalBind(listen, hostConfig.GatewayPorts), cancellationToken).ConfigureAwait(false));
+            }).ConfigureAwait(false);
+        }
+
+        async Task TryForwardAsync(string keyword, string spec, Func<Task> start)
+        {
+            try
+            {
+                await start().ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is FormatException or SocketException or SshException or ArgumentException)
+            {
+                if (hostConfig.ExitOnForwardFailure)
+                {
+                    throw new SshException(SshFailureReason.ConnectFailed, $"{keyword} {spec} could not be set up: {ex.Message}", ex);
+                }
+
+                SshLog.ConfiguredForwardingSkipped(_logger, keyword, spec, ex.Message);
+            }
+        }
+    }
+
+    /// <summary>
+    /// The local address a forwarding listens on, as ssh decides it: none given means loopback (or every address with GatewayPorts),
+    /// <c>localhost</c> loopback, <c>*</c> or empty every address, otherwise the address given.
+    /// </summary>
+    internal static IPEndPoint LocalBind(ForwardListen listen, bool gatewayPorts)
+    {
+        var address = listen.Bind switch
+        {
+            null => gatewayPorts ? IPAddress.Any : IPAddress.Loopback,
+            "localhost" => IPAddress.Loopback,
+            "*" or "" => IPAddress.Any,
+            var given when IPAddress.TryParse(given, out var parsed) => parsed,
+            var given => throw new FormatException($"the bind address '{given}' is not an IP address or localhost"),
+        };
+        return new IPEndPoint(address, listen.Port);
+    }
+
+    /// <summary>Stops the forwardings started from ssh_config (before the connection goes, so remote ones are cancelled on the server).</summary>
+    private async Task DisposeConfiguredForwardingsAsync()
+    {
+        foreach (var forwarding in _localForwardings)
+        {
+            await forwarding.DisposeAsync().ConfigureAwait(false);
+        }
+
+        foreach (var forwarding in _remoteForwardings)
+        {
+            await forwarding.DisposeAsync().ConfigureAwait(false);
+        }
+
+        foreach (var forwarding in _dynamicForwardings)
+        {
+            await forwarding.DisposeAsync().ConfigureAwait(false);
         }
     }
 

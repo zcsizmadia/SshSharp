@@ -50,6 +50,13 @@ public sealed class SshConfigConnectOptions
     public SshAgent? Agent { get; init; }
 
     /// <summary>
+    /// Start the destination's <c>LocalForward</c>, <c>RemoteForward</c> and <c>DynamicForward</c> forwardings once connected, as ssh does
+    /// (see <see cref="SshClient.LocalForwardings"/> and its siblings). Off by default: forwardings open listening ports, which a library
+    /// should not do unasked. <c>GatewayPorts</c>, <c>ExitOnForwardFailure</c> and <c>ClearAllForwardings</c> apply.
+    /// </summary>
+    public bool StartForwardings { get; init; }
+
+    /// <summary>
     /// Replaces the default host key verification, which is a <see cref="KnownHostsVerifier"/> built from the host's configuration
     /// (<c>UserKnownHostsFile</c>, <c>GlobalKnownHostsFile</c>, <c>StrictHostKeyChecking</c>, <c>HashKnownHosts</c>).
     /// </summary>

@@ -235,6 +235,7 @@ public sealed partial class SshClient : IAsyncDisposable
             return;
         }
 
+        await DisposeConfiguredForwardingsAsync().ConfigureAwait(false);
         SshTelemetry.Connections.Add(-1);
         await _connection.DisposeAsync().ConfigureAwait(false);
         if (!_leaveOpen)

@@ -88,4 +88,7 @@ internal static partial class SshLog
 
     [LoggerMessage(EventId = 28, Level = LogLevel.Warning, Message = "A connection forwarded to local port {LocalPort} could not be made: {Reason}")]
     public static partial void RemoteForwardingConnectFailed(ILogger logger, int localPort, string reason);
+
+    [LoggerMessage(EventId = 29, Level = LogLevel.Warning, Message = "{Keyword} {Spec} was skipped: {Reason}")]
+    public static partial void ConfiguredForwardingSkipped(ILogger logger, string keyword, string spec, string reason);
 }

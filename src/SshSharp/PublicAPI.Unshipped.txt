@@ -511,3 +511,12 @@ SshSharp.SshSocksProxy.DisposeAsync() -> System.Threading.Tasks.ValueTask
 SshSharp.SshSocksProxy.LocalEndPoint.get -> System.Net.IPEndPoint!
 SshSharp.SshClientOptions.ForwardAgent.get -> SshSharp.SshAgent?
 SshSharp.SshClientOptions.ForwardAgent.init -> void
+SshSharp.Config.SshHostConfig.ExitOnForwardFailure.get -> bool
+SshSharp.Config.SshHostConfig.ExitOnForwardFailure.init -> void
+SshSharp.Config.SshHostConfig.GatewayPorts.get -> bool
+SshSharp.Config.SshHostConfig.GatewayPorts.init -> void
+SshSharp.SshClient.DynamicForwardings.get -> System.Collections.Generic.IReadOnlyList<SshSharp.SshSocksProxy!>!
+SshSharp.SshClient.LocalForwardings.get -> System.Collections.Generic.IReadOnlyList<SshSharp.SshPortForwarder!>!
+SshSharp.SshClient.RemoteForwardings.get -> System.Collections.Generic.IReadOnlyList<SshSharp.SshRemotePortForwarder!>!
+SshSharp.SshConfigConnectOptions.StartForwardings.get -> bool
+SshSharp.SshConfigConnectOptions.StartForwardings.init -> void

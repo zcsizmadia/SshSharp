@@ -130,6 +130,20 @@ public sealed partial class SshClient
 
             var client = await ConnectCoreAsync(stream, clientOptions, leaveOpen: false, owner, hostConfig.HostName, hostConfig.Port, token).ConfigureAwait(false);
             owner = null; // the client owns it now
+            if (depth == 0 && options.StartForwardings)
+            {
+                // Only the destination's forwardings: jump hosts are a way to get there.
+                try
+                {
+                    await client.StartConfiguredForwardingsAsync(hostConfig, cancellationToken).ConfigureAwait(false);
+                }
+                catch
+                {
+                    await client.DisposeAsync().ConfigureAwait(false);
+                    throw;
+                }
+            }
+
             return client;
         }
         catch (OperationCanceledException) when (timeout?.IsCancellationRequested == true && !cancellationToken.IsCancellationRequested)
