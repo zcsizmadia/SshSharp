@@ -1,0 +1,37 @@
+name: Docs
+
+# Builds the documentation site (guides plus the API reference generated from the XML doc comments) with DocFX. Warnings,
+# such as broken links, fail the build. The site is kept as an artifact; GitHub Pages can serve it once the repo is public.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths: ['docs/**', 'src/**', 'dotnet-tools.json', '.github/workflows/docs.yml']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docs-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# Actions are pinned by commit SHA (the tag in the comment is for humans and Dependabot).
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0 # MinVer
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+        with:
+          global-json-file: global.json
+          dotnet-version: 8.0.x
+      - run: dotnet tool restore
+      - run: dotnet build src/SshSharp -c Release
+      - run: dotnet docfx docs/docfx.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: docs-site
+          path: docs/_site
