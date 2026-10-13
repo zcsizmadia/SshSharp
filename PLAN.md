@@ -109,8 +109,8 @@ docs/
   arm64 runners are free only for public repos, so while the repo is private they may be limited to nightly or release builds.
 - **Workflows:** on PR, the unit tests on the whole platform matrix plus Linux interop; nightly (from M3), the long
   coverage-guided fuzz run and the old/new server matrix; on release tag, everything plus `dotnet pack` and package checks.
-- **Supply chain:** actions pinned by commit SHA, Dependabot for NuGet and Actions, `packages.lock.json` restored in locked
-  mode, NuGet audit failing the build on vulnerable packages, per-job timeouts. CodeQL once the repo is public (code
+- **Supply chain:** actions pinned by commit SHA, Dependabot for NuGet and Actions, central package versions,
+  NuGet audit failing the build on vulnerable packages, per-job timeouts. CodeQL once the repo is public (code
   scanning on a private personal repo needs GitHub Advanced Security).
 - **Rules:** no code merges without tests. Timing-dependent tests use the fake clock or wait on a signal, not real sleeps;
   real-time delays are only allowed for negative checks and bounded polling. Flaky tests are fixed or tracked, not hidden.

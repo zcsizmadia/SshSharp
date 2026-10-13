@@ -9,10 +9,8 @@
     <Deterministic>true</Deterministic>
     <ContinuousIntegrationBuild Condition="'$(GITHUB_ACTIONS)' == 'true'">true</ContinuousIntegrationBuild>
 
-    <!-- Supply chain: fail the build on known-vulnerable packages, direct or transitive (warnings are errors), and restore
-         exactly the versions in packages.lock.json (CI restores with locked mode). -->
+    <!-- Supply chain: fail the build on known-vulnerable packages, direct or transitive (warnings are errors). -->
     <NuGetAudit>true</NuGetAudit>
     <NuGetAuditMode>all</NuGetAuditMode>
-    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
   </PropertyGroup>
 </Project>

@@ -32,8 +32,8 @@ jobs:
           global-json-file: global.json
           dotnet-version: 8.0.x
           cache: true
-          cache-dependency-path: '**/packages.lock.json'
-      - run: dotnet restore --locked-mode
+          cache-dependency-path: '**/Directory.Packages.props'
+      - run: dotnet restore
       - run: dotnet build -c Release --no-restore
       - name: Test net8.0
         run: dotnet test --project tests/SshSharp.Tests -c Release -f net8.0 --no-build
@@ -80,7 +80,7 @@ jobs:
           global-json-file: global.json
           dotnet-version: 8.0.x
           cache: true
-          cache-dependency-path: '**/packages.lock.json'
+          cache-dependency-path: '**/Directory.Packages.props'
       - name: Start OpenSSH with a throwaway account
         run: |
           set -euo pipefail
@@ -173,7 +173,7 @@ jobs:
           ssh-add -l
           echo "SSH_AUTH_SOCK=$SSH_AUTH_SOCK" >> "$GITHUB_ENV"
           echo "SSHSHARP_TEST_AGENT=1" >> "$GITHUB_ENV"
-      - run: dotnet restore --locked-mode
+      - run: dotnet restore
       - run: dotnet build -c Release --no-restore
       - name: Interop tests against the real server (net8.0)
         run: dotnet test --project tests/SshSharp.Tests -c Release -f net8.0 --no-build --treenode-filter "/*/*/*InteropTests/*"
@@ -234,7 +234,7 @@ jobs:
           global-json-file: global.json
           dotnet-version: 8.0.x
           cache: true
-          cache-dependency-path: '**/packages.lock.json'
+          cache-dependency-path: '**/Directory.Packages.props'
       - name: Start the server container
         run: |
           set -euo pipefail
@@ -257,7 +257,7 @@ jobs:
             echo "SSHSHARP_TEST_SERVER_STRICTKEX=${{ matrix.strict }}"
           } >> "$GITHUB_ENV"
           if [ "${{ matrix.server }}" = "openssh" ]; then echo "SSHSHARP_TEST_SSHD_REKEY=1" >> "$GITHUB_ENV"; fi
-      - run: dotnet restore --locked-mode
+      - run: dotnet restore
       - run: dotnet build -c Release --no-restore
       - name: Interop tests against the container
         # Few tests at a time: Dropbear limits unauthenticated connections per address (a compile-time setting).

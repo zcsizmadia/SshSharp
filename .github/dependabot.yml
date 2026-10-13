@@ -8,14 +8,6 @@ updates:
       # TUnit and the testing platform move together; one PR instead of several.
       testing:
         patterns: ["TUnit*", "Microsoft.Testing.*"]
-    ignore:
-      # The library's runtime dependencies follow the target framework (Directory.Packages.props): the 8.x line for net8.0, 10.x for
-      # net10.0. A major bump would move a line onto another framework's packages, so it comes with a target change, not from here.
-      # Patch and minor updates (security fixes) still come through.
-      - dependency-name: "System.IO.Pipelines"
-        update-types: ["version-update:semver-major"]
-      - dependency-name: "Microsoft.Extensions.Logging.Abstractions"
-        update-types: ["version-update:semver-major"]
   - package-ecosystem: github-actions
     directory: /
     schedule:
