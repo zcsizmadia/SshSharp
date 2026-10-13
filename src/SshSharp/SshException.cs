@@ -32,6 +32,9 @@ public enum SshFailureReason
 
     /// <summary>The SSH agent could not be reached, refused a request, or answered with something unexpected.</summary>
     AgentFailed,
+
+    /// <summary>A file transfer (SCP) failed: the remote side reported an error, or broke the protocol.</summary>
+    TransferFailed,
 }
 
 /// <summary>The base class for errors raised by SshSharp when talking SSH.</summary>

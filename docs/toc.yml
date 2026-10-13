@@ -10,6 +10,8 @@
       href: host-keys.md
     - name: Commands and shells
       href: sessions.md
+    - name: File transfer (SCP)
+      href: scp.md
     - name: Configuration files
       href: config-files.md
     - name: Errors and diagnostics

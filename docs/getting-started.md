@@ -58,5 +58,6 @@ await using var client = await SshClient.ConnectAsync("example.com", 22, new Ssh
 - [Authentication](authentication.md): passwords, keys, certificates, the SSH agent, keyboard-interactive.
 - [Host keys](host-keys.md): `known_hosts`, policies, pinning, certificate authorities.
 - [Commands and shells](sessions.md): `RunCommandAsync`, streamed commands, interactive shells with a terminal.
+- [File transfer (SCP)](scp.md): files, streams and directories.
 - [Configuration files](config-files.md): reading `ssh_config` and `known_hosts` directly.
 - [Errors and diagnostics](diagnostics.md): exceptions, logging, tracing and metrics.

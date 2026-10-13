@@ -520,3 +520,39 @@ SshSharp.SshClient.LocalForwardings.get -> System.Collections.Generic.IReadOnlyL
 SshSharp.SshClient.RemoteForwardings.get -> System.Collections.Generic.IReadOnlyList<SshSharp.SshRemotePortForwarder!>!
 SshSharp.SshConfigConnectOptions.StartForwardings.get -> bool
 SshSharp.SshConfigConnectOptions.StartForwardings.init -> void
+~override SshSharp.Scp.SshScpProgress.Equals(object obj) -> bool
+~override SshSharp.Scp.SshScpProgress.ToString() -> string
+override SshSharp.Scp.SshScpProgress.GetHashCode() -> int
+SshSharp.Scp.SshScpExtensions
+SshSharp.Scp.SshScpOptions
+SshSharp.Scp.SshScpOptions.DirectoryMode.get -> int
+SshSharp.Scp.SshScpOptions.DirectoryMode.init -> void
+SshSharp.Scp.SshScpOptions.FileMode.get -> int
+SshSharp.Scp.SshScpOptions.FileMode.init -> void
+SshSharp.Scp.SshScpOptions.PreserveTimes.get -> bool
+SshSharp.Scp.SshScpOptions.PreserveTimes.init -> void
+SshSharp.Scp.SshScpOptions.Progress.get -> System.IProgress<SshSharp.Scp.SshScpProgress>?
+SshSharp.Scp.SshScpOptions.Progress.init -> void
+SshSharp.Scp.SshScpOptions.ScpCommand.get -> string!
+SshSharp.Scp.SshScpOptions.ScpCommand.init -> void
+SshSharp.Scp.SshScpOptions.SshScpOptions() -> void
+SshSharp.Scp.SshScpProgress
+SshSharp.Scp.SshScpProgress.BytesTransferred.get -> long
+SshSharp.Scp.SshScpProgress.BytesTransferred.init -> void
+SshSharp.Scp.SshScpProgress.Deconstruct(out string! Path, out long BytesTransferred, out long TotalBytes) -> void
+SshSharp.Scp.SshScpProgress.Equals(SshSharp.Scp.SshScpProgress other) -> bool
+SshSharp.Scp.SshScpProgress.Path.get -> string!
+SshSharp.Scp.SshScpProgress.Path.init -> void
+SshSharp.Scp.SshScpProgress.SshScpProgress() -> void
+SshSharp.Scp.SshScpProgress.SshScpProgress(string! Path, long BytesTransferred, long TotalBytes) -> void
+SshSharp.Scp.SshScpProgress.TotalBytes.get -> long
+SshSharp.Scp.SshScpProgress.TotalBytes.init -> void
+SshSharp.SshFailureReason.TransferFailed = 10 -> SshSharp.SshFailureReason
+static SshSharp.Scp.SshScpExtensions.DownloadAsync(this SshSharp.SshClient! client, string! remotePath, System.IO.Stream! destination, SshSharp.Scp.SshScpOptions? options = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+static SshSharp.Scp.SshScpExtensions.DownloadDirectoryAsync(this SshSharp.SshClient! client, string! remotePath, string! localDirectory, SshSharp.Scp.SshScpOptions? options = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+static SshSharp.Scp.SshScpExtensions.DownloadFileAsync(this SshSharp.SshClient! client, string! remotePath, string! localPath, SshSharp.Scp.SshScpOptions? options = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+static SshSharp.Scp.SshScpExtensions.UploadAsync(this SshSharp.SshClient! client, System.IO.Stream! source, string! remotePath, long? length = null, SshSharp.Scp.SshScpOptions? options = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+static SshSharp.Scp.SshScpExtensions.UploadDirectoryAsync(this SshSharp.SshClient! client, string! localDirectory, string! remotePath, SshSharp.Scp.SshScpOptions? options = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+static SshSharp.Scp.SshScpExtensions.UploadFileAsync(this SshSharp.SshClient! client, string! localPath, string! remotePath, SshSharp.Scp.SshScpOptions? options = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+static SshSharp.Scp.SshScpProgress.operator !=(SshSharp.Scp.SshScpProgress left, SshSharp.Scp.SshScpProgress right) -> bool
+static SshSharp.Scp.SshScpProgress.operator ==(SshSharp.Scp.SshScpProgress left, SshSharp.Scp.SshScpProgress right) -> bool
