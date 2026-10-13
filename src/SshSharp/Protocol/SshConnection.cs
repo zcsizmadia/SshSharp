@@ -18,6 +18,9 @@ internal sealed class SshConnection : IAsyncDisposable
 
     public SshConnection(SshTransport transport) => _transport = transport;
 
+    /// <summary>How many key exchanges have completed, including the first.</summary>
+    public int KeyExchangeCount => _transport.KeyExchangeCount;
+
     /// <summary>Why the connection ended, if it did.</summary>
     public Exception? Failure => _failure;
 

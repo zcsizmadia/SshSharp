@@ -165,9 +165,6 @@ internal sealed class FakeServerOptions
     /// <summary>Claim a guessed first key exchange packet follows, using a different kex than the one negotiated.</summary>
     public bool WrongGuess { get; init; }
 
-    /// <summary>Send ident, KEXINIT and everything else without waiting for the client (tests leftover bytes after the ident line).</summary>
-    public bool Eager { get; init; }
-
     /// <summary>Close the connection right after receiving the client's KEXINIT.</summary>
     public bool CloseAfterKexInit { get; init; }
 
@@ -176,11 +173,26 @@ internal sealed class FakeServerOptions
 
     /// <summary>Do not send the server identification at all.</summary>
     public bool SilentOnConnect { get; init; }
+
+    // ---- behaviour of key re-exchanges ----
+
+    /// <summary>Use this host key (instead of <see cref="HostKey"/>) when re-exchanging keys.</summary>
+    public FakeHostKey? RekeyHostKey { get; init; }
+
+    /// <summary>Negotiate this cipher on re-exchange (the client must allow it).</summary>
+    public string? RekeyCipher { get; init; }
+
+    /// <summary>Negotiate this key exchange method on re-exchange.</summary>
+    public string? RekeyKex { get; init; }
+
+    /// <summary>Send an SSH_MSG_IGNORE between KEXINIT and the reply of a re-exchange.</summary>
+    public bool IgnoreDuringRekey { get; init; }
 }
 
 /// <summary>
 /// A scriptable in-memory SSH server speaking the real protocol with this library's primitives. After <see cref="StartAsync"/>
-/// completes, tests drive it with <see cref="SendAsync"/> and <see cref="ReceiveAsync"/>.
+/// completes, tests drive it with <see cref="SendAsync"/> and <see cref="ReceiveAsync"/>. It also takes part in key re-exchanges:
+/// call <see cref="RekeyAsync"/> to start one, and a client-initiated one is carried out transparently inside <see cref="ReceiveAsync"/>.
 /// </summary>
 internal sealed class FakeSshServer : IAsyncDisposable
 {
@@ -188,11 +200,18 @@ internal sealed class FakeSshServer : IAsyncDisposable
     private readonly Pipe _toClient = new();
     private readonly PipeReader _reader;
     private readonly PipeWriter _writer;
+    private readonly SemaphoreSlim _sendLock = new(1, 1);
     private PacketProtector _send = PacketProtector.None;
     private PacketProtector _receive = PacketProtector.None;
     private uint _sendSeq;
     private uint _receiveSeq;
-    private readonly SemaphoreSlim _sendLock = new(1, 1);
+    private bool _strict;
+
+    // Re-exchange state (protected by _sendLock, like the client's).
+    private bool _rekeying;
+    private TaskCompletionSource _rekeyDone = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private KexInitMessage? _pendingServerInit;
+    private byte[]? _pendingServerInitPayload;
 
     public FakeSshServer(FakeServerOptions? options = null)
     {
@@ -215,6 +234,9 @@ internal sealed class FakeSshServer : IAsyncDisposable
 
     public byte[]? SessionId { get; private set; }
 
+    /// <summary>How many key exchanges have completed on the server side, including the first.</summary>
+    public int KeyExchangeCount { get; private set; }
+
     /// <summary>Runs the server side of the handshake. Await it together with the client's ConnectAsync.</summary>
     public async Task StartAsync(CancellationToken cancellationToken = default)
     {
@@ -234,96 +256,37 @@ internal sealed class FakeSshServer : IAsyncDisposable
 
         for (var i = 0; i < Options.IgnoresBeforeKexInit; i++)
         {
-            await SendAsync(IgnorePayload(), cancellationToken);
+            await SendKexAsync(IgnorePayload(), cancellationToken);
         }
 
-        var serverInit = BuildServerKexInit();
+        var serverInit = BuildServerKexInit(initial: true);
         var serverInitPayload = Serialize(serverInit.Write);
-        await SendAsync(serverInitPayload, cancellationToken);
+        await SendKexAsync(serverInitPayload, cancellationToken);
 
-        using var clientInitPacket = await ReceiveAsync(cancellationToken);
+        using var clientInitPacket = await ReceiveRawAsync(cancellationToken);
         var clientInitPayload = clientInitPacket.Payload.ToArray();
         ClientKexInit = KexInitMessage.Parse(clientInitPayload);
-        Negotiated = AlgorithmNegotiator.Negotiate(ClientKexInit, serverInit);
 
         if (Options.CloseAfterKexInit)
         {
+            Negotiated = AlgorithmNegotiator.Negotiate(ClientKexInit, serverInit);
             await _writer.CompleteAsync();
             return;
         }
 
-        if (Options.WrongGuess)
-        {
-            await SendAsync(new byte[] { SshMessage.KexEcdhReply, 0, 0, 0, 0 }, cancellationToken); // the "guessed" packet, to be discarded
-        }
-
-        using var kexInitPacket = await ReceiveAsync(cancellationToken);
-        var init = kexInitPacket.Payload.ToArray();
-
-        if (Options.IgnoreDuringKex)
-        {
-            await SendAsync(IgnorePayload(), cancellationToken);
-        }
-
-        if (Options.DisconnectInsteadOfReply is { } why)
-        {
-            await SendAsync(DisconnectPayload(why), cancellationToken);
-            return;
-        }
-
-        var hostKeyAlgorithm = Negotiated.HostKey;
-        var (reply, secret, hash, kexHash) = RunKex(Negotiated.Kex, hostKeyAlgorithm, init, clientInitPayload, serverInitPayload);
-        await SendAsync(reply, cancellationToken);
-
-        SessionId = hash;
-        SshAlgorithms.TryGetCipher(Negotiated.CipherClientToServer, out var cipherC2S);
-        SshAlgorithms.TryGetCipher(Negotiated.CipherServerToClient, out var cipherS2C);
-        SshAlgorithms.TryGetMac(Negotiated.MacClientToServer, out var macC2S);
-        SshAlgorithms.TryGetMac(Negotiated.MacServerToClient, out var macS2C);
-        using var keys = KeyDerivation.DeriveAll(kexHash, secret, hash, hash, cipherC2S, cipherS2C, macC2S, macS2C);
-        var newSend = PacketProtectorFactory.Create(cipherS2C, macS2C, keys.EncryptionKeyServerToClient, keys.IvServerToClient, keys.IntegrityKeyServerToClient);
-        var newReceive = PacketProtectorFactory.Create(cipherC2S, macC2S, keys.EncryptionKeyClientToServer, keys.IvClientToServer, keys.IntegrityKeyClientToServer);
-
-        var strict = Negotiated.StrictKex;
-        await SendAsync(new byte[] { SshMessage.NewKeys }, cancellationToken);
-        _send = newSend;
-        if (strict)
-        {
-            _sendSeq = 0;
-        }
-
-        using var newKeysPacket = await ReceiveAsync(cancellationToken);
-        if (newKeysPacket.Payload.Span[0] != SshMessage.NewKeys)
-        {
-            throw new InvalidOperationException("The client did not send NEWKEYS.");
-        }
-
-        _receive = newReceive;
-        if (strict)
-        {
-            _receiveSeq = 0;
-        }
-
-        if (Options.SendExtInfo && Negotiated.ServerSupportsExtInfo)
-        {
-            await SendAsync(Serialize(output =>
-            {
-                var w = new SshWriter(output);
-                w.WriteByte(SshMessage.ExtInfo);
-                w.WriteUInt32(1);
-                w.WriteString("server-sig-algs");
-                w.WriteString("ssh-ed25519,rsa-sha2-512,rsa-sha2-256");
-            }), cancellationToken);
-        }
+        await ExchangeAsync(ClientKexInit, clientInitPayload, serverInit, serverInitPayload, initial: true, cancellationToken);
     }
 
-    public async ValueTask SendAsync(ReadOnlyMemory<byte> payload, CancellationToken cancellationToken = default)
+    /// <summary>Starts a key re-exchange from the server side. It completes when the client's KEXINIT arrives in <see cref="ReceiveAsync"/>.</summary>
+    public async Task RekeyAsync(CancellationToken cancellationToken = default)
     {
         await _sendLock.WaitAsync(cancellationToken);
         try
         {
-            PacketCodec.Encode(_writer, payload.Span, _send, _sendSeq++);
-            await _writer.FlushAsync(cancellationToken);
+            if (!_rekeying)
+            {
+                await SendServerKexInitLockedAsync(cancellationToken);
+            }
         }
         finally
         {
@@ -331,25 +294,49 @@ internal sealed class FakeSshServer : IAsyncDisposable
         }
     }
 
+    /// <summary>Sends an application message. Like the client, the server holds these back while a key exchange is in progress.</summary>
+    public async ValueTask SendAsync(ReadOnlyMemory<byte> payload, CancellationToken cancellationToken = default)
+    {
+        while (true)
+        {
+            Task? wait = null;
+            await _sendLock.WaitAsync(cancellationToken);
+            try
+            {
+                if (_rekeying)
+                {
+                    wait = _rekeyDone.Task;
+                }
+                else
+                {
+                    PacketCodec.Encode(_writer, payload.Span, _send, _sendSeq++);
+                    await _writer.FlushAsync(cancellationToken);
+                    return;
+                }
+            }
+            finally
+            {
+                _sendLock.Release();
+            }
+
+            await wait.WaitAsync(cancellationToken);
+        }
+    }
+
+    /// <summary>Receives the next application message; a client-initiated re-exchange is handled on the way.</summary>
     public async ValueTask<DecodedPacket> ReceiveAsync(CancellationToken cancellationToken = default)
     {
         while (true)
         {
-            var result = await _reader.ReadAsync(cancellationToken);
-            var buffer = result.Buffer;
-            if (PacketCodec.TryDecode(buffer, _receive, _receiveSeq, out var packet, out var consumed))
+            var packet = await ReceiveRawAsync(cancellationToken);
+            if (packet.Payload.Span[0] != SshMessage.KexInit)
             {
-                _reader.AdvanceTo(buffer.GetPosition(consumed));
-                _receiveSeq++;
-                return packet!;
+                return packet;
             }
 
-            if (result.IsCompleted)
-            {
-                throw new EndOfStreamException("The client closed the connection.");
-            }
-
-            _reader.AdvanceTo(buffer.Start, buffer.End);
+            var clientInitPayload = packet.Payload.ToArray();
+            packet.Dispose();
+            await HandleClientKexInitAsync(clientInitPayload, cancellationToken);
         }
     }
 
@@ -394,44 +381,218 @@ internal sealed class FakeSshServer : IAsyncDisposable
         return buffer.WrittenSpan.ToArray();
     }
 
-    private KexInitMessage BuildServerKexInit()
+    // ---- key exchange, initial and re-exchange ----
+
+    /// <summary>The client's KEXINIT arrived during normal operation: answer with ours (unless we started it) and run the exchange.</summary>
+    private async Task HandleClientKexInitAsync(byte[] clientInitPayload, CancellationToken cancellationToken)
     {
-        var kex = new List<string> { Options.WrongGuess ? SshAlgorithms.EcdhNistp256 : Options.Kex };
-        if (Options.WrongGuess)
+        KexInitMessage serverInit;
+        byte[] serverInitPayload;
+        await _sendLock.WaitAsync(cancellationToken);
+        try
         {
-            kex.Add(Options.Kex);
+            if (!_rekeying)
+            {
+                await SendServerKexInitLockedAsync(cancellationToken);
+            }
+
+            serverInit = _pendingServerInit!;
+            serverInitPayload = _pendingServerInitPayload!;
+        }
+        finally
+        {
+            _sendLock.Release();
         }
 
-        if (Options.SendExtInfo)
+        await ExchangeAsync(KexInitMessage.Parse(clientInitPayload), clientInitPayload, serverInit, serverInitPayload, initial: false, cancellationToken);
+    }
+
+    private async Task SendServerKexInitLockedAsync(CancellationToken cancellationToken)
+    {
+        var serverInit = BuildServerKexInit(initial: false);
+        var payload = Serialize(serverInit.Write);
+        _rekeying = true;
+        _pendingServerInit = serverInit;
+        _pendingServerInitPayload = payload;
+        PacketCodec.Encode(_writer, payload, _send, _sendSeq++);
+        await _writer.FlushAsync(cancellationToken);
+    }
+
+    private async Task ExchangeAsync(KexInitMessage clientInit, byte[] clientInitPayload, KexInitMessage serverInit, byte[] serverInitPayload, bool initial, CancellationToken cancellationToken)
+    {
+        var negotiated = AlgorithmNegotiator.Negotiate(clientInit, serverInit);
+        if (initial)
+        {
+            _strict = negotiated.StrictKex;
+        }
+
+        Negotiated = negotiated with { StrictKex = _strict };
+
+        if (initial && Options.WrongGuess)
+        {
+            await SendKexAsync(new byte[] { SshMessage.KexEcdhReply, 0, 0, 0, 0 }, cancellationToken); // the "guessed" packet, to be discarded
+        }
+
+        using var kexInitPacket = await ReceiveRawAsync(cancellationToken);
+        var init = kexInitPacket.Payload.ToArray();
+
+        if (initial ? Options.IgnoreDuringKex : Options.IgnoreDuringRekey)
+        {
+            await SendKexAsync(IgnorePayload(), cancellationToken);
+        }
+
+        if (initial && Options.DisconnectInsteadOfReply is { } why)
+        {
+            await SendKexAsync(DisconnectPayload(why), cancellationToken);
+            return;
+        }
+
+        var hostKey = !initial && Options.RekeyHostKey is { } replacement ? replacement : Options.HostKey;
+        var (reply, secret, hash, kexHash) = RunKex(negotiated.Kex, negotiated.HostKey, hostKey, init, clientInitPayload, serverInitPayload);
+        await SendKexAsync(reply, cancellationToken);
+
+        if (initial)
+        {
+            SessionId = hash;
+        }
+
+        SshAlgorithms.TryGetCipher(negotiated.CipherClientToServer, out var cipherC2S);
+        SshAlgorithms.TryGetCipher(negotiated.CipherServerToClient, out var cipherS2C);
+        SshAlgorithms.TryGetMac(negotiated.MacClientToServer, out var macC2S);
+        SshAlgorithms.TryGetMac(negotiated.MacServerToClient, out var macS2C);
+        using var keys = KeyDerivation.DeriveAll(kexHash, secret, hash, SessionId!, cipherC2S, cipherS2C, macC2S, macS2C);
+        var newSend = PacketProtectorFactory.Create(cipherS2C, macS2C, keys.EncryptionKeyServerToClient, keys.IvServerToClient, keys.IntegrityKeyServerToClient);
+        var newReceive = PacketProtectorFactory.Create(cipherC2S, macC2S, keys.EncryptionKeyClientToServer, keys.IvClientToServer, keys.IntegrityKeyClientToServer);
+
+        await _sendLock.WaitAsync(cancellationToken);
+        try
+        {
+            PacketCodec.Encode(_writer, new byte[] { SshMessage.NewKeys }, _send, _sendSeq++);
+            await _writer.FlushAsync(cancellationToken);
+            _send.Dispose();
+            _send = newSend;
+            if (_strict)
+            {
+                _sendSeq = 0;
+            }
+
+            _rekeying = false;
+            _pendingServerInit = null;
+            _pendingServerInitPayload = null;
+            var done = _rekeyDone;
+            _rekeyDone = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            done.TrySetResult();
+        }
+        finally
+        {
+            _sendLock.Release();
+        }
+
+        using var newKeysPacket = await ReceiveRawAsync(cancellationToken);
+        if (newKeysPacket.Payload.Span[0] != SshMessage.NewKeys)
+        {
+            throw new InvalidOperationException("The client did not send NEWKEYS.");
+        }
+
+        _receive.Dispose();
+        _receive = newReceive;
+        if (_strict)
+        {
+            _receiveSeq = 0;
+        }
+
+        KeyExchangeCount++;
+
+        if (initial && Options.SendExtInfo && negotiated.ServerSupportsExtInfo)
+        {
+            await SendAsync(Serialize(output =>
+            {
+                var w = new SshWriter(output);
+                w.WriteByte(SshMessage.ExtInfo);
+                w.WriteUInt32(1);
+                w.WriteString("server-sig-algs");
+                w.WriteString("ssh-ed25519,rsa-sha2-512,rsa-sha2-256");
+            }), cancellationToken);
+        }
+    }
+
+    /// <summary>Sends a key exchange or transport message: allowed while a key exchange is in progress.</summary>
+    private async ValueTask SendKexAsync(ReadOnlyMemory<byte> payload, CancellationToken cancellationToken)
+    {
+        await _sendLock.WaitAsync(cancellationToken);
+        try
+        {
+            PacketCodec.Encode(_writer, payload.Span, _send, _sendSeq++);
+            await _writer.FlushAsync(cancellationToken);
+        }
+        finally
+        {
+            _sendLock.Release();
+        }
+    }
+
+    private async ValueTask<DecodedPacket> ReceiveRawAsync(CancellationToken cancellationToken)
+    {
+        while (true)
+        {
+            var result = await _reader.ReadAsync(cancellationToken);
+            var buffer = result.Buffer;
+            if (PacketCodec.TryDecode(buffer, _receive, _receiveSeq, out var packet, out var consumed))
+            {
+                _reader.AdvanceTo(buffer.GetPosition(consumed));
+                _receiveSeq++;
+                return packet!;
+            }
+
+            if (result.IsCompleted)
+            {
+                throw new EndOfStreamException("The client closed the connection.");
+            }
+
+            _reader.AdvanceTo(buffer.Start, buffer.End);
+        }
+    }
+
+    private KexInitMessage BuildServerKexInit(bool initial)
+    {
+        var offeredKex = initial ? Options.Kex : Options.RekeyKex ?? Options.Kex;
+        var kex = new List<string> { initial && Options.WrongGuess ? SshAlgorithms.EcdhNistp256 : offeredKex };
+        if (initial && Options.WrongGuess)
+        {
+            kex.Add(offeredKex);
+        }
+
+        if (initial && Options.SendExtInfo)
         {
             kex.Add(SshAlgorithms.ExtInfoServer);
         }
 
-        if (Options.AdvertiseStrictKex)
+        if (initial && Options.AdvertiseStrictKex)
         {
             kex.Add(SshAlgorithms.StrictKexServer);
         }
 
+        var cipher = initial ? Options.Cipher : Options.RekeyCipher ?? Options.Cipher;
+        var hostKey = !initial && Options.RekeyHostKey is { } replacement ? replacement : Options.HostKey;
         return new KexInitMessage
         {
             Cookie = RandomNumberGenerator.GetBytes(16),
             KexAlgorithms = kex,
             ServerHostKeyAlgorithms = Options.HostKeyAlgorithm is { } algorithm
                 ? [algorithm]
-                : Options.HostKey.KeyType == "ssh-rsa" ? ["rsa-sha2-512", "rsa-sha2-256"] : [Options.HostKey.KeyType],
-            EncryptionClientToServer = [Options.Cipher],
-            EncryptionServerToClient = [Options.Cipher],
+                : hostKey.KeyType == "ssh-rsa" ? ["rsa-sha2-512", "rsa-sha2-256"] : [hostKey.KeyType],
+            EncryptionClientToServer = [cipher],
+            EncryptionServerToClient = [cipher],
             MacClientToServer = [Options.Mac],
             MacServerToClient = [Options.Mac],
             CompressionClientToServer = ["none"],
             CompressionServerToClient = ["none"],
-            FirstKexPacketFollows = Options.WrongGuess,
+            FirstKexPacketFollows = initial && Options.WrongGuess,
         };
     }
 
-    private (byte[] Reply, byte[] Secret, byte[] Hash, HashAlgorithmName HashAlgorithm) RunKex(string method, string hostKeyAlgorithm, byte[] init, byte[] clientInit, byte[] serverInit)
+    private (byte[] Reply, byte[] Secret, byte[] Hash, HashAlgorithmName HashAlgorithm) RunKex(string method, string hostKeyAlgorithm, FakeHostKey hostKey, byte[] init, byte[] clientInit, byte[] serverInit)
     {
-        var hostKey = Options.HostKey;
         var clientVersion = ClientIdentification!.Line;
         var serverVersion = Options.Identification;
 

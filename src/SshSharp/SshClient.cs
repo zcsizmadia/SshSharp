@@ -129,6 +129,8 @@ public sealed class SshClient : IAsyncDisposable
         {
             Preferences = options.AlgorithmPreferences ?? new AlgorithmPreferences(),
             MinimumRsaBits = options.MinimumRsaBits,
+            RekeyBytes = options.RekeyAfterBytes,
+            RekeyInterval = options.RekeyAfterTime,
             VerifyHostKey = (info, ct) => options.HostKeyVerifier(new SshHostKey(info.Algorithm, info.KeyType, info.Fingerprint, info.Blob, info.KeySizeBits), ct),
         };
         var transport = new SshTransport(stream, transportOptions);
