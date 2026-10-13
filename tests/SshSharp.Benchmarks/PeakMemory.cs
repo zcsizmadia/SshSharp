@@ -9,7 +9,48 @@ namespace SshSharp.Benchmarks;
 /// </summary>
 internal static class PeakMemory
 {
+    /// <summary>Counts the runtime's GCAllocationTick events by type: where the garbage comes from, without a profiler.</summary>
+    private sealed class AllocationSampler : System.Diagnostics.Tracing.EventListener
+    {
+        public System.Collections.Concurrent.ConcurrentDictionary<string, long> ByType { get; } = new();
+
+        protected override void OnEventSourceCreated(System.Diagnostics.Tracing.EventSource source)
+        {
+            if (source.Name == "Microsoft-Windows-DotNETRuntime")
+            {
+                EnableEvents(source, System.Diagnostics.Tracing.EventLevel.Verbose, (System.Diagnostics.Tracing.EventKeywords)0x1);
+            }
+        }
+
+        protected override void OnEventWritten(System.Diagnostics.Tracing.EventWrittenEventArgs e)
+        {
+            if (e.EventName?.StartsWith("GCAllocationTick", StringComparison.Ordinal) == true && e.Payload is { } p)
+            {
+                var name = e.PayloadNames!.IndexOf("TypeName") is var i and >= 0 ? p[i]?.ToString() ?? "?" : "?";
+                ByType.AddOrUpdate(name, 1, (_, n) => n + 1);
+            }
+        }
+    }
+
     public static async Task RunAsync(string library, int mebibytes)
+    {
+        using var allocations = new AllocationSampler();
+        try
+        {
+            await RunCoreAsync(library, mebibytes);
+        }
+        finally
+        {
+            // The runtime reports a sample about every 100 KB allocated, with the type that crossed the mark.
+            Console.WriteLine("  allocations by type (sampled):");
+            foreach (var (type, count) in allocations.ByType.OrderByDescending(kv => kv.Value).Take(15))
+            {
+                Console.WriteLine($"  ~{count * 100} KB  {type}");
+            }
+        }
+    }
+
+    private static async Task RunCoreAsync(string library, int mebibytes)
     {
         var bytes = (long)mebibytes * 1024 * 1024;
         // dd, not head -c: BusyBox head copies in small pieces and caps the transfer at about 130 MiB/s.
