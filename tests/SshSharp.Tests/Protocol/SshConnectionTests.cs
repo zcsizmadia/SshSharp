@@ -55,6 +55,25 @@ public class SshConnectionTests
     }
 
     [Test]
+    public async Task DisposingWhileThePeerHasStoppedReading_FinishesPromptly()
+    {
+        await using var server = new FakeSessionServer();
+        var gated = new GatedStream(server.ClientStream) { IgnoreCancellation = true };
+        var client = await ConnectAsync(server, gated);
+
+        // A write is stuck half-way and the stream does not even honour cancellation (a wedged socket). The caller gives up; disposal
+        // must neither wait for that write nor try to flush anything else into the same stream.
+        gated.Stall();
+        using (var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(200)))
+        {
+            await Assert.That(async () => await client.Connection.OpenSessionAsync(cts.Token)).Throws<OperationCanceledException>();
+        }
+
+        await client.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(15));
+        gated.Resume();
+    }
+
+    [Test]
     public async Task CancellingAChannelOpen_KeepsTheConnection_AndClosesTheChannelWhenItIsConfirmed()
     {
         var hold = new TaskCompletionSource();
@@ -202,6 +221,9 @@ public class SshConnectionTests
     {
         private volatile TaskCompletionSource? _stalled;
 
+        /// <summary>Stalled writes ignore their cancellation token, like a wedged socket.</summary>
+        public bool IgnoreCancellation { get; init; }
+
         public void Stall() => _stalled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public void Resume()
@@ -227,7 +249,7 @@ public class SshConnectionTests
             {
                 var half = buffer.Length / 2;
                 await inner.WriteAsync(buffer[..half], cancellationToken);
-                await stalled.Task.WaitAsync(cancellationToken);
+                await (IgnoreCancellation ? stalled.Task : stalled.Task.WaitAsync(cancellationToken));
                 await inner.WriteAsync(buffer[half..], cancellationToken);
                 return;
             }
