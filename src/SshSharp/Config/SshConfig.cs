@@ -158,7 +158,14 @@ public sealed class SshConfig
 
         // The host and user come from the caller, and may come from untrusted input. They are substituted into Match exec and
         // ProxyCommand (%h, %n, %r), which run in a shell, so shell metacharacters are refused, as OpenSSH does since 9.6 (CVE-2023-51385).
+        // A host name never contains white space, and a space would split %h into extra arguments of ProxyCommand. User names keep
+        // theirs (Windows account names can have spaces), as OpenSSH allows.
         RequireSafe(host, nameof(host), "host name");
+        if (host.Any(char.IsWhiteSpace))
+        {
+            throw new ArgumentException("The host name contains white space.", nameof(host));
+        }
+
         if (options.User is { } explicitUser)
         {
             RequireSafe(explicitUser, nameof(options), "user name");

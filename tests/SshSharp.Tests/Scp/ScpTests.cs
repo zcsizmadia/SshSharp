@@ -282,6 +282,37 @@ public sealed class ScpTests : IDisposable
     }
 
     [Test]
+    [Arguments("CON", true)]
+    [Arguments("nul.txt", true)]
+    [Arguments("Com1", true)]
+    [Arguments("LPT9.log", true)]
+    [Arguments("COM¹", true)]
+    [Arguments("aux .txt", true)]
+    [Arguments("report.", true)] // Windows strips the dot: it would overwrite "report"
+    [Arguments("report ", true)]
+    [Arguments("CON", false)] // ordinary names elsewhere
+    [Arguments("report.", false)]
+    [Arguments("console.txt", null)]
+    [Arguments("COM10", null)]
+    [Arguments("LPT", null)]
+    public async Task WindowsDeviceNames_AndTrailingDotsOrSpaces_AreRefusedOnWindows(string name, bool? windows)
+    {
+        if (windows is null)
+        {
+            await Assert.That(SshScpExtensions.CheckName(name, windows: true)).IsEqualTo(name);
+            await Assert.That(SshScpExtensions.CheckName(name, windows: false)).IsEqualTo(name);
+        }
+        else if (windows.Value)
+        {
+            await Assert.That(() => SshScpExtensions.CheckName(name, windows: true)).Throws<SshException>();
+        }
+        else
+        {
+            await Assert.That(SshScpExtensions.CheckName(name, windows: false)).IsEqualTo(name);
+        }
+    }
+
+    [Test]
     public async Task AHostileServer_CannotTurnAFileDownloadIntoMany_OrADirectory()
     {
         // Asked for one file, the server sends two (an extra file is how CVE-2019-6111 overwrote .bashrc), or a directory.

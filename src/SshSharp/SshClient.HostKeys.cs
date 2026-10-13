@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging;
+using SshSharp.Config;
 using SshSharp.Keys;
 using SshSharp.Protocol;
 
@@ -16,7 +17,8 @@ public sealed partial class SshClient
             return;
         }
 
-        if (new SshHostKeyContext(host, port, options.HostKeyAlias, hostKey).KnownHostsLookup is not var (name, lookupPort))
+        if (new SshHostKeyContext(host, port, options.HostKeyAlias, hostKey).KnownHostsLookup is not var (name, lookupPort)
+            || !KnownHostsEntry.IsLiteralHost(name))
         {
             return;
         }
@@ -44,6 +46,14 @@ public sealed partial class SshClient
             // The key this connection was verified with stays, whatever the announcement says.
             supported.Add(current);
             var unknown = await knownHosts.UnknownHostKeysAsync(name, port, supported, connection.Closed).ConfigureAwait(false);
+            if (unknown.Any(key => key.AsSpan().SequenceEqual(current)))
+            {
+                // The connection's own key is not in known_hosts: it was accepted although it changed (StrictHostKeyChecking no). The
+                // server is unauthenticated, so it must not add keys, and above all must not have the real ones removed as stale.
+                SshLog.HostKeyUpdateSkipped(logger, "the connection's host key is not in known_hosts");
+                return;
+            }
+
             var stale = await knownHosts.StaleHostKeysAsync(name, port, supported, connection.Closed).ConfigureAwait(false);
             if (unknown.Count == 0 && stale.Count == 0)
             {

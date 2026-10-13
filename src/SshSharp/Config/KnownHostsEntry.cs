@@ -22,6 +22,24 @@ public sealed class KnownHostsEntry
 {
     private const string HashPrefix = "|1|";
 
+    private static readonly System.Buffers.SearchValues<char> PatternCharacters = System.Buffers.SearchValues.Create(",*?!");
+
+    /// <summary>Refuses a host field that would add fields or lines to known_hosts (white space, a newline, control characters).</summary>
+    internal static void RequireSingleField(string host)
+    {
+        if (host.Any(char.IsWhiteSpace) || host.Any(char.IsControl))
+        {
+            throw new ArgumentException("A known_hosts host must not contain white space or control characters.", nameof(host));
+        }
+    }
+
+    /// <summary>
+    /// Whether a host name would be recorded as exactly that host: besides what <see cref="RequireSingleField"/> refuses, a comma would add
+    /// another host, and <c>*</c>, <c>?</c> or <c>!</c> would make it a pattern that trusts the key for other hosts too.
+    /// </summary>
+    internal static bool IsLiteralHost(string host) =>
+        !host.Any(char.IsWhiteSpace) && !host.Any(char.IsControl) && host.AsSpan().IndexOfAny(PatternCharacters) < 0;
+
     /// <summary>Creates an entry.</summary>
     /// <param name="hostPatterns">Comma-separated host patterns, or a single hashed host (<c>|1|salt|hash</c>).</param>
     /// <param name="keyType">The key type, for example <c>ssh-ed25519</c>.</param>

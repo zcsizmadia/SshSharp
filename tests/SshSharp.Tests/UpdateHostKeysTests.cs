@@ -127,6 +127,53 @@ public sealed class UpdateHostKeysTests : IDisposable
     }
 
     [Test]
+    public async Task AChangedKeyAcceptedWithStrictHostKeyCheckingNo_UpdatesNothing()
+    {
+        // A man in the middle presents its own key; StrictHostKeyChecking no lets the connection through, but its announcement must not
+        // add its keys or have the real one removed as stale.
+        var real = FakeHostKey.Ed25519();
+        var impostor = FakeHostKey.Ed25519();
+        File.WriteAllText(KnownHosts, Line(real));
+        await using var server = new FakeSessionServer(new FakeServerOptions { HostKey = impostor }) { AnnouncedHostKeys = [impostor, FakeHostKey.Ecdsa(256)] };
+        _ = server.StartAsync();
+        var skipped = new SkipLogger();
+        await using var client = await SshClient.ConnectAsync(server.ClientStream, new SshClientOptions
+        {
+            UserName = "tester",
+            Password = "secret",
+            HostKeyAlias = Host,
+            HostKeyVerifier = new KnownHostsVerifier([KnownHosts]) { Policy = StrictHostKeyChecking.No, UpdateHostKeys = true },
+            Logger = skipped,
+        }, leaveOpen: true, Timeout());
+
+        await skipped.Reason.Task.WaitAsync(Timeout());
+        await Assert.That(skipped.Reason.Task.Result).Contains("not in known_hosts");
+        await Assert.That(Recorded()).IsEquivalentTo([Line(real).TrimEnd()]);
+        await Assert.That(Proved(server)).IsFalse();
+    }
+
+    /// <summary>Completes when the client logs why it skipped a host key update.</summary>
+    private sealed class SkipLogger : Microsoft.Extensions.Logging.ILogger
+    {
+        public TaskCompletionSource<string> Reason { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull => null;
+
+        public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => true;
+
+        public void Log<TState>(Microsoft.Extensions.Logging.LogLevel logLevel, Microsoft.Extensions.Logging.EventId eventId, TState state, Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            var message = formatter(state, exception);
+            if (message.StartsWith("Host key update skipped", StringComparison.Ordinal))
+            {
+                Reason.TrySetResult(message);
+            }
+        }
+    }
+
+    [Test]
     public async Task WithUpdateHostKeysOff_NothingIsAskedOrRecorded()
     {
         var current = FakeHostKey.Ed25519();

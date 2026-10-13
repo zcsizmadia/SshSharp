@@ -105,6 +105,39 @@ public sealed class KnownHostsVerifierTests : IDisposable
     }
 
     [Test]
+    [Arguments("*")]
+    [Arguments("*.example.com")]
+    [Arguments("server.example,other.example")]
+    [Arguments("!server.example")]
+    [Arguments("ser?er.example")]
+    [Arguments("server.example\n* ssh-ed25519 AAAA")]
+    [Arguments("server example")]
+    public async Task AHostNameThatWouldBeRecordedAsAPattern_IsRefused_NotRecorded(string host)
+    {
+        // Written as is, these would trust the key for other hosts, or add hosts, fields or lines.
+        foreach (var policy in new[] { StrictHostKeyChecking.AcceptNew, StrictHostKeyChecking.No })
+        {
+            var verdict = await Verifier(policy).VerifyAsync(Context(Ed25519Key(), host: host), default);
+            await Assert.That(verdict.IsAccepted).IsFalse();
+            await Assert.That(verdict.Reason).Contains("cannot be recorded");
+        }
+
+        await Assert.That(File.Exists(UserFile)).IsFalse();
+    }
+
+    [Test]
+    public async Task KnownHostsFile_RefusesHostFieldsWithWhiteSpaceOrControlCharacters()
+    {
+        var key = Ed25519Key();
+        await Assert.That(async () => await KnownHostsFile.AppendAsync(UserFile, "a b", 22, key.KeyType, key.PublicKey)).Throws<ArgumentException>();
+        await Assert.That(() => new KnownHostsFile().Add("a\nb", 22, key.KeyType, key.PublicKey.Span)).Throws<ArgumentException>();
+
+        // Patterns stay possible when written on purpose (for @cert-authority lines, for example).
+        await Assert.That(new KnownHostsFile().Add("*.example.com", 22, key.KeyType, key.PublicKey.Span, marker: KnownHostsMarker.CertAuthority).HostPatterns)
+            .IsEqualTo("*.example.com");
+    }
+
+    [Test]
     public async Task ARevokedKey_IsRefusedEvenWithNo()
     {
         var key = Ed25519Key();
