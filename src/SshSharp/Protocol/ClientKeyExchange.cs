@@ -1,0 +1,279 @@
+using System.Buffers;
+using System.Numerics;
+using System.Security.Cryptography;
+using SshSharp.Crypto;
+
+namespace SshSharp.Protocol;
+
+/// <summary>What the transport needs to know about one exchange: both identification strings and both KEXINIT payloads.</summary>
+internal sealed record KexContext(string ClientVersion, string ServerVersion, byte[] ClientKexInit, byte[] ServerKexInit);
+
+/// <summary>The outcome of a key exchange. The host key signature over <see cref="ExchangeHash"/> still has to be verified by the caller.</summary>
+internal sealed class KexResult : IDisposable
+{
+    /// <summary>K, as an unsigned big-endian magnitude.</summary>
+    public required byte[] SharedSecret { get; init; }
+
+    /// <summary>H.</summary>
+    public required byte[] ExchangeHash { get; init; }
+
+    /// <summary>The server's host key blob (K_S).</summary>
+    public required byte[] HostKeyBlob { get; init; }
+
+    /// <summary>The signature blob over H (<c>string type || string signature</c>).</summary>
+    public required byte[] Signature { get; init; }
+
+    public void Dispose() => CryptographicOperations.ZeroMemory(SharedSecret);
+}
+
+/// <summary>The client side of one key exchange method (RFC 4253 section 8, RFC 5656, RFC 8731).</summary>
+internal abstract class ClientKeyExchange : IDisposable
+{
+    /// <summary>The hash used for the exchange hash and key derivation.</summary>
+    public abstract HashAlgorithmName Hash { get; }
+
+    /// <summary>The first key exchange message (including its message number): <c>SSH_MSG_KEX*_INIT</c>.</summary>
+    public abstract byte[] CreateInit();
+
+    /// <summary>Processes the server's reply message (including its message number), computes K and H.</summary>
+    /// <exception cref="SshProtocolException">The reply is malformed.</exception>
+    /// <exception cref="SshException">The server sent an unacceptable value (low-order point, point off the curve, DH value out of range).</exception>
+    public abstract KexResult ProcessReply(ReadOnlySpan<byte> reply, KexContext context);
+
+    public abstract void Dispose();
+
+    /// <summary>Creates the client side of the named method.</summary>
+    public static ClientKeyExchange Create(string name) => name switch
+    {
+        SshAlgorithms.Curve25519Sha256 or SshAlgorithms.Curve25519Sha256Libssh => new Curve25519KeyExchange(),
+        SshAlgorithms.EcdhNistp256 => new EcdhKeyExchange(NistCurve.P256),
+        SshAlgorithms.EcdhNistp384 => new EcdhKeyExchange(NistCurve.P384),
+        SshAlgorithms.EcdhNistp521 => new EcdhKeyExchange(NistCurve.P521),
+        SshAlgorithms.DhGroup14Sha256 => new DhKeyExchange(ModpGroup.Group14, HashAlgorithmName.SHA256),
+        SshAlgorithms.DhGroup16Sha512 => new DhKeyExchange(ModpGroup.Group16, HashAlgorithmName.SHA512),
+        _ => throw new ArgumentException($"Unsupported key exchange method '{name}'.", nameof(name)),
+    };
+
+    protected static byte[] BuildInit(byte messageNumber, Action<SshWriter> writeBody)
+    {
+        var buffer = new ArrayBufferWriter<byte>();
+        var writer = new SshWriter(buffer);
+        writer.WriteByte(messageNumber);
+        writeBody(writer);
+        return buffer.WrittenSpan.ToArray();
+    }
+
+    protected static byte[] ExpectReply(ref SshReader reader)
+    {
+        var type = reader.ReadByte();
+        if (type != SshMessage.KexEcdhReply)
+        {
+            throw new SshProtocolException($"Expected the key exchange reply (31), got message {type}.");
+        }
+
+        return reader.ReadString().ToArray(); // K_S
+    }
+
+    protected static KexResult Finish(
+        HashAlgorithmName hash, KexContext context, byte[] hostKey, byte[] signature, Action<SshWriter> writeKexSpecific, ReadOnlySpan<byte> sharedSecret)
+    {
+        var h = ExchangeHash.Compute(hash, context.ClientVersion, context.ServerVersion, context.ClientKexInit, context.ServerKexInit, hostKey, writeKexSpecific, sharedSecret);
+        return new KexResult { SharedSecret = sharedSecret.ToArray(), ExchangeHash = h, HostKeyBlob = hostKey, Signature = signature };
+    }
+}
+
+/// <summary><c>curve25519-sha256</c> (RFC 8731).</summary>
+internal sealed class Curve25519KeyExchange : ClientKeyExchange
+{
+    private readonly byte[] _privateKey = RandomNumberGenerator.GetBytes(X25519.KeySize);
+    private readonly byte[] _publicKey = new byte[X25519.KeySize];
+
+    public Curve25519KeyExchange() => X25519.GetPublicKey(_privateKey, _publicKey);
+
+    public override HashAlgorithmName Hash => HashAlgorithmName.SHA256;
+
+    public override byte[] CreateInit() => BuildInit(SshMessage.KexEcdhInit, w => w.WriteString(_publicKey));
+
+    public override KexResult ProcessReply(ReadOnlySpan<byte> reply, KexContext context)
+    {
+        var reader = new SshReader(reply);
+        var hostKey = ExpectReply(ref reader);
+        var serverPublic = reader.ReadString().ToArray();
+        var signature = reader.ReadString().ToArray();
+        if (!reader.IsEmpty)
+        {
+            throw new SshProtocolException("Trailing data in the key exchange reply.");
+        }
+
+        if (serverPublic.Length != X25519.KeySize)
+        {
+            throw new SshProtocolException("A Curve25519 public value must be 32 bytes.");
+        }
+
+        var shared = new byte[X25519.KeySize];
+        if (!X25519.TryAgree(_privateKey, serverPublic, shared))
+        {
+            throw new SshException(SshFailureReason.KeyExchangeFailed, "The server sent a low-order Curve25519 point.");
+        }
+
+        try
+        {
+            return Finish(Hash, context, hostKey, signature, w =>
+            {
+                w.WriteString(_publicKey);
+                w.WriteString(serverPublic);
+            }, shared);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(shared);
+        }
+    }
+
+    public override void Dispose()
+    {
+        CryptographicOperations.ZeroMemory(_privateKey);
+    }
+}
+
+/// <summary><c>ecdh-sha2-nistp256/384/521</c> (RFC 5656).</summary>
+internal sealed class EcdhKeyExchange : ClientKeyExchange
+{
+    private readonly NistCurve _curve;
+    private readonly ECDiffieHellman _key;
+    private readonly byte[] _publicPoint;
+
+    public EcdhKeyExchange(NistCurve curve)
+    {
+        _curve = curve;
+        _key = ECDiffieHellman.Create(curve.Curve);
+        var q = _key.ExportParameters(false).Q;
+        _publicPoint = new byte[1 + (2 * curve.FieldSize)];
+        _publicPoint[0] = 4;
+        q.X!.CopyTo(_publicPoint, 1 + curve.FieldSize - q.X.Length);
+        q.Y!.CopyTo(_publicPoint, 1 + (2 * curve.FieldSize) - q.Y.Length);
+    }
+
+    public override HashAlgorithmName Hash => _curve.Hash;
+
+    public override byte[] CreateInit() => BuildInit(SshMessage.KexEcdhInit, w => w.WriteString(_publicPoint));
+
+    public override KexResult ProcessReply(ReadOnlySpan<byte> reply, KexContext context)
+    {
+        var reader = new SshReader(reply);
+        var hostKey = ExpectReply(ref reader);
+        var serverPoint = reader.ReadString().ToArray();
+        var signature = reader.ReadString().ToArray();
+        if (!reader.IsEmpty)
+        {
+            throw new SshProtocolException("Trailing data in the key exchange reply.");
+        }
+
+        var size = _curve.FieldSize;
+        if (serverPoint.Length != 1 + (2 * size) || serverPoint[0] != 4)
+        {
+            throw new SshProtocolException("The server's ECDH value must be an uncompressed point.");
+        }
+
+        var x = serverPoint.AsSpan(1, size);
+        var y = serverPoint.AsSpan(1 + size);
+
+        // Never trust the platform to validate the peer's point (Windows CNG does not): check it explicitly.
+        if (!_curve.IsOnCurve(x, y))
+        {
+            throw new SshException(SshFailureReason.KeyExchangeFailed, "The server's ECDH point is not on the curve.");
+        }
+
+        byte[] secret;
+        try
+        {
+            using var peer = ECDiffieHellman.Create(new ECParameters { Curve = _curve.Curve, Q = new ECPoint { X = x.ToArray(), Y = y.ToArray() } });
+            secret = _key.DeriveRawSecretAgreement(peer.PublicKey);
+        }
+        catch (CryptographicException ex)
+        {
+            throw new SshException(SshFailureReason.KeyExchangeFailed, $"ECDH failed: {ex.Message}", ex);
+        }
+
+        try
+        {
+            return Finish(Hash, context, hostKey, signature, w =>
+            {
+                w.WriteString(_publicPoint);
+                w.WriteString(serverPoint);
+            }, secret);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(secret);
+        }
+    }
+
+    public override void Dispose() => _key.Dispose();
+}
+
+/// <summary><c>diffie-hellman-group14-sha256</c> and <c>diffie-hellman-group16-sha512</c> (RFC 4253 section 8, RFC 8268).</summary>
+internal sealed class DhKeyExchange : ClientKeyExchange
+{
+    private readonly ModpGroup _group;
+    private readonly HashAlgorithmName _hash;
+    private readonly BigInteger _x;
+    private readonly BigInteger _e;
+
+    public DhKeyExchange(ModpGroup group, HashAlgorithmName hash)
+    {
+        _group = group;
+        _hash = hash;
+
+        // A random exponent of ExponentBits bits with the top bit set, so it is never tiny.
+        var bytes = RandomNumberGenerator.GetBytes(group.ExponentBits / 8);
+        bytes[0] |= 0x80;
+        _x = new BigInteger(bytes, isUnsigned: true, isBigEndian: true);
+        _e = BigInteger.ModPow(ModpGroup.Generator, _x, group.Prime);
+    }
+
+    public override HashAlgorithmName Hash => _hash;
+
+    public override byte[] CreateInit() => BuildInit(SshMessage.KexDhInit, w => w.WriteMpint(Magnitude(_e)));
+
+    public override KexResult ProcessReply(ReadOnlySpan<byte> reply, KexContext context)
+    {
+        var reader = new SshReader(reply);
+        var hostKey = ExpectReply(ref reader);
+        var fMagnitude = reader.ReadMpint().ToArray();
+        var signature = reader.ReadString().ToArray();
+        if (!reader.IsEmpty)
+        {
+            throw new SshProtocolException("Trailing data in the key exchange reply.");
+        }
+
+        var f = new BigInteger(fMagnitude, isUnsigned: true, isBigEndian: true);
+        var p = _group.Prime;
+        if (f <= BigInteger.One || f >= p - BigInteger.One)
+        {
+            throw new SshException(SshFailureReason.KeyExchangeFailed, "The server's Diffie-Hellman value is out of range.");
+        }
+
+        var k = BigInteger.ModPow(f, _x, p);
+        var kBytes = Magnitude(k);
+        try
+        {
+            return Finish(_hash, context, hostKey, signature, w =>
+            {
+                w.WriteMpint(Magnitude(_e));
+                w.WriteMpint(fMagnitude);
+            }, kBytes);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(kBytes);
+        }
+    }
+
+    public override void Dispose()
+    {
+        // BigInteger values cannot be wiped; they are ephemeral and only live as long as this exchange.
+    }
+
+    private static byte[] Magnitude(BigInteger value) => value.ToByteArray(isUnsigned: true, isBigEndian: true);
+}
