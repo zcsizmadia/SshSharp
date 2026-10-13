@@ -39,6 +39,18 @@ public sealed class SshClient : IAsyncDisposable
     /// <summary>The host key the server proved possession of.</summary>
     public SshHostKey HostKey { get; }
 
+    /// <summary>
+    /// Whether the connection is still up: false once the server disconnected, the connection failed (including a missed keep-alive,
+    /// see <see cref="SshClientOptions.KeepAliveInterval"/>), or the client was disposed.
+    /// </summary>
+    public bool IsConnected => _disposed == 0 && _connection.Failure is null;
+
+    /// <summary>Cancelled when the connection ends for any reason, so pending work can stop or reconnect. <see cref="ConnectionError"/> says why.</summary>
+    public CancellationToken ConnectionClosed => _connection.Closed;
+
+    /// <summary>Why the connection ended (an <see cref="SshException"/>, usually), or null while it is up.</summary>
+    public Exception? ConnectionError => _connection.Failure;
+
     /// <summary>Connects to <paramref name="host"/> over TCP, performs the handshake and authenticates.</summary>
     public static async Task<SshClient> ConnectAsync(string host, int port, SshClientOptions options, CancellationToken cancellationToken = default)
     {
@@ -166,6 +178,7 @@ public sealed class SshClient : IAsyncDisposable
             RekeyBytes = Math.Min(options.RekeyAfterBytes, SshClientOptions.MaxRekeyAfterBytes),
             RekeyInterval = options.RekeyAfterTime,
             Logger = logger,
+            TimeProvider = options.TimeProvider,
             VerifyHostKey = async (info, ct) =>
             {
                 var key = new SshHostKey(info.Algorithm, info.KeyType, info.Fingerprint, info.Blob, info.KeySizeBits);
@@ -187,8 +200,12 @@ public sealed class SshClient : IAsyncDisposable
 
             var hostKey = transport.HostKey!;
             var algorithms = transport.Algorithms!;
-            var connection = new SshConnection(transport, logger);
+            var connection = new SshConnection(transport, logger, options.TimeProvider);
             connection.Start();
+            if (options.KeepAliveInterval is { } keepAlive)
+            {
+                connection.StartKeepAlive(keepAlive, options.KeepAliveCountMax);
+            }
 
             SshTelemetry.Connections.Add(1);
             SshTelemetry.ConnectDuration.Record(Stopwatch.GetElapsedTime(started).TotalSeconds);

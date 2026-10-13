@@ -105,6 +105,12 @@ internal sealed class FakeSessionServer : IAsyncDisposable
 
     public bool GlobalFailureReceived { get; private set; }
 
+    /// <summary>Names of the global requests the client sent, in order.</summary>
+    public List<string> GlobalRequests { get; } = [];
+
+    /// <summary>Never answer global requests (a server that has stopped responding).</summary>
+    public bool IgnoreGlobalRequests { get; set; }
+
     /// <summary>Public keys (SSH wire format) the server accepts for <see cref="UserName"/>.</summary>
     public List<byte[]> AuthorizedKeys { get; init; } = [];
 
@@ -268,13 +274,21 @@ internal sealed class FakeSessionServer : IAsyncDisposable
             }
 
             case SshMessage.GlobalRequest:
-                reader.ReadUtf8String();
-                if (reader.ReadBoolean())
+            {
+                var name = reader.ReadUtf8String();
+                lock (GlobalRequests)
+                {
+                    GlobalRequests.Add(name);
+                }
+
+                // Like OpenSSH: unknown requests (keepalive@openssh.com included) get a failure, which is still an answer.
+                if (reader.ReadBoolean() && !IgnoreGlobalRequests)
                 {
                     await _server.SendAsync(new byte[] { SshMessage.RequestFailure });
                 }
 
                 break;
+            }
 
             case SshMessage.RequestFailure:
                 GlobalFailureReceived = true;

@@ -8,6 +8,7 @@
   <ItemGroup>
     <PackageReference Include="TUnit" />
     <PackageReference Include="Microsoft.Testing.Extensions.CodeCoverage" />
+    <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" />
     <ProjectReference Include="../../src/SshSharp/SshSharp.csproj" />
   </ItemGroup>
   <ItemGroup>

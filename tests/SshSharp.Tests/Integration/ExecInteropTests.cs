@@ -27,6 +27,30 @@ public class ExecInteropTests
     private static CancellationToken Timeout() => new CancellationTokenSource(TimeSpan.FromSeconds(90)).Token;
 
     [Test]
+    public async Task KeepAlivesAreAnswered_SoAnIdleConnectionStaysUp()
+    {
+        if (!Configured)
+        {
+            Skip.Test("No real server account configured.");
+        }
+
+        // With CountMax 1, two unanswered probes in a row would drop the connection; OpenSSH answers keepalive@openssh.com.
+        var (host, port) = RealServer.Endpoint!.Value;
+        var options = new SshClientOptions
+        {
+            UserName = Environment.GetEnvironmentVariable("SSHSHARP_TEST_USER")!,
+            Password = Environment.GetEnvironmentVariable("SSHSHARP_TEST_PASSWORD"),
+            HostKeyVerifier = SshHostKeyVerifier.FromDelegate((_, _) => ValueTask.FromResult(true)),
+            KeepAliveInterval = TimeSpan.FromMilliseconds(200),
+            KeepAliveCountMax = 1,
+        };
+        await using var client = await SshClient.ConnectAsync(host, port, options, Timeout());
+        await Task.Delay(TimeSpan.FromSeconds(3));
+        await Assert.That(client.IsConnected).IsTrue();
+        await Assert.That((await client.RunCommandAsync("echo alive", Timeout())).StandardOutputText).IsEqualTo("alive\n");
+    }
+
+    [Test]
     public async Task RunsACommand()
     {
         if (!Configured)

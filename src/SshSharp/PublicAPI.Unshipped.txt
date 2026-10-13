@@ -183,8 +183,11 @@ SshSharp.SshAuthenticationException
 SshSharp.SshAuthenticationException.AllowedMethods.get -> System.Collections.Generic.IReadOnlyList<string!>!
 SshSharp.SshAuthenticationException.SshAuthenticationException(string! message, System.Collections.Generic.IReadOnlyList<string!>! allowedMethods) -> void
 SshSharp.SshClient
+SshSharp.SshClient.ConnectionClosed.get -> System.Threading.CancellationToken
+SshSharp.SshClient.ConnectionError.get -> System.Exception?
 SshSharp.SshClient.DisposeAsync() -> System.Threading.Tasks.ValueTask
 SshSharp.SshClient.HostKey.get -> SshSharp.SshHostKey!
+SshSharp.SshClient.IsConnected.get -> bool
 SshSharp.SshClient.RunCommandAsync(string! command, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SshSharp.SshCommandResult!>!
 SshSharp.SshClient.ServerIdentification.get -> string!
 SshSharp.SshClientOptions
@@ -194,6 +197,10 @@ SshSharp.SshClientOptions.HostKeyAlias.get -> string?
 SshSharp.SshClientOptions.HostKeyAlias.init -> void
 SshSharp.SshClientOptions.HostKeyVerifier.get -> SshSharp.SshHostKeyVerifier!
 SshSharp.SshClientOptions.HostKeyVerifier.init -> void
+SshSharp.SshClientOptions.KeepAliveCountMax.get -> int
+SshSharp.SshClientOptions.KeepAliveCountMax.init -> void
+SshSharp.SshClientOptions.KeepAliveInterval.get -> System.TimeSpan?
+SshSharp.SshClientOptions.KeepAliveInterval.init -> void
 SshSharp.SshClientOptions.Logger.get -> Microsoft.Extensions.Logging.ILogger?
 SshSharp.SshClientOptions.Logger.init -> void
 SshSharp.SshClientOptions.MaxCommandOutputBytes.get -> long
