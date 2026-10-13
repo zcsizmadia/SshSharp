@@ -8,26 +8,42 @@ on:
 permissions:
   contents: read
 
+# A newer push to the same PR or branch makes the running workflow obsolete.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# Actions are pinned by commit SHA (the tag in the comment is for humans and Dependabot).
 jobs:
   test:
     name: test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, ubuntu-24.04-arm, windows-latest, windows-11-arm, macos-latest]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
         with:
           global-json-file: global.json
           dotnet-version: 8.0.x
-      - run: dotnet build -c Release
+          cache: true
+          cache-dependency-path: '**/packages.lock.json'
+      - run: dotnet restore --locked-mode
+      - run: dotnet build -c Release --no-restore
       - name: Test net8.0
         run: dotnet test --project tests/SshSharp.Tests -c Release -f net8.0 --no-build
       - name: Test net10.0 with coverage
         run: dotnet test --project tests/SshSharp.Tests -c Release -f net10.0 --no-build --coverage --coverage-output-format cobertura --coverage-output coverage.cobertura.xml --results-directory TestResults
-      - uses: actions/upload-artifact@v4
+      - name: Coverage summary
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          dotnet tool install --global dotnet-reportgenerator-globaltool --version 5.5.11
+          reportgenerator -reports:"TestResults/**/coverage.cobertura.xml" -targetdir:coverage-report -reporttypes:MarkdownSummaryGithub -assemblyfilters:"+SshSharp"
+          cat coverage-report/SummaryGithub.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
           name: coverage-${{ matrix.os }}
@@ -37,16 +53,19 @@ jobs:
   interop:
     name: interop (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, ubuntu-24.04-arm]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
         with:
           global-json-file: global.json
           dotnet-version: 8.0.x
+          cache: true
+          cache-dependency-path: '**/packages.lock.json'
       - name: Start OpenSSH with a throwaway account
         run: |
           set -euo pipefail
@@ -78,8 +97,12 @@ jobs:
           sudo /usr/sbin/sshd -f /tmp/sshd_config_test -E /tmp/sshd.log
           sleep 1
           ssh -V
-      - name: Interop tests against the real server
-        run: dotnet test --project tests/SshSharp.Tests -c Release -f net10.0 --treenode-filter "/*/*/*InteropTests/*"
+      - run: dotnet restore --locked-mode
+      - run: dotnet build -c Release --no-restore
+      - name: Interop tests against the real server (net8.0)
+        run: dotnet test --project tests/SshSharp.Tests -c Release -f net8.0 --no-build --treenode-filter "/*/*/*InteropTests/*"
+      - name: Interop tests against the real server (net10.0)
+        run: dotnet test --project tests/SshSharp.Tests -c Release -f net10.0 --no-build --treenode-filter "/*/*/*InteropTests/*"
       - name: sshd log
         if: failure()
         run: sudo tail -n 80 /tmp/sshd.log

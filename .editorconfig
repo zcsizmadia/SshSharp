@@ -21,6 +21,12 @@ csharp_style_prefer_primary_constructors = true:suggestion
 dotnet_style_prefer_collection_expression = true:suggestion
 dotnet_sort_system_directives_first = true
 
+# Public API tracking (PublicAPI.*.txt) stays on. These two forbid several overloads with optional parameters; the BCL pattern of
+# "CancellationToken cancellationToken = default" on each async overload is what callers expect, and our overloads differ in their
+# first parameter type, so calls are never ambiguous.
+dotnet_diagnostic.RS0026.severity = none
+dotnet_diagnostic.RS0027.severity = none
+
 [tests/**.cs]
 # Underscores in test names are readable and conventional.
 dotnet_diagnostic.CA1707.severity = none
