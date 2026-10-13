@@ -179,6 +179,8 @@ SshSharp.KnownHostsVerifier.HashNewEntries.init -> void
 SshSharp.KnownHostsVerifier.KnownHostsVerifier(System.Collections.Generic.IReadOnlyList<string!>! userKnownHostsFiles, System.Collections.Generic.IReadOnlyList<string!>? globalKnownHostsFiles = null) -> void
 SshSharp.KnownHostsVerifier.Policy.get -> SshSharp.Config.StrictHostKeyChecking
 SshSharp.KnownHostsVerifier.Policy.init -> void
+SshSharp.KnownHostsVerifier.UpdateHostKeys.get -> bool
+SshSharp.KnownHostsVerifier.UpdateHostKeys.init -> void
 SshSharp.SshAuthenticationException
 SshSharp.SshAuthenticationException.AllowedMethods.get -> System.Collections.Generic.IReadOnlyList<string!>!
 SshSharp.SshAuthenticationException.SshAuthenticationException(string! message, System.Collections.Generic.IReadOnlyList<string!>! allowedMethods) -> void

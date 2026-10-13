@@ -210,7 +210,11 @@ public sealed partial class SshClient : IAsyncDisposable
 
             var hostKey = transport.HostKey!;
             var algorithms = transport.Algorithms!;
+            var publicHostKey = new SshHostKey(hostKey.Algorithm, hostKey.KeyType, hostKey.Fingerprint, hostKey.Blob, hostKey.KeySizeBits) { Certificate = hostKey.Certificate };
             var connection = new SshConnection(transport, logger, options.TimeProvider);
+
+            // Before the receive loop starts: the server announces its host keys right after authentication.
+            WatchHostKeyUpdates(connection, options, host, port, publicHostKey, logger);
             connection.Start();
             if (options.KeepAliveInterval is { } keepAlive)
             {
@@ -226,7 +230,7 @@ public sealed partial class SshClient : IAsyncDisposable
 
             return new SshClient(
                 connection, options, stream, leaveOpen, owner, transport.ServerIdentification!.Line,
-                new SshHostKey(hostKey.Algorithm, hostKey.KeyType, hostKey.Fingerprint, hostKey.Blob, hostKey.KeySizeBits) { Certificate = hostKey.Certificate }, logger);
+                publicHostKey, logger);
         }
         catch (Exception ex)
         {

@@ -59,15 +59,33 @@ public sealed class KnownHostsFile
     public static async Task<KnownHostsFile> LoadAsync(string path, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
-        return File.Exists(path) ? Parse(await File.ReadAllTextAsync(path, cancellationToken).ConfigureAwait(false)) : new KnownHostsFile();
+        if (!File.Exists(path))
+        {
+            return new KnownHostsFile();
+        }
+
+        // Shared, because ssh (or another connection) may be appending a key at this moment.
+        await using var stream = OpenShared(path, useAsync: true);
+        using var reader = new StreamReader(stream);
+        return Parse(await reader.ReadToEndAsync(cancellationToken).ConfigureAwait(false));
     }
 
     /// <summary>Loads a file. A missing file gives an empty <see cref="KnownHostsFile"/>.</summary>
     public static KnownHostsFile Load(string path)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
-        return File.Exists(path) ? Parse(File.ReadAllText(path)) : new KnownHostsFile();
+        if (!File.Exists(path))
+        {
+            return new KnownHostsFile();
+        }
+
+        using var stream = OpenShared(path, useAsync: false);
+        using var reader = new StreamReader(stream);
+        return Parse(reader.ReadToEnd());
     }
+
+    private static FileStream OpenShared(string path, bool useAsync) =>
+        new(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 4096, useAsync);
 
     /// <summary>Finds the entries that apply to a host and port.</summary>
     public IEnumerable<KnownHostsEntry> Find(string host, int port = 22) =>

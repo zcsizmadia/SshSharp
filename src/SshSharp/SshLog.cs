@@ -55,4 +55,10 @@ internal static partial class SshLog
 
     [LoggerMessage(EventId = 17, Level = LogLevel.Information, Message = "Identity file {FileName} was skipped: {Reason}")]
     public static partial void IdentitySkipped(ILogger logger, string fileName, string reason);
+
+    [LoggerMessage(EventId = 18, Level = LogLevel.Information, Message = "Recorded {Count} new host key(s) the server proved it holds (UpdateHostKeys)")]
+    public static partial void HostKeysUpdated(ILogger logger, int count);
+
+    [LoggerMessage(EventId = 19, Level = LogLevel.Debug, Message = "Host key update skipped: {Reason}")]
+    public static partial void HostKeyUpdateSkipped(ILogger logger, string reason);
 }

@@ -75,12 +75,55 @@ public sealed class KnownHostsVerifier : SshHostKeyVerifier
         ArgumentNullException.ThrowIfNull(config);
         var hash = config.Options.TryGetValue("hashknownhosts", out var value) && value.Count > 0
             && value[0].ToLowerInvariant() is "yes" or "true";
+        // UpdateHostKeys "ask" needs a person to confirm each key; a library treats it like "no".
+        var update = config.Options.TryGetValue("updatehostkeys", out var updateValue) && updateValue.Count > 0
+            && updateValue[0].ToLowerInvariant() is "yes" or "true";
         return new KnownHostsVerifier(config.UserKnownHostsFiles, config.GlobalKnownHostsFiles)
         {
             Policy = config.StrictHostKeyChecking,
             HashNewEntries = hash,
             Ask = ask,
+            UpdateHostKeys = update,
         };
+    }
+
+    /// <summary>
+    /// Record new host keys a server announces after authentication, once it has proven it holds them (OpenSSH's <c>UpdateHostKeys</c>).
+    /// This lets a server rotate its keys without users seeing "host key changed". Keys are only added, to the first user file;
+    /// connections authenticated with a host certificate are not used for updates. Default false (<c>UpdateHostKeys yes</c> in
+    /// ssh_config turns it on through <see cref="FromConfig(SshHostConfig)"/>).
+    /// </summary>
+    public bool UpdateHostKeys { get; init; }
+
+    /// <summary>The announced keys that known_hosts does not yet hold for this host (the ones worth proving).</summary>
+    internal async ValueTask<List<byte[]>> UnknownHostKeysAsync(string name, int port, IReadOnlyList<byte[]> announced, CancellationToken cancellationToken)
+    {
+        var files = new List<KnownHostsFile>();
+        foreach (var path in _userFiles.Concat(_globalFiles))
+        {
+            files.Add(await KnownHostsFile.LoadAsync(path, cancellationToken).ConfigureAwait(false));
+        }
+
+        return [.. announced.Where(blob =>
+        {
+            var keyType = new Protocol.SshReader(blob).ReadUtf8String();
+            return !files.Any(f => f.Check(name, port, keyType, blob) is KnownHostsCheckResult.Match or KnownHostsCheckResult.Revoked);
+        })];
+    }
+
+    /// <summary>Appends keys the server has proven it holds.</summary>
+    internal async ValueTask RecordProvenAsync(string name, int port, IEnumerable<byte[]> keys, CancellationToken cancellationToken)
+    {
+        if (_userFiles.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var blob in keys)
+        {
+            var keyType = new Protocol.SshReader(blob).ReadUtf8String();
+            await KnownHostsFile.AppendAsync(_userFiles[0], name, port, keyType, blob, HashNewEntries, cancellationToken).ConfigureAwait(false);
+        }
     }
 
     /// <summary>The clock for certificate validity; replaceable in tests.</summary>
