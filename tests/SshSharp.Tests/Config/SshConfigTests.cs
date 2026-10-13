@@ -240,14 +240,6 @@ public class SshConfigTests
     }
 
     [Test]
-    public async Task Resolve_MatchAllApplies_OtherMatchBlocksAreNotEvaluatedYet()
-    {
-        var c = SshConfig.Parse("Match all\n User everyone\nMatch host h\n Port 1\n").Resolve("h", Options);
-        await Assert.That(c.User).IsEqualTo("everyone");
-        await Assert.That(c.Port).IsEqualTo(22);
-    }
-
-    [Test]
     public async Task Parse_BuildsBlocks()
     {
         var config = SshConfig.Parse("Port 1\nHost a b\n User x\nMatch all\n User y\n");
@@ -283,6 +275,7 @@ public class SshConfigTests
         var missing = Path.Combine(Path.GetTempPath(), "sshsharp-nocfg-" + Guid.NewGuid().ToString("N"));
         await Assert.That(SshConfig.Load(missing).Blocks.Count).IsEqualTo(1);
         await Assert.That((await SshConfig.LoadAsync(missing)).Blocks.Count).IsEqualTo(1);
+        await Assert.That(() => SshConfig.Combine(null!)).Throws<ArgumentNullException>();
         await Assert.That(() => SshConfig.Load("")).Throws<ArgumentException>();
         await Assert.That(async () => await SshConfig.LoadAsync("")).Throws<ArgumentException>();
         await Assert.That(() => SshConfig.Parse("").Resolve("")).Throws<ArgumentException>();

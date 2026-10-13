@@ -9,6 +9,9 @@ namespace SshSharp.Config;
 /// <param name="Line">The 1-based line number.</param>
 public sealed record SshConfigDirective(string Keyword, IReadOnlyList<string> Arguments, string RawValue, int Line);
 
+/// <summary>The sections of one parsed config file and the directory its relative <c>Include</c> paths resolve against.</summary>
+internal sealed record SshConfigDocument(IReadOnlyList<SshConfigBlock> Blocks, string? BaseDirectory);
+
 /// <summary>A <c>Host</c> or <c>Match</c> section, or the global section before the first one.</summary>
 public sealed class SshConfigBlock
 {
@@ -31,37 +34,12 @@ public sealed class SshConfigBlock
     /// <summary>The directives in this section, in order.</summary>
     public IList<SshConfigDirective> Directives { get; } = [];
 
-    /// <summary>Whether a <c>Host</c> section applies to <paramref name="host"/> (a positive pattern matches and no negated one does).</summary>
-    internal bool AppliesToHost(string host)
-    {
-        if (IsMatch)
-        {
-            return MatchCriteria.Count == 1 && MatchCriteria[0].Equals("all", StringComparison.OrdinalIgnoreCase);
-        }
-
-        if (HostPatterns is null)
-        {
-            return true;
-        }
-
-        var matched = false;
-        foreach (var pattern in HostPatterns)
-        {
-            if (pattern.StartsWith('!'))
-            {
-                if (Glob.IsMatch(pattern.AsSpan(1), host))
-                {
-                    return false;
-                }
-            }
-            else if (Glob.IsMatch(pattern, host))
-            {
-                matched = true;
-            }
-        }
-
-        return matched;
-    }
+    /// <summary>
+    /// Whether a <c>Host</c> (or the global) section applies to <paramref name="host"/>: a positive pattern matches and no negated
+    /// one does. <c>Match</c> sections depend on resolution state and are evaluated by the resolver.
+    /// </summary>
+    internal bool AppliesToHost(string host) =>
+        HostPatterns is null || Glob.IsMatchList(string.Join(',', HostPatterns), host);
 }
 
 /// <summary>
@@ -70,23 +48,35 @@ public sealed class SshConfigBlock
 /// </summary>
 public sealed class SshConfig
 {
-    private static readonly HashSet<string> Accumulating = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "identityfile", "certificatefile", "localforward", "remoteforward", "dynamicforward", "sendenv",
-    };
 
     private static readonly string[] DefaultIdentityFiles = ["~/.ssh/id_rsa", "~/.ssh/id_ecdsa", "~/.ssh/id_ecdsa_sk", "~/.ssh/id_ed25519", "~/.ssh/id_ed25519_sk"];
 
-    private readonly List<SshConfigBlock> _blocks = [new SshConfigBlock(null, false, [])];
+    private readonly List<SshConfigDocument> _documents = [];
 
-    /// <summary>The sections in file order; the first is the global section before any <c>Host</c> line.</summary>
-    public IReadOnlyList<SshConfigBlock> Blocks => _blocks;
+    private SshConfig(string? baseDirectory) =>
+        _documents.Add(new SshConfigDocument([new SshConfigBlock(null, false, [])], baseDirectory));
+
+    private SshConfig(IEnumerable<SshConfigDocument> documents) => _documents.AddRange(documents);
+
+    /// <summary>
+    /// The sections of every loaded file in order; the first section of each file is its global part before any <c>Host</c> line.
+    /// </summary>
+    public IReadOnlyList<SshConfigBlock> Blocks => [.. _documents.SelectMany(d => d.Blocks)];
+
+    internal IReadOnlyList<SshConfigDocument> Documents => _documents;
 
     /// <summary>Parses <c>ssh_config</c> text. Throws <see cref="FormatException"/> (with the line number) on syntax errors.</summary>
-    public static SshConfig Parse(string text)
+    /// <param name="text">The file contents.</param>
+    /// <param name="baseDirectory">
+    /// The directory relative <c>Include</c> paths resolve against. OpenSSH uses <c>~/.ssh</c> for user files and the system
+    /// directory for the system file; the default (null) is <c>.ssh</c> in the home directory given when resolving.
+    /// </param>
+    public static SshConfig Parse(string text, string? baseDirectory = null)
     {
         ArgumentNullException.ThrowIfNull(text);
-        var config = new SshConfig();
+        var config = new SshConfig(baseDirectory);
+        var blocks = new List<SshConfigBlock>(config._documents[0].Blocks);
+        config._documents[0] = config._documents[0] with { Blocks = blocks };
         var lineNumber = 0;
         foreach (var raw in text.Split('\n'))
         {
@@ -100,15 +90,15 @@ public sealed class SshConfig
 
                 if (keyword.Equals("Host", StringComparison.OrdinalIgnoreCase))
                 {
-                    config._blocks.Add(new SshConfigBlock(args, false, []));
+                    blocks.Add(new SshConfigBlock(args, false, []));
                 }
                 else if (keyword.Equals("Match", StringComparison.OrdinalIgnoreCase))
                 {
-                    config._blocks.Add(new SshConfigBlock(null, true, args));
+                    blocks.Add(new SshConfigBlock(null, true, args));
                 }
                 else
                 {
-                    config._blocks[^1].Directives.Add(new SshConfigDirective(keyword, args, rawValue, lineNumber));
+                    blocks[^1].Directives.Add(new SshConfigDirective(keyword, args, rawValue, lineNumber));
                 }
             }
             catch (FormatException ex)
@@ -120,18 +110,42 @@ public sealed class SshConfig
         return config;
     }
 
-    /// <summary>Loads a config file. A missing file gives an empty config.</summary>
-    public static SshConfig Load(string path)
+    /// <summary>Loads a config file. A missing file gives an empty config. See <see cref="Parse"/> for <paramref name="baseDirectory"/>.</summary>
+    public static SshConfig Load(string path, string? baseDirectory = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
-        return File.Exists(path) ? Parse(File.ReadAllText(path)) : new SshConfig();
+        return File.Exists(path) ? Parse(File.ReadAllText(path), baseDirectory) : new SshConfig(baseDirectory);
     }
 
     /// <summary>Loads a config file asynchronously. A missing file gives an empty config.</summary>
-    public static async Task<SshConfig> LoadAsync(string path, CancellationToken cancellationToken = default)
+    public static async Task<SshConfig> LoadAsync(string path, string? baseDirectory = null, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
-        return File.Exists(path) ? Parse(await File.ReadAllTextAsync(path, cancellationToken).ConfigureAwait(false)) : new SshConfig();
+        return File.Exists(path)
+            ? Parse(await File.ReadAllTextAsync(path, cancellationToken).ConfigureAwait(false), baseDirectory)
+            : new SshConfig(baseDirectory);
+    }
+
+    /// <summary>
+    /// Loads the standard files like <c>ssh</c> does: the user's <c>~/.ssh/config</c> first, then the system-wide file
+    /// (<c>/etc/ssh/ssh_config</c>, or <c>%ProgramData%\ssh\ssh_config</c> on Windows). Earlier files win.
+    /// </summary>
+    /// <param name="homeDirectory">The home directory; defaults to the current user's profile folder.</param>
+    public static SshConfig LoadDefault(string? homeDirectory = null)
+    {
+        var home = homeDirectory ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var userDirectory = Path.Combine(home, ".ssh");
+        var systemDirectory = OperatingSystem.IsWindows()
+            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "ssh")
+            : "/etc/ssh";
+        return Combine(Load(Path.Combine(userDirectory, "config"), userDirectory), Load(Path.Combine(systemDirectory, "ssh_config"), systemDirectory));
+    }
+
+    /// <summary>Combines several configs; earlier ones take precedence (first obtained value wins).</summary>
+    public static SshConfig Combine(params SshConfig[] configs)
+    {
+        ArgumentNullException.ThrowIfNull(configs);
+        return new SshConfig(configs.SelectMany(c => c._documents));
     }
 
     /// <summary>Resolves the effective settings for <paramref name="host"/>.</summary>
@@ -141,7 +155,7 @@ public sealed class SshConfig
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(host);
         options ??= new SshConfigResolveOptions();
-        var values = Collect(host);
+        var values = new SshConfigResolver(_documents, host, options).Run();
 
         string? First(string key) => values.TryGetValue(key, out var v) && v.Count > 0 ? v[0] : null;
         IReadOnlyList<string> All(string key) => values.TryGetValue(key, out var v) ? v : [];
@@ -208,43 +222,6 @@ public sealed class SshConfig
             DynamicForwards = All("dynamicforward"),
             Options = values.ToDictionary(kv => kv.Key, kv => (IReadOnlyList<string>)kv.Value, StringComparer.OrdinalIgnoreCase),
         };
-    }
-
-    private Dictionary<string, List<string>> Collect(string host)
-    {
-        var values = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
-        foreach (var block in _blocks.Where(b => b.AppliesToHost(host)))
-        {
-            foreach (var directive in block.Directives)
-            {
-                var key = directive.Keyword;
-                var isForward = key.EndsWith("forward", StringComparison.OrdinalIgnoreCase) && !key.Equals("forwardagent", StringComparison.OrdinalIgnoreCase);
-                if (Accumulating.Contains(key))
-                {
-                    if (!values.TryGetValue(key, out var list))
-                    {
-                        values[key] = list = [];
-                    }
-
-                    if (isForward)
-                    {
-                        list.Add(string.Join(' ', directive.Arguments));
-                    }
-                    else
-                    {
-                        list.AddRange(directive.Arguments);
-                    }
-                }
-                else if (!values.ContainsKey(key))
-                {
-                    values[key] = key.Equals("proxycommand", StringComparison.OrdinalIgnoreCase)
-                        ? [directive.RawValue]
-                        : [.. directive.Arguments];
-                }
-            }
-        }
-
-        return values;
     }
 
     private static string[] DefaultGlobalKnownHosts()

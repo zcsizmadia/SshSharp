@@ -102,32 +102,7 @@ public sealed class KnownHostsEntry
             return MatchesHashed(HostPatterns, name);
         }
 
-        var matched = false;
-        var remaining = HostPatterns.AsSpan();
-        while (!remaining.IsEmpty)
-        {
-            var comma = remaining.IndexOf(',');
-            var pattern = comma < 0 ? remaining : remaining[..comma];
-            remaining = comma < 0 ? default : remaining[(comma + 1)..];
-            if (pattern.IsEmpty)
-            {
-                continue;
-            }
-
-            if (pattern[0] == '!')
-            {
-                if (Glob.IsMatch(pattern[1..], name))
-                {
-                    return false;
-                }
-            }
-            else if (Glob.IsMatch(pattern, name))
-            {
-                matched = true;
-            }
-        }
-
-        return matched;
+        return Glob.IsMatchList(HostPatterns, name);
     }
 
     /// <summary>Returns a copy with different host patterns.</summary>
