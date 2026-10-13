@@ -23,7 +23,7 @@ internal static class Ed25519
         Span<byte> h = stackalloc byte[64];
         SHA512.HashData(seed, h);
         Clamp(h);
-        Span<long> p = stackalloc long[64];
+        Span<long> p = stackalloc long[PointSize];
         ScalarBase(p, h[..32]);
         Pack(publicKey, p);
         h.Clear();
@@ -38,7 +38,7 @@ internal static class Ed25519
         Clamp(d);
 
         Span<byte> publicKey = stackalloc byte[PublicKeySize];
-        Span<long> p = stackalloc long[64];
+        Span<long> p = stackalloc long[PointSize];
         ScalarBase(p, d[..32]);
         Pack(publicKey, p);
 
@@ -97,7 +97,7 @@ internal static class Ed25519
             return false;
         }
 
-        Span<long> q = stackalloc long[64];
+        Span<long> q = stackalloc long[PointSize];
         if (!UnpackNegated(q, publicKey) || HasSmallOrder(q))
         {
             return false;
@@ -107,10 +107,11 @@ internal static class Ed25519
         Hash(h, signature[..32], publicKey, message);
         Reduce(h);
 
-        Span<long> p = stackalloc long[64];
-        ScalarMult(p, q, h[..32]);
-        ScalarBase(q, signature[32..]);
-        Add(p, q);
+        // R' = h*(-A) + S*B, in one pass over both scalars: the inputs are public, so this need not be constant-time.
+        Span<long> b = stackalloc long[PointSize];
+        BasePoint(b);
+        Span<long> p = stackalloc long[PointSize];
+        DoubleScalarMultPublic(p, q, h[..32], b, signature[32..]);
         Span<byte> check = stackalloc byte[32];
         Pack(check, p);
         return CryptographicOperations.FixedTimeEquals(check, signature[..32]);
@@ -150,27 +151,29 @@ internal static class Ed25519
 
     // ---- Points: extended coordinates (X, Y, Z, T) in four consecutive field elements ----
 
+    private const int PointSize = 4 * Field25519.Limbs;
+
     private static Span<long> Coord(Span<long> point, int index) => point.Slice(index * Field25519.Limbs, Field25519.Limbs);
 
     private static void Add(Span<long> p, ReadOnlySpan<long> q)
     {
-        Span<long> a = stackalloc long[16];
-        Span<long> b = stackalloc long[16];
-        Span<long> c = stackalloc long[16];
-        Span<long> d = stackalloc long[16];
-        Span<long> t = stackalloc long[16];
-        Span<long> e = stackalloc long[16];
-        Span<long> f = stackalloc long[16];
-        Span<long> g = stackalloc long[16];
-        Span<long> h = stackalloc long[16];
+        Span<long> a = stackalloc long[Field25519.Limbs];
+        Span<long> b = stackalloc long[Field25519.Limbs];
+        Span<long> c = stackalloc long[Field25519.Limbs];
+        Span<long> d = stackalloc long[Field25519.Limbs];
+        Span<long> t = stackalloc long[Field25519.Limbs];
+        Span<long> e = stackalloc long[Field25519.Limbs];
+        Span<long> f = stackalloc long[Field25519.Limbs];
+        Span<long> g = stackalloc long[Field25519.Limbs];
+        Span<long> h = stackalloc long[Field25519.Limbs];
         var p0 = Coord(p, 0);
         var p1 = Coord(p, 1);
         var p2 = Coord(p, 2);
         var p3 = Coord(p, 3);
-        var q0 = q.Slice(0, 16);
-        var q1 = q.Slice(16, 16);
-        var q2 = q.Slice(32, 16);
-        var q3 = q.Slice(48, 16);
+        var q0 = q.Slice(0, Field25519.Limbs);
+        var q1 = q.Slice(Field25519.Limbs, Field25519.Limbs);
+        var q2 = q.Slice(2 * Field25519.Limbs, Field25519.Limbs);
+        var q3 = q.Slice(3 * Field25519.Limbs, Field25519.Limbs);
 
         Field25519.Sub(a, p1, p0);
         Field25519.Sub(t, q1, q0);
@@ -202,9 +205,9 @@ internal static class Ed25519
 
     private static void Pack(Span<byte> output, Span<long> p)
     {
-        Span<long> tx = stackalloc long[16];
-        Span<long> ty = stackalloc long[16];
-        Span<long> zi = stackalloc long[16];
+        Span<long> tx = stackalloc long[Field25519.Limbs];
+        Span<long> ty = stackalloc long[Field25519.Limbs];
+        Span<long> zi = stackalloc long[Field25519.Limbs];
         Field25519.Invert(zi, Coord(p, 2));
         Field25519.Multiply(tx, Coord(p, 0), zi);
         Field25519.Multiply(ty, Coord(p, 1), zi);
@@ -228,26 +231,65 @@ internal static class Ed25519
         }
     }
 
-    private static void ScalarBase(Span<long> p, ReadOnlySpan<byte> s)
+    /// <summary>
+    /// p = s1*q1 + s2*q2 by a joint double-and-add (Straus–Shamir): one doubling per bit and at most one addition. Branches on the
+    /// scalars, so only for public inputs (signature verification).
+    /// </summary>
+    private static void DoubleScalarMultPublic(Span<long> p, ReadOnlySpan<long> q1, ReadOnlySpan<byte> s1, ReadOnlySpan<long> q2, ReadOnlySpan<byte> s2)
     {
-        Span<long> q = stackalloc long[64];
+        Span<long> sum = stackalloc long[PointSize];
+        q1.CopyTo(sum);
+        Add(sum, q2);
+
+        Field25519.Zero(Coord(p, 0));
+        Field25519.Set(Coord(p, 1), Field25519.One);
+        Field25519.Set(Coord(p, 2), Field25519.One);
+        Field25519.Zero(Coord(p, 3));
+        for (var i = 255; i >= 0; i--)
+        {
+            Add(p, p);
+            var bit1 = (s1[i / 8] >> (i & 7)) & 1;
+            var bit2 = (s2[i / 8] >> (i & 7)) & 1;
+            switch ((bit1 << 1) | bit2)
+            {
+                case 1:
+                    Add(p, q2);
+                    break;
+                case 2:
+                    Add(p, q1);
+                    break;
+                case 3:
+                    Add(p, sum);
+                    break;
+            }
+        }
+    }
+
+    private static void BasePoint(Span<long> q)
+    {
         Field25519.Set(Coord(q, 0), Field25519.BaseX);
         Field25519.Set(Coord(q, 1), Field25519.BaseY);
         Field25519.Set(Coord(q, 2), Field25519.One);
         Field25519.Multiply(Coord(q, 3), Field25519.BaseX, Field25519.BaseY);
+    }
+
+    private static void ScalarBase(Span<long> p, ReadOnlySpan<byte> s)
+    {
+        Span<long> q = stackalloc long[PointSize];
+        BasePoint(q);
         ScalarMult(p, q, s);
     }
 
     /// <summary>Decodes a point and negates it (so verification can compute S*B + h*(-A)). Returns false if it is not on the curve.</summary>
     private static bool UnpackNegated(Span<long> r, ReadOnlySpan<byte> p)
     {
-        Span<long> t = stackalloc long[16];
-        Span<long> chk = stackalloc long[16];
-        Span<long> num = stackalloc long[16];
-        Span<long> den = stackalloc long[16];
-        Span<long> den2 = stackalloc long[16];
-        Span<long> den4 = stackalloc long[16];
-        Span<long> den6 = stackalloc long[16];
+        Span<long> t = stackalloc long[Field25519.Limbs];
+        Span<long> chk = stackalloc long[Field25519.Limbs];
+        Span<long> num = stackalloc long[Field25519.Limbs];
+        Span<long> den = stackalloc long[Field25519.Limbs];
+        Span<long> den2 = stackalloc long[Field25519.Limbs];
+        Span<long> den4 = stackalloc long[Field25519.Limbs];
+        Span<long> den6 = stackalloc long[Field25519.Limbs];
         var r0 = Coord(r, 0);
         var r1 = Coord(r, 1);
         var r2 = Coord(r, 2);
@@ -287,7 +329,7 @@ internal static class Ed25519
         }
 
         // RFC 8032 section 5.1.3: x = 0 with the sign bit set is not a valid encoding.
-        Span<long> zero = stackalloc long[16];
+        Span<long> zero = stackalloc long[Field25519.Limbs];
         if ((p[31] >> 7) == 1 && !Field25519.NotEqual(r0, zero))
         {
             return false;
@@ -317,9 +359,9 @@ internal static class Ed25519
     /// <summary>Whether 8·P is the identity, i.e. P lies in the small (torsion) subgroup.</summary>
     private static bool HasSmallOrder(ReadOnlySpan<long> point)
     {
-        Span<long> p = stackalloc long[64];
+        Span<long> p = stackalloc long[PointSize];
         point.CopyTo(p);
-        Span<long> copy = stackalloc long[64];
+        Span<long> copy = stackalloc long[PointSize];
         for (var i = 0; i < 3; i++)
         {
             p.CopyTo(copy);

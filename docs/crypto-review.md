@@ -9,7 +9,8 @@ outside review is planned before 1.0.
 
 | Primitive | Checked against |
 |---|---|
-| X25519 | RFC 7748 vectors, OpenSSL-generated vectors, all-zero shared secret rejected |
+| Field arithmetic (GF(2^255 - 19)) | `BigInteger` on random and edge values (non-canonical encodings, limb boundaries), long operation chains with limb bounds checked |
+| X25519 | RFC 7748 vectors including the 1,000-iteration one, OpenSSL-generated vectors, all-zero shared secret rejected |
 | Ed25519 | RFC 8032 vectors, OpenSSL and ssh-keygen signatures; non-canonical S, small-order and non-canonical public keys rejected |
 | ChaCha20, Poly1305, chacha20-poly1305@openssh.com | RFC 8439 vectors, OpenSSH's construction, interop with OpenSSH |
 | bcrypt_pbkdf | pyca/bcrypt known answer; keys encrypted by ssh-keygen with every supported cipher |
@@ -28,9 +29,17 @@ memory indices that depend on secret data; then a statistical timing test.
 
 - Scalar multiplication is a fixed 256-step ladder. Secret scalar bits only drive `ConditionalSwap`, which is mask-based: no branches,
   no secret-dependent indices.
-- Field add, subtract, multiply and carry have fixed loop bounds; carries use arithmetic shifts. Inversion and square roots branch only
-  on the public exponent's bits.
-- Encoding (`Pack`) selects the canonical value with a mask-based swap; the parity bit is extracted arithmetically.
+- The field uses 5 limbs of 51 bits (as ref10 and curve25519-donna do). Add, subtract, multiply and square are straight-line code; the
+  64×64→128-bit products come from `Math.BigMul` (`mulx`/`mul` on x64, `umulh` on Arm64). Column sums are kept as two 64-bit halves
+  split at bit 51 when each product is made, so no 128-bit addition and no carry flag is involved: `UInt128` was avoided because its
+  addition derives the carry from a comparison, which the JIT is not bound to compile without a branch. Subtraction adds 2p first, so
+  limbs never go negative; every operation leaves limbs below 2^52, the bound its inputs need (checked by a test over long chains).
+  The x64 JIT output of `Multiply` was inspected: its only branches are span length checks.
+- Inversion and square roots use fixed addition chains (254 squarings and 11 multiplications for the inverse).
+- Encoding (`Pack`) reduces to the canonical value arithmetically (three carry passes, then subtracting p when the value is at least
+  p, computed as a carry); the parity bit is extracted arithmetically.
+- Verification (`Ed25519.Verify`) uses a variable-time joint double-scalar multiplication. Its inputs (public key, message,
+  signature) are all public.
 - Reduction modulo L uses fixed loops and shifts, no branches.
 - SHA-512 is the platform's.
 - Fixed: `Ed25519.Sign` left the unreduced `r + h·a` in a stack buffer; it is now cleared with the secret scalar and nonce.
@@ -44,10 +53,11 @@ It does not run in CI, because shared runners are too noisy for a statistical ti
 
 | Check (15,000 samples per class) | t | Verdict |
 |---|---|---|
-| Ed25519.Sign: all-zero seed vs random seeds | 0.90 | no evidence of a leak |
-| X25519: scalar with one bit set vs random scalars | -0.77 | no evidence of a leak |
+| Ed25519.Sign: all-zero seed vs random seeds | -0.45 | no evidence of a leak |
+| X25519: scalar with one bit set vs random scalars | 0.92 | no evidence of a leak |
 
-Measured on an Intel Core i7-12800H, Windows 11, .NET 10, x64. |t| below 4.5 means no evidence; it is not a proof.
+Measured with the 51-bit field on an Intel Core i7-12800H, Windows 11, .NET 10, x64 (the 16-bit field it replaced measured 0.90 and
+-0.77). |t| below 4.5 means no evidence; it is not a proof.
 
 ## Accepted risks
 
@@ -58,5 +68,5 @@ Measured on an Intel Core i7-12800H, Windows 11, .NET 10, x64. |t| below 4.5 mea
 
 ## Open
 
-- Faster field arithmetic (5×51-bit limbs) and a vectorised ChaCha20 would need the same review again.
+- A vectorised ChaCha20 would need the same review again.
 - An independent review before 1.0.
