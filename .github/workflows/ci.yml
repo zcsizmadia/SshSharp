@@ -304,6 +304,7 @@ jobs:
           $password = -join ((1..24) | ForEach-Object { '{0:x}' -f (Get-Random -Maximum 16) }) + 'Aa1!'
           Write-Output "::add-mask::$password"
           New-LocalUser -Name sshsharp -Password (ConvertTo-SecureString $password -AsPlainText -Force) -PasswordNeverExpires | Out-Null
+          Add-LocalGroupMember -Group Users -Member sshsharp
 
           New-ItemProperty -Path HKLM:\SOFTWARE\OpenSSH -Name DefaultShell -Value 'C:\Program Files\Git\bin\bash.exe' -PropertyType String -Force | Out-Null
           Start-Service sshd # creates the default sshd_config and host keys
@@ -317,7 +318,7 @@ jobs:
             'MaxSessions 64'
             'AllowTcpForwarding yes'
             'KexAlgorithms +diffie-hellman-group14-sha256,diffie-hellman-group16-sha512'
-          ) + (Get-Content $config | Where-Object { $_ -notmatch '^\s*(Port|ListenAddress|PasswordAuthentication|Match|AuthorizedKeysFile)\b' -and $_ -notmatch '^\s+' }) |
+          ) + (Get-Content $config | Where-Object { $_ -notmatch '^\s*(Port|ListenAddress|PasswordAuthentication|Match|AuthorizedKeysFile|AllowGroups|AllowUsers|DenyGroups|DenyUsers)\b' -and $_ -notmatch '^\s+' }) |
             Set-Content $config -Encoding ascii
           & "$env:WINDIR\System32\OpenSSH\sshd.exe" -t
           if ($LASTEXITCODE -ne 0) { throw "sshd_config is invalid" }
