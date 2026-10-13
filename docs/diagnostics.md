@@ -15,6 +15,7 @@ Everything SshSharp raises for SSH-level problems is an `SshException` with a `R
 | `ChannelClosed` | A channel was refused or closed (for example the server refused a command or a terminal) | `SshException` |
 | `Timeout` | `ConnectTimeout` passed, or the server missed `KeepAliveCountMax` keep-alives | `SshException` |
 | `AgentFailed` | The SSH agent could not be reached or refused a request | `SshException` |
+| `TransferFailed` | An SCP transfer failed on the server's side (a missing file, no permission); the message has the server's words | `SshException` |
 
 ```csharp
 try
@@ -36,6 +37,8 @@ catch (SshException ex) when (ex.Reason is SshFailureReason.ConnectFailed or Ssh
 ```
 
 Cancellation is reported as `OperationCanceledException`, and invalid arguments as `ArgumentException`, as usual in .NET.
+`RunCommandAsync` throws `InvalidOperationException` when a command's output exceeds `SshClientOptions.MaxCommandOutputBytes`
+(a safety limit, not a connection problem): stream such output with `StartCommandAsync` instead.
 
 ## Logging
 

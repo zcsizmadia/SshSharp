@@ -138,6 +138,16 @@ public sealed class KnownHostsVerifierTests : IDisposable
     }
 
     [Test]
+    public async Task HostKeys_AreEqualWhenTheirKeysAre_NotTheirBuffers()
+    {
+        var key = Ed25519Key();
+        var copy = key with { PublicKey = key.PublicKey.ToArray() }; // the same key from another connection: another buffer
+        await Assert.That(copy).IsEqualTo(key);
+        await Assert.That(copy.GetHashCode()).IsEqualTo(key.GetHashCode());
+        await Assert.That(Ed25519Key()).IsNotEqualTo(key);
+    }
+
+    [Test]
     public async Task ARevokedKey_IsRefusedEvenWithNo()
     {
         var key = Ed25519Key();

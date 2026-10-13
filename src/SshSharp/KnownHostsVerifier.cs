@@ -54,7 +54,7 @@ public sealed class SshHostKeyPrompt
 /// (<see cref="StrictHostKeyChecking.AcceptNew"/>, <see cref="StrictHostKeyChecking.No"/>). AcceptNew refuses it when keys of other types
 /// are already recorded for the host, so a man in the middle cannot get a weaker key type accepted silently.</item>
 /// </list>
-/// New keys are appended to the first user file; nothing is ever rewritten.
+/// New keys are appended to the first user file. The file is rewritten only by <see cref="UpdateHostKeys"/>, to remove keys the server no longer announces.
 /// </summary>
 public sealed class KnownHostsVerifier : SshHostKeyVerifier
 {

@@ -16,8 +16,9 @@ Console.WriteLine(string.Join(" -> ", host.ProxyJump));
 ```
 
 Resolution follows `ssh -G`: first value wins, `Host` and `Match` (`host`, `originalhost`, `user`, `localuser`,
-`canonical`, `final`, `all`, `exec`, `tagged`, `localnetwork`), `Include` with globs, `%` tokens, `~` and environment
-variables, and algorithm lists with `+`, `-` and `^`. `SshConfig.Parse(text)` reads a configuration from a string, and
+`canonical`, `final`, `all`, `exec`, `tagged`), `Include` with globs, `%` tokens, `~` and environment
+variables, and algorithm lists with `+`, `-` and `^`. `Match` blocks with criteria this library cannot evaluate
+(`localnetwork`, `version`, `sessiontype`, `command`) never apply, negated or not, rather than guess. `SshConfig.Parse(text)` reads a configuration from a string, and
 `SshConfigResolveOptions` supplies the home directory, environment, local user and host name (for tests, or another user).
 
 `Match exec` runs a local command, so it is evaluated only when `SshConfigResolveOptions.ExecMatcher` is set (for example

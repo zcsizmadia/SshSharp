@@ -16,6 +16,7 @@ public static class SshScpExtensions
     public static async Task UploadFileAsync(this SshClient client, string localPath, string remotePath, SshScpOptions? options = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(client);
+        ArgumentException.ThrowIfNullOrEmpty(remotePath);
         ArgumentException.ThrowIfNullOrEmpty(localPath);
         options ??= new SshScpOptions();
         var file = new FileInfo(localPath);
@@ -34,6 +35,7 @@ public static class SshScpExtensions
     public static async Task UploadAsync(this SshClient client, Stream source, string remotePath, long? length = null, SshScpOptions? options = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(client);
+        ArgumentException.ThrowIfNullOrEmpty(remotePath);
         ArgumentNullException.ThrowIfNull(source);
         options ??= new SshScpOptions();
         var size = length ?? (source.CanSeek ? source.Length - source.Position : throw new ArgumentException("The length is needed for a stream that cannot seek.", nameof(length)));
@@ -53,6 +55,7 @@ public static class SshScpExtensions
     public static async Task UploadDirectoryAsync(this SshClient client, string localDirectory, string remotePath, SshScpOptions? options = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(client);
+        ArgumentException.ThrowIfNullOrEmpty(remotePath);
         ArgumentException.ThrowIfNullOrEmpty(localDirectory);
         options ??= new SshScpOptions();
         var root = new DirectoryInfo(localDirectory);
@@ -123,6 +126,7 @@ public static class SshScpExtensions
     public static async Task DownloadFileAsync(this SshClient client, string remotePath, string localPath, SshScpOptions? options = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(client);
+        ArgumentException.ThrowIfNullOrEmpty(remotePath);
         ArgumentException.ThrowIfNullOrEmpty(localPath);
         options ??= new SshScpOptions();
         await using var scp = await ScpChannel.StartAsync(client, options, "-f", remotePath, cancellationToken).ConfigureAwait(false);
@@ -139,6 +143,7 @@ public static class SshScpExtensions
     public static async Task DownloadAsync(this SshClient client, string remotePath, Stream destination, SshScpOptions? options = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(client);
+        ArgumentException.ThrowIfNullOrEmpty(remotePath);
         ArgumentNullException.ThrowIfNull(destination);
         options ??= new SshScpOptions();
         await using var scp = await ScpChannel.StartAsync(client, options, "-f", remotePath, cancellationToken).ConfigureAwait(false);
@@ -158,6 +163,7 @@ public static class SshScpExtensions
     public static async Task DownloadDirectoryAsync(this SshClient client, string remotePath, string localDirectory, SshScpOptions? options = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(client);
+        ArgumentException.ThrowIfNullOrEmpty(remotePath);
         ArgumentException.ThrowIfNullOrEmpty(localDirectory);
         options ??= new SshScpOptions();
         await using var scp = await ScpChannel.StartAsync(client, options, "-r -f", remotePath, cancellationToken).ConfigureAwait(false);
