@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm, windows-latest, windows-11-arm, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+          dotnet-version: 8.0.x
+      - run: dotnet build -c Release
+      - name: Test net8.0
+        run: dotnet test --project tests/SshSharp.Tests -c Release -f net8.0 --no-build
+      - name: Test net10.0 with coverage
+        run: dotnet test --project tests/SshSharp.Tests -c Release -f net10.0 --no-build --coverage --coverage-output-format cobertura --coverage-output coverage.cobertura.xml --results-directory TestResults
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-${{ matrix.os }}
+          path: TestResults/**
+          if-no-files-found: ignore
