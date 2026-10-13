@@ -24,6 +24,7 @@ internal sealed record MacInfo(string Name, HashAlgorithmName Hash, int KeyLengt
 internal static class SshAlgorithms
 {
     // Key exchange
+    public const string MlKem768X25519Sha256 = "mlkem768x25519-sha256";
     public const string Curve25519Sha256 = "curve25519-sha256";
     public const string Curve25519Sha256Libssh = "curve25519-sha256@libssh.org";
     public const string EcdhNistp256 = "ecdh-sha2-nistp256";
@@ -49,10 +50,25 @@ internal static class SshAlgorithms
     // Compression
     public const string CompressionNone = "none";
 
-    public static IReadOnlyList<string> DefaultKex { get; } =
+    // Declared before DefaultKex, which reads it during static initialization.
+    private static readonly string[] ClassicKex =
     [
         Curve25519Sha256, Curve25519Sha256Libssh, EcdhNistp256, EcdhNistp384, EcdhNistp521, DhGroup16Sha512, DhGroup14Sha256,
     ];
+
+    /// <summary>
+    /// The post-quantum hybrid first, as OpenSSH 10 orders it, where the platform has ML-KEM (.NET 10 with OpenSSL 3.5+ or a recent Windows);
+    /// otherwise the classic methods.
+    /// </summary>
+    public static IReadOnlyList<string> DefaultKex { get; } = HasMlKem
+        ? [MlKem768X25519Sha256, .. ClassicKex]
+        : ClassicKex;
+
+#if NET10_0_OR_GREATER
+    internal static bool HasMlKem => System.Security.Cryptography.MLKem.IsSupported;
+#else
+    internal static bool HasMlKem => false;
+#endif
 
     public static IReadOnlyList<string> DefaultHostKeys { get; } =
     [

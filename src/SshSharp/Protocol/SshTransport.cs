@@ -285,7 +285,7 @@ internal sealed class SshTransport : IAsyncDisposable
         SshAlgorithms.TryGetCipher(negotiated.CipherServerToClient, out var cipherS2C);
         SshAlgorithms.TryGetMac(negotiated.MacClientToServer, out var macC2S);
         SshAlgorithms.TryGetMac(negotiated.MacServerToClient, out var macS2C);
-        using var keys = KeyDerivation.DeriveAll(kex.Hash, result.SharedSecret, result.ExchangeHash, SessionId!, cipherC2S, cipherS2C, macC2S, macS2C);
+        using var keys = KeyDerivation.DeriveAll(kex.Hash, result.SharedSecret, result.ExchangeHash, SessionId!, cipherC2S, cipherS2C, macC2S, macS2C, result.SharedSecretIsString);
         var newSend = PacketProtectorFactory.Create(cipherC2S, macC2S, keys.EncryptionKeyClientToServer, keys.IvClientToServer, keys.IntegrityKeyClientToServer);
         var newReceive = PacketProtectorFactory.Create(cipherS2C, macS2C, keys.EncryptionKeyServerToClient, keys.IvServerToClient, keys.IntegrityKeyServerToClient);
 

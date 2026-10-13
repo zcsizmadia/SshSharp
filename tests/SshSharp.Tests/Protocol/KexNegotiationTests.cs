@@ -62,7 +62,7 @@ public class KexNegotiationTests
         var b = KexInitMessage.ForClient(new AlgorithmPreferences());
         await Assert.That(a.KexAlgorithms.Contains(SshAlgorithms.StrictKexClient)).IsTrue();
         await Assert.That(a.KexAlgorithms.Contains(SshAlgorithms.ExtInfoClient)).IsTrue();
-        await Assert.That(a.KexAlgorithms[0]).IsEqualTo(SshAlgorithms.Curve25519Sha256);
+        await Assert.That(a.KexAlgorithms[0]).IsEqualTo(SshAlgorithms.DefaultKex[0]); // the ML-KEM hybrid where the platform has it
         await Assert.That(Convert.ToHexString(a.Cookie)).IsNotEqualTo(Convert.ToHexString(b.Cookie));
         await Assert.That(() => KexInitMessage.ForClient(null!)).Throws<ArgumentNullException>();
     }
@@ -175,7 +175,7 @@ public class KexNegotiationTests
         await Assert.That(prefs.Ciphers.Contains("3des-cbc")).IsFalse();
         await Assert.That(prefs.Ciphers[^1]).IsEqualTo("aes128-ctr");
         await Assert.That(prefs.Kex.Any(k => k.StartsWith("ecdh-", StringComparison.Ordinal))).IsFalse();
-        await Assert.That(prefs.Kex[0]).IsEqualTo(SshAlgorithms.Curve25519Sha256);
+        await Assert.That(prefs.Kex[0]).IsEqualTo(SshAlgorithms.DefaultKex[0]);
         await Assert.That(string.Join(",", prefs.Macs)).IsEqualTo("hmac-sha2-256-etm@openssh.com");
         await Assert.That(prefs.HostKeys[0]).IsEqualTo(SshAlgorithms.RsaSha2_256);
         await Assert.That(prefs.HostKeys.Contains("ssh-dss")).IsFalse();

@@ -16,7 +16,8 @@ internal static class ExchangeHash
     /// <param name="serverKexInit">The server's KEXINIT payload.</param>
     /// <param name="hostKeyBlob">The server host key blob K_S.</param>
     /// <param name="writeKexSpecific">Writes the method-specific values: e, f for DH; Q_C, Q_S for ECDH and X25519.</param>
-    /// <param name="sharedSecret">K as an unsigned big-endian magnitude.</param>
+    /// <param name="sharedSecret">K as an unsigned big-endian magnitude, or the raw bytes for the hybrid methods.</param>
+    /// <param name="sharedSecretIsString">K is encoded as a string, not an mpint (the post-quantum hybrid methods).</param>
     public static byte[] Compute(
         HashAlgorithmName hash,
         string clientVersion,
@@ -25,7 +26,8 @@ internal static class ExchangeHash
         ReadOnlySpan<byte> serverKexInit,
         ReadOnlySpan<byte> hostKeyBlob,
         Action<SshWriter> writeKexSpecific,
-        ReadOnlySpan<byte> sharedSecret)
+        ReadOnlySpan<byte> sharedSecret,
+        bool sharedSecretIsString = false)
     {
         ArgumentNullException.ThrowIfNull(writeKexSpecific);
         var buffer = new ArrayBufferWriter<byte>(1024);
@@ -36,7 +38,14 @@ internal static class ExchangeHash
         writer.WriteString(serverKexInit);
         writer.WriteString(hostKeyBlob);
         writeKexSpecific(writer);
-        writer.WriteMpint(sharedSecret);
+        if (sharedSecretIsString)
+        {
+            writer.WriteString(sharedSecret);
+        }
+        else
+        {
+            writer.WriteMpint(sharedSecret);
+        }
 
         var result = new byte[HashSize(hash)];
         using var hasher = IncrementalHash.CreateHash(hash);
