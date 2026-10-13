@@ -141,11 +141,17 @@ public class KnownHostsFileTests
     }
 
     [Test]
-    public async Task Remove_WildcardLineIsDropped()
+    public async Task Remove_KeepsLinesMatchedOnlyByAWildcard_AndMarkerLines()
     {
-        var file = KnownHostsFile.Parse($"*.example.com ssh-ed25519 {KeyAText}\n");
-        await Assert.That(file.Remove("a.example.com")).IsEqualTo(1);
-        await Assert.That(file.Entries.Count).IsEqualTo(0);
+        // Removing one host must not drop keys for other hosts, a CA trusted for a whole domain, or a revocation.
+        var text = $"*.example.com,10.0.0.5 ssh-ed25519 {KeyAText}\n@cert-authority *.example.com ssh-ed25519 {KeyAText}\n@revoked a.example.com ssh-ed25519 {KeyAText}\n";
+        var file = KnownHostsFile.Parse(text);
+        await Assert.That(file.Remove("a.example.com")).IsEqualTo(0);
+        await Assert.That(file.ToString()).IsEqualTo(text);
+
+        // An exact pattern on the shared line is still removed.
+        await Assert.That(file.Remove("10.0.0.5")).IsEqualTo(1);
+        await Assert.That(file.ToString()).StartsWith($"*.example.com ssh-ed25519 {KeyAText}\n");
     }
 
     [Test]

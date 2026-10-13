@@ -16,7 +16,7 @@ public sealed class SshClient : IAsyncDisposable
     private readonly bool _leaveOpen;
     private readonly IDisposable? _owner;
     private readonly ILogger _logger;
-    private bool _disposed;
+    private int _disposed;
 
     private SshClient(SshConnection connection, SshClientOptions options, Stream stream, bool leaveOpen, IDisposable? owner, string serverIdentification, SshHostKey hostKey, ILogger logger)
     {
@@ -70,7 +70,7 @@ public sealed class SshClient : IAsyncDisposable
     public async Task<SshCommandResult> RunCommandAsync(string command, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrEmpty(command);
-        ObjectDisposedException.ThrowIf(_disposed, this);
+        ObjectDisposedException.ThrowIf(_disposed != 0, this);
 
         using var activity = SshTelemetry.Activities.StartActivity("SshSharp.Command");
         var outcome = "error";
@@ -123,12 +123,12 @@ public sealed class SshClient : IAsyncDisposable
     /// <summary>Disconnects and releases the connection.</summary>
     public async ValueTask DisposeAsync()
     {
-        if (_disposed)
+        // Concurrent calls: only the first one tears down (and decrements the connection count).
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
         {
             return;
         }
 
-        _disposed = true;
         SshTelemetry.Connections.Add(-1);
         await _connection.DisposeAsync().ConfigureAwait(false);
         if (!_leaveOpen)
@@ -208,11 +208,11 @@ public sealed class SshClient : IAsyncDisposable
         IReadOnlyList<string> methods;
         if (options.Password is { } password)
         {
-            SshLog.Authenticating(logger, options.UserName, "password");
+            SshLog.Authenticating(logger, "password");
             var outcome = await SshUserAuth.PasswordAsync(transport, options.UserName, password, cancellationToken).ConfigureAwait(false);
             if (outcome.Success)
             {
-                SshLog.Authenticated(logger, options.UserName);
+                SshLog.Authenticated(logger, "password");
                 return;
             }
 
@@ -221,20 +221,20 @@ public sealed class SshClient : IAsyncDisposable
         else
         {
             // No credentials: "none" succeeds only on servers that allow anonymous access, and otherwise reveals the accepted methods.
-            SshLog.Authenticating(logger, options.UserName, "none");
+            SshLog.Authenticating(logger, "none");
             var outcome = await SshUserAuth.NoneAsync(transport, options.UserName, cancellationToken).ConfigureAwait(false);
             if (outcome.Success)
             {
-                SshLog.Authenticated(logger, options.UserName);
+                SshLog.Authenticated(logger, "none");
                 return;
             }
 
             methods = outcome.RemainingMethods;
         }
 
-        SshLog.AuthenticationFailed(logger, options.UserName, string.Join(", ", methods));
+        SshLog.AuthenticationFailed(logger, string.Join(", ", methods));
         throw new SshException(
             SshFailureReason.AuthenticationFailed,
-            $"Authentication failed for user '{options.UserName}'. The server accepts: {string.Join(", ", methods)}.");
+            $"Authentication failed. The server accepts: {string.Join(", ", methods)}.");
     }
 }

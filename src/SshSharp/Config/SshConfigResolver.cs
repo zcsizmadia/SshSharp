@@ -20,6 +20,7 @@ internal sealed class SshConfigResolver(IReadOnlyList<SshConfigDocument> documen
     private bool _finalPass;
     private bool _canonical;
     private bool _sawFinalOrCanonical;
+    private string? _finalHost;
 
     public Dictionary<string, List<string>> Run()
     {
@@ -34,6 +35,9 @@ internal sealed class SshConfigResolver(IReadOnlyList<SshConfigDocument> documen
 
         if (_canonical || _sawFinalOrCanonical)
         {
+            // OpenSSH re-reads the files with the new target name: Host sections now match the (HostName-substituted, canonicalized)
+            // name, lowercased, rather than what the user typed.
+            _finalHost = CurrentHost().ToLowerInvariant();
             _finalPass = true;
             Pass();
         }
@@ -124,6 +128,10 @@ internal sealed class SshConfigResolver(IReadOnlyList<SshConfigDocument> documen
                 list.Add(value);
             }
         }
+        else if (IsProxyKeyword(key) && (_values.ContainsKey("proxyjump") || _values.ContainsKey("proxycommand")))
+        {
+            // ProxyJump and ProxyCommand compete: whichever comes first (even "none") wins and the other is ignored.
+        }
         else if (!_values.ContainsKey(key))
         {
             _values[key] = key.Equals("proxycommand", StringComparison.OrdinalIgnoreCase)
@@ -132,12 +140,22 @@ internal sealed class SshConfigResolver(IReadOnlyList<SshConfigDocument> documen
         }
     }
 
+    private bool IsSet(string key) =>
+        _values.TryGetValue(key, out var v) && v.Count > 0 && !v[0].Trim().Equals("none", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsProxyKeyword(string key) =>
+        key.Equals("proxyjump", StringComparison.OrdinalIgnoreCase) || key.Equals("proxycommand", StringComparison.OrdinalIgnoreCase);
+
     private bool BlockApplies(SshConfigBlock block) =>
-        block.IsMatch ? EvaluateMatch(block.MatchCriteria) : block.AppliesToHost(originalHost);
+        block.IsMatch ? EvaluateMatch(block.MatchCriteria) : block.AppliesToHost(_finalHost ?? originalHost);
 
     private SshTokenContext Context() => new(
         originalHost, CurrentHost(), CurrentPort(), CurrentUser(), options.LocalUser, options.HomeDirectory,
-        options.LocalHostName, options.GetEnvironmentVariable);
+        options.LocalHostName, options.GetEnvironmentVariable)
+    {
+        HostKeyAlias = _values.TryGetValue("hostkeyalias", out var alias) && alias.Count > 0 ? alias[0] : null,
+        ProxyJump = IsSet("proxyjump") ? _values["proxyjump"][0] : string.Empty,
+    };
 
     private string CurrentHost() => _values.TryGetValue("hostname", out var v) && v.Count > 0
         ? new SshTokenContext(originalHost, originalHost, 22, string.Empty, options.LocalUser, options.HomeDirectory, options.LocalHostName, options.GetEnvironmentVariable).ExpandTokens(v[0])
@@ -153,6 +171,7 @@ internal sealed class SshConfigResolver(IReadOnlyList<SshConfigDocument> documen
     private bool EvaluateMatch(IReadOnlyList<string> criteria)
     {
         var result = true;
+        var unsupported = false;
         for (var i = 0; i < criteria.Count; i++)
         {
             var token = criteria[i];
@@ -173,7 +192,7 @@ internal sealed class SshConfigResolver(IReadOnlyList<SshConfigDocument> documen
                     _sawFinalOrCanonical = true;
                     value = _canonical;
                     break;
-                case "host" or "originalhost" or "user" or "localuser" or "tagged" or "exec" or "localnetwork":
+                case "host" or "originalhost" or "user" or "localuser" or "tagged" or "exec":
                     if (++i >= criteria.Count)
                     {
                         throw new FormatException($"Match criterion '{name}' needs an argument.");
@@ -181,6 +200,16 @@ internal sealed class SshConfigResolver(IReadOnlyList<SshConfigDocument> documen
 
                     value = result && EvaluateWithArgument(name, criteria[i]);
                     break;
+                case "localnetwork" or "version" or "sessiontype" or "command":
+                    // Criteria this library cannot evaluate (newer OpenSSH, or about the local network or session). The block never
+                    // applies, negated or not: guessing either way could apply settings meant for another situation.
+                    if (++i >= criteria.Count)
+                    {
+                        throw new FormatException($"Match criterion '{name}' needs an argument.");
+                    }
+
+                    unsupported = true;
+                    continue;
                 default:
                     throw new FormatException($"Unsupported Match criterion '{token}'.");
             }
@@ -189,7 +218,7 @@ internal sealed class SshConfigResolver(IReadOnlyList<SshConfigDocument> documen
             result &= value != negate;
         }
 
-        return result;
+        return result && !unsupported;
     }
 
     private bool EvaluateWithArgument(string name, string argument) => name switch
@@ -200,7 +229,7 @@ internal sealed class SshConfigResolver(IReadOnlyList<SshConfigDocument> documen
         "localuser" => Glob.IsMatchList(argument, options.LocalUser),
         "tagged" => CurrentTag() is { } tag && Glob.IsMatchList(argument, tag),
         "exec" => options.ExecMatcher is { } run && run(Context().ExpandTokens(argument)),
-        _ => false, // localnetwork: not supported, never matches.
+        _ => false,
     };
 
     private string? TryCanonicalize()
@@ -217,8 +246,7 @@ internal sealed class SshConfigResolver(IReadOnlyList<SshConfigDocument> documen
             return null;
         }
 
-        var viaProxy = _values.ContainsKey("proxycommand") || _values.TryGetValue("proxyjump", out var jump) && jump.Count > 0
-            && !jump[0].Equals("none", StringComparison.OrdinalIgnoreCase);
+        var viaProxy = IsSet("proxycommand") || IsSet("proxyjump");
         var host = CurrentHost();
         var maxDots = _values.TryGetValue("canonicalizemaxdots", out var dots) && dots.Count > 0
             && int.TryParse(dots[0], NumberStyles.None, CultureInfo.InvariantCulture, out var d) ? d : 1;

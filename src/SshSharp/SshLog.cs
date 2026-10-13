@@ -2,7 +2,7 @@ using Microsoft.Extensions.Logging;
 
 namespace SshSharp;
 
-/// <summary>Log messages. None of them include passwords, key material or command text.</summary>
+/// <summary>Log messages. None of them include passwords, key material, command text, user names or host names.</summary>
 internal static partial class SshLog
 {
     [LoggerMessage(EventId = 1, Level = LogLevel.Debug, Message = "Server identification: {Identification}")]
@@ -23,14 +23,14 @@ internal static partial class SshLog
     [LoggerMessage(EventId = 6, Level = LogLevel.Warning, Message = "The host key {Fingerprint} was not accepted")]
     public static partial void HostKeyRejected(ILogger logger, string fingerprint);
 
-    [LoggerMessage(EventId = 7, Level = LogLevel.Debug, Message = "Authenticating as {UserName} with method {Method}")]
-    public static partial void Authenticating(ILogger logger, string userName, string method);
+    [LoggerMessage(EventId = 7, Level = LogLevel.Debug, Message = "Authenticating with method {Method}")]
+    public static partial void Authenticating(ILogger logger, string method);
 
-    [LoggerMessage(EventId = 8, Level = LogLevel.Information, Message = "Authenticated as {UserName}")]
-    public static partial void Authenticated(ILogger logger, string userName);
+    [LoggerMessage(EventId = 8, Level = LogLevel.Information, Message = "Authenticated with method {Method}")]
+    public static partial void Authenticated(ILogger logger, string method);
 
-    [LoggerMessage(EventId = 9, Level = LogLevel.Warning, Message = "Authentication failed for {UserName}; the server accepts: {Methods}")]
-    public static partial void AuthenticationFailed(ILogger logger, string userName, string methods);
+    [LoggerMessage(EventId = 9, Level = LogLevel.Warning, Message = "Authentication failed; the server accepts: {Methods}")]
+    public static partial void AuthenticationFailed(ILogger logger, string methods);
 
     [LoggerMessage(EventId = 10, Level = LogLevel.Debug, Message = "Channel {Id} opened")]
     public static partial void ChannelOpened(ILogger logger, uint id);

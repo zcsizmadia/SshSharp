@@ -43,7 +43,8 @@ public class SshConfigTests
         await Assert.That(c.ConnectTimeout).IsNull();
         await Assert.That(c.Ciphers).IsEqualTo("+aes128-ctr");
         await Assert.That(string.Join("|", c.UserKnownHostsFiles)).IsEqualTo("/home/alice/.ssh/kh1|/home/alice/.ssh/kh2");
-        await Assert.That(c.ProxyCommand).IsEqualTo("ssh -W web.example.com:2222 \"gate way\"");
+        // ProxyJump came first, so the later ProxyCommand is ignored (ssh -G prints only proxyjump).
+        await Assert.That(c.ProxyCommand).IsNull();
     }
 
     [Test]
@@ -190,7 +191,7 @@ public class SshConfigTests
         await Assert.That(c.KexAlgorithms).IsEqualTo("curve25519-sha256");
         await Assert.That(c.Macs).IsEqualTo("hmac-sha2-256-etm@openssh.com");
         await Assert.That(c.PubkeyAcceptedAlgorithms).IsEqualTo("ssh-ed25519");
-        await Assert.That(c.HostKeyAlias).IsEqualTo("alias-h");
+        await Assert.That(c.HostKeyAlias).IsEqualTo("alias-%h"); // not token-expanded (ssh -G agrees)
         await Assert.That(c.CertificateFiles.Single()).IsEqualTo("/home/alice/cert-alice.pub");
         await Assert.That(c.DynamicForwards.Single()).IsEqualTo("1080");
         await Assert.That(c.RemoteForwards.Single()).IsEqualTo("9000 localhost:9000");

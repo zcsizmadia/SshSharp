@@ -70,8 +70,9 @@ public class SshObservabilityTests
 
         var all = string.Join("\n", logger.Entries.Select(e => e.Message));
         await Assert.That(all).Contains("Connected: curve25519-sha256");
-        await Assert.That(all).Contains("Authenticated as tester");
-        await Assert.That(all).Contains("Authenticating as tester with method password");
+        await Assert.That(all).Contains("Authenticated with method password");
+        await Assert.That(all).Contains("Authenticating with method password");
+        await Assert.That(all).DoesNotContain("tester"); // user names are personal data
         await Assert.That(all).Contains($"Running a command ({command.Length} characters)");
         await Assert.That(all).Contains("finished with exit status 0");
         await Assert.That(all).Contains("Negotiated key exchange curve25519-sha256");
@@ -108,7 +109,8 @@ public class SshObservabilityTests
         _ = server.StartAsync();
         await Assert.That(async () => await SshClient.ConnectAsync(server.ClientStream, Options(wrong, password: "wrong-battery"), true, Timeout())).Throws<SshException>();
         var text = string.Join("\n", wrong.Entries.Select(e => $"{e.Level}: {e.Message}"));
-        await Assert.That(text).Contains("Warning: Authentication failed for tester");
+        await Assert.That(text).Contains("Warning: Authentication failed; the server accepts: password");
+        await Assert.That(text).DoesNotContain("tester");
         await Assert.That(text).DoesNotContain("wrong-battery");
         await Assert.That(text).DoesNotContain("correct-horse");
 

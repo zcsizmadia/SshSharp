@@ -128,8 +128,9 @@ public sealed class KnownHostsFile
     }
 
     /// <summary>
-    /// Removes a host. A line that only names this host is dropped; on a line with several host patterns only the matching
-    /// pattern is removed. Returns the number of entries changed or removed.
+    /// Removes a host, like <c>ssh-keygen -R</c>: a line that names only this host (or its hash) is dropped, and on a line with several
+    /// host patterns only this host's pattern is removed. Lines that match only through a wildcard are kept, because they also cover
+    /// other hosts, and <c>@cert-authority</c>/<c>@revoked</c> lines are never touched. Returns the number of entries changed or removed.
     /// </summary>
     public int Remove(string host, int port = 22)
     {
@@ -138,16 +139,27 @@ public sealed class KnownHostsFile
         for (var i = _lines.Count - 1; i >= 0; i--)
         {
             var entry = _lines[i].Entry;
-            if (entry is null || !entry.Matches(host, port))
+            if (entry is null || entry.Marker != KnownHostsMarker.None || !entry.Matches(host, port))
             {
                 continue;
             }
 
+            if (entry.IsHashed)
+            {
+                count++;
+                _lines.RemoveAt(i);
+                continue;
+            }
+
+            var patterns = entry.HostPatterns.Split(',');
+            var remaining = patterns.Where(p => !p.Equals(name, StringComparison.OrdinalIgnoreCase)).ToArray();
+            if (remaining.Length == patterns.Length)
+            {
+                continue; // matched only by a wildcard: the line is about other hosts too
+            }
+
             count++;
-            var remaining = entry.IsHashed
-                ? []
-                : entry.HostPatterns.Split(',').Where(p => !p.Equals(name, StringComparison.OrdinalIgnoreCase)).ToArray();
-            if (remaining.Length == 0 || remaining.Length == entry.HostPatterns.Split(',').Length)
+            if (remaining.Length == 0)
             {
                 _lines.RemoveAt(i);
             }

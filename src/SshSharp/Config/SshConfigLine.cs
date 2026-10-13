@@ -50,9 +50,9 @@ internal static class SshConfigLine
             {
                 break;
             }
-            else if (rest[i] == '"')
+            else if (rest[i] is '"' or '\'')
             {
-                i = ReadQuoted(rest, i + 1, arguments);
+                i = ReadQuoted(rest, i + 1, rest[i], arguments);
             }
             else
             {
@@ -74,19 +74,19 @@ internal static class SshConfigLine
         return true;
     }
 
-    private static int ReadQuoted(ReadOnlySpan<char> text, int start, List<string> arguments)
+    private static int ReadQuoted(ReadOnlySpan<char> text, int start, char quote, List<string> arguments)
     {
         var sb = new StringBuilder();
         var i = start;
         while (i < text.Length)
         {
             var c = text[i];
-            if (c == '\\' && i + 1 < text.Length && (text[i + 1] == '"' || text[i + 1] == '\\'))
+            if (c == '\\' && i + 1 < text.Length && (text[i + 1] == quote || text[i + 1] == '\\'))
             {
                 sb.Append(text[i + 1]);
                 i += 2;
             }
-            else if (c == '"')
+            else if (c == quote)
             {
                 arguments.Add(sb.ToString());
                 return i + 1;
