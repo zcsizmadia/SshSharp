@@ -196,7 +196,11 @@ public sealed partial class SshClient
         }
     }
 
-    /// <summary>Loads the IdentityFile keys that exist; encrypted ones only when a passphrase is provided. Missing files are skipped, as ssh does.</summary>
+    /// <summary>
+    /// The keys to offer, in ssh's order: identity files the agent holds (signed by the agent, so an encrypted file needs no passphrase),
+    /// the agent's other keys (not with <c>IdentitiesOnly</c>), then the remaining identity files that exist (encrypted ones only when a
+    /// passphrase is provided; missing files are skipped, as ssh does). Keys with a certificate come first, paired with it.
+    /// </summary>
     private static async Task<List<SshPrivateKey>> LoadIdentitiesAsync(SshHostConfig hostConfig, SshConfigConnectOptions options, ILogger logger, CancellationToken cancellationToken)
     {
         var keys = new List<SshPrivateKey>();
@@ -206,8 +210,22 @@ public sealed partial class SshClient
             return keys;
         }
 
+        var agentKeys = await AgentKeysAsync(hostConfig, options, logger, cancellationToken).ConfigureAwait(false);
+        var fromAgent = new List<SshPrivateKey>();
         foreach (var path in hostConfig.IdentityFiles)
         {
+            if (agentKeys.Count > 0 && ReadPublicKey(path + ".pub") is { } publicKey
+                && agentKeys.FirstOrDefault(k => k.PublicKey.Span.SequenceEqual(publicKey)) is { } held)
+            {
+                if (!fromAgent.Contains(held))
+                {
+                    fromAgent.Add(held);
+                    paths.Add(path);
+                }
+
+                continue;
+            }
+
             if (!File.Exists(path))
             {
                 continue;
@@ -270,15 +288,79 @@ public sealed partial class SshClient
             }
         }
 
+        // The agent's keys: those matching an identity file, then (unless IdentitiesOnly) the rest; a key loaded from a file too is offered once.
+        IEnumerable<SshPrivateKey> offered = fromAgent;
+        if (!hostConfig.IdentitiesOnly)
+        {
+            offered = offered.Concat(agentKeys.Where(k => !fromAgent.Contains(k)));
+        }
+
+        offered = offered.Where(a => !keys.Any(k => k.PublicKey.Span.SequenceEqual(a.PublicKey.Span)));
+        List<SshPrivateKey> plain = [.. offered, .. keys];
+
         var certified = new List<SshPrivateKey>();
-        foreach (var key in keys)
+        foreach (var key in plain.Where(k => k.Certificate is null))
         {
             certified.AddRange(certificates
                 .Where(c => c.Type == SshCertificateType.User && c.PublicKey.Span.SequenceEqual(key.PublicKey.Span))
                 .Select(key.WithCertificate));
         }
 
-        return [.. certified, .. keys];
+        return [.. certified, .. plain];
+    }
+
+    /// <summary>The agent's keys for this host, or none: no agent configured, <c>IdentityAgent none</c>, or the agent is not running.</summary>
+    private static async Task<IReadOnlyList<SshPrivateKey>> AgentKeysAsync(SshHostConfig hostConfig, SshConfigConnectOptions options, ILogger logger, CancellationToken cancellationToken)
+    {
+        if (ResolveAgent(hostConfig, options) is not { } agent)
+        {
+            return [];
+        }
+
+        try
+        {
+            return await agent.GetKeysAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (SshException ex) when (ex.Reason == SshFailureReason.AgentFailed)
+        {
+            SshLog.AgentUnavailable(logger, ex.Message); // like ssh: no agent is not an error
+            return [];
+        }
+    }
+
+    /// <summary>The agent ssh would use: <see cref="SshConfigConnectOptions.Agent"/>, else <c>IdentityAgent</c> (a path, <c>none</c>, or <c>SSH_AUTH_SOCK</c>), else the environment's.</summary>
+    internal static SshAgent? ResolveAgent(SshHostConfig hostConfig, SshConfigConnectOptions options, Func<SshAgent?>? fromEnvironment = null)
+    {
+        if (!options.UseAgent)
+        {
+            return null;
+        }
+
+        if (options.Agent is { } agent)
+        {
+            return agent;
+        }
+
+        return hostConfig.IdentityAgent switch
+        {
+            null or "SSH_AUTH_SOCK" => (fromEnvironment ?? SshAgent.FromEnvironment)(),
+            var none when none.Equals("none", StringComparison.OrdinalIgnoreCase) => null,
+            var path => new SshAgent(path),
+        };
+    }
+
+    /// <summary>The key in a <c>.pub</c> file (<c>type base64 [comment]</c>), or null when there is none to read.</summary>
+    private static byte[]? ReadPublicKey(string path)
+    {
+        try
+        {
+            var fields = File.ReadAllText(path).Split((char[]?)null, 3, StringSplitOptions.RemoveEmptyEntries);
+            return fields.Length >= 2 ? Convert.FromBase64String(fields[1]) : null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or FormatException)
+        {
+            return null;
+        }
     }
 
     /// <summary>

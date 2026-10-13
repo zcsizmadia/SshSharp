@@ -67,4 +67,10 @@ internal static partial class SshLog
 
     [LoggerMessage(EventId = 21, Level = LogLevel.Debug, Message = "Session on channel {Id} closed with exit status {ExitStatus} and signal {ExitSignal}")]
     public static partial void SessionClosed(ILogger logger, uint id, int? exitStatus, string? exitSignal);
+
+    [LoggerMessage(EventId = 22, Level = LogLevel.Information, Message = "Agent key {Fingerprint} was skipped: {Reason}")]
+    public static partial void AgentKeySkipped(ILogger logger, string fingerprint, string reason);
+
+    [LoggerMessage(EventId = 23, Level = LogLevel.Debug, Message = "The SSH agent was not used: {Reason}")]
+    public static partial void AgentUnavailable(ILogger logger, string reason);
 }

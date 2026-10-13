@@ -234,6 +234,7 @@ public sealed class CertificateTests : IDisposable
         await using var server = new FakeSessionServer { AdvertisedMethods = ["publickey"], TrustedUserAuthority = _authority.PublicKey.ToArray() };
         await using var client = await SshClient.ConnectAsync("srv", new SshConfigConnectOptions
         {
+            UseAgent = false, // the developer's own agent must not change the outcome
             Config = SshConfig.Parse($"Host srv\n User tester\n IdentityFile \"{keyPath}\"\n StrictHostKeyChecking no\n UserKnownHostsFile none\n"),
             ResolveOptions = new SshConfigResolveOptions { LocalUser = "l", HomeDirectory = _dir },
             TcpConnector = (_, _, _, _) =>

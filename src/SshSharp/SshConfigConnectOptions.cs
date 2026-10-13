@@ -41,6 +41,15 @@ public sealed class SshConfigConnectOptions
     public IReadOnlyList<SshPrivateKey> PrivateKeys { get; init; } = [];
 
     /// <summary>
+    /// Whether to offer the SSH agent's keys, as ssh does: the agent named by <c>IdentityAgent</c>, or <see cref="SshAgent.FromEnvironment"/>.
+    /// With <c>IdentitiesOnly yes</c>, only agent keys that match an <c>IdentityFile</c> are offered. Default true.
+    /// </summary>
+    public bool UseAgent { get; init; } = true;
+
+    /// <summary>The agent to use instead of the configured or environment one.</summary>
+    public SshAgent? Agent { get; init; }
+
+    /// <summary>
     /// Replaces the default host key verification, which is a <see cref="KnownHostsVerifier"/> built from the host's configuration
     /// (<c>UserKnownHostsFile</c>, <c>GlobalKnownHostsFile</c>, <c>StrictHostKeyChecking</c>, <c>HashKnownHosts</c>).
     /// </summary>
