@@ -106,6 +106,13 @@ public class KeepAliveTests
         }
 
         await Assert.That(client.IsConnected).IsFalse();
+
+        // The second probe was sent before the client gave up, but the server may not have read it yet (seen on windows-latest).
+        for (var i = 0; i < 200 && Probes(server) < 2; i++)
+        {
+            await Task.Delay(10);
+        }
+
         await Assert.That(Probes(server)).IsEqualTo(2);
         await Assert.That(client.ConnectionClosed.IsCancellationRequested).IsTrue();
         var error = (SshException)client.ConnectionError!;
