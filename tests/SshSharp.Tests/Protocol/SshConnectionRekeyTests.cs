@@ -82,6 +82,14 @@ public class SshConnectionRekeyTests
         var (closeType, closeChannel) = ParseChannelMessage(reply.Payload.Span);
         await Assert.That(closeType).IsEqualTo(SshMessage.ChannelClose);
         await Assert.That(closeChannel).IsEqualTo(7u);
+
+        // The CLOSE went out after the client's NEWKEYS; the client counts the exchange only when the server's NEWKEYS reaches its
+        // receive loop, which may be a moment later.
+        for (var i = 0; i < 500 && transport.KeyExchangeCount < 2; i++)
+        {
+            await Task.Delay(20);
+        }
+
         await Assert.That(transport.KeyExchangeCount).IsGreaterThanOrEqualTo(2);
         await Assert.That(server.KeyExchangeCount).IsGreaterThanOrEqualTo(2);
         await Assert.That(connection.Failure).IsNull();

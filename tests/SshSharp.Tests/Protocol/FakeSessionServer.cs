@@ -134,6 +134,10 @@ internal sealed class FakeSessionServer : IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         await _cts.CancelAsync();
+
+        // The client is gone, so nothing reads the server-to-client pipe any more: a script blocked writing into it holds the send lock,
+        // and the loop may be waiting for that lock to answer a CLOSE. Closing the client's ends releases every blocked writer first.
+        _server.ClientStream.Dispose();
         if (_loop is not null)
         {
             try

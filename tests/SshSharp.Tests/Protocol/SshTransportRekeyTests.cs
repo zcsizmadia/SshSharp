@@ -208,6 +208,8 @@ public class SshTransportRekeyTests
             await client.SendAsync(Message(90, 4, 50), Timeout()); // waits for the re-exchange, then goes out under the new keys
             var after = await serverPump.NextAsync();
             await Assert.That(after.AsSpan().SequenceEqual(Message(90, 4, 50))).IsTrue();
+            // The client counts the exchange when the server's NEWKEYS reaches it, which can be after message 4 went out.
+            await WaitUntilAsync(() => client.KeyExchangeCount == 2 && server.KeyExchangeCount == 2);
             await Assert.That(client.KeyExchangeCount).IsEqualTo(2);
             await Assert.That(server.KeyExchangeCount).IsEqualTo(2);
             await clientPump.StopAsync();
