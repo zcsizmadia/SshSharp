@@ -86,7 +86,7 @@ internal sealed class SshTransport : IAsyncDisposable
 
         var clientInit = KexInitMessage.ForClient(_options.Preferences);
         var clientInitPayload = Serialize(clientInit.Write);
-        await SendPacketAsync(clientInitPayload, kexMessage: true, null, cancellationToken).ConfigureAwait(false);
+        await SendPacketAsync(clientInitPayload, kexMessage: true, null, null, cancellationToken).ConfigureAwait(false);
 
         var serverInitPayload = await ReceiveKexMessageAsync(SshMessage.KexInit, strict: false, cancellationToken).ConfigureAwait(false);
 
@@ -109,7 +109,7 @@ internal sealed class SshTransport : IAsyncDisposable
     public async ValueTask SendAsync(ReadOnlyMemory<byte> payload, Action? onCommitted, CancellationToken cancellationToken)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        await SendPacketAsync(payload, kexMessage: false, onCommitted, cancellationToken).ConfigureAwait(false);
+        await SendPacketAsync(payload, kexMessage: false, onCommitted, null, cancellationToken).ConfigureAwait(false);
         if (_connected && !_rekeying && RekeyDue())
         {
             await StartRekeyAsync(cancellationToken).ConfigureAwait(false);
@@ -117,10 +117,33 @@ internal sealed class SshTransport : IAsyncDisposable
     }
 
     /// <summary>
+    /// Sends one message only if <paramref name="condition"/> still holds when the packet takes its place on the wire: it is checked under
+    /// the send lock, so nothing can be sent in between. Returns whether the message was sent. A channel uses this so that its EOF or data
+    /// never follows its CLOSE, which the receive loop may send at any moment.
+    /// </summary>
+    public async ValueTask<bool> SendIfAsync(ReadOnlyMemory<byte> payload, Func<bool> condition, CancellationToken cancellationToken)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (!await SendPacketAsync(payload, kexMessage: false, null, condition, cancellationToken).ConfigureAwait(false))
+        {
+            return false;
+        }
+
+        if (_connected && !_rekeying && RekeyDue())
+        {
+            await StartRekeyAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        return true;
+    }
+
+    /// <summary>
     /// Receives the next application-level message. Transport housekeeping is handled here: <c>IGNORE</c>, <c>DEBUG</c> and
     /// <c>UNIMPLEMENTED</c> are skipped, <c>EXT_INFO</c> is recorded, a key re-exchange is carried out, and <c>DISCONNECT</c> raises an
     /// <see cref="SshException"/>. The caller must dispose the returned packet.
     /// </summary>
+    // Pooled: completes asynchronously for nearly every packet, and would otherwise allocate a state machine box each time.
+    [System.Runtime.CompilerServices.AsyncMethodBuilder(typeof(System.Runtime.CompilerServices.PoolingAsyncValueTaskMethodBuilder<>))]
     public async ValueTask<DecodedPacket> ReceiveAsync(CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -186,7 +209,7 @@ internal sealed class SshTransport : IAsyncDisposable
             writer.WriteString(description);
             writer.WriteString(string.Empty);
         });
-        await SendPacketAsync(payload, kexMessage: true, null, cancellationToken).ConfigureAwait(false);
+        await SendPacketAsync(payload, kexMessage: true, null, null, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Cancels every pending read and flush: the connection is being torn down and nothing more will be sent.</summary>
@@ -269,7 +292,7 @@ internal sealed class SshTransport : IAsyncDisposable
         }
 
         using var kex = ClientKeyExchange.Create(negotiated.Kex);
-        await SendPacketAsync(kex.CreateInit(), kexMessage: true, null, cancellationToken).ConfigureAwait(false);
+        await SendPacketAsync(kex.CreateInit(), kexMessage: true, null, null, cancellationToken).ConfigureAwait(false);
         var reply = await ReceiveKexMessageAsync(SshMessage.KexEcdhReply, strictMessages, cancellationToken).ConfigureAwait(false);
 
         var context = new KexContext(_options.ClientIdentification.Line, ServerIdentification!.Line, clientInitPayload, serverInitPayload);
@@ -422,7 +445,7 @@ internal sealed class SshTransport : IAsyncDisposable
     /// is cancelled during the flush, it gets <see cref="OperationCanceledException"/> right away, the flush finishes in the background,
     /// and the lock is released when it does.
     /// </remarks>
-    private async ValueTask SendPacketAsync(ReadOnlyMemory<byte> payload, bool kexMessage, Action? onCommitted, CancellationToken cancellationToken)
+    private async ValueTask<bool> SendPacketAsync(ReadOnlyMemory<byte> payload, bool kexMessage, Action? onCommitted, Func<bool>? condition, CancellationToken cancellationToken)
     {
         while (true)
         {
@@ -437,6 +460,11 @@ internal sealed class SshTransport : IAsyncDisposable
                 }
                 else
                 {
+                    if (condition is not null && !condition())
+                    {
+                        return false;
+                    }
+
                     PacketCodec.Encode(_writer, payload.Span, _sendProtector, _sendSequence++);
                     onCommitted?.Invoke();
                     Interlocked.Add(ref _bytesSinceKex, payload.Length);
@@ -446,7 +474,7 @@ internal sealed class SshTransport : IAsyncDisposable
                     if (flush.IsCompleted)
                     {
                         flush.GetAwaiter().GetResult();
-                        return;
+                        return true;
                     }
 
                     var pending = flush.AsTask();
@@ -461,7 +489,7 @@ internal sealed class SshTransport : IAsyncDisposable
                         throw;
                     }
 
-                    return;
+                    return true;
                 }
             }
             finally
@@ -499,6 +527,8 @@ internal sealed class SshTransport : IAsyncDisposable
         _ = _rekeyDone.Task.Exception; // mark observed: nobody may be waiting
     }
 
+    // Pooled: completes asynchronously for nearly every packet, and would otherwise allocate a state machine box each time.
+    [System.Runtime.CompilerServices.AsyncMethodBuilder(typeof(System.Runtime.CompilerServices.PoolingAsyncValueTaskMethodBuilder<>))]
     private async ValueTask<DecodedPacket> ReadPacketAsync(CancellationToken cancellationToken)
     {
         while (true)

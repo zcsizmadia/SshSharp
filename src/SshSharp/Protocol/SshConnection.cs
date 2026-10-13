@@ -193,6 +193,24 @@ internal sealed class SshConnection : IAsyncDisposable
         }
     }
 
+    /// <summary>Sends a message only if <paramref name="condition"/> holds when it takes its place on the wire (see <see cref="SshTransport.SendIfAsync"/>).</summary>
+    public async ValueTask<bool> SendIfAsync(ReadOnlyMemory<byte> payload, Func<bool> condition, CancellationToken cancellationToken)
+    {
+        if (_failure is { } failure)
+        {
+            throw failure;
+        }
+
+        try
+        {
+            return await _transport.SendIfAsync(payload, condition, cancellationToken).ConfigureAwait(false);
+        }
+        catch (IOException ex)
+        {
+            throw ConnectionLost(ex);
+        }
+    }
+
     /// <summary>A failure of the underlying stream, as the <see cref="SshException"/> callers handle.</summary>
     internal static SshException ConnectionLost(Exception inner) =>
         new(SshFailureReason.ConnectionClosed, "The connection was lost: " + inner.Message, inner);
@@ -554,43 +572,7 @@ internal sealed class SshConnection : IAsyncDisposable
                 var senderChannel = reader.ReadUInt32();
                 var window = reader.ReadUInt32();
                 var maxPacket = reader.ReadUInt32();
-                if (AcceptChannel?.Invoke(channelType, reader.Remaining.ToArray()) is not { } start)
-                {
-                    Post(SshChannel.BuildOpenFailure(senderChannel, ChannelOpenFailureReason.AdministrativelyProhibited, "Channel type not supported."));
-                    return false;
-                }
-
-                var accepted = new SshChannel(this, Interlocked.Increment(ref _nextChannelId) - 1);
-                _channels[accepted.LocalId] = accepted;
-                accepted.OnOpenConfirmed(senderChannel, window, maxPacket);
-                if (accepted.TryMarkOpen())
-                {
-                    SshTelemetry.Channels.Add(1);
-                    SshLog.ChannelOpened(_logger, accepted.LocalId);
-                }
-
-                // The confirmation must be on the wire before anything the handler sends on the channel, so it is sent first, not posted.
-                var confirmation = Build(w =>
-                {
-                    w.WriteByte(SshMessage.ChannelOpenConfirmation);
-                    w.WriteUInt32(senderChannel);
-                    w.WriteUInt32(accepted.LocalId);
-                    w.WriteUInt32(SshChannel.LocalWindowSize);
-                    w.WriteUInt32(SshChannel.LocalMaxPacketSize);
-                });
-                _ = Task.Run(async () =>
-                {
-                    try
-                    {
-                        await SendAsync(confirmation, _stop.Token).ConfigureAwait(false);
-                    }
-                    catch (Exception ex) when (ex is SshException or OperationCanceledException or ObjectDisposedException)
-                    {
-                        return; // the connection is ending; the channel fails with it
-                    }
-
-                    start(accepted);
-                }, CancellationToken.None);
+                OnChannelOpen(channelType, senderChannel, window, maxPacket, reader.Remaining.ToArray());
                 return false;
             }
 
@@ -608,6 +590,51 @@ internal sealed class SshConnection : IAsyncDisposable
                 Post(_transport.BuildUnimplemented());
                 return false;
         }
+    }
+
+    /// <summary>
+    /// A channel the server opens. A method of its own: its lambdas capture locals, and inside Dispatch their closure would be allocated
+    /// for every packet, not only for this message.
+    /// </summary>
+    private void OnChannelOpen(string channelType, uint senderChannel, uint window, uint maxPacket, byte[] typeSpecificData)
+    {
+        if (AcceptChannel?.Invoke(channelType, typeSpecificData) is not { } start)
+        {
+            Post(SshChannel.BuildOpenFailure(senderChannel, ChannelOpenFailureReason.AdministrativelyProhibited, "Channel type not supported."));
+            return;
+        }
+
+        var accepted = new SshChannel(this, Interlocked.Increment(ref _nextChannelId) - 1);
+        _channels[accepted.LocalId] = accepted;
+        accepted.OnOpenConfirmed(senderChannel, window, maxPacket);
+        if (accepted.TryMarkOpen())
+        {
+            SshTelemetry.Channels.Add(1);
+            SshLog.ChannelOpened(_logger, accepted.LocalId);
+        }
+
+        // The confirmation must be on the wire before anything the handler sends on the channel, so it is sent first, not posted.
+        var confirmation = Build(w =>
+        {
+            w.WriteByte(SshMessage.ChannelOpenConfirmation);
+            w.WriteUInt32(senderChannel);
+            w.WriteUInt32(accepted.LocalId);
+            w.WriteUInt32(SshChannel.LocalWindowSize);
+            w.WriteUInt32(SshChannel.LocalMaxPacketSize);
+        });
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await SendAsync(confirmation, _stop.Token).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is SshException or OperationCanceledException or ObjectDisposedException)
+            {
+                return; // the connection is ending; the channel fails with it
+            }
+
+            start(accepted);
+        }, CancellationToken.None);
     }
 
     private void ChannelGone(SshChannel channel)

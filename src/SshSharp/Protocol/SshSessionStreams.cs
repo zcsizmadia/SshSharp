@@ -21,6 +21,8 @@ internal sealed class SshChannelReadStream(Func<CancellationToken, ValueTask<Cha
 
     public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
 
+    // Pooled: completes asynchronously for nearly every packet, and would otherwise allocate a state machine box each time.
+    [System.Runtime.CompilerServices.AsyncMethodBuilder(typeof(System.Runtime.CompilerServices.PoolingAsyncValueTaskMethodBuilder<>))]
     public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(_disposed != 0, this);
