@@ -111,7 +111,8 @@ var keys = agent is null ? [] : await agent.GetKeysAsync();
 - .NET SDK 10.0.401 or later (see `global.json`).
 - Build: `dotnet build -c Release`
 - Test (TUnit): `dotnet test --project tests/SshSharp.Tests -c Release`. Tests against real servers run when
-  `SSHSHARP_TEST_SSHD` and related variables are set; CI sets them up on Linux.
+  `SSHSHARP_TEST_SSHD` and related variables are set; CI sets them up on Linux, and `. ./scripts/test-server.ps1` starts the
+  same server in Docker locally (`-Server dropbear` for Dropbear, `-Stop` to remove it).
 - Coverage report: `./scripts/coverage.ps1` (target 95%+, not enforced in CI).
 - Releases: pushing a `v*` tag on `main` publishes to nuget.org (`.github/workflows/publish.yml`).
 
