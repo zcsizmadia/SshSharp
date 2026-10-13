@@ -8,23 +8,22 @@ internal sealed class ExecScript(FakeSessionServer server, FakeSessionServer.Ser
 {
     public string Command { get; } = command;
 
-    /// <summary>Both sides sent CLOSE: the channel number is gone, and a real server sends nothing more on it.</summary>
-    private bool Gone => channel.CloseSent && channel.CloseReceived;
+    // Script messages are dropped once the server has sent CLOSE, as a real server sends nothing after it (see SendOnChannelAsync).
 
     /// <summary>Sends stdout, pausing whenever the client's receive window is exhausted (as a real server must).</summary>
-    public Task StdoutAsync(byte[] data) => Gone ? Task.CompletedTask : server.SendDataAsync(channel, data, extended: false);
+    public Task StdoutAsync(byte[] data) => server.SendDataAsync(channel, data, extended: false, fromScript: true);
 
-    public Task StderrAsync(byte[] data) => Gone ? Task.CompletedTask : server.SendDataAsync(channel, data, extended: true);
+    public Task StderrAsync(byte[] data) => server.SendDataAsync(channel, data, extended: true, fromScript: true);
 
-    public Task ExitStatusAsync(uint status) => Gone ? Task.CompletedTask : server.SendRequestAsync(channel, "exit-status", w => w.WriteUInt32(status));
+    public Task ExitStatusAsync(uint status) => server.SendRequestAsync(channel, "exit-status", w => w.WriteUInt32(status), fromScript: true);
 
-    public Task ExitSignalAsync(string signal) => Gone ? Task.CompletedTask : server.SendRequestAsync(channel, "exit-signal", w =>
+    public Task ExitSignalAsync(string signal) => server.SendRequestAsync(channel, "exit-signal", w =>
     {
         w.WriteString(signal);
         w.WriteBoolean(false);
         w.WriteString(string.Empty);
         w.WriteString(string.Empty);
-    });
+    }, fromScript: true);
 
     /// <summary>The next data the client sent on the channel, or null once it sent EOF.</summary>
     public async Task<byte[]?> ReadInputAsync(CancellationToken cancellationToken = default)
@@ -67,9 +66,9 @@ internal sealed class ExecScript(FakeSessionServer server, FakeSessionServer.Ser
         }
     }
 
-    public Task EofAsync() => Gone || channel.CloseSent ? Task.CompletedTask : server.SendChannelAsync(SshMessage.ChannelEof, channel);
+    public Task EofAsync() => server.SendChannelAsync(SshMessage.ChannelEof, channel, fromScript: true);
 
-    public Task CloseAsync() => channel.CloseSent ? Task.CompletedTask : server.SendChannelAsync(SshMessage.ChannelClose, channel);
+    public Task CloseAsync() => server.SendChannelAsync(SshMessage.ChannelClose, channel, fromScript: true);
 
     /// <summary>The usual ending: exit status, EOF, then CLOSE.</summary>
     public async Task FinishAsync(uint status)
@@ -101,6 +100,9 @@ internal sealed class FakeSessionServer : IAsyncDisposable
         public bool CloseSent { get; set; }
 
         public SemaphoreSlim WindowChanged { get; } = new(0);
+
+        /// <summary>Serializes the server's messages on this channel with its CLOSE handling.</summary>
+        public SemaphoreSlim SendGate { get; } = new(1, 1);
 
         /// <summary>Data the client sent (stdin), completed at its EOF.</summary>
         public System.Threading.Channels.Channel<byte[]> Input { get; } = System.Threading.Channels.Channel.CreateUnbounded<byte[]>();
@@ -178,6 +180,15 @@ internal sealed class FakeSessionServer : IAsyncDisposable
 
     /// <summary>The host:port of every direct-tcpip channel the client asked for.</summary>
     public List<string> DirectTcpIpRequests { get; } = [];
+
+    /// <summary>The originator address:port of every direct-tcpip channel.</summary>
+    public List<string> DirectTcpIpOriginators { get; } = [];
+
+    /// <summary>Where direct-streamlocal channels go: a stream to relay to, or null to refuse.</summary>
+    public Func<string, Stream?>? DirectStreamLocal { get; set; }
+
+    /// <summary>The socket path of every direct-streamlocal channel the client asked for.</summary>
+    public List<string> DirectStreamLocalRequests { get; } = [];
 
     /// <summary>Host keys announced after authentication (hostkeys-00@openssh.com) and proven on request (UpdateHostKeys).</summary>
     public List<FakeHostKey>? AnnouncedHostKeys { get; init; }
@@ -510,6 +521,26 @@ internal sealed class FakeSessionServer : IAsyncDisposable
                 var maxPacket = reader.ReadUInt32();
                 var tunnelHost = channelType == "direct-tcpip" ? reader.ReadUtf8String() : null;
                 var tunnelPort = channelType == "direct-tcpip" ? (int)reader.ReadUInt32() : 0;
+                if (tunnelHost is not null)
+                {
+                    var originator = $"{reader.ReadUtf8String()}:{reader.ReadUInt32()}";
+                    lock (DirectTcpIpOriginators)
+                    {
+                        DirectTcpIpOriginators.Add(originator);
+                    }
+                }
+
+                string? socketPath = null;
+                if (channelType == "direct-streamlocal@openssh.com")
+                {
+                    socketPath = reader.ReadUtf8String();
+                    reader.ReadUtf8String(); // reserved
+                    reader.ReadUInt32(); // reserved
+                    lock (DirectStreamLocalRequests)
+                    {
+                        DirectStreamLocalRequests.Add(socketPath);
+                    }
+                }
                 if (RefuseChannels)
                 {
                     await _server.SendAsync(Build(w =>
@@ -538,6 +569,15 @@ internal sealed class FakeSessionServer : IAsyncDisposable
                     }
 
                     tunnel = DirectTcpIp?.Invoke(tunnelHost, tunnelPort);
+                }
+
+                if (socketPath is not null)
+                {
+                    tunnel = DirectStreamLocal?.Invoke(socketPath);
+                }
+
+                if (tunnelHost is not null || socketPath is not null)
+                {
                     if (tunnel is null)
                     {
                         await _server.SendAsync(Build(w =>
@@ -687,8 +727,12 @@ internal sealed class FakeSessionServer : IAsyncDisposable
             }
 
             case SshMessage.ChannelEof:
-                Find(reader.ReadUInt32()).Input.Writer.TryComplete();
+            {
+                var channel = Find(reader.ReadUInt32());
+                channel.Input.Writer.TryComplete();
+                (channel.Tunnel as DuplexStream)?.CloseWrite(); // relay the half-close, as sshd does with shutdown(SHUT_WR)
                 break;
+            }
 
             case SshMessage.ChannelClose:
             {
@@ -701,9 +745,10 @@ internal sealed class FakeSessionServer : IAsyncDisposable
                     await closing.DisposeAsync();
                 }
 
+                // Under the send gate (inside SendOnChannelAsync): the reply marks the channel closed atomically with a racing script send.
                 if (!channel.CloseSent)
                 {
-                    await SendChannelAsync(SshMessage.ChannelClose, channel);
+                    await SendOnChannelAsync(channel, Build(w => { w.WriteByte(SshMessage.ChannelClose); w.WriteUInt32(channel.ClientId); }), fromScript: true, isClose: true);
                 }
 
                 break;
@@ -872,29 +917,49 @@ internal sealed class FakeSessionServer : IAsyncDisposable
         }
     }
 
-    internal async Task SendChannelAsync(byte type, ServerChannel channel)
+    /// <summary>
+    /// Sends one message on a channel under its send gate. With <paramref name="fromScript"/>, nothing is sent once the server has sent
+    /// CLOSE (a real server sends nothing after it); the check and the send are atomic with the CLOSE handling, so a script racing the
+    /// client's CLOSE cannot slip a message in after the reply.
+    /// </summary>
+    private async Task<bool> SendOnChannelAsync(ServerChannel channel, byte[] payload, bool fromScript, bool isClose = false)
     {
-        if (type == SshMessage.ChannelClose)
+        await channel.SendGate.WaitAsync();
+        try
         {
-            channel.CloseSent = true;
-        }
+            if (fromScript && channel.CloseSent)
+            {
+                return false;
+            }
 
-        await _server.SendAsync(Build(w => { w.WriteByte(type); w.WriteUInt32(channel.ClientId); }));
+            if (isClose)
+            {
+                channel.CloseSent = true;
+            }
+
+            await _server.SendAsync(payload);
+            return true;
+        }
+        finally
+        {
+            channel.SendGate.Release();
+        }
     }
 
-    internal async Task SendRequestAsync(ServerChannel channel, string type, Action<SshWriter> body)
-    {
-        await _server.SendAsync(Build(w =>
+    internal async Task SendChannelAsync(byte type, ServerChannel channel, bool fromScript = false) =>
+        await SendOnChannelAsync(channel, Build(w => { w.WriteByte(type); w.WriteUInt32(channel.ClientId); }), fromScript, isClose: type == SshMessage.ChannelClose);
+
+    internal async Task SendRequestAsync(ServerChannel channel, string type, Action<SshWriter> body, bool fromScript = false) =>
+        await SendOnChannelAsync(channel, Build(w =>
         {
             w.WriteByte(SshMessage.ChannelRequest);
             w.WriteUInt32(channel.ClientId);
             w.WriteString(type);
             w.WriteBoolean(false);
             body(w);
-        }));
-    }
+        }), fromScript);
 
-    internal async Task SendDataAsync(ServerChannel channel, byte[] data, bool extended)
+    internal async Task SendDataAsync(ServerChannel channel, byte[] data, bool extended, bool fromScript = false)
     {
         var offset = 0;
         while (offset < data.Length)
@@ -918,7 +983,7 @@ internal sealed class FakeSessionServer : IAsyncDisposable
             }
 
             var chunk = data.AsMemory(offset, take);
-            await _server.SendAsync(Build(w =>
+            var sent = await SendOnChannelAsync(channel, Build(w =>
             {
                 w.WriteByte(extended ? SshMessage.ChannelExtendedData : SshMessage.ChannelData);
                 w.WriteUInt32(channel.ClientId);
@@ -928,7 +993,12 @@ internal sealed class FakeSessionServer : IAsyncDisposable
                 }
 
                 w.WriteString(chunk.Span);
-            }));
+            }), fromScript);
+            if (!sent)
+            {
+                return;
+            }
+
             offset += take;
         }
     }

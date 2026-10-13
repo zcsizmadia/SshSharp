@@ -115,6 +115,8 @@ jobs:
           UsePAM yes
           MaxStartups 200:30:300
           MaxSessions 64
+          AllowTcpForwarding yes
+          AllowStreamLocalForwarding yes
           RekeyLimit 32K
           KexAlgorithms +diffie-hellman-group14-sha256,diffie-hellman-group16-sha512
           LogLevel DEBUG1
@@ -251,6 +253,7 @@ jobs:
           echo "Server: \`$BANNER\`" >> "$GITHUB_STEP_SUMMARY"
           {
             echo "SSHSHARP_TEST_SSHD=127.0.0.1:2200"
+            echo "SSHSHARP_TEST_SSHD_INNER_PORT=22"
             echo "SSHSHARP_TEST_USER=sshsharp"
             echo "SSHSHARP_TEST_PASSWORD=$PASSWORD"
             echo "SSHSHARP_TEST_SERVER=${{ matrix.software }}"

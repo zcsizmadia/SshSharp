@@ -64,6 +64,32 @@ replaces the configured one, `UseAgent`/`Agent`, `AllowProxyCommand`, `Authentic
 authenticated with its own configuration. `ProxyCommand` runs a local command and speaks SSH over its standard input and
 output, as `ssh` does; set `AllowProxyCommand = false` to refuse configurations that name one.
 
+## Tunnels and port forwarding
+
+A tunnel is a connection the server makes on your behalf, returned as a `Stream`. The server resolves the host name, so it
+can name machines only the server can reach.
+
+```csharp
+// TCP, as ssh -L uses (direct-tcpip).
+await using var database = await client.OpenTcpTunnelAsync("db.internal", 5432);
+
+// A Unix domain socket on the server (direct-streamlocal@openssh.com), for example the Docker socket.
+await using var docker = await client.OpenUnixSocketTunnelAsync("/var/run/docker.sock");
+```
+
+Local port forwarding (`ssh -L 15432:db.internal:5432`) listens locally and tunnels every connection made to it:
+
+```csharp
+await using var forwarder = await client.ForwardLocalPortAsync(
+    new IPEndPoint(IPAddress.Loopback, 0), "db.internal", 5432);   // port 0: the system picks a free one
+Console.WriteLine($"Connect to {forwarder.LocalEndPoint}");
+```
+
+Each forwarded connection gets its own channel, and a half-close travels both ways as it does with `ssh`. Bind to a loopback
+address unless other machines should use the tunnel. Forwarding stops when the forwarder or the client is disposed, or the
+connection ends. A server that does not allow forwarding (sshd's `AllowTcpForwarding no`) refuses each connection, and
+`OpenTcpTunnelAsync` throws an `SshException` with `SshFailureReason.ChannelClosed`.
+
 ## Keep-alive and connection state
 
 ```csharp

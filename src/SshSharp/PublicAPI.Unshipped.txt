@@ -487,3 +487,12 @@ SshSharp.SshConfigConnectOptions.UseAgent.get -> bool
 SshSharp.SshConfigConnectOptions.UseAgent.init -> void
 SshSharp.SshFailureReason.AgentFailed = 9 -> SshSharp.SshFailureReason
 static SshSharp.SshAgent.FromEnvironment() -> SshSharp.SshAgent?
+SshSharp.SshClient.ForwardLocalPortAsync(System.Net.IPEndPoint! localEndPoint, string! remoteHost, int remotePort, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SshSharp.SshPortForwarder!>!
+SshSharp.SshClient.OpenTcpTunnelAsync(string! host, int port, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.IO.Stream!>!
+SshSharp.SshClient.OpenUnixSocketTunnelAsync(string! path, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.IO.Stream!>!
+SshSharp.SshPortForwarder
+SshSharp.SshPortForwarder.ActiveConnections.get -> int
+SshSharp.SshPortForwarder.DisposeAsync() -> System.Threading.Tasks.ValueTask
+SshSharp.SshPortForwarder.LocalEndPoint.get -> System.Net.IPEndPoint!
+SshSharp.SshPortForwarder.RemoteHost.get -> string!
+SshSharp.SshPortForwarder.RemotePort.get -> int

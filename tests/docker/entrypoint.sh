@@ -7,10 +7,14 @@ if command -v dropbear > /dev/null 2>&1; then
   exec dropbear -F -E -R -p 22
 fi
 ssh-keygen -A
+# sshd takes the first value of each keyword, and Alpine's default file turns forwarding off: drop those lines before appending.
+sed -i '/^AllowTcpForwarding/d;/^AllowStreamLocalForwarding/d' /etc/ssh/sshd_config
 cat >> /etc/ssh/sshd_config <<CONFIG
 PasswordAuthentication yes
 MaxStartups 200:30:300
 MaxSessions 64
+AllowTcpForwarding yes
+AllowStreamLocalForwarding yes
 RekeyLimit 32K
 KexAlgorithms +diffie-hellman-group14-sha256,diffie-hellman-group16-sha512
 LogLevel DEBUG1
