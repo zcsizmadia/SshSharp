@@ -118,6 +118,7 @@ public sealed partial class SshClient
                 KeyboardInteractive = hostConfig.BatchMode ? null : options.KeyboardInteractive,
                 AuthenticationBanner = options.AuthenticationBanner,
                 AuthenticationOrder = AuthenticationOrder(hostConfig),
+                ForwardAgent = hostConfig.ForwardAgent ? ResolveAgent(hostConfig, options) : null,
                 HostKeyVerifier = options.HostKeyVerifier ?? KnownHostsVerifier.FromConfig(hostConfig, hostConfig.BatchMode ? null : options.AskHostKey),
                 HostKeyAlias = hostConfig.HostKeyAlias,
                 KeepAliveInterval = hostConfig.ServerAliveInterval,

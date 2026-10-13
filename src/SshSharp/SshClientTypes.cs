@@ -43,6 +43,13 @@ public sealed class SshClientOptions
     /// </summary>
     public Func<string, CancellationToken, ValueTask>? AuthenticationBanner { get; init; }
 
+    /// <summary>
+    /// Forward this agent to the server (<c>ssh -A</c>, <c>ForwardAgent yes</c>): sessions ask the server to offer it, so programs there
+    /// (ssh, git) can authenticate onward with your keys. Null (the default) forwards nothing. Only forward to servers you trust: while
+    /// connected, anyone with enough rights on the server can use the agent to sign with your keys (not read them).
+    /// </summary>
+    public SshAgent? ForwardAgent { get; init; }
+
     /// <summary>The methods to try and their order (ssh's <c>PreferredAuthentications</c>); null for publickey, keyboard-interactive, password.</summary>
     internal IReadOnlyList<string>? AuthenticationOrder { get; init; }
 
