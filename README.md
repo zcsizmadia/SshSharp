@@ -20,7 +20,7 @@ Console.WriteLine(result.StandardOutputText);
 ## Features
 
 - **Pure managed C#**, no native dependencies; .NET 8 and .NET 10, tested on Windows and Linux (x64 and Arm64) and macOS
-  (Arm64); marked trimming- and AOT-compatible (analyzer-checked).
+  (Arm64); trimming- and Native AOT-compatible, with an AOT-compiled smoke test against a real server in CI.
 - **Async all the way:** `CancellationToken` on every operation, `IAsyncDisposable`, `System.IO.Pipelines` I/O with zero-copy
   packet handling.
 - **OpenSSH configuration:** `ssh_config` (`Host`, `Match`, `Include`, tokens) and `known_hosts` (hashed hosts,

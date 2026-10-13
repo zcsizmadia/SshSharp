@@ -181,6 +181,12 @@ jobs:
         run: dotnet test --project tests/SshSharp.Tests -c Release -f net8.0 --no-build --treenode-filter "/*/*/*InteropTests/*"
       - name: Interop tests against the real server (net10.0)
         run: dotnet test --project tests/SshSharp.Tests -c Release -f net10.0 --no-build --treenode-filter "/*/*/*InteropTests/*"
+      - name: Native AOT smoke test against the real server
+        # Trim and AOT warnings fail the publish; the binary then connects and uses every main feature.
+        run: |
+          set -euo pipefail
+          dotnet publish tests/SshSharp.AotSmoke -c Release -o "$RUNNER_TEMP/aot"
+          "$RUNNER_TEMP/aot/SshSharp.AotSmoke"
       - name: sshd log
         if: failure()
         run: |
