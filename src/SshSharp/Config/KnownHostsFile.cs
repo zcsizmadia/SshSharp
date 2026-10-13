@@ -139,6 +139,7 @@ public sealed class KnownHostsFile
     public KnownHostsEntry Add(string host, int port, string keyType, ReadOnlySpan<byte> publicKey, bool hash = false,
         string? comment = null, KnownHostsMarker marker = KnownHostsMarker.None)
     {
+        KnownHostsEntry.RequireSingleField(host);
         var field = hash ? KnownHostsEntry.HashHost(host, port) : KnownHostsEntry.FormatHost(host, port);
         var entry = new KnownHostsEntry(field, keyType, publicKey.ToArray(), marker, comment);
         _lines.Add(new Line(entry.ToLine(), entry, false));
@@ -248,6 +249,7 @@ public sealed class KnownHostsFile
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
         ArgumentException.ThrowIfNullOrWhiteSpace(host);
+        KnownHostsEntry.RequireSingleField(host);
         var field = hash ? KnownHostsEntry.HashHost(host, port) : KnownHostsEntry.FormatHost(host, port);
         var entry = new KnownHostsEntry(field, keyType, publicKey.ToArray());
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);

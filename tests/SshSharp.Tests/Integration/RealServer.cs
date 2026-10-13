@@ -37,7 +37,7 @@ internal static class RealServer
     /// Client options for the test account (SSHSHARP_TEST_USER with SSHSHARP_TEST_PASSWORD or the ed25519 key in SSHSHARP_TEST_KEYDIR),
     /// or null when no server or account is configured.
     /// </summary>
-    public static async Task<SshClientOptions?> OptionsAsync(SshHostKeyVerifier? verifier = null, TimeSpan? keepAlive = null)
+    public static async Task<SshClientOptions?> OptionsAsync(SshHostKeyVerifier? verifier = null, TimeSpan? keepAlive = null, int keepAliveCountMax = 3)
     {
         var user = Environment.GetEnvironmentVariable("SSHSHARP_TEST_USER");
         var password = Environment.GetEnvironmentVariable("SSHSHARP_TEST_PASSWORD");
@@ -55,7 +55,7 @@ internal static class RealServer
             PrivateKeys = key is null ? [] : [key],
             HostKeyVerifier = verifier ?? SshHostKeyVerifier.FromDelegate((_, _) => ValueTask.FromResult(true)),
             KeepAliveInterval = keepAlive,
-            KeepAliveCountMax = 3,
+            KeepAliveCountMax = keepAliveCountMax,
         };
     }
 
