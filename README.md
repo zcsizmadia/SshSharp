@@ -75,7 +75,8 @@ Coming next: SFTP, as a separate package.
 | Maturity | New, pre-1.0; managed crypto awaiting an outside review | More than a decade of production use |
 
 **Use SSH.NET instead** when you need .NET Framework or .NET Standard, SFTP today, servers that only speak legacy algorithms,
-a connection through an HTTP or SOCKS proxy, or a long track record.
+a connection through an HTTP or SOCKS proxy, or a long track record. Moving from SSH.NET? See the
+[migration guide](https://github.com/zcsizmadia/SshSharp/blob/main/docs/migrating-from-sshnet.md).
 
 ## Install
 
@@ -134,6 +135,10 @@ var keys = agent is null ? [] : await agent.GetKeysAsync();
 - [Configuration files](https://github.com/zcsizmadia/SshSharp/blob/main/docs/config-files.md)
 - [Errors and diagnostics](https://github.com/zcsizmadia/SshSharp/blob/main/docs/diagnostics.md): exceptions, logging,
   tracing, metrics
+- [Migrating from SSH.NET](https://github.com/zcsizmadia/SshSharp/blob/main/docs/migrating-from-sshnet.md): the same tasks,
+  side by side
+- [Samples](https://github.com/zcsizmadia/SshSharp/tree/main/samples/SshSharp.Samples): a small `ssh`-like tool (commands,
+  streaming, shell, port forwarding, SOCKS, SCP)
 - API reference: generated from the XML documentation with DocFX (`dotnet tool restore`, then
   `dotnet docfx docs/docfx.json --serve`); every public member is documented, and IntelliSense shows the same text.
 - [Design notes](https://github.com/zcsizmadia/SshSharp/blob/main/docs/design.md),

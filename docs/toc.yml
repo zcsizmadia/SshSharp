@@ -16,6 +16,8 @@
       href: config-files.md
     - name: Errors and diagnostics
       href: diagnostics.md
+    - name: Migrating from SSH.NET
+      href: migrating-from-sshnet.md
 - name: API reference
   href: api/
 - name: Project
