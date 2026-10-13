@@ -386,3 +386,94 @@ SshSharp.SshKeyboardInteractiveRequest.Name.get -> string!
 SshSharp.SshKeyboardInteractiveRequest.Prompts.get -> System.Collections.Generic.IReadOnlyList<SshSharp.SshAuthenticationPrompt!>!
 static SshSharp.SshAuthenticationPrompt.operator !=(SshSharp.SshAuthenticationPrompt? left, SshSharp.SshAuthenticationPrompt? right) -> bool
 static SshSharp.SshAuthenticationPrompt.operator ==(SshSharp.SshAuthenticationPrompt? left, SshSharp.SshAuthenticationPrompt? right) -> bool
+SshSharp.SshClient.StartCommandAsync(string! command, SshSharp.SshSessionOptions? options = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SshSharp.SshSession!>!
+SshSharp.SshClient.StartShellAsync(SshSharp.SshSessionOptions? options = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SshSharp.SshSession!>!
+SshSharp.SshSession
+SshSharp.SshSession.CloseInputAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+SshSharp.SshSession.DisposeAsync() -> System.Threading.Tasks.ValueTask
+SshSharp.SshSession.ExitSignal.get -> string?
+SshSharp.SshSession.ExitStatus.get -> int?
+SshSharp.SshSession.HasTerminal.get -> bool
+SshSharp.SshSession.ResizeTerminalAsync(int columns, int rows, int widthPixels = 0, int heightPixels = 0, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+SshSharp.SshSession.SendSignalAsync(string! signal, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+SshSharp.SshSession.StandardError.get -> System.IO.Stream!
+SshSharp.SshSession.StandardInput.get -> System.IO.Stream!
+SshSharp.SshSession.StandardOutput.get -> System.IO.Stream!
+SshSharp.SshSession.WaitForExitAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+SshSharp.SshSessionOptions
+SshSharp.SshSessionOptions.Environment.get -> System.Collections.Generic.IReadOnlyDictionary<string!, string!>!
+SshSharp.SshSessionOptions.Environment.init -> void
+SshSharp.SshSessionOptions.SshSessionOptions() -> void
+SshSharp.SshSessionOptions.Terminal.get -> SshSharp.SshTerminalOptions?
+SshSharp.SshSessionOptions.Terminal.init -> void
+SshSharp.SshTerminalMode
+SshSharp.SshTerminalMode.CS7 = 90 -> SshSharp.SshTerminalMode
+SshSharp.SshTerminalMode.CS8 = 91 -> SshSharp.SshTerminalMode
+SshSharp.SshTerminalMode.ECHO = 53 -> SshSharp.SshTerminalMode
+SshSharp.SshTerminalMode.ECHOCTL = 60 -> SshSharp.SshTerminalMode
+SshSharp.SshTerminalMode.ECHOE = 54 -> SshSharp.SshTerminalMode
+SshSharp.SshTerminalMode.ECHOK = 55 -> SshSharp.SshTerminalMode
+SshSharp.SshTerminalMode.ECHOKE = 61 -> SshSharp.SshTerminalMode
+SshSharp.SshTerminalMode.ECHONL = 56 -> SshSharp.SshTerminalMode
+SshSharp.SshTerminalMode.ICANON = 51 -> SshSharp.SshTerminalMode
+SshSharp.SshTerminalMode.ICRNL = 36 -> SshSharp.SshTerminalMode
+SshSharp.SshTerminalMode.IEXTEN = 59 -> SshSharp.SshTerminalMode
+SshSharp.SshTerminalMode.IGNCR = 35 -> SshSharp.SshTerminalMode
+SshSharp.SshTerminalMode.IGNPAR = 30 -> SshSharp.SshTerminalMode
+SshSharp.SshTerminalMode.IMAXBEL = 41 -> SshSharp.SshTerminalMode
+SshSharp.SshTerminalMode.INLCR = 34 -> SshSharp.SshTerminalMode
+SshSharp.SshTerminalMode.INPCK = 32 -> SshSharp.SshTerminalMode
+SshSharp.SshTerminalMode.ISIG = 50 -> SshSharp.SshTerminalMode
+SshSharp.SshTerminalMode.ISTRIP = 33 -> SshSharp.SshTerminalMode
+SshSharp.SshTerminalMode.IUCLC = 37 -> SshSharp.SshTerminalMode
+SshSharp.SshTerminalMode.IUTF8 = 42 -> SshSharp.SshTerminalMode
+SshSharp.SshTerminalMode.IXANY = 39 -> SshSharp.SshTerminalMode
+SshSharp.SshTerminalMode.IXOFF = 40 -> SshSharp.SshTerminalMode
+SshSharp.SshTerminalMode.IXON = 38 -> SshSharp.SshTerminalMode
+SshSharp.SshTerminalMode.NOFLSH = 57 -> SshSharp.SshTerminalMode
+SshSharp.SshTerminalMode.OCRNL = 73 -> SshSharp.SshTerminalMode
+SshSharp.SshTerminalMode.OLCUC = 71 -> SshSharp.SshTerminalMode
+SshSharp.SshTerminalMode.ONLCR = 72 -> SshSharp.SshTerminalMode
+SshSharp.SshTerminalMode.ONLRET = 75 -> SshSharp.SshTerminalMode
+SshSharp.SshTerminalMode.ONOCR = 74 -> SshSharp.SshTerminalMode
+SshSharp.SshTerminalMode.OPOST = 70 -> SshSharp.SshTerminalMode
+SshSharp.SshTerminalMode.PARENB = 92 -> SshSharp.SshTerminalMode
+SshSharp.SshTerminalMode.PARMRK = 31 -> SshSharp.SshTerminalMode
+SshSharp.SshTerminalMode.PARODD = 93 -> SshSharp.SshTerminalMode
+SshSharp.SshTerminalMode.PENDIN = 62 -> SshSharp.SshTerminalMode
+SshSharp.SshTerminalMode.TOSTOP = 58 -> SshSharp.SshTerminalMode
+SshSharp.SshTerminalMode.TTY_OP_ISPEED = 128 -> SshSharp.SshTerminalMode
+SshSharp.SshTerminalMode.TTY_OP_OSPEED = 129 -> SshSharp.SshTerminalMode
+SshSharp.SshTerminalMode.VDISCARD = 18 -> SshSharp.SshTerminalMode
+SshSharp.SshTerminalMode.VDSUSP = 11 -> SshSharp.SshTerminalMode
+SshSharp.SshTerminalMode.VEOF = 5 -> SshSharp.SshTerminalMode
+SshSharp.SshTerminalMode.VEOL = 6 -> SshSharp.SshTerminalMode
+SshSharp.SshTerminalMode.VEOL2 = 7 -> SshSharp.SshTerminalMode
+SshSharp.SshTerminalMode.VERASE = 3 -> SshSharp.SshTerminalMode
+SshSharp.SshTerminalMode.VFLUSH = 15 -> SshSharp.SshTerminalMode
+SshSharp.SshTerminalMode.VINTR = 1 -> SshSharp.SshTerminalMode
+SshSharp.SshTerminalMode.VKILL = 4 -> SshSharp.SshTerminalMode
+SshSharp.SshTerminalMode.VLNEXT = 14 -> SshSharp.SshTerminalMode
+SshSharp.SshTerminalMode.VQUIT = 2 -> SshSharp.SshTerminalMode
+SshSharp.SshTerminalMode.VREPRINT = 12 -> SshSharp.SshTerminalMode
+SshSharp.SshTerminalMode.VSTART = 8 -> SshSharp.SshTerminalMode
+SshSharp.SshTerminalMode.VSTATUS = 17 -> SshSharp.SshTerminalMode
+SshSharp.SshTerminalMode.VSTOP = 9 -> SshSharp.SshTerminalMode
+SshSharp.SshTerminalMode.VSUSP = 10 -> SshSharp.SshTerminalMode
+SshSharp.SshTerminalMode.VSWTCH = 16 -> SshSharp.SshTerminalMode
+SshSharp.SshTerminalMode.VWERASE = 13 -> SshSharp.SshTerminalMode
+SshSharp.SshTerminalMode.XCASE = 52 -> SshSharp.SshTerminalMode
+SshSharp.SshTerminalOptions
+SshSharp.SshTerminalOptions.Columns.get -> int
+SshSharp.SshTerminalOptions.Columns.init -> void
+SshSharp.SshTerminalOptions.HeightPixels.get -> int
+SshSharp.SshTerminalOptions.HeightPixels.init -> void
+SshSharp.SshTerminalOptions.Modes.get -> System.Collections.Generic.IReadOnlyDictionary<SshSharp.SshTerminalMode, uint>!
+SshSharp.SshTerminalOptions.Modes.init -> void
+SshSharp.SshTerminalOptions.Rows.get -> int
+SshSharp.SshTerminalOptions.Rows.init -> void
+SshSharp.SshTerminalOptions.SshTerminalOptions() -> void
+SshSharp.SshTerminalOptions.TerminalType.get -> string!
+SshSharp.SshTerminalOptions.TerminalType.init -> void
+SshSharp.SshTerminalOptions.WidthPixels.get -> int
+SshSharp.SshTerminalOptions.WidthPixels.init -> void

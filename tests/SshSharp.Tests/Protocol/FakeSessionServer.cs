@@ -8,14 +8,17 @@ internal sealed class ExecScript(FakeSessionServer server, FakeSessionServer.Ser
 {
     public string Command { get; } = command;
 
+    /// <summary>Both sides sent CLOSE: the channel number is gone, and a real server sends nothing more on it.</summary>
+    private bool Gone => channel.CloseSent && channel.CloseReceived;
+
     /// <summary>Sends stdout, pausing whenever the client's receive window is exhausted (as a real server must).</summary>
-    public Task StdoutAsync(byte[] data) => server.SendDataAsync(channel, data, extended: false);
+    public Task StdoutAsync(byte[] data) => Gone ? Task.CompletedTask : server.SendDataAsync(channel, data, extended: false);
 
-    public Task StderrAsync(byte[] data) => server.SendDataAsync(channel, data, extended: true);
+    public Task StderrAsync(byte[] data) => Gone ? Task.CompletedTask : server.SendDataAsync(channel, data, extended: true);
 
-    public Task ExitStatusAsync(uint status) => server.SendRequestAsync(channel, "exit-status", w => w.WriteUInt32(status));
+    public Task ExitStatusAsync(uint status) => Gone ? Task.CompletedTask : server.SendRequestAsync(channel, "exit-status", w => w.WriteUInt32(status));
 
-    public Task ExitSignalAsync(string signal) => server.SendRequestAsync(channel, "exit-signal", w =>
+    public Task ExitSignalAsync(string signal) => Gone ? Task.CompletedTask : server.SendRequestAsync(channel, "exit-signal", w =>
     {
         w.WriteString(signal);
         w.WriteBoolean(false);
@@ -23,9 +26,50 @@ internal sealed class ExecScript(FakeSessionServer server, FakeSessionServer.Ser
         w.WriteString(string.Empty);
     });
 
-    public Task EofAsync() => server.SendChannelAsync(SshMessage.ChannelEof, channel);
+    /// <summary>The next data the client sent on the channel, or null once it sent EOF.</summary>
+    public async Task<byte[]?> ReadInputAsync(CancellationToken cancellationToken = default)
+    {
+        while (await channel.Input.Reader.WaitToReadAsync(cancellationToken))
+        {
+            if (channel.Input.Reader.TryRead(out var data))
+            {
+                return data;
+            }
+        }
 
-    public Task CloseAsync() => server.SendChannelAsync(SshMessage.ChannelClose, channel);
+        return null;
+    }
+
+    /// <summary>Lets the client send <paramref name="bytes"/> more (SSH_MSG_CHANNEL_WINDOW_ADJUST), as a server does after consuming input.</summary>
+    public Task GrantWindowAsync(uint bytes) => server.SendRawAsync(Build(w =>
+    {
+        w.WriteByte(SshMessage.ChannelWindowAdjust);
+        w.WriteUInt32(channel.ClientId);
+        w.WriteUInt32(bytes);
+    })).AsTask();
+
+    private static byte[] Build(Action<SshWriter> body)
+    {
+        var buffer = new ArrayBufferWriter<byte>();
+        body(new SshWriter(buffer));
+        return buffer.WrittenSpan.ToArray();
+    }
+
+    /// <summary>The channel requests the client sent before and while the program runs.</summary>
+    public FakeSessionServer.ChannelRequestRecord[] Requests
+    {
+        get
+        {
+            lock (channel.Requests)
+            {
+                return [.. channel.Requests];
+            }
+        }
+    }
+
+    public Task EofAsync() => Gone || channel.CloseSent ? Task.CompletedTask : server.SendChannelAsync(SshMessage.ChannelEof, channel);
+
+    public Task CloseAsync() => channel.CloseSent ? Task.CompletedTask : server.SendChannelAsync(SshMessage.ChannelClose, channel);
 
     /// <summary>The usual ending: exit status, EOF, then CLOSE.</summary>
     public async Task FinishAsync(uint status)
@@ -57,6 +101,12 @@ internal sealed class FakeSessionServer : IAsyncDisposable
         public bool CloseSent { get; set; }
 
         public SemaphoreSlim WindowChanged { get; } = new(0);
+
+        /// <summary>Data the client sent (stdin), completed at its EOF.</summary>
+        public System.Threading.Channels.Channel<byte[]> Input { get; } = System.Threading.Channels.Channel.CreateUnbounded<byte[]>();
+
+        /// <summary>Every channel request the client sent, in order.</summary>
+        public List<ChannelRequestRecord> Requests { get; } = [];
 
         /// <summary>For a direct-tcpip channel: the connection the server relays the channel to.</summary>
         public Stream? Tunnel { get; set; }
@@ -97,6 +147,21 @@ internal sealed class FakeSessionServer : IAsyncDisposable
     public bool IgnoreClientWindow { get; init; }
 
     public Func<ExecScript, Task> OnExec { get; set; } = script => script.FinishAsync(0);
+
+    /// <summary>Runs for a "shell" request (the script's command is empty).</summary>
+    public Func<ExecScript, Task> OnShell { get; set; } = script => script.FinishAsync(0);
+
+    /// <summary>Environment variable names the server accepts, like sshd's AcceptEnv; others are dropped.</summary>
+    public string[] AcceptEnv { get; init; } = [];
+
+    /// <summary>Refuse pty-req (a server with no terminals, or PermitTTY no).</summary>
+    public bool RefusePty { get; init; }
+
+    /// <summary>Refuse the shell request.</summary>
+    public bool RefuseShell { get; init; }
+
+    /// <summary>A channel request as the server parsed it: the type, its string and number arguments, and pty-req's encoded modes.</summary>
+    internal sealed record ChannelRequestRecord(string Type, bool WantReply, string[] Args, byte[]? Modes = null);
 
     public List<string> Commands { get; } = [];
 
@@ -515,34 +580,75 @@ internal sealed class FakeSessionServer : IAsyncDisposable
                 var channel = Find(reader.ReadUInt32());
                 var requestType = reader.ReadUtf8String();
                 var wantReply = reader.ReadBoolean();
-                if (requestType == "exec" && !RefuseExec)
+                var args = new List<string>();
+                byte[]? modes = null;
+                switch (requestType)
                 {
-                    var command = reader.ReadUtf8String();
-                    lock (Commands)
+                    case "exec" or "signal" or "subsystem":
+                        args.Add(reader.ReadUtf8String());
+                        break;
+                    case "env":
+                        args.Add(reader.ReadUtf8String());
+                        args.Add(reader.ReadUtf8String());
+                        break;
+                    case "pty-req" or "window-change":
+                        if (requestType == "pty-req")
+                        {
+                            args.Add(reader.ReadUtf8String());
+                        }
+
+                        for (var i = 0; i < 4; i++)
+                        {
+                            args.Add(reader.ReadUInt32().ToString(System.Globalization.CultureInfo.InvariantCulture));
+                        }
+
+                        modes = requestType == "pty-req" ? reader.ReadString().ToArray() : null;
+                        break;
+                }
+
+                var record = new ChannelRequestRecord(requestType, wantReply, [.. args], modes);
+                lock (channel.Requests)
+                {
+                    channel.Requests.Add(record);
+                }
+
+                var accepted = requestType switch
+                {
+                    "exec" => !RefuseExec,
+                    "shell" => !RefuseShell,
+                    "pty-req" => !RefusePty,
+                    "env" => AcceptEnv.Contains(record.Args[0]),
+                    "window-change" or "signal" => true,
+                    _ => false,
+                };
+                if (wantReply)
+                {
+                    await SendChannelAsync(accepted ? SshMessage.ChannelSuccess : SshMessage.ChannelFailure, channel);
+                }
+
+                if (accepted && requestType is "exec" or "shell")
+                {
+                    var command = requestType == "exec" ? record.Args[0] : "";
+                    if (requestType == "exec")
                     {
-                        Commands.Add(command);
+                        lock (Commands)
+                        {
+                            Commands.Add(command);
+                        }
                     }
 
-                    if (wantReply)
-                    {
-                        await SendChannelAsync(SshMessage.ChannelSuccess, channel);
-                    }
-
+                    var script = requestType == "exec" ? OnExec : OnShell;
                     _ = Task.Run(async () =>
                     {
                         try
                         {
-                            await OnExec(new ExecScript(this, channel, command));
+                            await script(new ExecScript(this, channel, command));
                         }
                         catch (Exception)
                         {
                             // The client went away mid-script.
                         }
                     });
-                }
-                else if (wantReply)
-                {
-                    await SendChannelAsync(SshMessage.ChannelFailure, channel);
                 }
 
                 break;
@@ -576,16 +682,19 @@ internal sealed class FakeSessionServer : IAsyncDisposable
                     ReceivedData.Add(data);
                 }
 
+                channel.Input.Writer.TryWrite(data);
                 break;
             }
 
             case SshMessage.ChannelEof:
+                Find(reader.ReadUInt32()).Input.Writer.TryComplete();
                 break;
 
             case SshMessage.ChannelClose:
             {
                 var channel = Find(reader.ReadUInt32());
                 channel.CloseReceived = true;
+                channel.Input.Writer.TryComplete();
                 if (channel.Tunnel is { } closing)
                 {
                     channel.Tunnel = null;

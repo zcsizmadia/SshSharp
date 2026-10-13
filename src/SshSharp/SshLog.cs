@@ -61,4 +61,10 @@ internal static partial class SshLog
 
     [LoggerMessage(EventId = 19, Level = LogLevel.Debug, Message = "Host key update skipped: {Reason}")]
     public static partial void HostKeyUpdateSkipped(ILogger logger, string reason);
+
+    [LoggerMessage(EventId = 20, Level = LogLevel.Debug, Message = "Started a {Kind} session on channel {Id} (terminal: {Terminal})")]
+    public static partial void SessionStarted(ILogger logger, string kind, uint id, bool terminal);
+
+    [LoggerMessage(EventId = 21, Level = LogLevel.Debug, Message = "Session on channel {Id} closed with exit status {ExitStatus} and signal {ExitSignal}")]
+    public static partial void SessionClosed(ILogger logger, uint id, int? exitStatus, string? exitSignal);
 }
