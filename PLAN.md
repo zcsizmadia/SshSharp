@@ -67,6 +67,7 @@ tests/SshSharp.Tests/      # TUnit unit tests (in-memory, no network)
 tests/SshSharp.Sftp.Tests/ # TUnit tests for SshSharp.Sftp (M6)
 tests/SshSharp.Integration/# TUnit tests against OpenSSH in Docker (Testcontainers)
 tests/SshSharp.Fuzz/       # parser/packet fuzz harness (not part of the coverage target)
+tests/SshSharp.Benchmarks/ # BenchmarkDotNet; allocation checks (M2) and the SSH.NET comparison (M5)
 docs/
 ```
 
@@ -136,6 +137,8 @@ docs/
 - **FIPS mode:** one option that restricts the algorithm registry to FIPS-approved algorithms.
 - **Observability:** `ILogger` (no-op by default), `ActivitySource` for tracing, `Meter` for metrics (bytes, rekeys, channels).
 - `none` and `password` auth, `exec` channel. Integration tests against OpenSSH in Docker.
+- Zero-copy check: a small BenchmarkDotNet project (`tests/SshSharp.Benchmarks`) and allocation-assert tests on the hot path
+  (encrypt, send, receive), so allocation regressions show up early.
 - **Done when:** `RunCommandAsync` works against OpenSSH and the in-memory fake server, and a local coverage check is near the 95% target.
 
 ### M3: Config-driven connect and host verification
@@ -157,6 +160,16 @@ docs/
 ### M5: Hardening and release
 - Fuzzing, interop matrix (OpenSSH versions, Dropbear, Windows OpenSSH), timing/side-channel review of the managed crypto.
 - Docs, samples, NuGet package metadata, SourceLink, symbols, versioning.
+- **Benchmark against SSH.NET** (BenchmarkDotNet, `tests/SshSharp.Benchmarks`, not part of normal CI), with a short results
+  section in the docs:
+  - Measure throughput (exec channel, SCP), connect/handshake and small-command latency, allocations and GC counts per MB,
+    parallel channels and thread count, and peak memory on a long stream (SSH.NET #1204). SFTP is added after M6.
+  - Fair setup: the same OpenSSH container, the same forced cipher/MAC/KEX, the same payloads, a Release build, warmup, and
+    both loopback and injected-latency runs. Pin the SSH.NET version, compare against its async methods where they exist, and
+    report algorithms it lacks as "not supported".
+  - SSH.NET is referenced only by the benchmark project, never by the shipped packages.
+  - Expect crypto to dominate raw throughput; the likely differences are allocations, threads and latency. Publish hardware
+    and versions with the results, and never trade correctness or security for a benchmark.
 - Make the repo public only after you confirm (publishing is hard to undo).
 
 ### M6 (post-release): SFTP (`SshSharp.Sftp` package)
