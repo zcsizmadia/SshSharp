@@ -1,5 +1,7 @@
 using System.Buffers;
 using System.Collections.Concurrent;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace SshSharp.Protocol;
 
@@ -16,7 +18,13 @@ internal sealed class SshConnection : IAsyncDisposable
     private Task? _loop;
     private Exception? _failure;
 
-    public SshConnection(SshTransport transport) => _transport = transport;
+    private readonly ILogger _logger;
+
+    public SshConnection(SshTransport transport, ILogger? logger = null)
+    {
+        _transport = transport;
+        _logger = logger ?? NullLogger.Instance;
+    }
 
     /// <summary>How many key exchanges have completed, including the first.</summary>
     public int KeyExchangeCount => _transport.KeyExchangeCount;
@@ -43,6 +51,12 @@ internal sealed class SshConnection : IAsyncDisposable
         try
         {
             await channel.OpenAsync("session", cancellationToken).ConfigureAwait(false);
+            if (channel.TryMarkOpen())
+            {
+                SshTelemetry.Channels.Add(1);
+                SshLog.ChannelOpened(_logger, channel.LocalId);
+            }
+
             return channel;
         }
         catch
@@ -55,6 +69,7 @@ internal sealed class SshConnection : IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         // Everything still waiting (commands, channel opens, window waits) fails now with a clear reason, not with a disposed-object error.
+        SshLog.Disconnecting(_logger);
         Fail(new SshException(SshFailureReason.ConnectionClosed, "The connection was closed by the client."));
         await _stop.CancelAsync().ConfigureAwait(false);
         try
@@ -109,6 +124,11 @@ internal sealed class SshConnection : IAsyncDisposable
         }
         catch (Exception ex)
         {
+            if (ex is not OperationCanceledException)
+            {
+                SshLog.ConnectionFailed(_logger, ex);
+            }
+
             Fail(ex is OperationCanceledException ? new SshException(SshFailureReason.ConnectionClosed, "The connection was closed.") : ex);
         }
     }
@@ -118,6 +138,7 @@ internal sealed class SshConnection : IAsyncDisposable
         _failure ??= exception;
         foreach (var channel in _channels.Values)
         {
+            ChannelGone(channel);
             channel.Fail(exception);
         }
     }
@@ -212,6 +233,7 @@ internal sealed class SshConnection : IAsyncDisposable
                 var channel = Find(reader.ReadUInt32());
                 await channel.OnCloseAsync().ConfigureAwait(false);
                 _channels.TryRemove(channel.LocalId, out _);
+                ChannelGone(channel);
                 return false;
             }
 
@@ -234,8 +256,18 @@ internal sealed class SshConnection : IAsyncDisposable
 
             default:
                 // RFC 4253 section 11.4: tell the peer we do not implement this message, quoting its sequence number.
+                SshLog.UnimplementedMessage(_logger, type);
                 await _transport.SendUnimplementedAsync().ConfigureAwait(false);
                 return false;
+        }
+    }
+
+    private void ChannelGone(SshChannel channel)
+    {
+        if (channel.TryMarkGone())
+        {
+            SshTelemetry.Channels.Add(-1);
+            SshLog.ChannelClosed(_logger, channel.LocalId);
         }
     }
 

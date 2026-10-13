@@ -15,6 +15,15 @@ internal sealed class AlgorithmPreferences
 
     public IReadOnlyList<string> Compression { get; init; } = SshAlgorithms.DefaultCompression;
 
+    /// <summary>The default preferences restricted to FIPS-approved algorithms.</summary>
+    public static AlgorithmPreferences Fips() => new()
+    {
+        Kex = SshAlgorithms.FilterFips(SshAlgorithms.DefaultKex, AlgorithmKind.Kex),
+        HostKeys = SshAlgorithms.FilterFips(SshAlgorithms.DefaultHostKeys, AlgorithmKind.HostKey),
+        Ciphers = SshAlgorithms.FilterFips(SshAlgorithms.DefaultCiphers, AlgorithmKind.Cipher),
+        Macs = SshAlgorithms.FilterFips(SshAlgorithms.DefaultMacs, AlgorithmKind.Mac),
+    };
+
     /// <summary>
     /// Builds preferences from the algorithm specifications of a resolved <c>ssh_config</c> host (<c>+</c>, <c>-</c>, <c>^</c> and plain lists)
     /// applied to the defaults, optionally restricted to FIPS-approved algorithms. Names this library does not implement are dropped.

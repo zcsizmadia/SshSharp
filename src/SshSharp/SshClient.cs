@@ -1,5 +1,8 @@
 using System.Buffers;
+using System.Diagnostics;
 using System.Net.Sockets;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using SshSharp.Protocol;
 
 namespace SshSharp;
@@ -12,10 +15,12 @@ public sealed class SshClient : IAsyncDisposable
     private readonly Stream _stream;
     private readonly bool _leaveOpen;
     private readonly IDisposable? _owner;
+    private readonly ILogger _logger;
     private bool _disposed;
 
-    private SshClient(SshConnection connection, SshClientOptions options, Stream stream, bool leaveOpen, IDisposable? owner, string serverIdentification, SshHostKey hostKey)
+    private SshClient(SshConnection connection, SshClientOptions options, Stream stream, bool leaveOpen, IDisposable? owner, string serverIdentification, SshHostKey hostKey, ILogger logger)
     {
+        _logger = logger;
         _connection = connection;
         _options = options;
         _stream = stream;
@@ -67,9 +72,12 @@ public sealed class SshClient : IAsyncDisposable
         ArgumentException.ThrowIfNullOrEmpty(command);
         ObjectDisposedException.ThrowIf(_disposed, this);
 
+        using var activity = SshTelemetry.Activities.StartActivity("SshSharp.Command");
+        var outcome = "error";
         var channel = await _connection.OpenSessionAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            SshLog.CommandStarting(_logger, command.Length, channel.LocalId);
             if (!await channel.RequestAsync("exec", true, w => w.WriteString(command), cancellationToken).ConfigureAwait(false))
             {
                 throw new SshException(SshFailureReason.ChannelClosed, "The server refused to execute the command.");
@@ -94,10 +102,20 @@ public sealed class SshClient : IAsyncDisposable
 
             // The exit status arrives before the server's CLOSE.
             await channel.WaitClosedAsync(cancellationToken).ConfigureAwait(false);
-            return new SshCommandResult(channel.ExitStatus is { } status ? (int)status : null, channel.ExitSignal, stdout.WrittenMemory, stderr.WrittenMemory);
+            int? exitStatus = channel.ExitStatus is { } status ? (int)status : null;
+            outcome = exitStatus == 0 ? "success" : "failure";
+            activity?.SetTag("ssh.command.exit_status", exitStatus);
+            SshLog.CommandFinished(_logger, channel.LocalId, exitStatus, channel.ExitSignal);
+            return new SshCommandResult(exitStatus, channel.ExitSignal, stdout.WrittenMemory, stderr.WrittenMemory);
+        }
+        catch (Exception ex)
+        {
+            activity?.SetStatus(ActivityStatusCode.Error, ex.GetType().Name);
+            throw;
         }
         finally
         {
+            SshTelemetry.Commands.Add(1, new KeyValuePair<string, object?>("result", outcome));
             await channel.CloseAsync(CancellationToken.None).ConfigureAwait(false);
         }
     }
@@ -111,6 +129,7 @@ public sealed class SshClient : IAsyncDisposable
         }
 
         _disposed = true;
+        SshTelemetry.Connections.Add(-1);
         await _connection.DisposeAsync().ConfigureAwait(false);
         if (!_leaveOpen)
         {
@@ -125,29 +144,53 @@ public sealed class SshClient : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(stream);
         ArgumentNullException.ThrowIfNull(options);
 
+        var logger = options.Logger ?? NullLogger.Instance;
+        using var activity = SshTelemetry.Activities.StartActivity("SshSharp.Connect");
+        var started = Stopwatch.GetTimestamp();
+
         var transportOptions = new SshTransportOptions
         {
-            Preferences = options.AlgorithmPreferences ?? new AlgorithmPreferences(),
+            Preferences = options.AlgorithmPreferences ?? (options.FipsMode ? AlgorithmPreferences.Fips() : new AlgorithmPreferences()),
             MinimumRsaBits = options.MinimumRsaBits,
             RekeyBytes = options.RekeyAfterBytes,
             RekeyInterval = options.RekeyAfterTime,
-            VerifyHostKey = (info, ct) => options.HostKeyVerifier(new SshHostKey(info.Algorithm, info.KeyType, info.Fingerprint, info.Blob, info.KeySizeBits), ct),
+            Logger = logger,
+            VerifyHostKey = async (info, ct) =>
+            {
+                var accepted = await options.HostKeyVerifier(new SshHostKey(info.Algorithm, info.KeyType, info.Fingerprint, info.Blob, info.KeySizeBits), ct).ConfigureAwait(false);
+                if (!accepted)
+                {
+                    SshLog.HostKeyRejected(logger, info.Fingerprint);
+                }
+
+                return accepted;
+            },
         };
         var transport = new SshTransport(stream, transportOptions);
         try
         {
             await transport.ConnectAsync(cancellationToken).ConfigureAwait(false);
-            await AuthenticateAsync(transport, options, cancellationToken).ConfigureAwait(false);
+            await AuthenticateAsync(transport, options, logger, cancellationToken).ConfigureAwait(false);
 
             var hostKey = transport.HostKey!;
-            var connection = new SshConnection(transport);
+            var algorithms = transport.Algorithms!;
+            var connection = new SshConnection(transport, logger);
             connection.Start();
+
+            SshTelemetry.Connections.Add(1);
+            SshTelemetry.ConnectDuration.Record(Stopwatch.GetElapsedTime(started).TotalSeconds);
+            activity?.SetTag("ssh.kex", algorithms.Kex);
+            activity?.SetTag("ssh.cipher", algorithms.CipherClientToServer);
+            activity?.SetTag("ssh.host_key.type", hostKey.KeyType);
+            SshLog.Connected(logger, algorithms.Kex, algorithms.CipherClientToServer, hostKey.KeyType, hostKey.Fingerprint);
+
             return new SshClient(
                 connection, options, stream, leaveOpen, owner, transport.ServerIdentification!.Line,
-                new SshHostKey(hostKey.Algorithm, hostKey.KeyType, hostKey.Fingerprint, hostKey.Blob, hostKey.KeySizeBits));
+                new SshHostKey(hostKey.Algorithm, hostKey.KeyType, hostKey.Fingerprint, hostKey.Blob, hostKey.KeySizeBits), logger);
         }
-        catch
+        catch (Exception ex)
         {
+            activity?.SetStatus(ActivityStatusCode.Error, ex.GetType().Name);
             await transport.DisposeAsync().ConfigureAwait(false);
             if (!leaveOpen)
             {
@@ -158,16 +201,18 @@ public sealed class SshClient : IAsyncDisposable
         }
     }
 
-    private static async Task AuthenticateAsync(SshTransport transport, SshClientOptions options, CancellationToken cancellationToken)
+    private static async Task AuthenticateAsync(SshTransport transport, SshClientOptions options, ILogger logger, CancellationToken cancellationToken)
     {
         await SshUserAuth.RequestServiceAsync(transport, cancellationToken).ConfigureAwait(false);
 
-        IReadOnlyList<string> methods = [];
+        IReadOnlyList<string> methods;
         if (options.Password is { } password)
         {
+            SshLog.Authenticating(logger, options.UserName, "password");
             var outcome = await SshUserAuth.PasswordAsync(transport, options.UserName, password, cancellationToken).ConfigureAwait(false);
             if (outcome.Success)
             {
+                SshLog.Authenticated(logger, options.UserName);
                 return;
             }
 
@@ -176,15 +221,18 @@ public sealed class SshClient : IAsyncDisposable
         else
         {
             // No credentials: "none" succeeds only on servers that allow anonymous access, and otherwise reveals the accepted methods.
+            SshLog.Authenticating(logger, options.UserName, "none");
             var outcome = await SshUserAuth.NoneAsync(transport, options.UserName, cancellationToken).ConfigureAwait(false);
             if (outcome.Success)
             {
+                SshLog.Authenticated(logger, options.UserName);
                 return;
             }
 
             methods = outcome.RemainingMethods;
         }
 
+        SshLog.AuthenticationFailed(logger, options.UserName, string.Join(", ", methods));
         throw new SshException(
             SshFailureReason.AuthenticationFailed,
             $"Authentication failed for user '{options.UserName}'. The server accepts: {string.Join(", ", methods)}.");

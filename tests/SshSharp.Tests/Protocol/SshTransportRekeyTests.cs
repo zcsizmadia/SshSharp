@@ -133,6 +133,31 @@ public class SshTransportRekeyTests
     }
 
     [Test]
+    public async Task AReceiveOnlyConnectionRekeysOnItsOwn()
+    {
+        // The client only receives (a big download): the byte threshold counts both directions, so it must start the re-exchange itself.
+        var (client, server, clientPump, serverPump) = await StartAsync(client: ClientOptions(rekeyBytes: 20_000));
+        await using (client)
+        await using (server)
+        {
+            for (var i = 0; i < 100; i++)
+            {
+                await server.SendAsync(Message(94, i, 1000), Timeout());
+            }
+
+            for (var i = 0; i < 100; i++)
+            {
+                await Assert.That((await clientPump.NextAsync()).AsSpan().SequenceEqual(Message(94, i, 1000))).IsTrue();
+            }
+
+            await WaitUntilAsync(() => client.KeyExchangeCount >= 2 && server.KeyExchangeCount == client.KeyExchangeCount);
+            await Assert.That(clientPump.Error).IsNull();
+            await clientPump.StopAsync();
+            await serverPump.StopAsync();
+        }
+    }
+
+    [Test]
     public async Task TimeThreshold_TriggersARekey()
     {
         var time = new ManualTimeProvider();

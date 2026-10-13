@@ -72,6 +72,14 @@ internal sealed class SshChannel
 
     public uint LocalId { get; }
 
+    private int _state; // 0 = not open yet, 1 = open, 2 = gone
+
+    /// <summary>Records that the channel is open. True the first time only.</summary>
+    internal bool TryMarkOpen() => Interlocked.CompareExchange(ref _state, 1, 0) == 0;
+
+    /// <summary>Records that an open channel is gone (closed or failed). True once, and only for channels that were open.</summary>
+    internal bool TryMarkGone() => Interlocked.CompareExchange(ref _state, 2, 1) == 1;
+
     public uint RemoteId { get; private set; }
 
     /// <summary>The command's exit status, from the peer's <c>exit-status</c> request.</summary>
