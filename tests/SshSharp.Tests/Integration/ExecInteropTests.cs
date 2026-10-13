@@ -98,6 +98,11 @@ public class ExecInteropTests
             Skip.Test("No real server account configured.");
         }
 
+        if (RealServer.IsWindows)
+        {
+            Skip.Test("Windows has no signals: OpenSSH for Windows reports an exit status instead.");
+        }
+
         await using var client = await ConnectAsync(Timeout());
         // The login shell kills itself: busybox ash does not exec a nested shell's last command, so 'sh -c kill' would exit 137 instead.
         var result = await client.RunCommandAsync("kill -9 $$", Timeout());

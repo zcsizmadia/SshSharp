@@ -313,6 +313,7 @@ jobs:
           @(
             'Port 2222'
             'ListenAddress 127.0.0.1'
+            'ListenAddress ::1' # "localhost" resolves to ::1 first on Windows (the forwarding tests connect to it by name)
             'PasswordAuthentication yes'
             'MaxStartups 200:30:300'
             'MaxSessions 64'
@@ -345,4 +346,9 @@ jobs:
       - name: Server log
         if: failure()
         shell: pwsh
-        run: Get-Content "$env:ProgramData\ssh\logs\sshd.log" -Tail 400 -ErrorAction SilentlyContinue
+        run: |
+          $log = Get-Content "$env:ProgramData\ssh\logs\sshd.log" -ErrorAction SilentlyContinue
+          "--- global requests, errors and channel opens ---"
+          $log | Select-String -Pattern 'global_request|keepalive|error|fatal|channel_open|direct-tcpip|forward' | Select-Object -Last 150
+          "--- tail ---"
+          $log | Select-Object -Last 100

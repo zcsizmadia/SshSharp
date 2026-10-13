@@ -57,7 +57,11 @@ public class SessionInteropTests
 
         await Assert.That(output).Contains("50 132");
         await Assert.That(output).Contains("marker-42");
-        await Assert.That(session.ExitStatus).IsEqualTo(7);
+        if (!RealServer.IsWindows)
+        {
+            // OpenSSH for Windows runs the shell through ConPTY and does not pass its exit status on.
+            await Assert.That(session.ExitStatus).IsEqualTo(7);
+        }
     }
 
     [Test]
