@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.Numerics;
+using System.Runtime.CompilerServices;
 
 namespace SshSharp.Crypto;
 
@@ -15,41 +16,52 @@ internal static class ChaCha20
     /// </summary>
     public static void Block(ReadOnlySpan<byte> key, uint word12, uint word13, uint word14, uint word15, Span<byte> output)
     {
-        Span<uint> state = stackalloc uint[16];
-        Span<uint> x = stackalloc uint[16];
-        state[0] = 0x61707865;
-        state[1] = 0x3320646e;
-        state[2] = 0x79622d32;
-        state[3] = 0x6b206574;
-        for (var i = 0; i < 8; i++)
-        {
-            state[4 + i] = BinaryPrimitives.ReadUInt32LittleEndian(key[(4 * i)..]);
-        }
+        // The whole state lives in locals so the JIT can keep it in registers.
+        const uint c0 = 0x61707865;
+        const uint c1 = 0x3320646e;
+        const uint c2 = 0x79622d32;
+        const uint c3 = 0x6b206574;
+        var k0 = BinaryPrimitives.ReadUInt32LittleEndian(key);
+        var k1 = BinaryPrimitives.ReadUInt32LittleEndian(key[4..]);
+        var k2 = BinaryPrimitives.ReadUInt32LittleEndian(key[8..]);
+        var k3 = BinaryPrimitives.ReadUInt32LittleEndian(key[12..]);
+        var k4 = BinaryPrimitives.ReadUInt32LittleEndian(key[16..]);
+        var k5 = BinaryPrimitives.ReadUInt32LittleEndian(key[20..]);
+        var k6 = BinaryPrimitives.ReadUInt32LittleEndian(key[24..]);
+        var k7 = BinaryPrimitives.ReadUInt32LittleEndian(key[28..]);
 
-        state[12] = word12;
-        state[13] = word13;
-        state[14] = word14;
-        state[15] = word15;
-        state.CopyTo(x);
+        uint x0 = c0, x1 = c1, x2 = c2, x3 = c3;
+        uint x4 = k0, x5 = k1, x6 = k2, x7 = k3, x8 = k4, x9 = k5, x10 = k6, x11 = k7;
+        uint x12 = word12, x13 = word13, x14 = word14, x15 = word15;
 
         for (var round = 0; round < 10; round++)
         {
-            QuarterRound(x, 0, 4, 8, 12);
-            QuarterRound(x, 1, 5, 9, 13);
-            QuarterRound(x, 2, 6, 10, 14);
-            QuarterRound(x, 3, 7, 11, 15);
-            QuarterRound(x, 0, 5, 10, 15);
-            QuarterRound(x, 1, 6, 11, 12);
-            QuarterRound(x, 2, 7, 8, 13);
-            QuarterRound(x, 3, 4, 9, 14);
+            QuarterRound(ref x0, ref x4, ref x8, ref x12);
+            QuarterRound(ref x1, ref x5, ref x9, ref x13);
+            QuarterRound(ref x2, ref x6, ref x10, ref x14);
+            QuarterRound(ref x3, ref x7, ref x11, ref x15);
+            QuarterRound(ref x0, ref x5, ref x10, ref x15);
+            QuarterRound(ref x1, ref x6, ref x11, ref x12);
+            QuarterRound(ref x2, ref x7, ref x8, ref x13);
+            QuarterRound(ref x3, ref x4, ref x9, ref x14);
         }
 
-        for (var i = 0; i < 16; i++)
-        {
-            BinaryPrimitives.WriteUInt32LittleEndian(output[(4 * i)..], x[i] + state[i]);
-        }
-
-        x.Clear();
+        BinaryPrimitives.WriteUInt32LittleEndian(output, x0 + c0);
+        BinaryPrimitives.WriteUInt32LittleEndian(output[4..], x1 + c1);
+        BinaryPrimitives.WriteUInt32LittleEndian(output[8..], x2 + c2);
+        BinaryPrimitives.WriteUInt32LittleEndian(output[12..], x3 + c3);
+        BinaryPrimitives.WriteUInt32LittleEndian(output[16..], x4 + k0);
+        BinaryPrimitives.WriteUInt32LittleEndian(output[20..], x5 + k1);
+        BinaryPrimitives.WriteUInt32LittleEndian(output[24..], x6 + k2);
+        BinaryPrimitives.WriteUInt32LittleEndian(output[28..], x7 + k3);
+        BinaryPrimitives.WriteUInt32LittleEndian(output[32..], x8 + k4);
+        BinaryPrimitives.WriteUInt32LittleEndian(output[36..], x9 + k5);
+        BinaryPrimitives.WriteUInt32LittleEndian(output[40..], x10 + k6);
+        BinaryPrimitives.WriteUInt32LittleEndian(output[44..], x11 + k7);
+        BinaryPrimitives.WriteUInt32LittleEndian(output[48..], x12 + word12);
+        BinaryPrimitives.WriteUInt32LittleEndian(output[52..], x13 + word13);
+        BinaryPrimitives.WriteUInt32LittleEndian(output[56..], x14 + word14);
+        BinaryPrimitives.WriteUInt32LittleEndian(output[60..], x15 + word15);
     }
 
     /// <summary>
@@ -71,24 +83,22 @@ internal static class ChaCha20
             Block(key, (uint)counter, (uint)(counter >> 32), n0, n1, block);
             counter++;
             var count = Math.Min(BlockSize, input.Length - offset);
-            for (var i = 0; i < count; i++)
-            {
-                output[offset + i] = (byte)(input[offset + i] ^ block[i]);
-            }
+            XorHelper.Xor(input.Slice(offset, count), block, output[offset..]);
         }
 
         block.Clear();
     }
 
-    private static void QuarterRound(Span<uint> x, int a, int b, int c, int d)
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void QuarterRound(ref uint a, ref uint b, ref uint c, ref uint d)
     {
-        x[a] += x[b];
-        x[d] = BitOperations.RotateLeft(x[d] ^ x[a], 16);
-        x[c] += x[d];
-        x[b] = BitOperations.RotateLeft(x[b] ^ x[c], 12);
-        x[a] += x[b];
-        x[d] = BitOperations.RotateLeft(x[d] ^ x[a], 8);
-        x[c] += x[d];
-        x[b] = BitOperations.RotateLeft(x[b] ^ x[c], 7);
+        a += b;
+        d = BitOperations.RotateLeft(d ^ a, 16);
+        c += d;
+        b = BitOperations.RotateLeft(b ^ c, 12);
+        a += b;
+        d = BitOperations.RotateLeft(d ^ a, 8);
+        c += d;
+        b = BitOperations.RotateLeft(b ^ c, 7);
     }
 }

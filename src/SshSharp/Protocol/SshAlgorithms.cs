@@ -59,10 +59,15 @@ internal static class SshAlgorithms
         SshEd25519, EcdsaNistp256, EcdsaNistp384, EcdsaNistp521, RsaSha2_512, RsaSha2_256,
     ];
 
-    public static IReadOnlyList<string> DefaultCiphers { get; } =
-    [
-        "chacha20-poly1305@openssh.com", "aes256-gcm@openssh.com", "aes128-gcm@openssh.com", "aes256-ctr", "aes192-ctr", "aes128-ctr",
-    ];
+    private static readonly bool HardwareAes = System.Runtime.Intrinsics.X86.Aes.IsSupported || System.Runtime.Intrinsics.Arm.Aes.IsSupported;
+
+    /// <summary>
+    /// With AES instructions AES-GCM is much faster than our managed ChaCha20-Poly1305, so it goes first; without them ChaCha20-Poly1305 does
+    /// (the same trade-off OpenSSH makes).
+    /// </summary>
+    public static IReadOnlyList<string> DefaultCiphers { get; } = HardwareAes
+        ? ["aes256-gcm@openssh.com", "aes128-gcm@openssh.com", "chacha20-poly1305@openssh.com", "aes256-ctr", "aes192-ctr", "aes128-ctr"]
+        : ["chacha20-poly1305@openssh.com", "aes256-gcm@openssh.com", "aes128-gcm@openssh.com", "aes256-ctr", "aes192-ctr", "aes128-ctr"];
 
     public static IReadOnlyList<string> DefaultMacs { get; } =
     [
