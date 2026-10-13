@@ -179,6 +179,15 @@ docs/
   - Versioning (MinVer or Nerdbank.GitVersioning, 0.x prereleases), `dotnet pack` with package validation in CI, and
     reserving the NuGet ID.
 - **Done when:** a connect through a two-hop ProxyJump to a Docker target succeeds using only an `ssh_config` alias.
+- **Status:** done (#32–#43), except reserving the NuGet ID, which means a first publish and waits for that decision.
+  The done-when check is `Integration/ConfigInteropTests.TwoHopProxyJump_ByAliasOnly`, run against real sshd in CI.
+  Known gaps carried forward:
+  - `UpdateHostKeys` only adds keys. Keys the server no longer announces stay in `known_hosts`, where OpenSSH would
+    remove them.
+  - `UpdateHostKeys ask` is treated as off.
+  - keyboard-interactive is M4a.
+  - The coverage-guided fuzzer found two crashes, both fixed in #42: a known_hosts line with unusual whitespace, and an
+    `ssh_config` time value overflow.
 
 ### M4a: Agent and interactive sessions
 - ssh-agent: Unix `SSH_AUTH_SOCK`, Windows OpenSSH named pipe, Pageant.
