@@ -1,12 +1,15 @@
 #nullable enable
+abstract SshSharp.SshHostKeyVerifier.VerifyAsync(SshSharp.SshHostKeyContext! context, System.Threading.CancellationToken cancellationToken) -> System.Threading.Tasks.ValueTask<SshSharp.SshHostKeyVerdict>
 const SshSharp.SshTelemetry.SourceName = "SshSharp" -> string!
 override SshSharp.Config.KnownHostsFile.ToString() -> string!
 override SshSharp.Config.SshConfigDirective.Equals(object? obj) -> bool
 override SshSharp.Config.SshConfigDirective.GetHashCode() -> int
 override SshSharp.Config.SshConfigDirective.ToString() -> string!
+override SshSharp.KnownHostsVerifier.VerifyAsync(SshSharp.SshHostKeyContext! context, System.Threading.CancellationToken cancellationToken) -> System.Threading.Tasks.ValueTask<SshSharp.SshHostKeyVerdict>
 override SshSharp.SshHostKey.Equals(object? obj) -> bool
 override SshSharp.SshHostKey.GetHashCode() -> int
 override SshSharp.SshHostKey.ToString() -> string!
+override SshSharp.SshHostKeyVerdict.GetHashCode() -> int
 SshSharp.Config.KnownHostsCheckResult
 SshSharp.Config.KnownHostsCheckResult.Changed = 2 -> SshSharp.Config.KnownHostsCheckResult
 SshSharp.Config.KnownHostsCheckResult.Match = 1 -> SshSharp.Config.KnownHostsCheckResult
@@ -168,6 +171,17 @@ SshSharp.Config.StrictHostKeyChecking.AcceptNew = 2 -> SshSharp.Config.StrictHos
 SshSharp.Config.StrictHostKeyChecking.Ask = 0 -> SshSharp.Config.StrictHostKeyChecking
 SshSharp.Config.StrictHostKeyChecking.No = 3 -> SshSharp.Config.StrictHostKeyChecking
 SshSharp.Config.StrictHostKeyChecking.Yes = 1 -> SshSharp.Config.StrictHostKeyChecking
+SshSharp.KnownHostsVerifier
+SshSharp.KnownHostsVerifier.Ask.get -> System.Func<SshSharp.SshHostKeyPrompt!, System.Threading.CancellationToken, System.Threading.Tasks.ValueTask<bool>>?
+SshSharp.KnownHostsVerifier.Ask.init -> void
+SshSharp.KnownHostsVerifier.HashNewEntries.get -> bool
+SshSharp.KnownHostsVerifier.HashNewEntries.init -> void
+SshSharp.KnownHostsVerifier.KnownHostsVerifier(System.Collections.Generic.IReadOnlyList<string!>! userKnownHostsFiles, System.Collections.Generic.IReadOnlyList<string!>? globalKnownHostsFiles = null) -> void
+SshSharp.KnownHostsVerifier.Policy.get -> SshSharp.Config.StrictHostKeyChecking
+SshSharp.KnownHostsVerifier.Policy.init -> void
+SshSharp.SshAuthenticationException
+SshSharp.SshAuthenticationException.AllowedMethods.get -> System.Collections.Generic.IReadOnlyList<string!>!
+SshSharp.SshAuthenticationException.SshAuthenticationException(string! message, System.Collections.Generic.IReadOnlyList<string!>! allowedMethods) -> void
 SshSharp.SshClient
 SshSharp.SshClient.DisposeAsync() -> System.Threading.Tasks.ValueTask
 SshSharp.SshClient.HostKey.get -> SshSharp.SshHostKey!
@@ -176,7 +190,9 @@ SshSharp.SshClient.ServerIdentification.get -> string!
 SshSharp.SshClientOptions
 SshSharp.SshClientOptions.FipsMode.get -> bool
 SshSharp.SshClientOptions.FipsMode.init -> void
-SshSharp.SshClientOptions.HostKeyVerifier.get -> System.Func<SshSharp.SshHostKey!, System.Threading.CancellationToken, System.Threading.Tasks.ValueTask<bool>>!
+SshSharp.SshClientOptions.HostKeyAlias.get -> string?
+SshSharp.SshClientOptions.HostKeyAlias.init -> void
+SshSharp.SshClientOptions.HostKeyVerifier.get -> SshSharp.SshHostKeyVerifier!
 SshSharp.SshClientOptions.HostKeyVerifier.init -> void
 SshSharp.SshClientOptions.Logger.get -> Microsoft.Extensions.Logging.ILogger?
 SshSharp.SshClientOptions.Logger.init -> void
@@ -204,6 +220,7 @@ SshSharp.SshException.SshException(SshSharp.SshFailureReason reason, string! mes
 SshSharp.SshFailureReason
 SshSharp.SshFailureReason.AuthenticationFailed = 4 -> SshSharp.SshFailureReason
 SshSharp.SshFailureReason.ChannelClosed = 6 -> SshSharp.SshFailureReason
+SshSharp.SshFailureReason.ConnectFailed = 8 -> SshSharp.SshFailureReason
 SshSharp.SshFailureReason.ConnectionClosed = 5 -> SshSharp.SshFailureReason
 SshSharp.SshFailureReason.HostKeyRejected = 3 -> SshSharp.SshFailureReason
 SshSharp.SshFailureReason.KeyExchangeFailed = 2 -> SshSharp.SshFailureReason
@@ -225,12 +242,32 @@ SshSharp.SshHostKey.KeyType.init -> void
 SshSharp.SshHostKey.PublicKey.get -> System.ReadOnlyMemory<byte>
 SshSharp.SshHostKey.PublicKey.init -> void
 SshSharp.SshHostKey.SshHostKey(string! Algorithm, string! KeyType, string! Fingerprint, System.ReadOnlyMemory<byte> PublicKey, int KeySizeBits) -> void
+SshSharp.SshHostKeyContext
+SshSharp.SshHostKeyContext.Host.get -> string?
+SshSharp.SshHostKeyContext.HostKey.get -> SshSharp.SshHostKey!
+SshSharp.SshHostKeyContext.HostKeyAlias.get -> string?
+SshSharp.SshHostKeyContext.KnownHostsLookup.get -> (string! Name, int Port)?
+SshSharp.SshHostKeyContext.Port.get -> int
+SshSharp.SshHostKeyException
+SshSharp.SshHostKeyException.HostKey.get -> SshSharp.SshHostKey?
+SshSharp.SshHostKeyException.SshHostKeyException(string! message, SshSharp.SshHostKey? hostKey = null) -> void
+SshSharp.SshHostKeyPrompt
+SshSharp.SshHostKeyPrompt.Context.get -> SshSharp.SshHostKeyContext!
+SshSharp.SshHostKeyPrompt.KnownKeyTypes.get -> System.Collections.Generic.IReadOnlyList<string!>!
+SshSharp.SshHostKeyVerdict
+SshSharp.SshHostKeyVerdict.Equals(SshSharp.SshHostKeyVerdict other) -> bool
+SshSharp.SshHostKeyVerdict.IsAccepted.get -> bool
+SshSharp.SshHostKeyVerdict.Reason.get -> string?
+SshSharp.SshHostKeyVerdict.SshHostKeyVerdict() -> void
+SshSharp.SshHostKeyVerifier
+SshSharp.SshHostKeyVerifier.SshHostKeyVerifier() -> void
 SshSharp.SshProtocolException
 SshSharp.SshProtocolException.SshProtocolException(string! message) -> void
 SshSharp.SshSharpInfo
 SshSharp.SshTelemetry
 static SshSharp.Config.KnownHostsEntry.FormatHost(string! host, int port) -> string!
 static SshSharp.Config.KnownHostsEntry.HashHost(string! host, int port, System.ReadOnlySpan<byte> salt = default(System.ReadOnlySpan<byte>)) -> string!
+static SshSharp.Config.KnownHostsFile.AppendAsync(string! path, string! host, int port, string! keyType, System.ReadOnlyMemory<byte> publicKey, bool hash = false, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SshSharp.Config.KnownHostsEntry!>!
 static SshSharp.Config.KnownHostsFile.Load(string! path) -> SshSharp.Config.KnownHostsFile!
 static SshSharp.Config.KnownHostsFile.LoadAsync(string! path, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SshSharp.Config.KnownHostsFile!>!
 static SshSharp.Config.KnownHostsFile.Parse(string! text) -> SshSharp.Config.KnownHostsFile!
@@ -243,8 +280,18 @@ static SshSharp.Config.SshConfig.Parse(string! text, string? baseDirectory = nul
 static SshSharp.Config.SshConfigDirective.operator !=(SshSharp.Config.SshConfigDirective? left, SshSharp.Config.SshConfigDirective? right) -> bool
 static SshSharp.Config.SshConfigDirective.operator ==(SshSharp.Config.SshConfigDirective? left, SshSharp.Config.SshConfigDirective? right) -> bool
 static SshSharp.Config.SshExecMatcher.RunShell(string! command) -> bool
+static SshSharp.KnownHostsVerifier.ForCurrentUser(SshSharp.Config.StrictHostKeyChecking policy = SshSharp.Config.StrictHostKeyChecking.Ask) -> SshSharp.KnownHostsVerifier!
+static SshSharp.KnownHostsVerifier.FromConfig(SshSharp.Config.SshHostConfig! config) -> SshSharp.KnownHostsVerifier!
 static SshSharp.SshClient.ConnectAsync(string! host, int port, SshSharp.SshClientOptions! options, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SshSharp.SshClient!>!
 static SshSharp.SshClient.ConnectAsync(System.IO.Stream! stream, SshSharp.SshClientOptions! options, bool leaveOpen = false, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SshSharp.SshClient!>!
 static SshSharp.SshHostKey.operator !=(SshSharp.SshHostKey? left, SshSharp.SshHostKey? right) -> bool
 static SshSharp.SshHostKey.operator ==(SshSharp.SshHostKey? left, SshSharp.SshHostKey? right) -> bool
+static SshSharp.SshHostKeyVerdict.Accept() -> SshSharp.SshHostKeyVerdict
+static SshSharp.SshHostKeyVerdict.operator !=(SshSharp.SshHostKeyVerdict left, SshSharp.SshHostKeyVerdict right) -> bool
+static SshSharp.SshHostKeyVerdict.operator ==(SshSharp.SshHostKeyVerdict left, SshSharp.SshHostKeyVerdict right) -> bool
+static SshSharp.SshHostKeyVerdict.Reject(string! reason) -> SshSharp.SshHostKeyVerdict
+static SshSharp.SshHostKeyVerifier.FromDelegate(System.Func<SshSharp.SshHostKeyContext!, System.Threading.CancellationToken, System.Threading.Tasks.ValueTask<bool>>! verify) -> SshSharp.SshHostKeyVerifier!
+static SshSharp.SshHostKeyVerifier.Pinned(params string![]! fingerprints) -> SshSharp.SshHostKeyVerifier!
 static SshSharp.SshSharpInfo.SoftwareVersion.get -> string!
+~override SshSharp.SshHostKeyVerdict.Equals(object obj) -> bool
+~override SshSharp.SshHostKeyVerdict.ToString() -> string

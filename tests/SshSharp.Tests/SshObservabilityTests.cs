@@ -44,7 +44,7 @@ public class SshObservabilityTests
     {
         UserName = "tester",
         Password = password,
-        HostKeyVerifier = (_, _) => ValueTask.FromResult(true),
+        HostKeyVerifier = SshHostKeyVerifier.FromDelegate((_, _) => ValueTask.FromResult(true)),
         Logger = logger,
         RekeyAfterBytes = rekeyBytes,
         FipsMode = fips,
@@ -124,7 +124,7 @@ public class SshObservabilityTests
         var rejected = new TestLogger();
         await using var second = new FakeSessionServer();
         _ = second.StartAsync();
-        var options = new SshClientOptions { UserName = "tester", Password = "x", Logger = rejected, HostKeyVerifier = (_, _) => ValueTask.FromResult(false) };
+        var options = new SshClientOptions { UserName = "tester", Password = "x", Logger = rejected, HostKeyVerifier = SshHostKeyVerifier.FromDelegate((_, _) => ValueTask.FromResult(false)) };
         await Assert.That(async () => await SshClient.ConnectAsync(second.ClientStream, options, true, Timeout())).Throws<SshException>();
         await Assert.That(rejected.Entries.Any(e => e.Level == LogLevel.Warning && e.Message.Contains("was not accepted") && e.Message.Contains("SHA256:"))).IsTrue();
     }
@@ -258,7 +258,7 @@ public class SshObservabilityTests
             connect = stopped.Single(a => a.TraceId == root.TraceId && a.OperationName == "SshSharp.Connect");
         }
         await Assert.That(connect.Status).IsEqualTo(ActivityStatusCode.Error);
-        await Assert.That(connect.StatusDescription).IsEqualTo(nameof(SshException));
+        await Assert.That(connect.StatusDescription).IsEqualTo(nameof(SshAuthenticationException));
     }
 
     [Test]

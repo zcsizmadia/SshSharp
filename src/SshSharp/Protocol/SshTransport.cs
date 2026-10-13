@@ -553,12 +553,12 @@ internal sealed class SshTransport : IAsyncDisposable
         var expectedType = negotiated.HostKey is SshAlgorithms.RsaSha2_256 or SshAlgorithms.RsaSha2_512 ? "ssh-rsa" : negotiated.HostKey;
         if (key.KeyType != expectedType)
         {
-            throw new SshException(SshFailureReason.HostKeyRejected, $"The server sent a {key.KeyType} host key but negotiated {negotiated.HostKey}.");
+            throw new SshHostKeyException($"The server sent a {key.KeyType} host key but negotiated {negotiated.HostKey}.");
         }
 
         if (!key.VerifySignature(negotiated.HostKey, result.Signature, result.ExchangeHash))
         {
-            throw new SshException(SshFailureReason.HostKeyRejected, "The server's signature over the exchange hash is invalid.");
+            throw new SshHostKeyException("The server's signature over the exchange hash is invalid.");
         }
 
         if (!initial)
@@ -566,7 +566,7 @@ internal sealed class SshTransport : IAsyncDisposable
             // A re-exchange must prove possession of the same key we already trusted; a different key is never silently accepted.
             if (!result.HostKeyBlob.AsSpan().SequenceEqual(HostKey!.Blob.Span))
             {
-                throw new SshException(SshFailureReason.HostKeyRejected, "The server's host key changed during a key re-exchange.");
+                throw new SshHostKeyException("The server's host key changed during a key re-exchange.");
             }
 
             return;
@@ -574,14 +574,14 @@ internal sealed class SshTransport : IAsyncDisposable
 
         if (key.KeyType == "ssh-rsa" && key.KeySizeBits < _options.MinimumRsaBits)
         {
-            throw new SshException(SshFailureReason.HostKeyRejected, $"The server's RSA host key is only {key.KeySizeBits} bits (minimum {_options.MinimumRsaBits}).");
+            throw new SshHostKeyException($"The server's RSA host key is only {key.KeySizeBits} bits (minimum {_options.MinimumRsaBits}).");
         }
 
         var info = new HostKeyInfo(negotiated.HostKey, key.KeyType, result.HostKeyBlob, key.Fingerprint, key.KeySizeBits);
         HostKey = info;
         if (!await _options.VerifyHostKey(info, cancellationToken).ConfigureAwait(false))
         {
-            throw new SshException(SshFailureReason.HostKeyRejected, $"The host key {info.Fingerprint} was not accepted.");
+            throw new SshHostKeyException($"The host key {info.Fingerprint} was not accepted.");
         }
     }
 

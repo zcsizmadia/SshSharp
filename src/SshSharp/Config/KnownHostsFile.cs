@@ -217,6 +217,38 @@ public sealed class KnownHostsFile
         }
     }
 
+    /// <summary>
+    /// Appends one entry to a file without rewriting it (creating the file and directory if needed), the way <c>ssh</c> records a
+    /// new host key. Other processes appending at the same time do not lose their lines, unlike a load-modify-save.
+    /// </summary>
+    /// <returns>The entry that was written.</returns>
+    public static async Task<KnownHostsEntry> AppendAsync(string path, string host, int port, string keyType, ReadOnlyMemory<byte> publicKey,
+        bool hash = false, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        ArgumentException.ThrowIfNullOrWhiteSpace(host);
+        var field = hash ? KnownHostsEntry.HashHost(host, port) : KnownHostsEntry.FormatHost(host, port);
+        var entry = new KnownHostsEntry(field, keyType, publicKey.ToArray());
+        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
+
+        // Start on a new line if the file does not end with one (a hand-edited file).
+        var prefix = File.Exists(path) && EndsWithoutNewline(path) ? "\n" : string.Empty;
+        await File.AppendAllTextAsync(path, prefix + entry.ToLine() + "\n", cancellationToken).ConfigureAwait(false);
+        return entry;
+    }
+
+    private static bool EndsWithoutNewline(string path)
+    {
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        if (stream.Length == 0)
+        {
+            return false;
+        }
+
+        stream.Seek(-1, SeekOrigin.End);
+        return stream.ReadByte() != '\n';
+    }
+
     private static string PrepareTemp(string path)
     {
         var directory = Path.GetDirectoryName(Path.GetFullPath(path))!;
