@@ -383,6 +383,26 @@ public class SshTransportRekeyTests
     [Test]
     [Arguments(true)]
     [Arguments(false)]
+    public async Task AnApplicationMessageAfterThePeersKexInit_IsAProtocolError_WithOrWithoutStrictKex(bool strict)
+    {
+        // RFC 4253 section 7.1: once a party has sent KEXINIT, it sends only key exchange messages until NEWKEYS (IGNORE, DEBUG and the like
+        // aside). OpenSSH 10.4 enforces this on the client too. Before the peer's KEXINIT, traffic is legitimate (it has not seen ours).
+        var data = new byte[] { SshMessage.ChannelData, 0, 0, 0, 0, 0, 0, 0, 1, 42 };
+        var (client, server, clientPump, serverPump) = await StartAsync(new FakeServerOptions { ApplicationMessageDuringRekey = data, AdvertiseStrictKex = strict });
+        await using (client)
+        await using (server)
+        {
+            await server.RekeyAsync(Timeout());
+            await WaitUntilAsync(() => clientPump.Error is not null);
+            await Assert.That(clientPump.Error).IsTypeOf<SshProtocolException>();
+            await Assert.That(clientPump.Error!.Message).Contains("during key exchange");
+            await serverPump.StopAsync();
+        }
+    }
+
+    [Test]
+    [Arguments(true)]
+    [Arguments(false)]
     public async Task IgnoreDuringARekeyIsAccepted_StrictKexOnlyPolicesTheInitialExchange(bool strict)
     {
         // OpenSSH PROTOCOL 1.10: unexpected messages are fatal during the initial KEX only (SshTransportTests covers that case).

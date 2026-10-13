@@ -1,7 +1,7 @@
 # SshSharp
 
 [![CI](https://github.com/zcsizmadia/SshSharp/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/zcsizmadia/SshSharp/actions/workflows/ci.yml)
-[![NuGet](https://img.shields.io/nuget/vpre/SshSharp?logo=nuget&label=NuGet)](https://www.nuget.org/packages/SshSharp)
+[![NuGet](https://img.shields.io/nuget/v/SshSharp?logo=nuget&label=NuGet)](https://www.nuget.org/packages/SshSharp)
 [![.NET](https://img.shields.io/badge/.NET-8.0%20%7C%2010.0-512BD4?logo=dotnet)](https://dotnet.microsoft.com/download/dotnet)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/zcsizmadia/SshSharp/blob/main/LICENSE)
 
@@ -14,7 +14,7 @@ var result = await client.RunCommandAsync("uptime");
 Console.WriteLine(result.StandardOutputText);
 ```
 
-> **Status:** in development, prerelease packages only. The API may still change before 1.0, and the managed cryptography
+> **Status:** pre-1.0 (0.x releases). The API may still change before 1.0, and the managed cryptography
 > has had an internal constant-time review but not yet an outside one. See [SECURITY.md](https://github.com/zcsizmadia/SshSharp/blob/main/SECURITY.md).
 
 ## Features
@@ -81,7 +81,7 @@ a connection through an HTTP or SOCKS proxy, or a long track record. Moving from
 ## Install
 
 ```
-dotnet add package SshSharp --prerelease
+dotnet add package SshSharp
 ```
 
 ## Examples

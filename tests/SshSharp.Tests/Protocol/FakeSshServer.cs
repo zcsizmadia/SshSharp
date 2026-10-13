@@ -214,6 +214,9 @@ internal sealed class FakeServerOptions
 
     /// <summary>Send an SSH_MSG_IGNORE between KEXINIT and the reply of a re-exchange.</summary>
     public bool IgnoreDuringRekey { get; init; }
+
+    /// <summary>Send this application message (channel data, for example) between KEXINIT and the reply of a re-exchange: a protocol violation.</summary>
+    public byte[]? ApplicationMessageDuringRekey { get; init; }
 }
 
 /// <summary>
@@ -466,6 +469,11 @@ internal sealed class FakeSshServer : IAsyncDisposable
         if (initial ? Options.IgnoreDuringKex : Options.IgnoreDuringRekey)
         {
             await SendKexAsync(IgnorePayload(), cancellationToken);
+        }
+
+        if (!initial && Options.ApplicationMessageDuringRekey is { } misplaced)
+        {
+            await SendKexAsync(misplaced, cancellationToken);
         }
 
         if (initial && Options.DisconnectInsteadOfReply is { } why)

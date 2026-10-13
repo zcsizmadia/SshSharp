@@ -74,6 +74,13 @@ public class SessionInteropTests
             return;
         }
 
+        if (RealServer.IsWindows)
+        {
+            // OpenSSH for Windows (with Git Bash as its shell) sometimes does not pass stdin's EOF on to the command, which then waits forever.
+            Skip.Test("Stdin EOF does not reliably reach the command on OpenSSH for Windows (#86).");
+            return;
+        }
+
         await using var session = await client.StartCommandAsync("echo to-err 1>&2; tr a-z A-Z; exit 4", cancellationToken: Timeout());
         await Assert.That(session.HasTerminal).IsFalse();
         var output = ReadAllAsync(session.StandardOutput);

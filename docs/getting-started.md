@@ -3,7 +3,7 @@
 ## Install
 
 ```
-dotnet add package SshSharp --prerelease
+dotnet add package SshSharp
 ```
 
 SshSharp targets .NET 8 and .NET 10 and has no native dependencies.
