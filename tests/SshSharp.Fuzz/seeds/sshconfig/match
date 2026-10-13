@@ -1,0 +1,5 @@
+Host a b *.example.com
+  HostName real
+  ProxyJump j1,j2
+Match final host x
+  Port 2222
