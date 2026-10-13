@@ -192,6 +192,7 @@ internal sealed class FakeSshServer : IAsyncDisposable
     private PacketProtector _receive = PacketProtector.None;
     private uint _sendSeq;
     private uint _receiveSeq;
+    private readonly SemaphoreSlim _sendLock = new(1, 1);
 
     public FakeSshServer(FakeServerOptions? options = null)
     {
@@ -318,8 +319,16 @@ internal sealed class FakeSshServer : IAsyncDisposable
 
     public async ValueTask SendAsync(ReadOnlyMemory<byte> payload, CancellationToken cancellationToken = default)
     {
-        PacketCodec.Encode(_writer, payload.Span, _send, _sendSeq++);
-        await _writer.FlushAsync(cancellationToken);
+        await _sendLock.WaitAsync(cancellationToken);
+        try
+        {
+            PacketCodec.Encode(_writer, payload.Span, _send, _sendSeq++);
+            await _writer.FlushAsync(cancellationToken);
+        }
+        finally
+        {
+            _sendLock.Release();
+        }
     }
 
     public async ValueTask<DecodedPacket> ReceiveAsync(CancellationToken cancellationToken = default)

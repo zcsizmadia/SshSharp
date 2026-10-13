@@ -173,6 +173,18 @@ internal sealed class SshTransport : IAsyncDisposable
         }
     }
 
+    /// <summary>Replies <c>SSH_MSG_UNIMPLEMENTED</c> (RFC 4253 section 11.4) for the message that was just received.</summary>
+    public ValueTask SendUnimplementedAsync(CancellationToken cancellationToken = default)
+    {
+        var payload = Serialize(output =>
+        {
+            var writer = new SshWriter(output);
+            writer.WriteByte(SshMessage.Unimplemented);
+            writer.WriteUInt32(_receiveSequence - 1);
+        });
+        return SendAsync(payload, cancellationToken);
+    }
+
     /// <summary>Tells the server we are leaving (<c>SSH_MSG_DISCONNECT</c>), best effort.</summary>
     public async ValueTask DisconnectAsync(DisconnectReason reason, string description, CancellationToken cancellationToken = default)
     {
