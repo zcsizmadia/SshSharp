@@ -94,7 +94,7 @@ docs/                      # guides, design notes, the API reference site (DocFX
 - `ci.yml`: on every PR and push to main, the unit tests on the platform matrix, interop on Linux, and `dotnet pack`.
 - `fuzz.yml`: nightly coverage-guided fuzzing; a short run on PRs that touch the fuzzing setup.
 - `mutation.yml`: weekly and on-demand Stryker.NET mutation testing; HTML and JSON reports as artifacts.
-- `publish.yml`: on a `v*` tag on main (`v0.1.0`, `v1.0.0-preview.1`, ...), tests, packs and pushes to nuget.org with
+- `publish.yml`: on a `v*` tag on main (`v0.3.0`, `v1.0.0-preview.1`, ...), tests, packs and pushes to nuget.org with
   trusted publishing (GitHub OIDC exchanged for a short-lived key; no API key is stored).
 - `docs.yml`: builds the API reference site.
 - Supply chain: actions pinned by commit SHA, Dependabot for NuGet and Actions, central package versions, NuGet audit

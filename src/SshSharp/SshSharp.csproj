@@ -9,6 +9,9 @@
     <Description>Managed-only, async-first SSH client library for .NET with known_hosts and ssh_config support.</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageProjectUrl>https://github.com/zcsizmadia/SshSharp</PackageProjectUrl>
+    <PackageTags>ssh;ssh-client;openssh;scp;port-forwarding;known_hosts;ssh_config;ssh-agent;proxyjump;async</PackageTags>
+    <PackageReleaseNotes>https://github.com/zcsizmadia/SshSharp/releases</PackageReleaseNotes>
     <RepositoryUrl>https://github.com/zcsizmadia/SshSharp</RepositoryUrl>
     <PublishRepositoryUrl>true</PublishRepositoryUrl>
     <IncludeSymbols>true</IncludeSymbols>
