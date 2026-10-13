@@ -348,6 +348,8 @@ jobs:
         shell: pwsh
         run: |
           $log = Get-Content "$env:ProgramData\ssh\logs\sshd.log" -ErrorAction SilentlyContinue
+          "--- host key announcements and failed replies ---"
+          $log | Select-String -Pattern 'hostkeys|send reply'
           "--- global requests, errors and channel opens ---"
           $log | Select-String -Pattern 'global_request|keepalive|error|fatal|channel_open|direct-tcpip|forward' | Select-Object -Last 150
           "--- tail ---"
