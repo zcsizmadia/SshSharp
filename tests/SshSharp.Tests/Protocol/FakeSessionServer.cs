@@ -120,6 +120,9 @@ internal sealed class FakeSessionServer : IAsyncDisposable
     /// <summary>Never answer global requests (a server that has stopped responding).</summary>
     public bool IgnoreGlobalRequests { get; set; }
 
+    /// <summary>A certificate authority's public key: user certificates it signed are accepted (sshd's TrustedUserCAKeys).</summary>
+    public byte[]? TrustedUserAuthority { get; init; }
+
     /// <summary>Public keys (SSH wire format) the server accepts for <see cref="UserName"/>.</summary>
     public List<byte[]> AuthorizedKeys { get; init; } = [];
 
@@ -231,7 +234,7 @@ internal sealed class FakeSessionServer : IAsyncDisposable
                     var hasSignature = reader.ReadBoolean();
                     var algorithm = reader.ReadUtf8String();
                     var blob = reader.ReadString().ToArray();
-                    var authorized = user == UserName && AuthorizedKeys.Any(k => k.AsSpan().SequenceEqual(blob));
+                    var authorized = user == UserName && (AuthorizedKeys.Any(k => k.AsSpan().SequenceEqual(blob)) || CertificateTrusted(algorithm, blob, user));
                     if (!hasSignature)
                     {
                         // RFC 4252 section 7: PK_OK says "this key would do; now sign".
@@ -506,6 +509,30 @@ internal sealed class FakeSessionServer : IAsyncDisposable
     private Task SendAuthFailureAsync(string[] methods, bool partial) =>
         _server.SendAsync(Build(w => { w.WriteByte(SshMessage.UserAuthFailure); w.WriteNameList(methods); w.WriteBoolean(partial); })).AsTask();
 
+    /// <summary>Like sshd's TrustedUserCAKeys: a user certificate from <see cref="TrustedUserAuthority"/>, valid now, naming the user.</summary>
+    private bool CertificateTrusted(string algorithm, byte[] blob, string user)
+    {
+        if (TrustedUserAuthority is not { } authority || !SshCertificate.IsCertificateAlgorithm(algorithm))
+        {
+            return false;
+        }
+
+        try
+        {
+            var certificate = SshCertificate.FromBlob(blob);
+            var now = (ulong)DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            return certificate.Type == SshCertificateType.User
+                && certificate.AuthorityKey.Span.SequenceEqual(authority)
+                && certificate.HasValidAuthoritySignature()
+                && now >= certificate.ValidAfterSeconds && now < certificate.ValidBeforeSeconds
+                && certificate.Principals.Contains(user);
+        }
+        catch (SshProtocolException)
+        {
+            return false;
+        }
+    }
+
     /// <summary>Checks a publickey signature exactly as a server must: over the session id and the request.</summary>
     private bool SignatureValid(string user, string algorithm, byte[] blob, byte[] signature)
     {
@@ -522,7 +549,9 @@ internal sealed class FakeSessionServer : IAsyncDisposable
         });
         try
         {
-            return SshSharp.Keys.SshPublicKey.Parse(blob).VerifySignature(algorithm, signature, signed);
+            return SshCertificate.IsCertificateAlgorithm(algorithm)
+                ? SshCertificate.FromBlob(blob).Key.VerifySignature(SshCertificate.BaseAlgorithm(algorithm), signature, signed)
+                : SshSharp.Keys.SshPublicKey.Parse(blob).VerifySignature(algorithm, signature, signed);
         }
         catch (SshProtocolException)
         {

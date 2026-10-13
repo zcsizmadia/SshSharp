@@ -197,6 +197,59 @@ internal static class TestKeys
         return sb.ToString();
     }
 
+    /// <summary>
+    /// An OpenSSH certificate (PROTOCOL.certkeys) for <paramref name="publicKeyBlob"/>, signed by <paramref name="authority"/>: the same layout
+    /// <c>ssh-keygen -s</c> writes. Interop CI checks the reader against certificates made by the real ssh-keygen.
+    /// </summary>
+    public static byte[] Certificate(SshPrivateKey authority, byte[] publicKeyBlob, SshCertificateType type, string[]? principals = null,
+        DateTimeOffset? validAfter = null, DateTimeOffset? validBefore = null, (string Name, string Value)[]? criticalOptions = null,
+        string keyId = "test-certificate", ulong serial = 7, string? authorityAlgorithm = null)
+    {
+        var reader = new SshReader(publicKeyBlob);
+        var keyType = reader.ReadUtf8String();
+        var keyFields = reader.Remaining.ToArray();
+        var signed = Blob(w =>
+        {
+            w.WriteString(keyType + "-cert-v01@openssh.com");
+            w.WriteString(RandomNumberGenerator.GetBytes(32));
+            w.WriteBytes(keyFields);
+            w.WriteUInt64(serial);
+            w.WriteUInt32((uint)type);
+            w.WriteString(keyId);
+            w.WriteString(Blob(p =>
+            {
+                foreach (var principal in principals ?? [])
+                {
+                    p.WriteString(principal);
+                }
+            }));
+            w.WriteUInt64(validAfter is { } after ? (ulong)after.ToUnixTimeSeconds() : 0);
+            w.WriteUInt64(validBefore is { } before ? (ulong)before.ToUnixTimeSeconds() : ulong.MaxValue);
+            w.WriteString(Blob(o =>
+            {
+                foreach (var (name, value) in criticalOptions ?? [])
+                {
+                    o.WriteString(name);
+                    o.WriteString(Blob(v => v.WriteString(value)));
+                }
+            }));
+            w.WriteString(Blob(e =>
+            {
+                e.WriteString("permit-pty");
+                e.WriteString(ReadOnlySpan<byte>.Empty);
+            }));
+            w.WriteString(ReadOnlySpan<byte>.Empty);
+            w.WriteString(authority.PublicKey.Span);
+        });
+
+        var signature = authority.Sign(authorityAlgorithm ?? authority.SignatureAlgorithms[0], signed);
+        return [.. signed, .. Blob(w => w.WriteString(signature))];
+    }
+
+    /// <summary>A certificate as the text of an OpenSSH <c>-cert.pub</c> file.</summary>
+    public static string CertificateLine(byte[] certificateBlob) =>
+        $"{new SshReader(certificateBlob).ReadUtf8String()} {Convert.ToBase64String(certificateBlob)} test-cert";
+
     public static byte[] RsaPublicBlob(RSA rsa)
     {
         var p = rsa.ExportParameters(false);

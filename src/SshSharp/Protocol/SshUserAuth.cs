@@ -97,7 +97,8 @@ internal static class SshUserAuth
         }
 
         var accepted = list.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        return key.SignatureAlgorithms.FirstOrDefault(a => accepted.Contains(a, StringComparer.Ordinal));
+        // server-sig-algs lists plain algorithms; a certificate algorithm is acceptable when its base one is.
+        return key.SignatureAlgorithms.FirstOrDefault(a => accepted.Contains(SshCertificate.BaseAlgorithm(a), StringComparer.Ordinal));
     }
 
     private static async Task<AuthOutcome> RequestAsync(SshTransport transport, string userName, string method, Action<SshWriter>? body, bool acceptsPkOk, CancellationToken cancellationToken)

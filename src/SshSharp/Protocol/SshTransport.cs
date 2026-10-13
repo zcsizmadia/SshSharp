@@ -557,14 +557,41 @@ internal sealed class SshTransport : IAsyncDisposable
 
     private async ValueTask VerifyHostKeyAsync(NegotiatedAlgorithms negotiated, KexResult result, bool initial, CancellationToken cancellationToken)
     {
-        var key = SshPublicKey.Parse(result.HostKeyBlob);
-        var expectedType = negotiated.HostKey is SshAlgorithms.RsaSha2_256 or SshAlgorithms.RsaSha2_512 ? "ssh-rsa" : negotiated.HostKey;
-        if (key.KeyType != expectedType)
+        // A certificate host key (PROTOCOL.certkeys): the server proves possession of the certified key, signing with the base algorithm.
+        // Whether the certificate itself is trusted (authority, principals, validity) is the verifier's decision.
+        SshPublicKey key;
+        SshCertificate? certificate = null;
+        var signatureAlgorithm = negotiated.HostKey;
+        if (SshCertificate.IsCertificateAlgorithm(negotiated.HostKey))
         {
-            throw new SshHostKeyException($"The server sent a {key.KeyType} host key but negotiated {negotiated.HostKey}.");
+            try
+            {
+                certificate = SshCertificate.FromBlob(result.HostKeyBlob);
+            }
+            catch (SshProtocolException ex)
+            {
+                throw new SshHostKeyException("The server's host certificate is malformed: " + ex.Message);
+            }
+
+            if (certificate.CertificateType != SshCertificate.CertificateKeyType(negotiated.HostKey))
+            {
+                throw new SshHostKeyException($"The server sent a {certificate.CertificateType} certificate but negotiated {negotiated.HostKey}.");
+            }
+
+            key = certificate.Key;
+            signatureAlgorithm = SshCertificate.BaseAlgorithm(negotiated.HostKey);
+        }
+        else
+        {
+            key = SshPublicKey.Parse(result.HostKeyBlob);
+            var expectedType = negotiated.HostKey is SshAlgorithms.RsaSha2_256 or SshAlgorithms.RsaSha2_512 ? "ssh-rsa" : negotiated.HostKey;
+            if (key.KeyType != expectedType)
+            {
+                throw new SshHostKeyException($"The server sent a {key.KeyType} host key but negotiated {negotiated.HostKey}.");
+            }
         }
 
-        if (!key.VerifySignature(negotiated.HostKey, result.Signature, result.ExchangeHash))
+        if (!key.VerifySignature(signatureAlgorithm, result.Signature, result.ExchangeHash))
         {
             throw new SshHostKeyException("The server's signature over the exchange hash is invalid.");
         }
@@ -572,7 +599,7 @@ internal sealed class SshTransport : IAsyncDisposable
         if (!initial)
         {
             // A re-exchange must prove possession of the same key we already trusted; a different key is never silently accepted.
-            if (!result.HostKeyBlob.AsSpan().SequenceEqual(HostKey!.Blob.Span))
+            if (!result.HostKeyBlob.AsSpan().SequenceEqual(HostKey!.Presented.Span))
             {
                 throw new SshHostKeyException("The server's host key changed during a key re-exchange.");
             }
@@ -585,7 +612,7 @@ internal sealed class SshTransport : IAsyncDisposable
             throw new SshHostKeyException($"The server's RSA host key is only {key.KeySizeBits} bits (minimum {_options.MinimumRsaBits}).");
         }
 
-        var info = new HostKeyInfo(negotiated.HostKey, key.KeyType, result.HostKeyBlob, key.Fingerprint, key.KeySizeBits);
+        var info = new HostKeyInfo(negotiated.HostKey, key.KeyType, key.Blob, key.Fingerprint, key.KeySizeBits, result.HostKeyBlob, certificate);
         HostKey = info;
         if (!await _options.VerifyHostKey(info, cancellationToken).ConfigureAwait(false))
         {

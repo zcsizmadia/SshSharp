@@ -123,6 +123,13 @@ internal sealed class FakeHostKey
         });
     }
 
+    /// <summary>
+    /// <paramref name="key"/> presented with a certificate for it (made with <see cref="Keys.TestKeys.Certificate"/>): the server sends the
+    /// certificate and signs with the key under the base algorithm, as sshd does with a HostCertificate.
+    /// </summary>
+    public static FakeHostKey Certified(FakeHostKey key, byte[] certificateBlob) =>
+        new(new SshReader(certificateBlob).ReadUtf8String(), certificateBlob, (alg, data) => key.Sign(SshCertificate.BaseAlgorithm(alg), data));
+
     // Alias so this file does not clash with the Ed25519 test class name.
     private static class Ed25519Impl
     {
@@ -145,6 +152,12 @@ internal sealed class FakeServerOptions
 
     /// <summary>The host key algorithm to offer; defaults to the key's type.</summary>
     public string? HostKeyAlgorithm { get; init; }
+
+    /// <summary>A host certificate offered in addition to <see cref="HostKey"/> (see <see cref="FakeHostKey.Certified"/>).</summary>
+    public FakeHostKey? HostCertificate { get; init; }
+
+    /// <summary>The certificate algorithm to offer, when it differs from the certificate type (RSA: <c>rsa-sha2-512-cert-v01@openssh.com</c>).</summary>
+    public string? HostCertificateAlgorithm { get; init; }
 
     public bool AdvertiseStrictKex { get; init; } = true;
 
@@ -450,7 +463,9 @@ internal sealed class FakeSshServer : IAsyncDisposable
             return;
         }
 
-        var hostKey = !initial && Options.RekeyHostKey is { } replacement ? replacement : Options.HostKey;
+        var hostKey = SshCertificate.IsCertificateAlgorithm(negotiated.HostKey) && Options.HostCertificate is { } certificate
+            ? certificate
+            : !initial && Options.RekeyHostKey is { } replacement ? replacement : Options.HostKey;
         var (reply, secret, hash, kexHash) = RunKex(negotiated.Kex, negotiated.HostKey, hostKey, init, clientInitPayload, serverInitPayload);
         await SendKexAsync(reply, cancellationToken);
 
@@ -581,9 +596,14 @@ internal sealed class FakeSshServer : IAsyncDisposable
         {
             Cookie = RandomNumberGenerator.GetBytes(16),
             KexAlgorithms = kex,
-            ServerHostKeyAlgorithms = Options.HostKeyAlgorithm is { } algorithm
-                ? [algorithm]
-                : hostKey.KeyType == "ssh-rsa" ? ["rsa-sha2-512", "rsa-sha2-256"] : [hostKey.KeyType],
+            // Like sshd with HostCertificate: the certificate algorithm first, then the plain key's.
+            ServerHostKeyAlgorithms =
+            [
+                .. Options.HostCertificate is { } certificate ? [Options.HostCertificateAlgorithm ?? certificate.KeyType] : Array.Empty<string>(),
+                .. Options.HostKeyAlgorithm is { } algorithm
+                    ? new[] { algorithm }
+                    : hostKey.KeyType == "ssh-rsa" ? ["rsa-sha2-512", "rsa-sha2-256"] : [hostKey.KeyType],
+            ],
             EncryptionClientToServer = [cipher],
             EncryptionServerToClient = [cipher],
             MacClientToServer = [Options.Mac],

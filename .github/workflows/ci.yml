@@ -79,12 +79,23 @@ jobs:
           echo "sshsharp:$PASSWORD" | sudo chpasswd
           sudo ssh-keygen -A
           sudo mkdir -p /run/sshd
+          # A throwaway certificate authority: it signs sshd's Ed25519 host key, and a user key that is NOT in authorized_keys.
+          CERTS="$RUNNER_TEMP/certs"
+          mkdir -p "$CERTS"
+          ssh-keygen -q -t ed25519 -N '' -C ca -f "$CERTS/ca"
+          ssh-keygen -q -t ed25519 -N '' -C certuser -f "$CERTS/user"
+          ssh-keygen -q -s "$CERTS/ca" -I test-user -n sshsharp -V -5m:+2h "$CERTS/user.pub"
+          sudo ssh-keygen -q -s "$CERTS/ca" -I ci-sshd -h -n 127.0.0.1,localhost -V -5m:+2h /etc/ssh/ssh_host_ed25519_key.pub
+          sudo cp "$CERTS/ca.pub" /etc/ssh/sshsharp_user_ca.pub
+          echo "SSHSHARP_TEST_CERTDIR=$CERTS" >> "$GITHUB_ENV"
           cat <<EOF | sudo tee /tmp/sshd_config_test
           Port 2222
           ListenAddress 127.0.0.1
           HostKey /etc/ssh/ssh_host_ed25519_key
           HostKey /etc/ssh/ssh_host_rsa_key
           HostKey /etc/ssh/ssh_host_ecdsa_key
+          HostCertificate /etc/ssh/ssh_host_ed25519_key-cert.pub
+          TrustedUserCAKeys /etc/ssh/sshsharp_user_ca.pub
           PasswordAuthentication yes
           UsePAM yes
           MaxStartups 200:30:300

@@ -63,6 +63,31 @@ public abstract class SshPrivateKey : IDisposable
         return Parse(await File.ReadAllTextAsync(path, cancellationToken).ConfigureAwait(false), passphrase);
     }
 
+    /// <summary>The user certificate this key authenticates with, if it was paired with one (<see cref="WithCertificate"/>).</summary>
+    public SshCertificate? Certificate { get; private protected init; }
+
+    /// <summary>
+    /// This key paired with an OpenSSH user certificate for it (<c>id_ed25519-cert.pub</c>, made with <c>ssh-keygen -s</c>): authentication
+    /// then presents the certificate, which servers that trust its authority (<c>TrustedUserCAKeys</c>) accept without an authorized_keys
+    /// entry. The returned key shares this key's private material: disposing this key disposes both.
+    /// </summary>
+    /// <exception cref="ArgumentException">The certificate is not a user certificate, or certifies a different key.</exception>
+    public SshPrivateKey WithCertificate(SshCertificate certificate)
+    {
+        ArgumentNullException.ThrowIfNull(certificate);
+        if (certificate.Type != SshCertificateType.User)
+        {
+            throw new ArgumentException("Only user certificates can be used to authenticate.", nameof(certificate));
+        }
+
+        if (!certificate.PublicKey.Span.SequenceEqual(PublicKey.Span))
+        {
+            throw new ArgumentException($"The certificate is for key {certificate.Fingerprint}, not this key ({Fingerprint}).", nameof(certificate));
+        }
+
+        return new CertifiedKey(this, certificate);
+    }
+
     /// <summary>Clears the private key material.</summary>
     public void Dispose()
     {
@@ -86,6 +111,29 @@ public abstract class SshPrivateKey : IDisposable
         writer.WriteString(algorithm);
         writer.WriteString(signature);
         return buffer.WrittenSpan.ToArray();
+    }
+
+    /// <summary>A key presented with its certificate: the public key is the certificate, and signatures are the base key's (PROTOCOL.certkeys).</summary>
+    private sealed class CertifiedKey : SshPrivateKey
+    {
+        private readonly SshPrivateKey _key;
+
+        public CertifiedKey(SshPrivateKey key, SshCertificate certificate)
+            : base(certificate.CertificateType, certificate.Blob.ToArray(), key.Comment)
+        {
+            _key = key;
+            Certificate = certificate;
+            SignatureAlgorithms = [.. key.SignatureAlgorithms.Select(a => a + "-cert-v01@openssh.com")];
+        }
+
+        internal override IReadOnlyList<string> SignatureAlgorithms { get; }
+
+        internal override byte[] Sign(string algorithm, ReadOnlySpan<byte> data) => _key.Sign(SshCertificate.BaseAlgorithm(algorithm), data);
+
+        private protected override void DisposeCore()
+        {
+            // The private material belongs to the key this was made from.
+        }
     }
 
     internal sealed class Ed25519Key : SshPrivateKey

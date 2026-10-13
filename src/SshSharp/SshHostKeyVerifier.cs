@@ -65,6 +65,10 @@ public abstract class SshHostKeyVerifier
     /// <summary>Decides whether to trust the key in <paramref name="context"/>.</summary>
     public abstract ValueTask<SshHostKeyVerdict> VerifyAsync(SshHostKeyContext context, CancellationToken cancellationToken);
 
+    /// <summary>Whether a host certificate would be checked (a certificate authority is trusted for the host), so certificates should be asked for first.</summary>
+    internal virtual ValueTask<bool> PrefersCertificatesAsync(string? host, int port, string? hostKeyAlias, CancellationToken cancellationToken) =>
+        ValueTask.FromResult(false);
+
     /// <summary>A verifier that calls <paramref name="verify"/>: true trusts the key.</summary>
     public static SshHostKeyVerifier FromDelegate(Func<SshHostKeyContext, CancellationToken, ValueTask<bool>> verify)
     {

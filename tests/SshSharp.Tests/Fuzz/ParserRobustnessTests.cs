@@ -149,6 +149,26 @@ public class ParserRobustnessTests
     }
 
     [Test]
+    public async Task CertificateParsingAndChecking_OnlyEverFailWithAProtocolError()
+    {
+        // Host certificates come from the server: parsing and every check must reject garbage cleanly.
+        using var authority = SshPrivateKey.Parse(Keys.TestKeys.OpenSshEd25519(out _));
+        using var rsaAuthority = SshPrivateKey.Parse(Keys.TestKeys.OpenSshRsa(2048, out _));
+        var seeds = PublicKeyBlobs()
+            .Select(key => Keys.TestKeys.Certificate(authority, key, SshCertificateType.Host, ["a", "b"], criticalOptions: [("x", "y")]))
+            .Append(Keys.TestKeys.Certificate(rsaAuthority, PublicKeyBlobs()[0], SshCertificateType.User))
+            .ToArray();
+        var failures = Run(seeds, input =>
+        {
+            var certificate = SshCertificate.FromBlob(input);
+            certificate.CheckForHost("a", DateTimeOffset.UtcNow);
+            _ = certificate.ValidBefore;
+            _ = certificate.AuthorityFingerprint;
+        }, ProtocolErrors, iterations: 2000);
+        await Assert.That(failures).IsEmpty();
+    }
+
+    [Test]
     public async Task PuttyKeyParsing_OnlyEverFailsWithAFormatError()
     {
         byte[][] seeds =

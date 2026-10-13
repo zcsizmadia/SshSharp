@@ -8,7 +8,14 @@ namespace SshSharp;
 /// <param name="Fingerprint">The OpenSSH-style SHA-256 fingerprint (<c>SHA256:...</c>).</param>
 /// <param name="PublicKey">The public key in SSH wire format, as stored in <c>known_hosts</c> after base64 decoding.</param>
 /// <param name="KeySizeBits">The key size in bits.</param>
-public sealed record SshHostKey(string Algorithm, string KeyType, string Fingerprint, ReadOnlyMemory<byte> PublicKey, int KeySizeBits);
+public sealed record SshHostKey(string Algorithm, string KeyType, string Fingerprint, ReadOnlyMemory<byte> PublicKey, int KeySizeBits)
+{
+    /// <summary>
+    /// The host certificate, when the server presented one (an OpenSSH <c>-cert-v01@openssh.com</c> host key). The other members then
+    /// describe the certified key, which is what a plain known_hosts entry or a pinned fingerprint refers to.
+    /// </summary>
+    public SshCertificate? Certificate { get; init; }
+}
 
 /// <summary>Options for <see cref="SshClient"/>.</summary>
 public sealed class SshClientOptions

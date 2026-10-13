@@ -47,12 +47,23 @@ internal sealed class AlgorithmPreferences
         };
     }
 
+    /// <summary>These preferences with the certificate versions of the host key algorithms in front (only for algorithms already allowed).</summary>
+    public AlgorithmPreferences WithCertificateHostKeysFirst() => new()
+    {
+        Kex = Kex,
+        HostKeys = [.. SshAlgorithms.CertificateHostKeys.Where(c => HostKeys.Contains(SshCertificate.BaseAlgorithm(c))),
+            .. HostKeys.Where(h => !SshCertificate.IsCertificateAlgorithm(h))],
+        Ciphers = Ciphers,
+        Macs = Macs,
+        Compression = Compression,
+    };
+
     private static bool IsImplemented(string name, AlgorithmKind kind) => kind switch
     {
         AlgorithmKind.Cipher => SshAlgorithms.IsKnownCipher(name),
         AlgorithmKind.Mac => SshAlgorithms.IsKnownMac(name),
         AlgorithmKind.Kex => SshAlgorithms.DefaultKex.Contains(name),
-        AlgorithmKind.HostKey => SshAlgorithms.DefaultHostKeys.Contains(name),
+        AlgorithmKind.HostKey => SshAlgorithms.DefaultHostKeys.Contains(name) || SshAlgorithms.CertificateHostKeys.Contains(name),
         _ => true,
     };
 }

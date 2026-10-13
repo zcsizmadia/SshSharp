@@ -59,6 +59,13 @@ internal static class SshAlgorithms
         SshEd25519, EcdsaNistp256, EcdsaNistp384, EcdsaNistp521, RsaSha2_512, RsaSha2_256,
     ];
 
+    /// <summary>OpenSSH certificate host key algorithms (PROTOCOL.certkeys), offered first when a certificate authority is trusted for the host.</summary>
+    public static IReadOnlyList<string> CertificateHostKeys { get; } =
+    [
+        "ssh-ed25519-cert-v01@openssh.com", "ecdsa-sha2-nistp256-cert-v01@openssh.com", "ecdsa-sha2-nistp384-cert-v01@openssh.com",
+        "ecdsa-sha2-nistp521-cert-v01@openssh.com", "rsa-sha2-512-cert-v01@openssh.com", "rsa-sha2-256-cert-v01@openssh.com",
+    ];
+
     private static readonly bool HardwareAes = System.Runtime.Intrinsics.X86.Aes.IsSupported || System.Runtime.Intrinsics.Arm.Aes.IsSupported;
 
     /// <summary>

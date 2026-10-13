@@ -197,6 +197,7 @@ public sealed partial class SshClient
     private static async Task<List<SshPrivateKey>> LoadIdentitiesAsync(SshHostConfig hostConfig, SshConfigConnectOptions options, ILogger logger, CancellationToken cancellationToken)
     {
         var keys = new List<SshPrivateKey>();
+        var paths = new List<string>();
         if (!hostConfig.PubkeyAuthentication)
         {
             return keys;
@@ -214,6 +215,7 @@ public sealed partial class SshClient
             try
             {
                 keys.Add(SshPrivateKey.Parse(text));
+                paths.Add(path);
                 continue;
             }
             catch (FormatException ex) when (ex.Message.Contains("passphrase is required", StringComparison.Ordinal))
@@ -236,6 +238,7 @@ public sealed partial class SshClient
             try
             {
                 keys.Add(SshPrivateKey.Parse(text, passphrase));
+                paths.Add(path);
             }
             catch (FormatException ex)
             {
@@ -243,7 +246,36 @@ public sealed partial class SshClient
             }
         }
 
-        return keys;
+        // Certificates, as ssh finds them: CertificateFile entries and "<identity>-cert.pub" next to each key. A key with a certificate is
+        // offered with it first, then on its own.
+        var certificates = new List<SshCertificate>();
+        foreach (var path in hostConfig.CertificateFiles.Concat(paths.Select(p => p + "-cert.pub")).Distinct(StringComparer.Ordinal))
+        {
+            if (!File.Exists(path))
+            {
+                continue;
+            }
+
+            try
+            {
+                certificates.Add(SshCertificate.Parse(await File.ReadAllTextAsync(path, cancellationToken).ConfigureAwait(false)));
+            }
+            catch (FormatException ex)
+            {
+                var certificateName = Path.GetFileName(path);
+                SshLog.IdentitySkipped(logger, certificateName, ex.Message);
+            }
+        }
+
+        var certified = new List<SshPrivateKey>();
+        foreach (var key in keys)
+        {
+            certified.AddRange(certificates
+                .Where(c => c.Type == SshCertificateType.User && c.PublicKey.Span.SequenceEqual(key.PublicKey.Span))
+                .Select(key.WithCertificate));
+        }
+
+        return [.. certified, .. keys];
     }
 
     /// <summary>Parses <c>[user@]host</c>, or <c>ssh://[user@]host[:port]</c> (the only form that carries a port, as with ssh).</summary>
