@@ -5,3 +5,6 @@ obj/
 TestResults/
 coverage/
 BenchmarkDotNet.Artifacts/
+
+# Claude Code session state
+.claude/scheduled_tasks.lock

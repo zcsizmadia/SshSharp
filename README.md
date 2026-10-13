@@ -2,9 +2,11 @@
 
 Managed-only, async-first SSH client library for .NET 8 and .NET 10, with OpenSSH `known_hosts` and `ssh_config` support.
 
-Status: in development, not yet released. Milestones M0–M2 are done: transport, modern key exchange and ciphers, strict KEX,
-rekeying, password authentication, `RunCommandAsync`, and the `known_hosts`/`ssh_config` parsers. M3 (config-driven connect,
-publickey authentication, ProxyJump, certificates) is next. See [PLAN.md](PLAN.md).
+Status: in development, not yet released. Milestones M0–M3 are done: transport, modern key exchange and ciphers, strict KEX,
+rekeying, password and publickey authentication (OpenSSH, PKCS#1/#8, SEC1 and PuTTY `.ppk` keys), OpenSSH certificates,
+`known_hosts` verification with every `StrictHostKeyChecking` policy and `UpdateHostKeys`, keep-alive, and connecting by
+`ssh_config` alias through ProxyJump chains or `ProxyCommand`. M4 (ssh-agent, shells, forwarding, SCP) is next.
+See [PLAN.md](PLAN.md).
 
 The managed cryptography (X25519, Ed25519, ChaCha20-Poly1305) is tested against RFC and OpenSSL vectors but has not had an
 outside review yet. See [SECURITY.md](SECURITY.md) and the [threat model](docs/threat-model.md).
