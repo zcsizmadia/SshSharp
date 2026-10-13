@@ -37,9 +37,11 @@ Console.WriteLine(result.StandardOutputText);
   signals and window resizing.
 - **Modern algorithms:** `curve25519-sha256`, ECDH and DH group 14/16 key exchange; ChaCha20-Poly1305, AES-GCM and
   AES-CTR with HMAC-SHA2 ETM; Ed25519, ECDSA and RSA (SHA-2) keys; strict key exchange (Terrapin) always on; a FIPS mode.
+- **File transfer:** SCP uploads and downloads of files, streams and directories, with progress, kept times, and checks
+  that stop a hostile server from writing outside the target.
 - **Observability:** `ILogger` logging, `ActivitySource` tracing and `Meter` metrics, with no secrets recorded.
 
-Coming next: SCP, then SFTP as a separate package.
+Coming next: SFTP, as a separate package.
 
 ## Install
 
@@ -94,6 +96,7 @@ var keys = agent is null ? [] : await agent.GetKeysAsync();
   certificates, the agent, keyboard-interactive
 - [Host keys](https://github.com/zcsizmadia/SshSharp/blob/main/docs/host-keys.md): `known_hosts`, policies, pinning
 - [Commands and shells](https://github.com/zcsizmadia/SshSharp/blob/main/docs/sessions.md)
+- [File transfer (SCP)](https://github.com/zcsizmadia/SshSharp/blob/main/docs/scp.md)
 - [Configuration files](https://github.com/zcsizmadia/SshSharp/blob/main/docs/config-files.md)
 - [Errors and diagnostics](https://github.com/zcsizmadia/SshSharp/blob/main/docs/diagnostics.md): exceptions, logging,
   tracing, metrics

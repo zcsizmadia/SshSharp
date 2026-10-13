@@ -3,7 +3,8 @@
 ARG BASE
 FROM ${BASE}
 ARG SERVER=openssh
-RUN if [ "$SERVER" = "dropbear" ]; then apk add --no-cache dropbear; else apk add --no-cache openssh-server; fi \
+# The scp program too, for the SCP interop tests.
+RUN if [ "$SERVER" = "dropbear" ]; then apk add --no-cache dropbear dropbear-scp; else apk add --no-cache openssh-server openssh-client; fi \
  && adduser -D -s /bin/sh sshsharp
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
