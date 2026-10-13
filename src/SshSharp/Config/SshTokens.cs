@@ -15,7 +15,15 @@ internal sealed record SshTokenContext(
     string LocalHostName,
     Func<string, string?> GetEnvironmentVariable)
 {
-    /// <summary>Expands <c>%h %n %p %r %u %d %l %L %C %%</c>. An unknown token throws <see cref="FormatException"/>.</summary>
+    /// <summary>The <c>HostKeyAlias</c>, if set (<c>%k</c> falls back to the host name).</summary>
+    public string? HostKeyAlias { get; init; }
+
+    /// <summary>The <c>ProxyJump</c> value, or empty (<c>%j</c>).</summary>
+    public string ProxyJump { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Expands <c>%h %n %p %r %u %d %l %L %C %k %j %i %T %%</c>. An unknown token throws <see cref="FormatException"/>, as in OpenSSH.
+    /// </summary>
     public string ExpandTokens(string value)
     {
         if (!value.Contains('%', StringComparison.Ordinal))
@@ -49,6 +57,10 @@ internal sealed record SshTokenContext(
                 'l' => LocalHostName,
                 'L' => ShortLocalHostName(),
                 'C' => ConnectionHash(),
+                'k' => HostKeyAlias ?? Host,
+                'j' => ProxyJump,
+                'i' => LocalUserId(),
+                'T' => "NONE", // no tun device is ever opened
                 _ => throw new FormatException($"Unknown token '%{value[i]}' in '{value}'."),
             });
         }
@@ -104,10 +116,22 @@ internal sealed record SshTokenContext(
         return dot < 0 ? LocalHostName : LocalHostName[..dot];
     }
 
+    /// <summary>OpenSSH's <c>%C</c>: SHA-1 of <c>%l%h%p%r%j</c> (an empty <c>%j</c> gives the pre-9.x value).</summary>
     [SuppressMessage("Security", "CA5350", Justification = "SHA-1 is how OpenSSH defines the %C token; it is a file-name hash, not a security control.")]
     private string ConnectionHash()
     {
-        var data = Encoding.UTF8.GetBytes(LocalHostName + Host + Port.ToString(System.Globalization.CultureInfo.InvariantCulture) + RemoteUser);
+        var data = Encoding.UTF8.GetBytes(LocalHostName + Host + Port.ToString(System.Globalization.CultureInfo.InvariantCulture) + RemoteUser + ProxyJump);
         return Convert.ToHexString(SHA1.HashData(data)).ToLowerInvariant();
+    }
+
+    private static string LocalUserId() => OperatingSystem.IsWindows()
+        ? throw new FormatException("The %i token (local user id) is not available on Windows.")
+        : NativeMethods.GetUid().ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+    private static class NativeMethods
+    {
+        [System.Runtime.InteropServices.DllImport("libc", EntryPoint = "getuid")]
+        [System.Runtime.InteropServices.DefaultDllImportSearchPaths(System.Runtime.InteropServices.DllImportSearchPath.SafeDirectories)]
+        public static extern uint GetUid();
     }
 }

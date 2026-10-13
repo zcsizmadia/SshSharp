@@ -19,9 +19,22 @@ public static class SshExecMatcher
             UseShellExecute = false,
             CreateNoWindow = true,
             RedirectStandardInput = true,
+
+            // Like OpenSSH (stdout to /dev/null): the command must not write into the host application's own output.
+            RedirectStandardOutput = true,
         };
-        info.ArgumentList.Add(windows ? "/c" : "-c");
-        info.ArgumentList.Add(command);
+
+        if (windows)
+        {
+            // cmd.exe does not follow the C runtime's quoting rules that ArgumentList applies; "/s /c "..."" passes the command
+            // through verbatim (cmd strips the outer quotes).
+            info.Arguments = "/d /s /c \"" + command + "\"";
+        }
+        else
+        {
+            info.ArgumentList.Add("-c");
+            info.ArgumentList.Add(command);
+        }
 
         using var process = Process.Start(info);
         if (process is null)
@@ -30,6 +43,8 @@ public static class SshExecMatcher
         }
 
         process.StandardInput.Close();
+        process.OutputDataReceived += static (_, _) => { };
+        process.BeginOutputReadLine();
         if (process.WaitForExit(TimeSpan.FromSeconds(30)))
         {
             return process.ExitCode == 0;

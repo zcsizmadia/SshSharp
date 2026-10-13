@@ -155,6 +155,15 @@ public sealed class SshConfig
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(host);
         options ??= new SshConfigResolveOptions();
+
+        // The host and user come from the caller, and may come from untrusted input. They are substituted into Match exec and
+        // ProxyCommand (%h, %n, %r), which run in a shell, so shell metacharacters are refused, as OpenSSH does since 9.6 (CVE-2023-51385).
+        RequireSafe(host, nameof(host), "host name");
+        if (options.User is { } explicitUser)
+        {
+            RequireSafe(explicitUser, nameof(options), "user name");
+        }
+
         var values = new SshConfigResolver(_documents, host, options).Run();
 
         string? First(string key) => values.TryGetValue(key, out var v) && v.Count > 0 ? v[0] : null;
@@ -162,10 +171,20 @@ public sealed class SshConfig
 
         var hostContext = new SshTokenContext(host, host, 22, string.Empty, options.LocalUser, options.HomeDirectory,
             options.LocalHostName, options.GetEnvironmentVariable);
-        var hostName = hostContext.ExpandTokens(First("hostname") ?? host);
+        // ssh lowercases the target name (it is a DNS name); %h and HostName then use the lowercase form.
+        var hostName = hostContext.ExpandTokens(First("hostname") ?? host).ToLowerInvariant();
         var port = options.Port ?? ParsePort(First("port")) ?? 22;
         var user = options.User ?? First("user") ?? options.LocalUser;
-        var ctx = hostContext with { Host = hostName, Port = port, RemoteUser = user };
+        var proxyJump = First("proxyjump");
+        var hostKeyAlias = First("hostkeyalias");
+        var ctx = hostContext with
+        {
+            Host = hostName,
+            Port = port,
+            RemoteUser = user,
+            HostKeyAlias = hostKeyAlias,
+            ProxyJump = proxyJump is null || proxyJump.Equals("none", StringComparison.OrdinalIgnoreCase) ? string.Empty : proxyJump,
+        };
 
         var identityFiles = All("identityfile").Select(v => ctx.ExpandPath(ctx.ExpandTokens(v))).ToList();
         if (identityFiles.Count == 0)
@@ -173,12 +192,11 @@ public sealed class SshConfig
             identityFiles = [.. DefaultIdentityFiles.Select(ctx.ExpandPath)];
         }
 
-        IReadOnlyList<string> userKnownHosts = values.TryGetValue("userknownhostsfile", out var ukh) && ukh.Count > 0
-            ? ukh : ["~/.ssh/known_hosts", "~/.ssh/known_hosts2"];
-        IReadOnlyList<string> globalKnownHosts = values.TryGetValue("globalknownhostsfile", out var gkh) && gkh.Count > 0
-            ? gkh : DefaultGlobalKnownHosts();
+        // "none" means no file at all, not a file named "none".
+        var userKnownHosts = KnownHostsFiles(values, "userknownhostsfile", ["~/.ssh/known_hosts", "~/.ssh/known_hosts2"]);
+        var globalKnownHosts = KnownHostsFiles(values, "globalknownhostsfile", DefaultGlobalKnownHosts());
 
-        var proxyJump = First("proxyjump");
+        // The resolver keeps only whichever of ProxyJump and ProxyCommand came first, as OpenSSH does.
         var proxyCommand = values.TryGetValue("proxycommand", out var pc) && pc.Count > 0 && !pc[0].Equals("none", StringComparison.OrdinalIgnoreCase)
             ? ctx.ExpandTokens(pc[0]) : null;
 
@@ -198,7 +216,7 @@ public sealed class SshConfig
             UserKnownHostsFiles = [.. userKnownHosts.Select(v => ctx.ExpandPath(ctx.ExpandTokens(v)))],
             GlobalKnownHostsFiles = [.. globalKnownHosts.Select(v => ctx.ExpandPath(ctx.ExpandTokens(v)))],
             StrictHostKeyChecking = ParseStrict(First("stricthostkeychecking")),
-            HostKeyAlias = First("hostkeyalias") is { } alias ? ctx.ExpandTokens(alias) : null,
+            HostKeyAlias = hostKeyAlias, // not token-expanded (ssh_config(5) does not list it)
             HostKeyAlgorithms = First("hostkeyalgorithms"),
             KexAlgorithms = First("kexalgorithms"),
             Ciphers = First("ciphers"),
@@ -223,6 +241,21 @@ public sealed class SshConfig
             Options = values.ToDictionary(kv => kv.Key, kv => (IReadOnlyList<string>)kv.Value, StringComparer.OrdinalIgnoreCase),
         };
     }
+
+    private static void RequireSafe(string value, string parameterName, string what)
+    {
+        if (value.StartsWith('-') || value.AsSpan().IndexOfAny(UnsafeCharacters) >= 0 || value.Any(char.IsControl))
+        {
+            throw new ArgumentException($"The {what} contains characters that are not allowed (shell metacharacters, control characters, or a leading '-').", parameterName);
+        }
+    }
+
+    private static readonly System.Buffers.SearchValues<char> UnsafeCharacters = System.Buffers.SearchValues.Create("'`\"$\\;&<>|(){}");
+
+    private static IReadOnlyList<string> KnownHostsFiles(Dictionary<string, List<string>> values, string key, IReadOnlyList<string> defaults) =>
+        !values.TryGetValue(key, out var files) || files.Count == 0 ? defaults
+        : files.Count == 1 && files[0].Equals("none", StringComparison.OrdinalIgnoreCase) ? []
+        : files;
 
     private static string[] DefaultGlobalKnownHosts()
     {

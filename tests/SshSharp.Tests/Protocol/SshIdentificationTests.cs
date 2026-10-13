@@ -47,6 +47,15 @@ public class SshIdentificationTests
     }
 
     [Test]
+    public async Task SoftwareVersion_NeverContainsADashOrSpace()
+    {
+        // RFC 4253 4.2: a prerelease version must not break the identification line.
+        await Assert.That(SshSharpInfo.ForIdentification("SshSharp_1.0.0-preview.1 x")).IsEqualTo("SshSharp_1.0.0_preview.1_x");
+        await Assert.That(SshSharpInfo.SoftwareVersion).DoesNotContain("-");
+        await Assert.That(SshSharpInfo.SoftwareVersion).DoesNotContain(" ");
+    }
+
+    [Test]
     public async Task ForClient_IdentifiesTheLibrary()
     {
         var id = SshIdentification.ForClient();
