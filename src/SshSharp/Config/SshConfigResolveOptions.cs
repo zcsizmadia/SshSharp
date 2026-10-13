@@ -20,4 +20,21 @@ public sealed class SshConfigResolveOptions
 
     /// <summary>Looks up environment variables for <c>${VAR}</c> expansion. Defaults to the process environment.</summary>
     public Func<string, string?> GetEnvironmentVariable { get; init; } = Environment.GetEnvironmentVariable;
+
+    /// <summary>
+    /// Evaluates <c>Match exec</c> commands (after token expansion): returns true when the command succeeds. Null (the default)
+    /// means exec criteria never match, because running commands from a config file is opt-in; use <see cref="SshExecMatcher.RunShell"/>
+    /// for trusted files.
+    /// </summary>
+    public Func<string, bool>? ExecMatcher { get; init; }
+
+    /// <summary>
+    /// Looks up the canonical name for <c>CanonicalizeHostname</c>: receives the host and the <c>CanonicalDomains</c> and returns
+    /// the canonical name, or null when none is found. Null (the default) disables canonicalization, since resolving names is
+    /// the caller's business (DNS, <c>CanonicalizePermittedCNAMEs</c> policy).
+    /// </summary>
+    public Func<string, IReadOnlyList<string>, string?>? HostCanonicalizer { get; init; }
+
+    /// <summary>A tag given by the caller (<c>ssh -P</c>), matched by <c>Match tagged</c>; overrides <c>Tag</c> in the file.</summary>
+    public string? Tag { get; init; }
 }
