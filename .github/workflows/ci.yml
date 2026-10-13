@@ -339,22 +339,6 @@ jobs:
             'SSHSHARP_TEST_SERVER=OpenSSH'
             'SSHSHARP_TEST_SERVER_OS=windows'
           ) >> $env:GITHUB_ENV
-      - name: Keep-alives with OpenSSH's own client
-        # Does the server answer keepalive@openssh.com? ssh's ServerAliveInterval sends the same global request SshSharp does.
-        shell: pwsh
-        continue-on-error: true
-        run: |
-          # The password through SSH_ASKPASS (ssh has no option for it); the helper reads it from the masked environment variable.
-          $askpass = "$env:RUNNER_TEMP\askpass.cmd"
-          Set-Content $askpass '@echo %SSHSHARP_TEST_PASSWORD%' -Encoding ascii
-          $env:SSH_ASKPASS = $askpass
-          $env:SSH_ASKPASS_REQUIRE = 'force'
-          foreach ($round in 1..3) {
-            $start = Get-Date
-            & ssh -p 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile=NUL -o PubkeyAuthentication=no -o NumberOfPasswordPrompts=1 `
-              -o ServerAliveInterval=1 -o ServerAliveCountMax=3 sshsharp@127.0.0.1 'sleep 6; echo survived'
-            "round ${round}: ssh exit code $LASTEXITCODE after $([int]((Get-Date) - $start).TotalSeconds) s"
-          }
       - run: dotnet restore
       - run: dotnet build -c Release --no-restore
       - name: Interop tests against OpenSSH for Windows

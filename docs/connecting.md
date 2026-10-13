@@ -152,6 +152,10 @@ client.ConnectionClosed.Register(() => Console.WriteLine($"Disconnected: {client
 `IsConnected` turns false once the server disconnects, the connection fails (including missed keep-alives) or the client
 is disposed.
 
+> **OpenSSH for Windows:** the server built into Windows (OpenSSH for Windows 9.5) often fails to answer keep-alives, and
+> the connection then ends after `KeepAliveCountMax` intervals, as it does with OpenSSH's own `ssh -o ServerAliveInterval`.
+> Against such servers, leave `KeepAliveInterval` unset or use a long interval with a generous `KeepAliveCountMax`.
+
 ## Algorithms
 
 The defaults prefer modern algorithms: the post-quantum hybrid `mlkem768x25519-sha256` (in OpenSSH since 9.9 and its default since 10.0; offered on
