@@ -120,6 +120,9 @@ internal sealed class FakeSessionServer : IAsyncDisposable
     /// <summary>Send invalid proofs for hostkeys-prove-00@openssh.com (an impostor that cannot sign with the announced keys).</summary>
     public bool CorruptHostKeyProofs { get; init; }
 
+    /// <summary>Prove RSA keys with SHA-1 "ssh-rsa" signatures, as OpenSSH before 8.x does when the host key in use is not RSA.</summary>
+    public bool ProveRsaWithSha1 { get; init; }
+
     /// <summary>Names of the global requests the client sent, in order.</summary>
     public List<string> GlobalRequests { get; } = [];
 
@@ -327,7 +330,7 @@ internal sealed class FakeSessionServer : IAsyncDisposable
                     {
                         var key = announced.First(k => k.Blob.AsSpan().SequenceEqual(blob));
                         var signed = Build(w => { w.WriteString(name); w.WriteString(_server.SessionId!); w.WriteString(blob); });
-                        var signature = key.Sign(key.KeyType == "ssh-rsa" ? "rsa-sha2-512" : key.KeyType, signed);
+                        var signature = key.Sign(key.KeyType == "ssh-rsa" ? (ProveRsaWithSha1 ? "ssh-rsa" : "rsa-sha2-512") : key.KeyType, signed);
                         if (CorruptHostKeyProofs)
                         {
                             signature[^1] ^= 1;

@@ -80,6 +80,30 @@ public sealed class UpdateHostKeysTests : IDisposable
     }
 
     [Test]
+    public async Task Sha1ProofsForRsaKeys_LeaveOnlyThatKeyOut()
+    {
+        // Older OpenSSH proves RSA keys with SHA-1 when the connection's host key is not RSA (found by the interop matrix).
+        var current = FakeHostKey.Ed25519();
+        var rsa = FakeHostKey.Rsa(2048);
+        var ecdsa = FakeHostKey.Ecdsa(256);
+        File.WriteAllText(KnownHosts, Line(current));
+        await using var server = new FakeSessionServer(new FakeServerOptions { HostKey = current })
+        {
+            AnnouncedHostKeys = [current, rsa, ecdsa],
+            ProveRsaWithSha1 = true,
+        };
+        await using var client = await ConnectAsync(server, update: true);
+
+        string[] expected = [Line(current).TrimEnd(), Line(ecdsa).TrimEnd()];
+        for (var i = 0; i < 500 && !Recorded().SequenceEqual(expected); i++)
+        {
+            await Task.Delay(10);
+        }
+
+        await Assert.That(Recorded()).IsEquivalentTo(expected);
+    }
+
+    [Test]
     public async Task InvalidProofs_RecordNothing()
     {
         var current = FakeHostKey.Ed25519();

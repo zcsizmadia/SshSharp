@@ -32,4 +32,12 @@ internal static class RealServer
     }
 
     public static bool IsAvailable => Endpoint is not null;
+
+    /// <summary>The server software (SSHSHARP_TEST_SERVER, default OpenSSH), for expectations that differ, such as Dropbear's.</summary>
+    public static string Software => Environment.GetEnvironmentVariable("SSHSHARP_TEST_SERVER") is { Length: > 0 } name ? name : "OpenSSH";
+
+    public static bool IsOpenSsh => Software == "OpenSSH";
+
+    /// <summary>Whether the server supports strict KEX (OpenSSH 9.6+, Dropbear 2024.84+); SSHSHARP_TEST_SERVER_STRICTKEX=0 for older ones.</summary>
+    public static bool SupportsStrictKex => Environment.GetEnvironmentVariable("SSHSHARP_TEST_SERVER_STRICTKEX") != "0";
 }

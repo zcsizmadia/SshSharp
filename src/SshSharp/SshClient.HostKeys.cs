@@ -54,14 +54,17 @@ public sealed partial class SshClient
                 return;
             }
 
-            if (!AllProven(unknown, reply.Data, connection.SessionId.ToArray()))
+            if (ProvenKeys(unknown, reply.Data, connection.SessionId.ToArray()) is not { } proven)
             {
                 SshLog.HostKeyUpdateSkipped(logger, "a proof did not verify");
                 return;
             }
 
-            await knownHosts.RecordProvenAsync(name, port, unknown, connection.Closed).ConfigureAwait(false);
-            SshLog.HostKeysUpdated(logger, unknown.Count);
+            if (proven.Count > 0)
+            {
+                await knownHosts.RecordProvenAsync(name, port, proven, connection.Closed).ConfigureAwait(false);
+                SshLog.HostKeysUpdated(logger, proven.Count);
+            }
         }
         catch (Exception ex) when (ex is SshException or IOException or OperationCanceledException or ObjectDisposedException or FormatException
             or UnauthorizedAccessException)
@@ -71,9 +74,15 @@ public sealed partial class SshClient
         }
     }
 
-    private static bool AllProven(List<byte[]> keys, byte[] proofs, byte[] sessionId)
+    /// <summary>
+    /// The keys whose proof verifies, or null when any proof is invalid (then nothing is trusted). Older OpenSSH proves RSA keys with
+    /// SHA-1 "ssh-rsa" signatures when the connection's host key is not RSA; this client never trusts SHA-1, so such a key is just left
+    /// out rather than counted as a forgery.
+    /// </summary>
+    private static List<byte[]>? ProvenKeys(List<byte[]> keys, byte[] proofs, byte[] sessionId)
     {
         var reader = new SshReader(proofs);
+        var proven = new List<byte[]>();
         foreach (var key in keys)
         {
             var signature = reader.ReadString();
@@ -84,13 +93,21 @@ public sealed partial class SshClient
                 w.WriteString(key);
             });
             var algorithm = new SshReader(signature).ReadUtf8String();
-            if (!SshPublicKey.Parse(key).VerifySignature(algorithm, signature, signed))
+            var publicKey = SshPublicKey.Parse(key);
+            if (algorithm == "ssh-rsa" && publicKey.KeyType == "ssh-rsa")
             {
-                return false;
+                continue;
             }
+
+            if (!publicKey.VerifySignature(algorithm, signature, signed))
+            {
+                return null;
+            }
+
+            proven.Add(key);
         }
 
-        return reader.IsEmpty;
+        return reader.IsEmpty ? proven : null;
     }
 
     private static bool IsSupportedKey(byte[] blob)

@@ -26,6 +26,12 @@ public sealed class UpdateHostKeysInteropTests : IDisposable
             return;
         }
 
+        if (!RealServer.IsOpenSsh)
+        {
+            Skip.Test("hostkeys-00@openssh.com is an OpenSSH extension.");
+            return;
+        }
+
         using var key = keyFile is not null && File.Exists(keyFile) ? await SshPrivateKey.LoadFileAsync(keyFile) : null;
         var knownHosts = Path.Combine(_dir, "known_hosts");
         var options = new SshClientOptions

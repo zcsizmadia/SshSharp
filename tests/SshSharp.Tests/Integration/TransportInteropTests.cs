@@ -53,12 +53,21 @@ public class TransportInteropTests
         await using var stream = await RealServer.ConnectAsync();
         await using var transport = new SshTransport(stream, Options(kex, cipher, hostKey, seen));
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
-        await transport.ConnectAsync(timeout.Token);
+        try
+        {
+            await transport.ConnectAsync(timeout.Token);
+        }
+        catch (SshException ex) when (ex.Reason == SshFailureReason.KeyExchangeFailed && ex.Message.StartsWith("No matching", StringComparison.Ordinal))
+        {
+            // Older OpenSSH and Dropbear lack some algorithms; only "the server does not offer it" is a skip, anything else fails.
+            Skip.Test($"{RealServer.Software} does not offer this combination: {ex.Message}");
+            return;
+        }
 
         await Assert.That(transport.Algorithms!.Kex).IsEqualTo(kex);
         await Assert.That(transport.Algorithms.CipherClientToServer).IsEqualTo(cipher);
         await Assert.That(transport.Algorithms.HostKey).IsEqualTo(hostKey);
-        await Assert.That(transport.Algorithms.StrictKex).IsTrue();
+        await Assert.That(transport.Algorithms.StrictKex).IsEqualTo(RealServer.SupportsStrictKex);
         await Assert.That(transport.SessionId!.Length).IsGreaterThanOrEqualTo(32);
         await Assert.That(seen.Count).IsEqualTo(1);
         await Assert.That(seen[0].Fingerprint).StartsWith("SHA256:");
@@ -87,7 +96,7 @@ public class TransportInteropTests
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
         await transport.ConnectAsync(timeout.Token);
 
-        await Assert.That(transport.ServerIdentification!.SoftwareVersion).StartsWith("OpenSSH");
+        await Assert.That(transport.ServerIdentification!.SoftwareVersion).StartsWith(RealServer.Software, StringComparison.OrdinalIgnoreCase);
         await Assert.That(transport.ServerIdentification.ProtocolVersion).IsEqualTo("2.0");
 
         // OpenSSH sends SSH_MSG_EXT_INFO with server-sig-algs right after NEWKEYS, before it answers anything: provoke the first read.
