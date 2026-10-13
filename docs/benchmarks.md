@@ -70,11 +70,11 @@ cores per lane, BenchmarkDotNet 0.15.8 in-process.
 
 | Benchmark | SSH.NET | SshSharp | SshSharp time | Allocated (SSH.NET / SshSharp) |
 |---|---:|---:|---:|---|
-| Connect and authenticate | 23.4 ms | 26.2 ms | 1.12x | 68.5 KB / 57.9 KB |
-| Run a command (`echo hi`) on an open connection | 1.71 ms | 1.69 ms | 0.99x | 12.1 KB / 8.2 KB |
-| 8 commands (`echo hi`) in parallel on one connection | 5.90 ms | 3.93 ms | 0.67x | 84.6 KB / 61.6 KB |
-| Download 32 MiB (command output) | 82.3 ms | 74.7 ms | 0.91x | 613 KB / 837 KB |
-| SCP upload 32 MiB | 367 ms | 174 ms | 0.48x | 345 KB / 264 KB |
+| Connect and authenticate | 24.2 ms | 26.9 ms | 1.11x | 68.7 KB / 56.4 KB |
+| Run a command (`echo hi`) on an open connection | 1.76 ms | 1.68 ms | 0.96x | 12.1 KB / 6.3 KB |
+| 8 commands (`echo hi`) in parallel on one connection | 6.04 ms | 3.90 ms | 0.65x | 84.8 KB / 53.7 KB |
+| Download 32 MiB (command output) | 80.7 ms | 76.5 ms | 0.95x | 639 KB / 160 KB |
+| SCP upload 32 MiB | 374 ms | 170 ms | 0.46x | 344 KB / 173 KB |
 
 Streaming 2 GiB of command output (`--peak`), client on 8 cores:
 
@@ -84,7 +84,8 @@ Streaming 2 GiB of command output (`--peak`), client on 8 cores:
 | Client CPU per GiB | 4.88 s | 5.57 s |
 | ... with thread-pool spinning off | 2.69 s | 2.40 s |
 | Throughput with the client on 1 core | 265 MiB/s | 434 MiB/s |
-| Peak working set (4 GiB run) | 80 MiB | 78 MiB |
+| Peak working set (4 GiB run) | 83 MiB | 76 MiB |
+| Allocated (4 GiB run) | 62 MiB | 15 MiB |
 
 For reference, OpenSSH's own `ssh` client reaches 397 MiB/s on the same setup: the server's single encryption thread sets the pace,
 so on many cores both libraries keep up with it. The CPU each library spends per GiB, and how it does on one core, are what tell
@@ -100,6 +101,11 @@ CPU per GiB is lower than SSH.NET's once spinning is excluded. On one core, SshS
 * **Connect** first measured 2.2x SSH.NET's time. Profiling each phase showed the key exchange took 12 ms, mostly in the
   managed X25519 and Ed25519. The faster field arithmetic (see above) brought the whole connect within 12% of SSH.NET.
   The rest is the server (process start, password check), the same for both libraries.
+* **Allocations while streaming** were first 837 KB for the 32 MiB download, more than SSH.NET's. The `--peak` mode's
+  allocation sampler showed why: async state machine boxes on the receive path (the methods complete asynchronously for
+  nearly every packet), and two closures allocated per packet by lambdas that rarely run. With pooled builders and those
+  lambdas moved into methods of their own, streaming allocates about 90 bytes per 32 KiB packet (the packet and data
+  wrappers), and a 1 GiB transfer runs without a garbage collection.
 * **Setup pitfalls** that made early numbers meaningless, and that the scripts now avoid:
   * The CI image renews keys every 32 KiB (`RekeyLimit 32K`, to test rekeying), which held every transfer to about 2 MiB/s. The
     benchmark containers set `REKEY_LIMIT="default none"`.
