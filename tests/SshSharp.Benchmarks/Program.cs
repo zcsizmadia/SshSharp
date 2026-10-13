@@ -9,6 +9,19 @@ if (args.Length > 0 && args[0] == "--timing")
     return;
 }
 
+// Peak memory streaming a large output through one library: ... -- --peak sshsharp|sshnet [MiB] (see PeakMemory).
+if (args.Length > 1 && args[0] == "--peak")
+{
+    await SshSharp.Benchmarks.PeakMemory.RunAsync(args[1], args.Length > 2 ? int.Parse(args[2], System.Globalization.CultureInfo.InvariantCulture) : 1024);
+    return;
+}
+
+if (args.Length > 0 && args[0] == "--connect-profile")
+{
+    await SshSharp.Benchmarks.ConnectProfile.RunAsync();
+    return;
+}
+
 BenchmarkSwitcher.FromAssembly(typeof(Program).Assembly).Run(args);
 
 /// <summary>Entry point holder for the benchmark runner.</summary>

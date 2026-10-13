@@ -15,7 +15,7 @@ MaxStartups 200:30:300
 MaxSessions 64
 AllowTcpForwarding yes
 AllowStreamLocalForwarding yes
-RekeyLimit 32K
+RekeyLimit ${REKEY_LIMIT:-32K}
 KexAlgorithms +diffie-hellman-group14-sha256,diffie-hellman-group16-sha512
 LogLevel DEBUG1
 CONFIG
