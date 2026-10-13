@@ -143,6 +143,81 @@ public sealed partial class SshClient : IAsyncDisposable
         }
     }
 
+    /// <summary>Starts the user's login shell, usually with a terminal (<see cref="SshSessionOptions.Terminal"/>) for interactive use.</summary>
+    /// <exception cref="SshException">The server refused the terminal or the shell, or the connection failed.</exception>
+    public Task<SshSession> StartShellAsync(SshSessionOptions? options = null, CancellationToken cancellationToken = default) =>
+        StartSessionAsync("shell", null, options, cancellationToken);
+
+    /// <summary>
+    /// Starts <paramref name="command"/> with its input and output as streams, for long-running or interactive commands. For a command whose
+    /// output fits in memory, <see cref="RunCommandAsync"/> is simpler.
+    /// </summary>
+    /// <exception cref="SshException">The server refused the terminal or the command, or the connection failed.</exception>
+    public Task<SshSession> StartCommandAsync(string command, SshSessionOptions? options = null, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(command);
+        return StartSessionAsync("exec", command, options, cancellationToken);
+    }
+
+    private async Task<SshSession> StartSessionAsync(string kind, string? command, SshSessionOptions? options, CancellationToken cancellationToken)
+    {
+        ObjectDisposedException.ThrowIf(_disposed != 0, this);
+        var terminal = options?.Terminal;
+        terminal?.Validate();
+        var environment = options?.Environment ?? new Dictionary<string, string>();
+        foreach (var (name, value) in environment)
+        {
+            if (string.IsNullOrEmpty(name) || name.Contains('=') || name.Contains('\0') || value is null || value.Contains('\0'))
+            {
+                throw new ArgumentException("Environment variable names must be non-empty without '=', and names and values without NUL.", nameof(options));
+            }
+        }
+
+        var channel = await _connection.OpenSessionAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            channel.SplitExtended = true;
+
+            // In ssh's order: the terminal, then the environment, then the program.
+            if (terminal is not null && !await channel.RequestAsync("pty-req", true, w =>
+            {
+                w.WriteString(terminal.TerminalType);
+                w.WriteUInt32((uint)terminal.Columns);
+                w.WriteUInt32((uint)terminal.Rows);
+                w.WriteUInt32((uint)terminal.WidthPixels);
+                w.WriteUInt32((uint)terminal.HeightPixels);
+                w.WriteString(terminal.EncodeModes());
+            }, cancellationToken).ConfigureAwait(false))
+            {
+                throw new SshException(SshFailureReason.ChannelClosed, "The server refused to allocate a terminal.");
+            }
+
+            foreach (var (name, value) in environment)
+            {
+                // No reply: servers drop names they do not accept (sshd's AcceptEnv), as ssh expects.
+                await channel.RequestAsync("env", false, w =>
+                {
+                    w.WriteString(name);
+                    w.WriteString(value);
+                }, cancellationToken).ConfigureAwait(false);
+            }
+
+            if (!await channel.RequestAsync(kind, true, command is null ? null : w => w.WriteString(command), cancellationToken).ConfigureAwait(false))
+            {
+                throw new SshException(SshFailureReason.ChannelClosed, kind == "shell" ? "The server refused to start a shell." : "The server refused to execute the command.");
+            }
+
+            SshLog.SessionStarted(_logger, kind, channel.LocalId, terminal is not null);
+            return new SshSession(channel, terminal is not null, _logger);
+        }
+        catch
+        {
+            await channel.CloseAsync(CancellationToken.None).ConfigureAwait(false);
+            channel.DiscardUnread();
+            throw;
+        }
+    }
+
     /// <summary>Disconnects and releases the connection.</summary>
     public async ValueTask DisposeAsync()
     {

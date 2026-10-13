@@ -53,6 +53,7 @@ internal sealed class SshChannel
 
     private readonly SshConnection _connection;
     private readonly Channel<ChannelData> _incoming = Channel.CreateUnbounded<ChannelData>(new UnboundedChannelOptions { SingleReader = true, SingleWriter = true });
+    private readonly Channel<ChannelData> _extended = Channel.CreateUnbounded<ChannelData>(new UnboundedChannelOptions { SingleReader = true, SingleWriter = true });
     private readonly TaskCompletionSource _confirmed = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly TaskCompletionSource _closed = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly Queue<TaskCompletionSource<bool>> _pendingReplies = new();
@@ -212,26 +213,54 @@ internal sealed class SshChannel
         }
     }
 
-    public ValueTask SendEofAsync(CancellationToken cancellationToken) => _connection.SendAsync(Build(w =>
-    {
-        w.WriteByte(SshMessage.ChannelEof);
-        w.WriteUInt32(RemoteId);
-    }), cancellationToken);
+    /// <summary>Sends EOF: no more data from us. Nothing is sent once the channel is closing (EOF after CLOSE would be a protocol error).</summary>
+    public ValueTask SendEofAsync(CancellationToken cancellationToken) => Volatile.Read(ref _closeSent)
+        ? ValueTask.CompletedTask
+        : _connection.SendAsync(Build(w =>
+        {
+            w.WriteByte(SshMessage.ChannelEof);
+            w.WriteUInt32(RemoteId);
+        }), cancellationToken);
 
     // ---- receiving ----
 
+    /// <summary>
+    /// Deliver stderr separately, to <see cref="ReadExtendedAsync"/>, instead of interleaved with stdout in <see cref="ReadAsync"/>.
+    /// Set before the channel's command starts.
+    /// </summary>
+    public bool SplitExtended { get; set; }
+
     /// <summary>Returns the next chunk of data, or null once the peer has sent EOF (or closed) and everything has been read.</summary>
-    public async ValueTask<ChannelData?> ReadAsync(CancellationToken cancellationToken)
+    public ValueTask<ChannelData?> ReadAsync(CancellationToken cancellationToken) => ReadQueueAsync(_incoming, cancellationToken);
+
+    /// <summary>With <see cref="SplitExtended"/>: the next chunk of stderr, or null at its end.</summary>
+    public ValueTask<ChannelData?> ReadExtendedAsync(CancellationToken cancellationToken) => ReadQueueAsync(_extended, cancellationToken);
+
+    private static async ValueTask<ChannelData?> ReadQueueAsync(Channel<ChannelData> queue, CancellationToken cancellationToken)
     {
-        while (await _incoming.Reader.WaitToReadAsync(cancellationToken).ConfigureAwait(false))
+        while (await queue.Reader.WaitToReadAsync(cancellationToken).ConfigureAwait(false))
         {
-            if (_incoming.Reader.TryRead(out var item))
+            if (queue.Reader.TryRead(out var item))
             {
                 return item;
             }
         }
 
         return null;
+    }
+
+    /// <summary>Releases data nobody will read any more (the owner is done with the channel).</summary>
+    public void DiscardUnread()
+    {
+        while (_incoming.Reader.TryRead(out var item))
+        {
+            item.Dispose();
+        }
+
+        while (_extended.Reader.TryRead(out var item))
+        {
+            item.Dispose();
+        }
     }
 
     /// <summary>Called when the consumer is done with received bytes: replenishes the peer's window in large steps.</summary>
@@ -356,7 +385,8 @@ internal sealed class SshChannel
         }
 
         // Nobody will read an abandoned channel; don't hold its buffers until it closes.
-        if (_abandoned || !_incoming.Writer.TryWrite(new ChannelData(this, packet, offset, length, isExtended)))
+        var queue = isExtended && SplitExtended ? _extended : _incoming;
+        if (_abandoned || !queue.Writer.TryWrite(new ChannelData(this, packet, offset, length, isExtended)))
         {
             packet.Dispose();
         }
@@ -373,12 +403,17 @@ internal sealed class SshChannel
         Interlocked.Add(ref _localWindow, -length);
     }
 
-    internal void OnEof() => _incoming.Writer.TryComplete();
+    internal void OnEof()
+    {
+        _incoming.Writer.TryComplete();
+        _extended.Writer.TryComplete();
+    }
 
     internal void OnClose()
     {
         _remoteClosed = true;
         _incoming.Writer.TryComplete();
+        _extended.Writer.TryComplete();
 
         // Reply to the peer's CLOSE (once), without waiting: this runs on the receive loop.
         var reply = false;
@@ -452,6 +487,7 @@ internal sealed class SshChannel
     {
         _confirmed.TrySetException(exception);
         _incoming.Writer.TryComplete(exception);
+        _extended.Writer.TryComplete(exception);
         _sendWindow.Fail(exception);
         FailReplies(exception);
         _closed.TrySetException(exception);
