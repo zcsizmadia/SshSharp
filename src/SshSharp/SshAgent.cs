@@ -208,6 +208,27 @@ public sealed class SshAgent
         }
     }
 
+    /// <summary>
+    /// Whether the pipe is listed under <c>\\.\pipe\</c>. Listing the pipes is synchronous and has been seen to stall for minutes (CI, with
+    /// many pipes coming and going), so it runs off the caller's thread, bounded and cancellable: when it does not answer in time, the
+    /// pipe may exist, and the connect's own timeout decides.
+    /// </summary>
+    private static async ValueTask<bool> PipeMayExistAsync(string name, CancellationToken cancellationToken)
+    {
+        var listing = Task.Run(() => Directory.EnumerateFiles(PipePrefix, name).Any(), CancellationToken.None);
+        try
+        {
+            return await listing.WaitAsync(PipeListingTimeout, cancellationToken).ConfigureAwait(false);
+        }
+        catch (TimeoutException)
+        {
+            _ = listing.ContinueWith(static t => _ = t.Exception, CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
+            return true;
+        }
+    }
+
+    private static readonly TimeSpan PipeListingTimeout = TimeSpan.FromSeconds(2);
+
     private static async ValueTask<Stream> ConnectAsync(string path, CancellationToken cancellationToken)
     {
         if (path.StartsWith(PipePrefix, StringComparison.OrdinalIgnoreCase))
@@ -219,7 +240,7 @@ public sealed class SshAgent
 
             // Connecting waits for a pipe that does not exist yet, so a stopped agent service would stall every connection; look first.
             var name = path[PipePrefix.Length..];
-            if (!Directory.EnumerateFiles(PipePrefix, name).Any())
+            if (!await PipeMayExistAsync(name, cancellationToken).ConfigureAwait(false))
             {
                 throw new IOException($"No agent is listening on {path}.");
             }

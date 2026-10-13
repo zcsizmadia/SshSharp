@@ -112,6 +112,30 @@ public class SshTransportTests
     }
 
     [Test]
+    public async Task AFailedConnection_ReleasesSendersWaitingForAReexchange_AndRefusesNewOnes()
+    {
+        // Our KEXINIT goes out after the first send (RekeyBytes = 1) and the server never answers it: the next send waits for an exchange
+        // that cannot finish. When the connection fails (keep-alive timeout, DISCONNECT, reset), that sender must not wait forever.
+        var options = Accepting();
+        options = new SshTransportOptions { Preferences = options.Preferences, VerifyHostKey = options.VerifyHostKey, RekeyBytes = 1 };
+        var (transport, server) = await Connect(new FakeServerOptions(), options);
+        await using (transport)
+        await using (server)
+        {
+            await transport.SendAsync(new byte[] { 90, 1 }, Timeout());
+            var waiting = transport.SendAsync(new byte[] { 90, 2 }, CancellationToken.None).AsTask();
+            await Task.Delay(100);
+            await Assert.That(waiting.IsCompleted).IsFalse();
+
+            var failure = new SshException(SshFailureReason.Timeout, "The server did not respond to 3 keep-alive messages.");
+            transport.Fail(failure);
+            var error = await Assert.ThrowsAsync<SshException>(() => waiting.WaitAsync(Timeout()));
+            await Assert.That(error!.Reason).IsEqualTo(SshFailureReason.Timeout);
+            await Assert.That(async () => await transport.SendAsync(new byte[] { 90, 3 }, Timeout())).Throws<SshException>();
+        }
+    }
+
+    [Test]
     public async Task SendIf_SendsOnlyWhileTheConditionHolds_CheckedAtTheMomentOfSending()
     {
         // A channel's EOF and data use this so they never follow its CLOSE (Dropbear drops the connection for "EOF for unknown channel").
