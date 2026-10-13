@@ -64,3 +64,12 @@ internal enum DisconnectReason : uint
     NoMoreAuthMethodsAvailable = 14,
     IllegalUserName = 15,
 }
+
+/// <summary>Reason codes for <c>SSH_MSG_CHANNEL_OPEN_FAILURE</c> (RFC 4254 section 5.1).</summary>
+internal enum ChannelOpenFailureReason : uint
+{
+    AdministrativelyProhibited = 1,
+    ConnectFailed = 2,
+    UnknownChannelType = 3,
+    ResourceShortage = 4,
+}

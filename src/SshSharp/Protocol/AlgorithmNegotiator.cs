@@ -84,9 +84,13 @@ internal static class AlgorithmNegotiator
         var cipherC2S = Pick("encryption (client to server)", client.EncryptionClientToServer, server.EncryptionClientToServer);
         var cipherS2C = Pick("encryption (server to client)", client.EncryptionServerToClient, server.EncryptionServerToClient);
 
-        // AEAD ciphers authenticate themselves, but the MAC list must still be negotiable (OpenSSH always offers some).
-        var macC2S = Pick("MAC (client to server)", client.MacClientToServer, server.MacClientToServer);
-        var macS2C = Pick("MAC (server to client)", client.MacServerToClient, server.MacServerToClient);
+        // AEAD ciphers authenticate themselves: the MAC is not used, so (like OpenSSH) a MAC list without a match is no reason to fail.
+        var macC2S = IsAead(cipherC2S)
+            ? TryPick(client.MacClientToServer, server.MacClientToServer) ?? string.Empty
+            : Pick("MAC (client to server)", client.MacClientToServer, server.MacClientToServer);
+        var macS2C = IsAead(cipherS2C)
+            ? TryPick(client.MacServerToClient, server.MacServerToClient) ?? string.Empty
+            : Pick("MAC (server to client)", client.MacServerToClient, server.MacServerToClient);
         var compC2S = Pick("compression (client to server)", client.CompressionClientToServer, server.CompressionClientToServer);
         var compS2C = Pick("compression (server to client)", client.CompressionServerToClient, server.CompressionServerToClient);
 
@@ -103,7 +107,9 @@ internal static class AlgorithmNegotiator
     private static bool IsRealKex(string name) =>
         name is not (SshAlgorithms.ExtInfoClient or SshAlgorithms.ExtInfoServer or SshAlgorithms.StrictKexClient or SshAlgorithms.StrictKexServer);
 
-    private static string Pick(string what, IReadOnlyList<string> client, IReadOnlyList<string> server, Func<string, bool>? accept = null)
+    private static bool IsAead(string cipher) => SshAlgorithms.TryGetCipher(cipher, out var info) && info.IsAead;
+
+    private static string? TryPick(IReadOnlyList<string> client, IReadOnlyList<string> server, Func<string, bool>? accept = null)
     {
         foreach (var name in client)
         {
@@ -111,6 +117,16 @@ internal static class AlgorithmNegotiator
             {
                 return name;
             }
+        }
+
+        return null;
+    }
+
+    private static string Pick(string what, IReadOnlyList<string> client, IReadOnlyList<string> server, Func<string, bool>? accept = null)
+    {
+        if (TryPick(client, server, accept) is { } name)
+        {
+            return name;
         }
 
         throw new SshException(

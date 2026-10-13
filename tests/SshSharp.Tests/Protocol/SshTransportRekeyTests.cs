@@ -351,28 +351,22 @@ public class SshTransportRekeyTests
     }
 
     [Test]
-    public async Task StrictKexForbidsInjectedPacketsDuringARekey_ButNonStrictAllowsThem()
+    [Arguments(true)]
+    [Arguments(false)]
+    public async Task IgnoreDuringARekeyIsAccepted_StrictKexOnlyPolicesTheInitialExchange(bool strict)
     {
-        var (client, server, clientPump, serverPump) = await StartAsync(new FakeServerOptions { IgnoreDuringRekey = true });
+        // OpenSSH PROTOCOL 1.10: unexpected messages are fatal during the initial KEX only (SshTransportTests covers that case).
+        var (client, server, clientPump, serverPump) = await StartAsync(new FakeServerOptions { IgnoreDuringRekey = true, AdvertiseStrictKex = strict });
         await using (client)
         await using (server)
         {
             await server.RekeyAsync(Timeout());
-            await WaitUntilAsync(() => clientPump.Error is not null);
-            await Assert.That(clientPump.Error).IsTypeOf<SshProtocolException>();
+            await server.SendAsync(Message(94, 1, 50), Timeout());
+            await clientPump.NextAsync();
+            await Assert.That(client.KeyExchangeCount).IsEqualTo(2);
+            await Assert.That(clientPump.Error).IsNull();
+            await clientPump.StopAsync();
             await serverPump.StopAsync();
-        }
-
-        var (client2, server2, clientPump2, serverPump2) = await StartAsync(new FakeServerOptions { IgnoreDuringRekey = true, AdvertiseStrictKex = false });
-        await using (client2)
-        await using (server2)
-        {
-            await server2.RekeyAsync(Timeout());
-            await server2.SendAsync(Message(94, 1, 50), Timeout());
-            await clientPump2.NextAsync();
-            await Assert.That(client2.KeyExchangeCount).IsEqualTo(2);
-            await clientPump2.StopAsync();
-            await serverPump2.StopAsync();
         }
     }
 

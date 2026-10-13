@@ -105,6 +105,21 @@ internal sealed class FakeSessionServer : IAsyncDisposable
 
     public bool GlobalFailureReceived { get; private set; }
 
+    /// <summary>When set, channel opens are answered only after this task completes (to race the client's cancellation).</summary>
+    public Task? HoldChannelOpen { get; set; }
+
+    /// <summary>A snapshot of the channels the client has opened.</summary>
+    public IReadOnlyList<ServerChannel> Channels
+    {
+        get
+        {
+            lock (_channels)
+            {
+                return [.. _channels.Values];
+            }
+        }
+    }
+
     public Task StartAsync()
     {
         var handshake = _server.StartAsync(_cts.Token);
@@ -222,6 +237,11 @@ internal sealed class FakeSessionServer : IAsyncDisposable
                         w.WriteString(string.Empty);
                     }));
                     break;
+                }
+
+                if (HoldChannelOpen is { } hold)
+                {
+                    await hold.WaitAsync(_cts.Token);
                 }
 
                 var channel = new ServerChannel(_nextId++) { ClientId = clientId, ClientWindow = window, ClientMaxPacket = maxPacket };
