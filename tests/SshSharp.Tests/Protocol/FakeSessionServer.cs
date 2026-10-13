@@ -114,6 +114,12 @@ internal sealed class FakeSessionServer : IAsyncDisposable
     /// <summary>The host:port of every direct-tcpip channel the client asked for.</summary>
     public List<string> DirectTcpIpRequests { get; } = [];
 
+    /// <summary>Host keys announced after authentication (hostkeys-00@openssh.com) and proven on request (UpdateHostKeys).</summary>
+    public List<FakeHostKey>? AnnouncedHostKeys { get; init; }
+
+    /// <summary>Send invalid proofs for hostkeys-prove-00@openssh.com (an impostor that cannot sign with the announced keys).</summary>
+    public bool CorruptHostKeyProofs { get; init; }
+
     /// <summary>Names of the global requests the client sent, in order.</summary>
     public List<string> GlobalRequests { get; } = [];
 
@@ -276,6 +282,20 @@ internal sealed class FakeSessionServer : IAsyncDisposable
                 if (ok)
                 {
                     await _server.SendAsync(new byte[] { SshMessage.UserAuthSuccess });
+                    if (AnnouncedHostKeys is { } announced)
+                    {
+                        // Like sshd with UpdateHostKeys clients: list every host key right after authentication.
+                        await _server.SendAsync(Build(w =>
+                        {
+                            w.WriteByte(SshMessage.GlobalRequest);
+                            w.WriteString("hostkeys-00@openssh.com");
+                            w.WriteBoolean(false);
+                            foreach (var key in announced)
+                            {
+                                w.WriteString(key.Blob);
+                            }
+                        }));
+                    }
                 }
                 else
                 {
@@ -293,8 +313,41 @@ internal sealed class FakeSessionServer : IAsyncDisposable
                     GlobalRequests.Add(name);
                 }
 
+                var wantReply = reader.ReadBoolean();
+                if (name == "hostkeys-prove-00@openssh.com" && AnnouncedHostKeys is { } announced)
+                {
+                    // Prove possession of each requested key: sign "hostkeys-prove-00@openssh.com", the session id and the key.
+                    var requested = new List<byte[]>();
+                    while (!reader.IsEmpty)
+                    {
+                        requested.Add(reader.ReadString().ToArray());
+                    }
+
+                    var proofs = requested.Select(blob =>
+                    {
+                        var key = announced.First(k => k.Blob.AsSpan().SequenceEqual(blob));
+                        var signed = Build(w => { w.WriteString(name); w.WriteString(_server.SessionId!); w.WriteString(blob); });
+                        var signature = key.Sign(key.KeyType == "ssh-rsa" ? "rsa-sha2-512" : key.KeyType, signed);
+                        if (CorruptHostKeyProofs)
+                        {
+                            signature[^1] ^= 1;
+                        }
+
+                        return signature;
+                    }).ToList();
+                    await _server.SendAsync(Build(w =>
+                    {
+                        w.WriteByte(SshMessage.RequestSuccess);
+                        foreach (var proof in proofs)
+                        {
+                            w.WriteString(proof);
+                        }
+                    }));
+                    break;
+                }
+
                 // Like OpenSSH: unknown requests (keepalive@openssh.com included) get a failure, which is still an answer.
-                if (reader.ReadBoolean() && !IgnoreGlobalRequests)
+                if (wantReply && !IgnoreGlobalRequests)
                 {
                     await _server.SendAsync(new byte[] { SshMessage.RequestFailure });
                 }

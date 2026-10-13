@@ -48,6 +48,12 @@ internal sealed class SshConnection : IAsyncDisposable
     /// <summary>Why the connection ended, if it did.</summary>
     public Exception? Failure => _failure;
 
+    /// <summary>Called on the receive loop with the host keys a server announces (<c>hostkeys-00@openssh.com</c>); must not block.</summary>
+    public Action<IReadOnlyList<byte[]>>? HostKeysAnnounced { get; set; }
+
+    /// <summary>The session identifier (the first exchange hash), which host key proofs are bound to.</summary>
+    public ReadOnlyMemory<byte> SessionId => _transport.SessionId;
+
     /// <summary>When the last packet arrived (a <see cref="TimeProvider"/> timestamp), for tests.</summary>
     internal long LastReceived => Interlocked.Read(ref _lastReceived);
 
@@ -410,13 +416,27 @@ internal sealed class SshConnection : IAsyncDisposable
         switch (type)
         {
             case SshMessage.GlobalRequest:
-                reader.ReadUtf8String();
-                if (reader.ReadBoolean())
+            {
+                var name = reader.ReadUtf8String();
+                var wantReply = reader.ReadBoolean();
+                if (name == "hostkeys-00@openssh.com" && !wantReply && HostKeysAnnounced is { } announced)
+                {
+                    // OpenSSH's UpdateHostKeys (PROTOCOL 2.5): the server lists all its host keys after authentication.
+                    var keys = new List<byte[]>();
+                    while (!reader.IsEmpty && keys.Count < 64)
+                    {
+                        keys.Add(reader.ReadString().ToArray());
+                    }
+
+                    announced(keys);
+                }
+                else if (wantReply)
                 {
                     Post([SshMessage.RequestFailure]);
                 }
 
                 return false;
+            }
 
             case SshMessage.RequestSuccess or SshMessage.RequestFailure:
                 CompleteGlobalReply(new GlobalReply(type == SshMessage.RequestSuccess, reader.Remaining.ToArray()));
