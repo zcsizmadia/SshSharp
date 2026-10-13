@@ -97,6 +97,32 @@ jobs:
           sudo /usr/sbin/sshd -f /tmp/sshd_config_test -E /tmp/sshd.log
           sleep 1
           ssh -V
+      - name: Throwaway user keys from ssh-keygen (every type and file format)
+        run: |
+          set -euo pipefail
+          KEYS="$RUNNER_TEMP/keys"
+          mkdir -p "$KEYS"
+          ssh-keygen -q -t ed25519 -N '' -C ed25519 -f "$KEYS/ed25519"
+          ssh-keygen -q -t ecdsa -b 256 -N '' -f "$KEYS/ecdsa256"
+          ssh-keygen -q -t ecdsa -b 384 -N '' -f "$KEYS/ecdsa384"
+          ssh-keygen -q -t ecdsa -b 521 -N '' -f "$KEYS/ecdsa521"
+          ssh-keygen -q -t rsa -b 3072 -N '' -f "$KEYS/rsa"
+          ssh-keygen -q -t rsa -b 2048 -m PEM -N '' -f "$KEYS/rsa_pem"
+          ssh-keygen -q -t rsa -b 2048 -m PKCS8 -N '' -f "$KEYS/rsa_pkcs8"
+          ssh-keygen -q -t ecdsa -b 384 -m PEM -N '' -f "$KEYS/ecdsa_pem"
+          ssh-keygen -q -t ecdsa -b 256 -m PKCS8 -N '' -f "$KEYS/ecdsa_pkcs8"
+          # Passphrase-protected (bcrypt_pbkdf) with each cipher ssh-keygen offers that SshSharp reads.
+          PHRASE="$(openssl rand -hex 12)"
+          echo "::add-mask::$PHRASE"
+          echo "SSHSHARP_TEST_KEY_PASSPHRASE=$PHRASE" >> "$GITHUB_ENV"
+          for cipher in aes256-ctr aes128-ctr aes256-cbc aes256-gcm@openssh.com aes128-gcm@openssh.com; do
+            ssh-keygen -q -t ed25519 -Z "$cipher" -N "$PHRASE" -f "$KEYS/ed25519_encrypted_${cipher%%@*}"
+          done
+          ssh-keygen -q -t rsa -b 2048 -N "$PHRASE" -f "$KEYS/rsa_encrypted_default"
+          ssh-keygen -q -t ecdsa -b 384 -a 4 -N "$PHRASE" -f "$KEYS/ecdsa_encrypted_rounds4"
+          sudo install -d -m 700 -o sshsharp -g sshsharp /home/sshsharp/.ssh
+          cat "$KEYS"/*.pub | sudo install -m 600 -o sshsharp -g sshsharp /dev/stdin /home/sshsharp/.ssh/authorized_keys
+          echo "SSHSHARP_TEST_KEYDIR=$KEYS" >> "$GITHUB_ENV"
       - run: dotnet restore --locked-mode
       - run: dotnet build -c Release --no-restore
       - name: Interop tests against the real server (net8.0)

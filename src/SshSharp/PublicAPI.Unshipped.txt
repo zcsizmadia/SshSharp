@@ -200,6 +200,8 @@ SshSharp.SshClientOptions.MaxCommandOutputBytes.get -> long
 SshSharp.SshClientOptions.MaxCommandOutputBytes.init -> void
 SshSharp.SshClientOptions.Password.get -> string?
 SshSharp.SshClientOptions.Password.init -> void
+SshSharp.SshClientOptions.PrivateKeys.get -> System.Collections.Generic.IReadOnlyList<SshSharp.SshPrivateKey!>!
+SshSharp.SshClientOptions.PrivateKeys.init -> void
 SshSharp.SshClientOptions.RekeyAfterBytes.get -> long
 SshSharp.SshClientOptions.RekeyAfterBytes.init -> void
 SshSharp.SshClientOptions.RekeyAfterTime.get -> System.TimeSpan
@@ -261,6 +263,13 @@ SshSharp.SshHostKeyVerdict.Reason.get -> string?
 SshSharp.SshHostKeyVerdict.SshHostKeyVerdict() -> void
 SshSharp.SshHostKeyVerifier
 SshSharp.SshHostKeyVerifier.SshHostKeyVerifier() -> void
+SshSharp.SshPrivateKey
+SshSharp.SshPrivateKey.Comment.get -> string?
+SshSharp.SshPrivateKey.Dispose() -> void
+SshSharp.SshPrivateKey.Fingerprint.get -> string!
+SshSharp.SshPrivateKey.KeyType.get -> string!
+SshSharp.SshPrivateKey.PublicKey.get -> System.ReadOnlyMemory<byte>
+SshSharp.SshPrivateKey.ToAuthorizedKeysLine() -> string!
 SshSharp.SshProtocolException
 SshSharp.SshProtocolException.SshProtocolException(string! message) -> void
 SshSharp.SshSharpInfo
@@ -292,6 +301,8 @@ static SshSharp.SshHostKeyVerdict.operator ==(SshSharp.SshHostKeyVerdict left, S
 static SshSharp.SshHostKeyVerdict.Reject(string! reason) -> SshSharp.SshHostKeyVerdict
 static SshSharp.SshHostKeyVerifier.FromDelegate(System.Func<SshSharp.SshHostKeyContext!, System.Threading.CancellationToken, System.Threading.Tasks.ValueTask<bool>>! verify) -> SshSharp.SshHostKeyVerifier!
 static SshSharp.SshHostKeyVerifier.Pinned(params string![]! fingerprints) -> SshSharp.SshHostKeyVerifier!
+static SshSharp.SshPrivateKey.LoadFileAsync(string! path, string? passphrase = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SshSharp.SshPrivateKey!>!
+static SshSharp.SshPrivateKey.Parse(string! text, string? passphrase = null) -> SshSharp.SshPrivateKey!
 static SshSharp.SshSharpInfo.SoftwareVersion.get -> string!
 ~override SshSharp.SshHostKeyVerdict.Equals(object obj) -> bool
 ~override SshSharp.SshHostKeyVerdict.ToString() -> string

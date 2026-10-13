@@ -16,8 +16,14 @@ public sealed class SshClientOptions
     /// <summary>The user to authenticate as.</summary>
     public required string UserName { get; init; }
 
-    /// <summary>The password for password authentication, if used.</summary>
+    /// <summary>The password for password authentication, if used. Tried after <see cref="PrivateKeys"/>.</summary>
     public string? Password { get; init; }
+
+    /// <summary>
+    /// Keys for public-key authentication, tried in order (load them with <see cref="SshPrivateKey.LoadFileAsync"/>). The client does not
+    /// dispose them. The server is asked whether it accepts each key before anything is signed.
+    /// </summary>
+    public IReadOnlyList<SshPrivateKey> PrivateKeys { get; init; } = [];
 
     /// <summary>
     /// Decides whether to trust the server's host key: a <see cref="KnownHostsVerifier"/>, <see cref="SshHostKeyVerifier.Pinned"/>,

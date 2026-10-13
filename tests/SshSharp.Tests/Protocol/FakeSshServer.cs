@@ -150,6 +150,9 @@ internal sealed class FakeServerOptions
 
     public bool SendExtInfo { get; init; } = true;
 
+    /// <summary>The <c>server-sig-algs</c> extension value (what OpenSSH sends by default).</summary>
+    public string ServerSigAlgs { get; init; } = "ssh-ed25519,ecdsa-sha2-nistp256,ecdsa-sha2-nistp384,ecdsa-sha2-nistp521,rsa-sha2-512,rsa-sha2-256";
+
     public string[] BannerLines { get; init; } = [];
 
     public string Identification { get; init; } = "SSH-2.0-FakeServer_1.0";
@@ -511,7 +514,7 @@ internal sealed class FakeSshServer : IAsyncDisposable
                 w.WriteByte(SshMessage.ExtInfo);
                 w.WriteUInt32(1);
                 w.WriteString("server-sig-algs");
-                w.WriteString("ssh-ed25519,rsa-sha2-512,rsa-sha2-256");
+                w.WriteString(Options.ServerSigAlgs);
             }), cancellationToken);
         }
     }
