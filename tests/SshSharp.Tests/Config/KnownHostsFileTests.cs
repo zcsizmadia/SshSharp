@@ -121,6 +121,15 @@ public class KnownHostsFileTests
     }
 
     [Test]
+    public async Task FieldsOfOtherWhitespace_AreAnInvalidLine_NotAnException()
+    {
+        // Found by the coverage-guided fuzzer: fields are split on space and tab, so a key type of "\v" reached the entry constructor.
+        var file = KnownHostsFile.Parse($"host \v {KeyAText}\n  ssh-ed25519 {KeyAText}\ngood ssh-ed25519 {KeyAText}\n");
+        await Assert.That(file.Entries.Count).IsEqualTo(1);
+        await Assert.That(file.InvalidLineCount).IsEqualTo(2);
+    }
+
+    [Test]
     public async Task Remove_DropsLine_ButKeepsComments()
     {
         var file = KnownHostsFile.Parse($"# keep me\na ssh-ed25519 {KeyAText}\nb ssh-ed25519 {KeyAText}\n");
