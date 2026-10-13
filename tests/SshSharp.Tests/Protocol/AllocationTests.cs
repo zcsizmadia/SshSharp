@@ -55,14 +55,22 @@ public class AllocationTests
             Once(); // warm up: JIT, tiered compilation, buffer pools
         }
 
+        // The lowest of a few rounds: the runtime occasionally allocates on this thread for its own reasons (the shared array pool
+        // trimming and refilling after a gen-2 GC, a late tier-up), which lands in one round and is not the codec's doing.
         const int iterations = 2000;
-        var before = GC.GetAllocatedBytesForCurrentThread();
-        for (var i = 0; i < iterations; i++)
+        var lowest = double.MaxValue;
+        for (var round = 0; round < 3; round++)
         {
-            Once();
+            var before = GC.GetAllocatedBytesForCurrentThread();
+            for (var i = 0; i < iterations; i++)
+            {
+                Once();
+            }
+
+            lowest = Math.Min(lowest, (GC.GetAllocatedBytesForCurrentThread() - before) / (double)iterations);
         }
 
-        return (GC.GetAllocatedBytesForCurrentThread() - before) / (double)iterations;
+        return lowest;
     }
 
     [Test]

@@ -45,6 +45,10 @@ public abstract class SshPrivateKey : IDisposable
     /// <summary>Signs <paramref name="data"/> and returns the SSH signature blob (<c>string algorithm || string signature</c>).</summary>
     internal abstract byte[] Sign(string algorithm, ReadOnlySpan<byte> data);
 
+    /// <summary>Signs like <see cref="Sign"/>; keys held elsewhere (an SSH agent) sign only this way.</summary>
+    internal virtual ValueTask<byte[]> SignAsync(string algorithm, ReadOnlyMemory<byte> data, CancellationToken cancellationToken) =>
+        ValueTask.FromResult(Sign(algorithm, data.Span));
+
     /// <summary>Parses a private key.</summary>
     /// <param name="text">The key file's contents.</param>
     /// <param name="passphrase">The passphrase of an encrypted key; ignored for unencrypted keys.</param>
@@ -129,6 +133,9 @@ public abstract class SshPrivateKey : IDisposable
         internal override IReadOnlyList<string> SignatureAlgorithms { get; }
 
         internal override byte[] Sign(string algorithm, ReadOnlySpan<byte> data) => _key.Sign(SshCertificate.BaseAlgorithm(algorithm), data);
+
+        internal override ValueTask<byte[]> SignAsync(string algorithm, ReadOnlyMemory<byte> data, CancellationToken cancellationToken) =>
+            _key.SignAsync(SshCertificate.BaseAlgorithm(algorithm), data, cancellationToken);
 
         private protected override void DisposeCore()
         {

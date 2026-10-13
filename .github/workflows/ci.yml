@@ -165,6 +165,14 @@ jobs:
           sudo install -d -m 700 -o sshsharp -g sshsharp /home/sshsharp/.ssh
           cat "$KEYS"/*.pub | sudo install -m 600 -o sshsharp -g sshsharp /dev/stdin /home/sshsharp/.ssh/authorized_keys
           echo "SSHSHARP_TEST_KEYDIR=$KEYS" >> "$GITHUB_ENV"
+      - name: OpenSSH's ssh-agent holding an Ed25519 and an RSA key
+        run: |
+          set -euo pipefail
+          eval "$(ssh-agent -s -a "$RUNNER_TEMP/agent.sock")" > /dev/null
+          ssh-add -q "$SSHSHARP_TEST_KEYDIR/ed25519" "$SSHSHARP_TEST_KEYDIR/rsa"
+          ssh-add -l
+          echo "SSH_AUTH_SOCK=$SSH_AUTH_SOCK" >> "$GITHUB_ENV"
+          echo "SSHSHARP_TEST_AGENT=1" >> "$GITHUB_ENV"
       - run: dotnet restore --locked-mode
       - run: dotnet build -c Release --no-restore
       - name: Interop tests against the real server (net8.0)

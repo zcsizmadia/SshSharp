@@ -29,6 +29,9 @@ public enum SshFailureReason
 
     /// <summary>The network connection to the server could not be established.</summary>
     ConnectFailed,
+
+    /// <summary>The SSH agent could not be reached, refused a request, or answered with something unexpected.</summary>
+    AgentFailed,
 }
 
 /// <summary>The base class for errors raised by SshSharp when talking SSH.</summary>

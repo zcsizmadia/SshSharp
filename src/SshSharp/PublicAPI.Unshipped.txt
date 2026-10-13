@@ -477,3 +477,13 @@ SshSharp.SshTerminalOptions.TerminalType.get -> string!
 SshSharp.SshTerminalOptions.TerminalType.init -> void
 SshSharp.SshTerminalOptions.WidthPixels.get -> int
 SshSharp.SshTerminalOptions.WidthPixels.init -> void
+SshSharp.SshAgent
+SshSharp.SshAgent.GetKeysAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<SshSharp.SshPrivateKey!>!>!
+SshSharp.SshAgent.Path.get -> string!
+SshSharp.SshAgent.SshAgent(string! path) -> void
+SshSharp.SshConfigConnectOptions.Agent.get -> SshSharp.SshAgent?
+SshSharp.SshConfigConnectOptions.Agent.init -> void
+SshSharp.SshConfigConnectOptions.UseAgent.get -> bool
+SshSharp.SshConfigConnectOptions.UseAgent.init -> void
+SshSharp.SshFailureReason.AgentFailed = 9 -> SshSharp.SshFailureReason
+static SshSharp.SshAgent.FromEnvironment() -> SshSharp.SshAgent?

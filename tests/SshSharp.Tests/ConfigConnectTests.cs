@@ -75,6 +75,7 @@ public sealed class ConfigConnectTests : IDisposable
         await using var t = target;
         await using var client = await SshClient.ConnectAsync("target", new SshConfigConnectOptions
         {
+            UseAgent = false, // the developer's own agent must not change the outcome
             Config = SshConfig.Parse(Config("accept-new")),
             ResolveOptions = Resolve,
             Password = "secret",
@@ -101,6 +102,7 @@ public sealed class ConfigConnectTests : IDisposable
         await using var at = againTarget;
         await using var again = await SshClient.ConnectAsync("target", new SshConfigConnectOptions
         {
+            UseAgent = false, // the developer's own agent must not change the outcome
             Config = SshConfig.Parse(Config("yes")),
             ResolveOptions = Resolve,
             Password = "secret",
@@ -117,6 +119,7 @@ public sealed class ConfigConnectTests : IDisposable
         jump.DirectTcpIp = Routes(("t", target));
         var client = await SshClient.ConnectAsync("t", new SshConfigConnectOptions
         {
+            UseAgent = false, // the developer's own agent must not change the outcome
             Config = SshConfig.Parse("Host t\n ProxyJump j\nHost *\n User tester\n StrictHostKeyChecking no\n UserKnownHostsFile none\n"),
             ResolveOptions = Resolve,
             Password = "secret",
@@ -143,6 +146,7 @@ public sealed class ConfigConnectTests : IDisposable
         {
             await using var client = await SshClient.ConnectAsync("srv", new SshConfigConnectOptions
             {
+                UseAgent = false, // the developer's own agent must not change the outcome
                 Config = SshConfig.Parse("Host srv\n User tester\n IdentityFile ~/missing\n IdentityFile ~/plain\n StrictHostKeyChecking no\n UserKnownHostsFile none\n"),
                 ResolveOptions = Resolve,
                 TcpConnector = Network(("srv", server)),
@@ -155,6 +159,7 @@ public sealed class ConfigConnectTests : IDisposable
         {
             await using var client = await SshClient.ConnectAsync("srv", new SshConfigConnectOptions
             {
+                UseAgent = false, // the developer's own agent must not change the outcome
                 Config = SshConfig.Parse("Host srv\n User tester\n IdentityFile ~/locked\n StrictHostKeyChecking no\n UserKnownHostsFile none\n"),
                 ResolveOptions = Resolve,
                 PassphraseProvider = (path, _) => { asked.Add(Path.GetFileName(path)); return ValueTask.FromResult<string?>("pw"); },
@@ -169,6 +174,7 @@ public sealed class ConfigConnectTests : IDisposable
             asked.Clear();
             await Assert.That(async () => await SshClient.ConnectAsync("srv", new SshConfigConnectOptions
             {
+                UseAgent = false, // the developer's own agent must not change the outcome
                 Config = SshConfig.Parse("Host srv\n User tester\n IdentityFile ~/locked\n BatchMode yes\n StrictHostKeyChecking no\n UserKnownHostsFile none\n"),
                 ResolveOptions = Resolve,
                 PassphraseProvider = (path, _) => { asked.Add(path); return ValueTask.FromResult<string?>("pw"); },
@@ -187,6 +193,7 @@ public sealed class ConfigConnectTests : IDisposable
             // StrictHostKeyChecking defaults to ask, and nobody answers: refused.
             await Assert.That(async () => await SshClient.ConnectAsync("alice@srv", new SshConfigConnectOptions
             {
+                UseAgent = false, // the developer's own agent must not change the outcome
                 Config = config,
                 ResolveOptions = Resolve,
                 Password = "secret",
@@ -198,6 +205,7 @@ public sealed class ConfigConnectTests : IDisposable
         await using var server = new FakeSessionServer { UserName = "alice" };
         await using var client = await SshClient.ConnectAsync("alice@srv", new SshConfigConnectOptions
         {
+            UseAgent = false, // the developer's own agent must not change the outcome
             Config = config,
             ResolveOptions = Resolve,
             Password = "secret",
@@ -214,6 +222,7 @@ public sealed class ConfigConnectTests : IDisposable
         var started = DateTime.UtcNow;
         var ex = await Assert.ThrowsAsync<SshException>(async () => await SshClient.ConnectAsync("slow", new SshConfigConnectOptions
         {
+            UseAgent = false, // the developer's own agent must not change the outcome
             Config = SshConfig.Parse("Host slow\n ConnectTimeout 1\n User u\n"),
             ResolveOptions = Resolve,
             TcpConnector = async (_, _, _, ct) =>
@@ -235,6 +244,7 @@ public sealed class ConfigConnectTests : IDisposable
         var config = SshConfig.Parse($"Host p\n User u\n ProxyCommand {command}\n StrictHostKeyChecking no\n UserKnownHostsFile none\n");
         var ex = await Assert.ThrowsAsync<SshException>(async () => await SshClient.ConnectAsync("p", new SshConfigConnectOptions
         {
+            UseAgent = false, // the developer's own agent must not change the outcome
             Config = config,
             ResolveOptions = Resolve,
             TcpConnector = (_, _, _, _) => throw new InvalidOperationException("TCP must not be used with a ProxyCommand."),
@@ -243,6 +253,7 @@ public sealed class ConfigConnectTests : IDisposable
 
         var refused = await Assert.ThrowsAsync<SshException>(async () => await SshClient.ConnectAsync("p", new SshConfigConnectOptions
         {
+            UseAgent = false, // the developer's own agent must not change the outcome
             Config = config,
             ResolveOptions = Resolve,
             AllowProxyCommand = false,

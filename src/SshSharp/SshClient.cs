@@ -383,7 +383,18 @@ public sealed partial class SshClient : IAsyncDisposable
                             }
 
                             SshLog.Authenticating(logger, "publickey");
-                            result = await auth.PublicKeyAsync(key, algorithm, cancellationToken).ConfigureAwait(false);
+                            try
+                            {
+                                result = await auth.PublicKeyAsync(key, algorithm, cancellationToken).ConfigureAwait(false);
+                            }
+                            catch (SshException ex) when (ex.Reason == SshFailureReason.AgentFailed)
+                            {
+                                // The agent lost the key or the user declined to confirm: the next key may still do.
+                                SshLog.AgentKeySkipped(logger, key.Fingerprint, ex.Message);
+                                result = null;
+                                continue;
+                            }
+
                             if (result.Success || result.PartialSuccess)
                             {
                                 break;
