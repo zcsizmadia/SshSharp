@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Formats.Asn1;
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using SshSharp.Crypto;
@@ -84,6 +85,116 @@ internal static class TestKeys
         }
 
         return PemEncoding.WriteString("PRIVATE KEY", writer.Encode()) + "\n";
+    }
+
+    /// <summary>A PuTTY .ppk file (version 2 or 3, optionally aes256-cbc encrypted) for a fresh Ed25519, ECDSA P-256 or RSA key.</summary>
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Security", "CA5350", Justification = "PuTTY version 2 files are defined with SHA-1.")]
+    public static string Ppk(int version, string keyType, out byte[] publicBlob, string? passphrase = null, string comment = "ppk-test",
+        bool corruptMac = false)
+    {
+        byte[] privateBlob;
+        switch (keyType)
+        {
+            case "ssh-ed25519":
+            {
+                var seed = RandomNumberGenerator.GetBytes(32);
+                var pub = new byte[32];
+                Ed25519.GetPublicKey(seed, pub);
+                publicBlob = Blob(w => { w.WriteString("ssh-ed25519"); w.WriteString(pub); });
+                privateBlob = Blob(w => w.WriteString(seed));
+                break;
+            }
+
+            case "ecdsa-sha2-nistp256":
+            {
+                using var ecdsa = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+                var p = ecdsa.ExportParameters(true);
+                publicBlob = EcdsaPublicBlob(ecdsa, "nistp256");
+                privateBlob = Blob(w => w.WriteMpint(p.D));
+                break;
+            }
+
+            default:
+            {
+                using var rsa = RSA.Create(2048);
+                var p = rsa.ExportParameters(true);
+                publicBlob = RsaPublicBlob(rsa);
+                privateBlob = Blob(w => { w.WriteMpint(p.D); w.WriteMpint(p.P); w.WriteMpint(p.Q); w.WriteMpint(p.InverseQ); });
+                break;
+            }
+        }
+
+        var encryption = passphrase is null ? "none" : "aes256-cbc";
+        var phrase = Encoding.UTF8.GetBytes(passphrase ?? string.Empty);
+        if (passphrase is not null)
+        {
+            // Padding to the cipher block (PuTTY fills it with hash bytes; any bytes do, as the MAC covers them).
+            privateBlob = [.. privateBlob, .. RandomNumberGenerator.GetBytes((16 - (privateBlob.Length % 16)) % 16)];
+        }
+
+        var salt = RandomNumberGenerator.GetBytes(16);
+        byte[] cipherKey = [], iv = new byte[16], macKey;
+        if (version == 3)
+        {
+            if (passphrase is not null)
+            {
+                var derived = new byte[80];
+                Argon2.Hash(Argon2Type.Argon2id, phrase, salt, 64, 2, 1, derived);
+                (cipherKey, iv, macKey) = (derived[..32], derived[32..48], derived[48..]);
+            }
+            else
+            {
+                macKey = [];
+            }
+        }
+        else
+        {
+            macKey = SHA1.HashData([.. "putty-private-key-file-mac-key"u8, .. phrase]);
+            cipherKey = [.. SHA1.HashData([0, 0, 0, 0, .. phrase]), .. SHA1.HashData([0, 0, 0, 1, .. phrase])];
+            cipherKey = cipherKey[..32];
+        }
+
+        var publicCopy = publicBlob;
+        var macData = Blob(w =>
+        {
+            w.WriteString(keyType);
+            w.WriteString(encryption);
+            w.WriteString(comment);
+            w.WriteString(publicCopy);
+            w.WriteString(privateBlob);
+        });
+        var mac = version == 3 ? HMACSHA256.HashData(macKey, macData) : HMACSHA1.HashData(macKey, macData);
+        if (corruptMac)
+        {
+            mac[0] ^= 1;
+        }
+
+        var stored = privateBlob;
+        if (passphrase is not null)
+        {
+            using var aes = Aes.Create();
+            aes.Key = cipherKey;
+            stored = aes.EncryptCbc(privateBlob, iv, PaddingMode.None);
+        }
+
+        static string Lines(byte[] data)
+        {
+            var base64 = Convert.ToBase64String(data);
+            var lines = Enumerable.Range(0, (base64.Length + 63) / 64).Select(i => base64.Substring(i * 64, Math.Min(64, base64.Length - (i * 64)))).ToList();
+            return $"{lines.Count}\n{string.Join('\n', lines)}\n";
+        }
+
+        var sb = new StringBuilder();
+        sb.Append(CultureInfo.InvariantCulture, $"PuTTY-User-Key-File-{version}: {keyType}\nEncryption: {encryption}\nComment: {comment}\n");
+        sb.Append("Public-Lines: ").Append(Lines(publicBlob));
+        if (version == 3 && passphrase is not null)
+        {
+            sb.Append(CultureInfo.InvariantCulture, $"Key-Derivation: Argon2id\nArgon2-Memory: 64\nArgon2-Passes: 2\nArgon2-Parallelism: 1\nArgon2-Salt: {Convert.ToHexString(salt).ToLowerInvariant()}\n");
+        }
+
+        sb.Append("Private-Lines: ").Append(Lines(stored));
+        sb.Append(CultureInfo.InvariantCulture, $"Private-MAC: {Convert.ToHexString(mac).ToLowerInvariant()}\n");
+        return sb.ToString();
     }
 
     public static byte[] RsaPublicBlob(RSA rsa)

@@ -149,6 +149,22 @@ public class ParserRobustnessTests
     }
 
     [Test]
+    public async Task PuttyKeyParsing_OnlyEverFailsWithAFormatError()
+    {
+        byte[][] seeds =
+        [
+            Encoding.Latin1.GetBytes(Keys.TestKeys.Ppk(2, "ssh-ed25519", out _)),
+            Encoding.Latin1.GetBytes(Keys.TestKeys.Ppk(3, "ecdsa-sha2-nistp256", out _)),
+            Encoding.Latin1.GetBytes(Keys.TestKeys.Ppk(3, "ssh-ed25519", out _, passphrase: "pw")),
+        ];
+        var failures = Run(seeds, input =>
+        {
+            using var key = SshPrivateKey.Parse(Encoding.Latin1.GetString(input), "pw");
+        }, FormatErrors, iterations: 1500);
+        await Assert.That(failures).IsEmpty();
+    }
+
+    [Test]
     public async Task TheHarness_ReportsUnexpectedExceptions_AndMutates()
     {
         // A harness that silently swallowed everything would make every test above pass.

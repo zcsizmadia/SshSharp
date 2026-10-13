@@ -29,9 +29,9 @@ internal static class PrivateKeyParser
                 return ParseOpenSsh(text, passphrase);
             }
 
-            if (text.StartsWith("PuTTY-User-Key-File-", StringComparison.Ordinal))
+            if (text.TrimStart().StartsWith("PuTTY-User-Key-File-", StringComparison.Ordinal))
             {
-                throw new FormatException("PuTTY .ppk keys are not supported yet; convert the key with puttygen to OpenSSH format.");
+                return PuttyKeyParser.Parse(text.TrimStart(), passphrase);
             }
 
             if (text.Contains("-----BEGIN ENCRYPTED PRIVATE KEY-----", StringComparison.Ordinal))
