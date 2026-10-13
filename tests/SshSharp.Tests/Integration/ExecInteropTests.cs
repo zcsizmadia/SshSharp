@@ -27,6 +27,32 @@ public class ExecInteropTests
     private static CancellationToken Timeout() => new CancellationTokenSource(TimeSpan.FromSeconds(90)).Token;
 
     [Test]
+    public async Task KeepAlivesAreAnswered_SoAnIdleConnectionStaysUp()
+    {
+        if (!Configured)
+        {
+            Skip.Test("No real server account configured.");
+        }
+
+        // Unanswered probes would drop the connection after 4 x 500 ms; OpenSSH answers keepalive@openssh.com. (Not tighter: a loaded CI
+        // runner can delay the receive loop past a very short interval, which is a genuine miss.)
+        var (host, port) = RealServer.Endpoint!.Value;
+        var options = new SshClientOptions
+        {
+            UserName = Environment.GetEnvironmentVariable("SSHSHARP_TEST_USER")!,
+            Password = Environment.GetEnvironmentVariable("SSHSHARP_TEST_PASSWORD"),
+            HostKeyVerifier = SshHostKeyVerifier.FromDelegate((_, _) => ValueTask.FromResult(true)),
+            KeepAliveInterval = TimeSpan.FromMilliseconds(500),
+            KeepAliveCountMax = 3,
+        };
+        await using var client = await SshClient.ConnectAsync(host, port, options, Timeout());
+        await Task.Delay(TimeSpan.FromSeconds(3));
+        await Assert.That(client.ConnectionError).IsNull(); // shows the exception if the connection dropped
+        await Assert.That(client.IsConnected).IsTrue();
+        await Assert.That((await client.RunCommandAsync("echo alive", Timeout())).StandardOutputText).IsEqualTo("alive\n");
+    }
+
+    [Test]
     public async Task RunsACommand()
     {
         if (!Configured)

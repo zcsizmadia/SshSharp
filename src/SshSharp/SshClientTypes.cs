@@ -38,6 +38,21 @@ public sealed class SshClientOptions
     /// </summary>
     public string? HostKeyAlias { get; init; }
 
+    /// <summary>
+    /// Send a keep-alive when the server has been silent this long (OpenSSH's <c>ServerAliveInterval</c>). Null (the default) sends none.
+    /// Keep-alives detect a dead connection and stop idle NAT and firewall timeouts from dropping it.
+    /// </summary>
+    public TimeSpan? KeepAliveInterval { get; init; }
+
+    /// <summary>
+    /// After this many keep-alive intervals without hearing from the server, the connection is declared dead and fails with
+    /// <see cref="SshFailureReason.Timeout"/> (OpenSSH's <c>ServerAliveCountMax</c>). Default 3.
+    /// </summary>
+    public int KeepAliveCountMax { get; init; } = 3;
+
+    /// <summary>The clock for rekey and keep-alive timing; replaceable in tests.</summary>
+    internal TimeProvider TimeProvider { get; init; } = TimeProvider.System;
+
     /// <summary>The most output (stdout plus stderr) <see cref="SshClient.RunCommandAsync"/> will collect before failing. Default 128 MiB.</summary>
     public long MaxCommandOutputBytes { get; init; } = 128L * 1024 * 1024;
 

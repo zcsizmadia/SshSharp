@@ -27,10 +27,19 @@ internal sealed class SshConnection : IAsyncDisposable
     private readonly Channel<byte[]> _outbox = Channel.CreateUnbounded<byte[]>(new UnboundedChannelOptions { SingleReader = true });
     private Task? _outboxLoop;
 
-    public SshConnection(SshTransport transport, ILogger? logger = null)
+    // Global requests are answered in order (RFC 4254 section 4), so waiters are queued exactly when their request is committed to the wire.
+    private readonly Queue<TaskCompletionSource<GlobalReply>> _globalReplies = new();
+    private readonly CancellationTokenSource _closed = new();
+    private readonly TimeProvider _time;
+    private long _lastReceived;
+    private Task? _keepAliveLoop;
+
+    public SshConnection(SshTransport transport, ILogger? logger = null, TimeProvider? timeProvider = null)
     {
         _transport = transport;
         _logger = logger ?? NullLogger.Instance;
+        _time = timeProvider ?? TimeProvider.System;
+        _lastReceived = _time.GetTimestamp();
     }
 
     /// <summary>How many key exchanges have completed, including the first.</summary>
@@ -39,11 +48,119 @@ internal sealed class SshConnection : IAsyncDisposable
     /// <summary>Why the connection ended, if it did.</summary>
     public Exception? Failure => _failure;
 
+    /// <summary>When the last packet arrived (a <see cref="TimeProvider"/> timestamp), for tests.</summary>
+    internal long LastReceived => Interlocked.Read(ref _lastReceived);
+
+    /// <summary>Cancelled when the connection ends, for any reason (see <see cref="Failure"/>).</summary>
+    public CancellationToken Closed => _closed.Token;
+
     /// <summary>Starts the receive loop. Call once, after authentication succeeded.</summary>
     public void Start()
     {
         _loop = Task.Run(RunAsync);
         _outboxLoop = Task.Run(RunOutboxAsync);
+    }
+
+    /// <summary>
+    /// Starts sending <c>keepalive@openssh.com</c> when the server has been silent for <paramref name="interval"/>, like OpenSSH's
+    /// <c>ServerAliveInterval</c>. After <paramref name="countMax"/> silent intervals in a row the connection is declared dead.
+    /// </summary>
+    public void StartKeepAlive(TimeSpan interval, int countMax)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(interval, TimeSpan.Zero);
+        ArgumentOutOfRangeException.ThrowIfNegative(countMax);
+        _keepAliveLoop = Task.Run(() => RunKeepAliveAsync(interval, countMax));
+    }
+
+    /// <summary>
+    /// Sends a global request (RFC 4254 section 4). With <paramref name="wantReply"/>, waits for the server's answer and returns it;
+    /// otherwise returns a success at once.
+    /// </summary>
+    public async Task<GlobalReply> SendGlobalRequestAsync(string name, bool wantReply, Action<SshWriter>? body, CancellationToken cancellationToken)
+    {
+        var reply = wantReply ? new TaskCompletionSource<GlobalReply>(TaskCreationOptions.RunContinuationsAsynchronously) : null;
+        await SendAsync(
+            Build(w =>
+            {
+                w.WriteByte(SshMessage.GlobalRequest);
+                w.WriteString(name);
+                w.WriteBoolean(wantReply);
+                body?.Invoke(w);
+            }),
+            reply is null ? null : () => EnqueueGlobalReply(reply),
+            cancellationToken).ConfigureAwait(false);
+        return reply is null ? new GlobalReply(true, []) : await reply.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private void EnqueueGlobalReply(TaskCompletionSource<GlobalReply> reply)
+    {
+        lock (_globalReplies)
+        {
+            if (_failure is { } failure)
+            {
+                reply.TrySetException(failure);
+                return;
+            }
+
+            _globalReplies.Enqueue(reply);
+        }
+    }
+
+    private void CompleteGlobalReply(GlobalReply result)
+    {
+        TaskCompletionSource<GlobalReply>? reply;
+        lock (_globalReplies)
+        {
+            // A reply nobody asked for is ignored, as OpenSSH's client does.
+            _globalReplies.TryDequeue(out reply);
+        }
+
+        reply?.TrySetResult(result);
+    }
+
+    private async Task RunKeepAliveAsync(TimeSpan interval, int countMax)
+    {
+        var missed = 0;
+        var lastTick = _time.GetTimestamp();
+        try
+        {
+            while (true)
+            {
+                await Task.Delay(interval, _time, _stop.Token).ConfigureAwait(false);
+                var received = Interlocked.Read(ref _lastReceived);
+                if (received >= lastTick)
+                {
+                    missed = 0; // the server spoke since the last tick (an answer to the last probe counts)
+                }
+
+                lastTick = _time.GetTimestamp();
+                if (_time.GetElapsedTime(received) < interval)
+                {
+                    continue; // recent traffic: no probe needed
+                }
+
+                if (++missed > countMax)
+                {
+                    var dead = new SshException(SshFailureReason.Timeout, $"The server did not respond to {countMax} keep-alive messages.");
+                    SshLog.ConnectionFailed(_logger, dead);
+                    Fail(dead);
+                    await _stop.CancelAsync().ConfigureAwait(false);
+                    return;
+                }
+
+                // Any packet from the server counts as an answer; the reply itself is not awaited (a dead server never sends it).
+                var probe = SendGlobalRequestAsync("keepalive@openssh.com", wantReply: true, null, _stop.Token);
+                _ = probe.ContinueWith(static t => _ = t.Exception, CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
+            }
+        }
+        catch (OperationCanceledException) when (_stop.IsCancellationRequested)
+        {
+            // Shutting down.
+        }
+        catch (SshException)
+        {
+            // The connection failed while sending; the receive loop reports why.
+        }
     }
 
     /// <summary>Queues a message to be sent without waiting. For use from the receive loop and from synchronous callbacks.</summary>
@@ -123,6 +240,7 @@ internal sealed class SshConnection : IAsyncDisposable
         _transport.Abort();
         await WaitQuietlyAsync(_loop).ConfigureAwait(false);
         await WaitQuietlyAsync(_outboxLoop).ConfigureAwait(false);
+        await WaitQuietlyAsync(_keepAliveLoop).ConfigureAwait(false);
         await _transport.DisposeAsync().ConfigureAwait(false);
         _stop.Dispose();
     }
@@ -183,6 +301,7 @@ internal sealed class SshConnection : IAsyncDisposable
             while (true)
             {
                 var packet = await _transport.ReceiveAsync(_stop.Token).ConfigureAwait(false);
+                Interlocked.Exchange(ref _lastReceived, _time.GetTimestamp());
                 var keep = false;
                 try
                 {
@@ -216,6 +335,32 @@ internal sealed class SshConnection : IAsyncDisposable
             ChannelGone(channel);
             channel.Fail(exception);
         }
+
+        lock (_globalReplies)
+        {
+            while (_globalReplies.TryDequeue(out var reply))
+            {
+                reply.TrySetException(exception);
+                _ = reply.Task.Exception; // observed: the keep-alive does not wait for its replies
+            }
+        }
+
+        try
+        {
+            _closed.Cancel();
+        }
+        catch (AggregateException ex)
+        {
+            // A callback registered by the application threw; the connection is closed regardless.
+            SshLog.ConnectionFailed(_logger, ex);
+        }
+    }
+
+    private static byte[] Build(Action<SshWriter> body)
+    {
+        var buffer = new ArrayBufferWriter<byte>(64);
+        body(new SshWriter(buffer));
+        return buffer.WrittenSpan.ToArray();
     }
 
     /// <summary>Handles one message. Returns true when the channel took ownership of the packet buffer.</summary>
@@ -236,6 +381,7 @@ internal sealed class SshConnection : IAsyncDisposable
                 return false;
 
             case SshMessage.RequestSuccess or SshMessage.RequestFailure:
+                CompleteGlobalReply(new GlobalReply(type == SshMessage.RequestSuccess, reader.Remaining.ToArray()));
                 return false;
 
             case SshMessage.ChannelOpenConfirmation:
@@ -361,3 +507,6 @@ internal sealed class SshConnection : IAsyncDisposable
     private SshChannel Find(uint id) =>
         _channels.TryGetValue(id, out var channel) ? channel : throw new SshProtocolException($"Message for unknown channel {id}.");
 }
+
+/// <summary>The server's answer to a global request: success or failure, and any request-specific data (for example a bound port).</summary>
+internal sealed record GlobalReply(bool Success, byte[] Data);
