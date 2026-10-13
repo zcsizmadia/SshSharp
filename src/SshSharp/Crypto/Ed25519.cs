@@ -70,8 +70,11 @@ internal static class Ed25519
 
         encodedR.CopyTo(signature);
         ModL(signature[32..], x);
+
+        // d holds the secret scalar and prefix, r the nonce, x the unreduced r + h*a: none may outlive the call.
         d.Clear();
         r.Clear();
+        x.Clear();
     }
 
     /// <summary>Verifies a signature. Rejects non-canonical S (S >= L) as RFC 8032 requires.</summary>
