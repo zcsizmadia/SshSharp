@@ -417,17 +417,19 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          choco install putty --no-progress -y | Out-Null
-          $pageant = Get-ChildItem "$env:ProgramFiles\PuTTY\pageant.exe", "${env:ProgramFiles(x86)}\PuTTY\pageant.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
-          if (-not $pageant) { throw "pageant.exe was not installed" }
-          Start-Process -FilePath $pageant.FullName
+          # The standalone pageant.exe of a pinned PuTTY release, checked against the SHA-256 PuTTY publishes (0.83/sha256sums).
+          $pageant = "$env:RUNNER_TEMP\pageant.exe"
+          Invoke-WebRequest -Uri 'https://the.earth.li/~sgtatham/putty/0.83/w64/pageant.exe' -OutFile $pageant
+          $hash = (Get-FileHash $pageant -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($hash -ne '267d8be2912e897cd1cebe6dbde73c1e0ceb9bd865fd17817dd9debed6151de1') { throw "pageant.exe has an unexpected hash: $hash" }
+          Start-Process -FilePath $pageant
           foreach ($i in 1..30) {
             if (Get-ChildItem '\\.\pipe\' | Where-Object Name -like 'pageant.*') { break }
             Start-Sleep -Seconds 1
           }
           $pipe = Get-ChildItem '\\.\pipe\' | Where-Object Name -like 'pageant.*'
           if (-not $pipe) { throw "Pageant did not create its pipe" }
-          Write-Output "Pageant $((Get-Item $pageant.FullName).VersionInfo.ProductVersion) is listening"
+          Write-Output "Pageant 0.83 is listening"
           'SSHSHARP_TEST_PAGEANT=1' >> $env:GITHUB_ENV
       - run: dotnet restore
       - run: dotnet build -c Release --no-restore
