@@ -267,7 +267,11 @@ public sealed partial class SftpClient : IAsyncDisposable
         return SingleName(reply, "Resolving", path);
     }
 
-    /// <summary>The login directory: the server's <c>home-directory</c> extension when it has one, otherwise what <c>.</c> resolves to.</summary>
+    /// <summary>
+    /// The login directory: the server's <c>home-directory</c> extension when it has one, otherwise what <c>.</c> resolves to. In an
+    /// OpenSSH <c>ChrootDirectory</c> session the extension answers the passwd home, outside the chroot; relative paths resolve from
+    /// <see cref="GetFullPathAsync"/> of <c>.</c>.
+    /// </summary>
     public async Task<string> GetHomeDirectoryAsync(CancellationToken cancellationToken = default)
     {
         if (!Extensions.ContainsKey(SftpProtocol.HomeDirectoryExtension))

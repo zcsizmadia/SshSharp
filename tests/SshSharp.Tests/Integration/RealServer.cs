@@ -64,6 +64,19 @@ internal static class RealServer
 
     public static bool IsOpenSsh => Software == "OpenSSH";
 
+    /// <summary>Whether the server has an sftp subsystem: every one tested but the Dropbear image (which has no sftp-server).</summary>
+    public static bool HasSftp => !Software.Equals("dropbear", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Whether the server offers only SFTP (no shell or commands), as atmoz/sftp and the pkg/sftp test server do.</summary>
+    public static bool SftpOnly => Environment.GetEnvironmentVariable("SSHSHARP_TEST_SFTP_ONLY") == "1";
+
+    /// <summary>
+    /// Where the SFTP tests may create files (SSHSHARP_TEST_SFTP_DIR), relative to the login directory: chrooted servers such as
+    /// atmoz/sftp allow writing only below it. Empty: the login directory itself.
+    /// </summary>
+    public static string SftpPath(string name) =>
+        Environment.GetEnvironmentVariable("SSHSHARP_TEST_SFTP_DIR") is { Length: > 0 } dir ? dir.TrimEnd('/') + "/" + name : name;
+
     /// <summary>Whether the server runs on Windows (SSHSHARP_TEST_SERVER_OS=windows): no signals, and a pseudo-terminal through ConPTY.</summary>
     public static bool IsWindows => string.Equals(Environment.GetEnvironmentVariable("SSHSHARP_TEST_SERVER_OS"), "windows", StringComparison.OrdinalIgnoreCase);
 

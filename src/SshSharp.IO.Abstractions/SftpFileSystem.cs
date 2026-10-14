@@ -89,7 +89,9 @@ public sealed class SftpFileSystem : IFileSystem
     /// <summary>The directory relative paths start from: the login directory until <see cref="IDirectory.SetCurrentDirectory"/>.</summary>
     internal string CurrentDirectory
     {
-        get => _currentDirectory ??= Run(null, false, ct => Sftp.GetHomeDirectoryAsync(ct));
+        // Where the server resolves relative paths, as sftp starts. Not the home-directory extension: OpenSSH answers it with the
+        // passwd home even in a ChrootDirectory session, where that path does not exist.
+        get => _currentDirectory ??= Run(null, false, ct => Sftp.GetFullPathAsync(".", ct));
         set => _currentDirectory = value;
     }
 
