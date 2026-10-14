@@ -76,6 +76,21 @@ of RFC 4254 section 8, named as in POSIX `termios`.
 
 `StartCommandAsync(command, options)` takes the same options, for commands that need a terminal (`sudo`, `top`, editors).
 
+## Subsystems
+
+A subsystem is a protocol the server runs by name instead of a command: `sftp`, `netconf`, or anything configured with
+sshd's `Subsystem` keyword. `StartSubsystemAsync` starts one, as `ssh -s` does, with no shell in between. The session's
+streams then carry the subsystem's own protocol, byte for byte:
+
+```csharp
+await using var netconf = await client.StartSubsystemAsync("netconf");
+await netconf.StandardInput.WriteAsync(helloMessage);
+// ... read the server's hello from netconf.StandardOutput, and so on.
+```
+
+A server that does not offer the subsystem refuses it with `SshException` (`ChannelClosed`), and the connection stays
+usable. SFTP itself will come as the separate `SshSharp.Sftp` package, built on this.
+
 ## Ending a session
 
 Disposing an `SshSession` closes the channel; a program still running gets a hangup from the server. Disposing the

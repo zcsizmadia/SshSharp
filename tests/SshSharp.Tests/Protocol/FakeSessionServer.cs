@@ -160,6 +160,9 @@ internal sealed class FakeSessionServer : IAsyncDisposable
     /// <summary>Runs for a "shell" request (the script's command is empty).</summary>
     public Func<ExecScript, Task> OnShell { get; set; } = script => script.FinishAsync(0);
 
+    /// <summary>The subsystems the server offers, by name (the script's command is the name); a request for any other is refused, as sshd does.</summary>
+    public Dictionary<string, Func<ExecScript, Task>> Subsystems { get; } = new(StringComparer.Ordinal);
+
     /// <summary>Environment variable names the server accepts, like sshd's AcceptEnv; others are dropped.</summary>
     public string[] AcceptEnv { get; init; } = [];
 
@@ -800,6 +803,7 @@ internal sealed class FakeSessionServer : IAsyncDisposable
                     "pty-req" => !RefusePty,
                     "env" => AcceptEnv.Contains(record.Args[0]),
                     "window-change" or "signal" => true,
+                    "subsystem" => Subsystems.ContainsKey(record.Args[0]),
                     _ => false,
                 };
                 if (wantReply)
@@ -807,9 +811,9 @@ internal sealed class FakeSessionServer : IAsyncDisposable
                     await SendChannelAsync(accepted ? SshMessage.ChannelSuccess : SshMessage.ChannelFailure, channel);
                 }
 
-                if (accepted && requestType is "exec" or "shell")
+                if (accepted && requestType is "exec" or "shell" or "subsystem")
                 {
-                    var command = requestType == "exec" ? record.Args[0] : "";
+                    var command = requestType is "exec" or "subsystem" ? record.Args[0] : "";
                     if (requestType == "exec")
                     {
                         lock (Commands)
@@ -818,7 +822,12 @@ internal sealed class FakeSessionServer : IAsyncDisposable
                         }
                     }
 
-                    var script = requestType == "exec" ? OnExec : OnShell;
+                    var script = requestType switch
+                    {
+                        "exec" => OnExec,
+                        "subsystem" => Subsystems[command],
+                        _ => OnShell,
+                    };
                     _ = Task.Run(async () =>
                     {
                         try

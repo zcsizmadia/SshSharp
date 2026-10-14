@@ -85,6 +85,54 @@ public class SessionTests
     }
 
     [Test]
+    public async Task ASubsystem_CarriesItsProtocolBothWays_ByteForByte()
+    {
+        // A binary request/reply protocol, as SFTP is: every byte the client writes comes back unchanged (no shell, no line handling).
+        await using var server = new FakeSessionServer();
+        server.Subsystems["echo-binary"] = EchoAsync;
+        await using var client = await ConnectAsync(server);
+        await using var session = await client.StartSubsystemAsync("echo-binary", cancellationToken: Timeout());
+
+        byte[] request = [0, 0, 0, 5, 1, 0, 0, 0, 3, 0xFF, 0x0D, 0x0A, 0x00];
+        await session.StandardInput.WriteAsync(request, Timeout());
+        var reply = new byte[request.Length];
+        await session.StandardOutput.ReadExactlyAsync(reply, Timeout());
+        await Assert.That(reply).IsEquivalentTo(request);
+
+        await session.CloseInputAsync(Timeout());
+        await session.WaitForExitAsync(Timeout());
+        await Assert.That(session.ExitStatus).IsEqualTo(0);
+        await Assert.That(session.HasTerminal).IsFalse();
+        var subsystem = Requests(server).Single();
+        await Assert.That(subsystem.Type).IsEqualTo("subsystem");
+        await Assert.That(subsystem.Args).IsEquivalentTo(new[] { "echo-binary" });
+        await Assert.That(server.Commands).IsEmpty(); // a subsystem is not a command: no shell runs it
+    }
+
+    [Test]
+    public async Task ASubsystemTheServerDoesNotOffer_FailsWithItsName_AndTheChannelIsClosed()
+    {
+        await using var server = new FakeSessionServer();
+        await using var client = await ConnectAsync(server);
+        var error = await Assert.ThrowsAsync<SshException>(async () => await client.StartSubsystemAsync("sftp", cancellationToken: Timeout()));
+        await Assert.That(error!.Reason).IsEqualTo(SshFailureReason.ChannelClosed);
+        await Assert.That(error.Message).Contains("'sftp'");
+
+        // The connection is still usable.
+        var result = await client.RunCommandAsync("true", Timeout());
+        await Assert.That(result.ExitStatus).IsEqualTo(0);
+    }
+
+    [Test]
+    public async Task SubsystemNames_AreChecked()
+    {
+        await using var server = new FakeSessionServer();
+        await using var client = await ConnectAsync(server);
+        await Assert.That(async () => await client.StartSubsystemAsync("")).Throws<ArgumentException>();
+        await Assert.That(async () => await client.StartSubsystemAsync("sftp\nexec")).Throws<ArgumentException>();
+    }
+
+    [Test]
     public async Task ACommandWithoutATerminal_KeepsStdoutAndStderrApart()
     {
         await using var server = new FakeSessionServer

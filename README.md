@@ -34,7 +34,7 @@ Console.WriteLine(result.StandardOutputText);
   TCP and Unix-socket tunnels; local, remote and dynamic (SOCKS) port forwarding (`ssh -L`, `-R`, `-D`), also
   started from `ssh_config`.
 - **Sessions:** run commands, stream stdin/stdout/stderr, interactive shells with a pseudo-terminal, environment variables,
-  signals and window resizing.
+  signals and window resizing; subsystems (`ssh -s`) such as `netconf`.
 - **Modern algorithms:** post-quantum `mlkem768x25519-sha256` (on .NET 10 where the platform has ML-KEM), `curve25519-sha256`,
   ECDH and DH group 14/16 key exchange; ChaCha20-Poly1305, AES-GCM and
   AES-CTR with HMAC-SHA2 ETM; Ed25519, ECDSA and RSA (SHA-2) keys; strict key exchange (Terrapin) always on; a FIPS mode.
