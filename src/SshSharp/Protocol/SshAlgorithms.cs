@@ -25,6 +25,8 @@ internal static class SshAlgorithms
 {
     // Key exchange
     public const string MlKem768X25519Sha256 = "mlkem768x25519-sha256";
+    public const string MlKem768Nistp256Sha256 = "mlkem768nistp256-sha256";
+    public const string MlKem1024Nistp384Sha384 = "mlkem1024nistp384-sha384";
     public const string Curve25519Sha256 = "curve25519-sha256";
     public const string Curve25519Sha256Libssh = "curve25519-sha256@libssh.org";
     public const string EcdhNistp256 = "ecdh-sha2-nistp256";
@@ -32,7 +34,7 @@ internal static class SshAlgorithms
     public const string EcdhNistp521 = "ecdh-sha2-nistp521";
 
     /// <summary>Whether a key exchange method resists a future quantum computer (a hybrid with a post-quantum KEM), as OpenSSH's WarnWeakCrypto judges it.</summary>
-    public static bool IsPostQuantum(string kex) => kex is MlKem768X25519Sha256;
+    public static bool IsPostQuantum(string kex) => kex is MlKem768X25519Sha256 or MlKem768Nistp256Sha256 or MlKem1024Nistp384Sha384;
     public const string DhGroup14Sha256 = "diffie-hellman-group14-sha256";
     public const string DhGroup16Sha512 = "diffie-hellman-group16-sha512";
 
@@ -60,11 +62,11 @@ internal static class SshAlgorithms
     ];
 
     /// <summary>
-    /// The post-quantum hybrid first, as OpenSSH 10 orders it, where the platform has ML-KEM (.NET 10 with OpenSSL 3.5+ or a recent Windows);
-    /// otherwise the classic methods.
+    /// The post-quantum hybrids first, where the platform has ML-KEM (.NET 10 with OpenSSL 3.5+ or a recent Windows): the X25519 one, as
+    /// OpenSSH 10 orders it, then the NIST-curve ones of RFC 10042 (the FIPS-compatible choices); otherwise the classic methods.
     /// </summary>
     public static IReadOnlyList<string> DefaultKex { get; } = HasMlKem
-        ? [MlKem768X25519Sha256, .. ClassicKex]
+        ? [MlKem768X25519Sha256, MlKem768Nistp256Sha256, MlKem1024Nistp384Sha384, .. ClassicKex]
         : ClassicKex;
 
 #if NET10_0_OR_GREATER
@@ -120,7 +122,8 @@ internal static class SshAlgorithms
 
     private static readonly HashSet<string> FipsKex = new(StringComparer.Ordinal)
     {
-        EcdhNistp256, EcdhNistp384, EcdhNistp521, DhGroup16Sha512, DhGroup14Sha256,
+        // ML-KEM (FIPS 203) with a NIST curve and SHA-2: both halves are FIPS-approved, unlike the X25519 hybrid.
+        MlKem768Nistp256Sha256, MlKem1024Nistp384Sha384, EcdhNistp256, EcdhNistp384, EcdhNistp521, DhGroup16Sha512, DhGroup14Sha256,
     };
 
     private static readonly HashSet<string> FipsHostKeys = new(StringComparer.Ordinal)

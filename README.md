@@ -35,7 +35,7 @@ Console.WriteLine(result.StandardOutputText);
   started from `ssh_config`.
 - **Sessions:** run commands, stream stdin/stdout/stderr, interactive shells with a pseudo-terminal, environment variables,
   signals and window resizing; subsystems (`ssh -s`) such as `netconf`.
-- **Modern algorithms:** post-quantum `mlkem768x25519-sha256` (on .NET 10 where the platform has ML-KEM), `curve25519-sha256`,
+- **Modern algorithms:** post-quantum `mlkem768x25519-sha256`, and the FIPS-compatible `mlkem768nistp256-sha256` and `mlkem1024nistp384-sha384` (on .NET 10 where the platform has ML-KEM), `curve25519-sha256`,
   ECDH and DH group 14/16 key exchange; ChaCha20-Poly1305, AES-GCM and
   AES-CTR with HMAC-SHA2 ETM; Ed25519, ECDSA and RSA (SHA-2) keys; strict key exchange (Terrapin) always on; a FIPS mode.
 - **File transfer:** SCP uploads and downloads of files, streams and directories, with progress, kept times, and checks
@@ -63,7 +63,7 @@ Coming next: SFTP, as a separate package.
 | Password, public key, keyboard-interactive, multi-factor | ✅ | ✅ |
 | OpenSSH certificates | User and host | User (authentication) |
 | Private key formats | OpenSSH, PKCS#1/#8, SEC1, PuTTY `.ppk` | OpenSSH, PKCS#1/#8, PuTTY `.ppk`, ssh.com |
-| Post-quantum key exchange | `mlkem768x25519-sha256` (.NET 10 with platform ML-KEM) | `mlkem768x25519-sha256`, `sntrup761x25519-sha512` |
+| Post-quantum key exchange | `mlkem768x25519-sha256`, and FIPS-compatible `mlkem768nistp256-sha256` / `mlkem1024nistp384-sha384` (.NET 10 with platform ML-KEM) | `mlkem768x25519-sha256`, `sntrup761x25519-sha512` |
 | Strict key exchange (Terrapin fix) | ✅ | ✅ |
 | Legacy algorithms (CBC, 3DES, SHA-1, `ssh-rsa`, DH group 1, zlib) | — (by design) | ✅ |
 | Commands, shells with a terminal | ✅ | ✅ |
