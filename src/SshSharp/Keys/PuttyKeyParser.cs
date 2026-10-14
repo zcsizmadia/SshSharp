@@ -187,7 +187,6 @@ internal static class PuttyKeyParser
         }
 
         var priv = new SshReader(privateBlob);
-        SshPrivateKey key;
         switch (algorithm)
         {
             case SshAlgorithms.SshEd25519:
@@ -199,14 +198,11 @@ internal static class PuttyKeyParser
                     throw new FormatException("The .ppk Ed25519 private key must be 32 bytes.");
                 }
 
-                key = new SshPrivateKey.Ed25519Key(seed.ToArray(), comment);
-                if (!key.PublicKey.Span.SequenceEqual(publicBlob) || publicKey.Length != Ed25519.PublicKeySize)
-                {
-                    key.Dispose();
-                    throw new FormatException("The .ppk Ed25519 private key does not match its public key.");
-                }
-
-                return key;
+                var publicKeyLength = publicKey.Length;
+                return PrivateKeyParser.Checked(
+                    new SshPrivateKey.Ed25519Key(seed.ToArray(), comment),
+                    k => k.PublicKey.Span.SequenceEqual(publicBlob) && publicKeyLength == Ed25519.PublicKeySize,
+                    "The .ppk Ed25519 private key does not match its public key.");
             }
 
             case SshAlgorithms.EcdsaNistp256 or SshAlgorithms.EcdsaNistp384 or SshAlgorithms.EcdsaNistp521:

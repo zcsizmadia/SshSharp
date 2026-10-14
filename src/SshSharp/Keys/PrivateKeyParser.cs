@@ -129,13 +129,7 @@ internal static class PrivateKeyParser
                 }
             }
 
-            if (!key.PublicKey.Span.SequenceEqual(publicBlob))
-            {
-                key.Dispose();
-                throw new FormatException("The OpenSSH private key does not match its public key.");
-            }
-
-            return key;
+            return Checked(key, k => k.PublicKey.Span.SequenceEqual(publicBlob), "The OpenSSH private key does not match its public key.");
         }
         finally
         {
@@ -146,7 +140,9 @@ internal static class PrivateKeyParser
     private static SshPrivateKey ParseOpenSshPrivate(ReadOnlySpan<byte> section)
     {
         var reader = new SshReader(section);
-        if (reader.ReadUInt32() != reader.ReadUInt32())
+        var check1 = reader.ReadUInt32();
+        var check2 = reader.ReadUInt32();
+        if (check1 != check2)
         {
             throw new FormatException("The private key check values differ (wrong passphrase or a corrupt file).");
         }
@@ -239,6 +235,23 @@ internal static class PrivateKeyParser
         }
 
         return key;
+    }
+
+    /// <summary>
+    /// Returns <paramref name="key"/> when <paramref name="valid"/> says so; otherwise, or if the check itself throws, disposes it (clearing
+    /// its material) and throws.
+    /// </summary>
+    internal static SshPrivateKey Checked(SshPrivateKey key, Func<SshPrivateKey, bool> valid, string message)
+    {
+        try
+        {
+            return valid(key) ? key : throw new FormatException(message);
+        }
+        catch
+        {
+            key.Dispose();
+            throw;
+        }
     }
 
     private static string? Comment(ref SshReader reader)

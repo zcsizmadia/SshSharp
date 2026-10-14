@@ -92,7 +92,7 @@ internal static class Glob
             {
                 if (!HasWildcards(segment))
                 {
-                    var candidate = Path.Combine(dir, segment);
+                    var candidate = Path.Join(dir, segment);
                     if (isLast ? File.Exists(candidate) : Directory.Exists(candidate))
                     {
                         next.Add(candidate);
@@ -112,7 +112,7 @@ internal static class Glob
                     .Order(StringComparer.Ordinal);
                 foreach (var name in names)
                 {
-                    var candidate = Path.Combine(dir, name);
+                    var candidate = Path.Join(dir, name);
                     if (isLast ? File.Exists(candidate) : Directory.Exists(candidate))
                     {
                         next.Add(candidate);

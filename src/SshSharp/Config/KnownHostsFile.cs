@@ -314,7 +314,7 @@ public sealed class KnownHostsFile
     {
         var directory = Path.GetDirectoryName(Path.GetFullPath(path))!;
         Directory.CreateDirectory(directory);
-        return Path.Combine(directory, $".{Path.GetFileName(path)}.{Guid.NewGuid():N}.tmp");
+        return Path.Join(directory, $".{Path.GetFileName(path)}.{Guid.NewGuid():N}.tmp");
     }
 
     private static Line ParseLine(string raw)

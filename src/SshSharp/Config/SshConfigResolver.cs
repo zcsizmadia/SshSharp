@@ -84,13 +84,13 @@ internal sealed class SshConfigResolver(IReadOnlyList<SshConfigDocument> documen
         }
 
         var context = Context();
-        var directory = baseDirectory ?? Path.Combine(options.HomeDirectory, ".ssh");
+        var directory = baseDirectory ?? Path.Join(options.HomeDirectory, ".ssh");
         foreach (var argument in directive.Arguments)
         {
             var path = context.ExpandPath(context.ExpandTokens(argument));
             if (!Path.IsPathRooted(path))
             {
-                path = Path.Combine(directory, path);
+                path = Path.Join(directory, path);
             }
 
             IEnumerable<string> files = Glob.HasWildcards(path) ? Glob.ExpandFiles(path) : File.Exists(path) ? [path] : [];
