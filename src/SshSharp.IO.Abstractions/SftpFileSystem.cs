@@ -122,21 +122,33 @@ public sealed class SftpFileSystem : IFileSystem
     }
 
     /// <summary>
-    /// Runs an SFTP operation to completion for a synchronous caller, on the thread pool (so a synchronization context cannot deadlock
-    /// it), bounded by the timeout, with SFTP errors turned into <c>System.IO</c> exceptions about <paramref name="path"/>.
+    /// Whether <paramref name="path"/> exists (and is a directory, or not one, when <paramref name="directory"/> says so). Never throws,
+    /// as <c>File.Exists</c> and <c>Directory.Exists</c> do not: an invalid path, a denied lookup or a failed session reads as false.
     /// </summary>
-    internal T Run<T>(string? path, bool directory, Func<CancellationToken, Task<T>> operation)
+    internal bool Exists(string? path, bool? directory)
     {
-        using var timeout = new CancellationTokenSource(Options.OperationTimeout);
+        if (string.IsNullOrEmpty(path) || path.Contains('\0'))
+        {
+            return false;
+        }
+
         try
         {
-            return Task.Run(() => operation(timeout.Token), CancellationToken.None).GetAwaiter().GetResult();
+            return Stat(Full(path)) is { } attributes && (directory is not { } wanted || attributes.IsDirectory == wanted);
         }
-        catch (Exception ex) when (Translate(ex, path, directory, timeout.IsCancellationRequested) is { } translated)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or SshException)
         {
-            throw translated;
+            return false;
         }
     }
+
+    /// <summary>
+    /// Runs an SFTP operation to completion for a synchronous caller, on the thread pool (so a synchronization context cannot deadlock
+    /// it), bounded by the timeout, with SFTP errors turned into <c>System.IO</c> exceptions about <paramref name="path"/>. The calling
+    /// thread waits, so many concurrent synchronous calls hold as many threads; the asynchronous methods do not.
+    /// </summary>
+    internal T Run<T>(string? path, bool directory, Func<CancellationToken, Task<T>> operation) =>
+        RunTransfer(path, directory, (ct, _) => operation(ct));
 
     internal void Run(string? path, bool directory, Func<CancellationToken, Task> operation) =>
         Run<bool>(path, directory, async ct =>
@@ -145,20 +157,33 @@ public sealed class SftpFileSystem : IFileSystem
             return true;
         });
 
-    /// <summary>Runs an asynchronous operation for an asynchronous caller, with the same exceptions as <see cref="Run{T}"/>.</summary>
-    internal async Task<T> RunAsync<T>(string? path, bool directory, Func<CancellationToken, Task<T>> operation, CancellationToken cancellationToken)
+    /// <summary>
+    /// Like <see cref="Run{T}"/> for a transfer of any length: the timeout limits how long it may go without progress (the operation
+    /// reports progress to the <see cref="IProgress{T}"/> it is given), not how long it takes.
+    /// </summary>
+    internal T RunTransfer<T>(string? path, bool directory, Func<CancellationToken, IProgress<long>, Task<T>> operation, bool limited = true)
     {
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(Options.OperationTimeout);
+        using var deadline = new Deadline(limited ? Options.OperationTimeout : Timeout.InfiniteTimeSpan, CancellationToken.None);
         try
         {
-            return await operation(timeout.Token).ConfigureAwait(false);
+            return Task.Run(() => operation(deadline.Token, deadline), CancellationToken.None).GetAwaiter().GetResult();
         }
-        catch (Exception ex) when (Translate(ex, path, directory, timeout.IsCancellationRequested && !cancellationToken.IsCancellationRequested) is { } translated)
+        catch (Exception ex) when (Translate(ex, path, directory, deadline.TimedOut) is { } translated)
         {
             throw translated;
         }
     }
+
+    internal void RunTransfer(string? path, bool directory, Func<CancellationToken, IProgress<long>, Task> operation, bool limited = true) =>
+        RunTransfer<bool>(path, directory, async (ct, progress) =>
+        {
+            await operation(ct, progress).ConfigureAwait(false);
+            return true;
+        }, limited);
+
+    /// <summary>Runs an asynchronous operation for an asynchronous caller, with the same exceptions as <see cref="Run{T}"/>.</summary>
+    internal Task<T> RunAsync<T>(string? path, bool directory, Func<CancellationToken, Task<T>> operation, CancellationToken cancellationToken) =>
+        RunTransferAsync(path, directory, (ct, _) => operation(ct), cancellationToken);
 
     internal Task RunAsync(string? path, bool directory, Func<CancellationToken, Task> operation, CancellationToken cancellationToken) =>
         RunAsync<bool>(path, directory, async ct =>
@@ -166,6 +191,62 @@ public sealed class SftpFileSystem : IFileSystem
             await operation(ct).ConfigureAwait(false);
             return true;
         }, cancellationToken);
+
+    /// <summary>The asynchronous <see cref="RunTransfer{T}"/>: the timeout limits time without progress.</summary>
+    internal async Task<T> RunTransferAsync<T>(string? path, bool directory, Func<CancellationToken, IProgress<long>, Task<T>> operation, CancellationToken cancellationToken)
+    {
+        using var deadline = new Deadline(Options.OperationTimeout, cancellationToken);
+        try
+        {
+            return await operation(deadline.Token, deadline).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (Translate(ex, path, directory, deadline.TimedOut) is { } translated)
+        {
+            throw translated;
+        }
+    }
+
+    internal Task RunTransferAsync(string? path, bool directory, Func<CancellationToken, IProgress<long>, Task> operation, CancellationToken cancellationToken) =>
+        RunTransferAsync<bool>(path, directory, async (ct, progress) =>
+        {
+            await operation(ct, progress).ConfigureAwait(false);
+            return true;
+        }, cancellationToken);
+
+    /// <summary>A timeout that each progress report restarts, linked to the caller's token; infinite when the timeout is.</summary>
+    private sealed class Deadline : IProgress<long>, IDisposable
+    {
+        private readonly CancellationTokenSource _source;
+        private readonly CancellationToken _caller;
+        private readonly TimeSpan _timeout;
+
+        public Deadline(TimeSpan timeout, CancellationToken caller)
+        {
+            _timeout = timeout;
+            _caller = caller;
+            _source = CancellationTokenSource.CreateLinkedTokenSource(caller);
+            _source.CancelAfter(timeout);
+        }
+
+        public CancellationToken Token => _source.Token;
+
+        /// <summary>Whether the timeout, not the caller, cancelled the operation.</summary>
+        public bool TimedOut => _source.IsCancellationRequested && !_caller.IsCancellationRequested;
+
+        public void Report(long value)
+        {
+            try
+            {
+                _source.CancelAfter(_timeout);
+            }
+            catch (ObjectDisposedException)
+            {
+                // A late report after the operation ended.
+            }
+        }
+
+        public void Dispose() => _source.Dispose();
+    }
 
     /// <summary>The <c>System.IO</c> exception for an SFTP or SSH failure; null for exceptions that pass through unchanged.</summary>
     internal static Exception? Translate(Exception ex, string? path, bool directory, bool timedOut) => ex switch
@@ -185,13 +266,23 @@ public sealed class SftpFileSystem : IFileSystem
 [Experimental(SftpClient.ExperimentalId)]
 public sealed class SftpFileSystemOptions
 {
-    /// <summary>How long one operation may take before it fails with an <see cref="IOException"/> (default 60 seconds).</summary>
+    /// <summary>
+    /// How long the server may take to answer before the operation fails with an <see cref="IOException"/> (default 60 seconds;
+    /// <see cref="Timeout.InfiniteTimeSpan"/> for no limit). For a request it bounds the answer; for a whole-file read, write, copy or
+    /// append it bounds the time without progress, so a large file over a slow link is not cut off. A server-side copy
+    /// (<c>copy-data</c>) reports no progress and has no limit.
+    /// </summary>
     public TimeSpan OperationTimeout
     {
         get;
         init
         {
-            ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(value, TimeSpan.Zero);
+            if (value != Timeout.InfiniteTimeSpan)
+            {
+                ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(value, TimeSpan.Zero);
+                ArgumentOutOfRangeException.ThrowIfGreaterThan(value, TimeSpan.FromMilliseconds(int.MaxValue));
+            }
+
             field = value;
         }
     } = TimeSpan.FromSeconds(60);

@@ -21,15 +21,29 @@ internal sealed class BlockingReadStream(Stream inner, long length, TimeSpan tim
         set => inner.Position = value;
     }
 
-    public override int Read(byte[] buffer, int offset, int count) => Read(buffer.AsSpan(offset, count));
+    /// <summary>A synchronous read: a timeout is an <see cref="SshException"/> (<see cref="SshFailureReason.Timeout"/>), as for lookups.</summary>
+    public override int Read(byte[] buffer, int offset, int count)
+    {
+        ArgumentNullException.ThrowIfNull(buffer);
+        var memory = buffer.AsMemory(offset, count);
+        return SftpFileProvider.Run(timeout, ct => inner.ReadAsync(memory, ct).AsTask());
+    }
 
     public override int Read(Span<byte> buffer)
     {
-        var rented = new byte[buffer.Length];
-        using var cancel = new CancellationTokenSource(timeout);
-        var read = inner.ReadAsync(rented, cancel.Token).AsTask().GetAwaiter().GetResult();
-        rented.AsSpan(0, read).CopyTo(buffer);
-        return read;
+        // The span cannot cross into the asynchronous read, so it goes through a pooled array.
+        var length = buffer.Length;
+        var rented = System.Buffers.ArrayPool<byte>.Shared.Rent(length);
+        try
+        {
+            var read = SftpFileProvider.Run(timeout, ct => inner.ReadAsync(rented.AsMemory(0, length), ct).AsTask());
+            rented.AsSpan(0, read).CopyTo(buffer);
+            return read;
+        }
+        finally
+        {
+            System.Buffers.ArrayPool<byte>.Shared.Return(rented);
+        }
     }
 
     public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) => inner.ReadAsync(buffer, cancellationToken);

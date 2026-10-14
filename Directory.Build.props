@@ -9,6 +9,9 @@
     <Deterministic>true</Deterministic>
     <ContinuousIntegrationBuild Condition="'$(GITHUB_ACTIONS)' == 'true'">true</ContinuousIntegrationBuild>
 
+    <!-- Package metadata shared by the published packages (only the src projects are packable). -->
+    <Authors>zcsizmadia</Authors>
+
     <!-- Supply chain: fail the build on known-vulnerable packages, direct or transitive (warnings are errors). -->
     <NuGetAudit>true</NuGetAudit>
     <NuGetAuditMode>all</NuGetAuditMode>

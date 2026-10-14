@@ -1,4 +1,5 @@
 using System.IO.Abstractions;
+using System.Runtime.ExceptionServices;
 using SshSharp.Sftp;
 
 namespace SshSharp.IO.Abstractions;
@@ -12,18 +13,26 @@ internal abstract class SftpFileSystemInfo : IFileSystemInfo
     private SftpFileAttributes? _own;
     private SftpFileAttributes? _attributes;
     private bool _loaded;
+    private ExceptionDispatchInfo? _error;
 
-    protected SftpFileSystemInfo(SftpFileSystem fileSystem, string path, SftpFileAttributes? known = null)
+    protected SftpFileSystemInfo(SftpFileSystem fileSystem, string path, KnownAttributes? known = null)
     {
         Fs = fileSystem;
         OriginalPath = path;
         FullName = fileSystem.Full(path);
-        if (known is not null)
+        if (known is { } attributes)
         {
-            _own = _attributes = known;
+            _own = attributes.Own;
+            _attributes = attributes.Current;
             _loaded = true;
         }
     }
+
+    /// <summary>
+    /// Attributes already known from a listing: the entry's own (a link's are the link's) and the current ones (what a link points to,
+    /// null for a link that leads nowhere; the same as <see cref="Own"/> for anything else).
+    /// </summary>
+    internal readonly record struct KnownAttributes(SftpFileAttributes Own, SftpFileAttributes? Current);
 
     public IFileSystem FileSystem => Fs;
 
@@ -41,6 +50,7 @@ internal abstract class SftpFileSystemInfo : IFileSystemInfo
         get
         {
             Load();
+            _error?.Throw();
             return _own is null ? (FileAttributes)(-1) : IO.Abstractions.Attributes.From(_own, Name, _own.IsSymbolicLink ? _attributes : null);
         }
         set
@@ -102,6 +112,7 @@ internal abstract class SftpFileSystemInfo : IFileSystemInfo
         get
         {
             Load();
+            _error?.Throw();
             return _own is { IsSymbolicLink: true } ? Fs.Run(FullName, false, ct => Fs.Sftp.ReadSymbolicLinkAsync(FullName, ct)) : null;
         }
     }
@@ -121,12 +132,24 @@ internal abstract class SftpFileSystemInfo : IFileSystemInfo
     protected string OriginalPath { get; set; }
 
     /// <summary>The attributes (of what a link points to), or null when the path does not exist.</summary>
+    /// <exception cref="IOException">The server could not be asked (the error is kept until <see cref="Refresh"/>).</exception>
     protected SftpFileAttributes? Current
     {
         get
         {
             Load();
+            _error?.Throw();
             return _attributes;
+        }
+    }
+
+    /// <summary>Like <see cref="Current"/>, but null instead of an error, for <see cref="Exists"/>, which never throws.</summary>
+    protected SftpFileAttributes? CurrentOrNull
+    {
+        get
+        {
+            Load();
+            return _error is null ? _attributes : null;
         }
     }
 
@@ -147,8 +170,19 @@ internal abstract class SftpFileSystemInfo : IFileSystemInfo
             return;
         }
 
-        _own = Fs.Stat(FullName, follow: false);
-        _attributes = _own is { IsSymbolicLink: true } ? Fs.Stat(FullName) : _own;
+        // As FileSystemInfo does: an error is kept, Exists reads false, and the other members throw it.
+        try
+        {
+            _own = Fs.Stat(FullName, follow: false);
+            _attributes = _own is { IsSymbolicLink: true } ? Fs.Stat(FullName) : _own;
+            _error = null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _own = _attributes = null;
+            _error = ExceptionDispatchInfo.Capture(ex);
+        }
+
         _loaded = true;
     }
 }

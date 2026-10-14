@@ -30,7 +30,7 @@ public class SftpFileSystemTests
 
         public SftpFileSystem Fs { get; private set; } = null!;
 
-        public static async Task<Rig> StartAsync(Action<FakeSftpServer>? setup = null)
+        public static async Task<Rig> StartAsync(Action<FakeSftpServer>? setup = null, SftpFileSystemOptions? options = null)
         {
             var rig = new Rig();
             setup?.Invoke(rig.Files);
@@ -43,7 +43,7 @@ public class SftpFileSystemTests
                 HostKeyVerifier = SshHostKeyVerifier.FromDelegate((_, _) => ValueTask.FromResult(true)),
             }, leaveOpen: true, Timeout());
             rig.Sftp = await rig.Client.OpenSftpAsync(Timeout());
-            rig.Fs = new SftpFileSystem(rig.Sftp);
+            rig.Fs = new SftpFileSystem(rig.Sftp, options);
             return rig;
         }
 
@@ -75,7 +75,13 @@ public class SftpFileSystemTests
         await Assert.That(path.GetDirectoryName("a")).IsEqualTo(string.Empty);
         await Assert.That(path.GetFileName("/a/b/c.tar.gz")).IsEqualTo("c.tar.gz");
         await Assert.That(path.GetExtension("/a/b/c.tar.gz")).IsEqualTo(".gz");
-        await Assert.That(path.GetExtension("/a/.hidden")).IsEqualTo(string.Empty);
+        // A name that starts with its only dot is all extension, as System.IO.Path has it.
+        await Assert.That(path.GetExtension("/a/.bashrc")).IsEqualTo(System.IO.Path.GetExtension("/a/.bashrc")).And.IsEqualTo(".bashrc");
+        await Assert.That(path.GetFileNameWithoutExtension("/a/.bashrc")).IsEqualTo(System.IO.Path.GetFileNameWithoutExtension("/a/.bashrc")).And.IsEmpty();
+        await Assert.That(path.HasExtension(".bashrc")).IsTrue();
+        await Assert.That(path.GetExtension("/a/file.")).IsEqualTo(string.Empty);
+        await Assert.That(path.GetFileNameWithoutExtension("/a/file.")).IsEqualTo("file");
+        await Assert.That(rig.Fs.FileInfo.New("/a/.profile").Extension).IsEqualTo(".profile");
         await Assert.That(path.GetFileNameWithoutExtension("dir.d/file.txt")).IsEqualTo("file");
         await Assert.That(path.ChangeExtension("a/b.txt", "md")).IsEqualTo("a/b.md");
         await Assert.That(path.ChangeExtension("a/b.txt", null)).IsEqualTo("a/b");
@@ -512,5 +518,168 @@ public class SftpFileSystemTests
         })));
 
         await Assert.That(fs.Directory.GetFiles("/home/tester", "t*.txt").Length).IsEqualTo(16);
+    }
+
+    // ---- found in the pre-0.5.0 review ----
+
+    [Test]
+    [Arguments(true)]
+    [Arguments(false)]
+    public async Task CopyingAFileOntoItself_IsRefused_AndKeepsTheData(bool serverSideCopy)
+    {
+        var data = RandomNumberGenerator.GetBytes(5000);
+        await using var rig = await Rig.StartAsync(f =>
+        {
+            f.AddFile(Home + "/a.bin", data);
+            f.AddLink(Home + "/alias.bin", "a.bin");
+            if (!serverSideCopy)
+            {
+                f.Extensions.Remove("copy-data");
+            }
+        });
+        var fs = rig.Fs;
+
+        // The same path, the same path spelled differently, and the same file through a link: all refused before anything is opened.
+        await Assert.That(() => fs.File.Copy("a.bin", "a.bin", overwrite: true)).Throws<IOException>();
+        await Assert.That(() => fs.File.Copy("a.bin", "./sub/../a.bin", overwrite: true)).Throws<IOException>();
+        await Assert.That(() => fs.File.Copy("a.bin", "alias.bin", overwrite: true)).Throws<IOException>();
+        await Assert.That(() => fs.FileInfo.New(Home + "/a.bin").CopyTo("a.bin", overwrite: true)).Throws<IOException>();
+        await Assert.That(rig.Files.FileData(Home + "/a.bin")!.SequenceEqual(data)).IsTrue();
+
+        // A real copy still works.
+        fs.File.Copy("a.bin", "b.bin");
+        await Assert.That(rig.Files.FileData(Home + "/b.bin")!.SequenceEqual(data)).IsTrue();
+    }
+
+    [Test]
+    public async Task Exists_NeverThrows_EvenWhenTheServerDeniesOrTheSessionIsGone()
+    {
+        await using var rig = await Rig.StartAsync(f =>
+        {
+            f.AddDirectory(Home + "/locked");
+            f.AddFile(Home + "/locked/x", [1]);
+            f.DenyStat = path => path.StartsWith(Home + "/locked", StringComparison.Ordinal);
+        });
+        var fs = rig.Fs;
+
+        await Assert.That(fs.File.Exists("locked/x")).IsFalse();
+        await Assert.That(fs.Directory.Exists("locked")).IsFalse();
+        await Assert.That(fs.Path.Exists("locked/x")).IsFalse();
+        var info = fs.FileInfo.New("locked/x");
+        await Assert.That(info.Exists).IsFalse();
+        await Assert.That(() => info.Length).Throws<UnauthorizedAccessException>(); // the other members report the error, as FileInfo does
+        await Assert.That(() => fs.File.GetAttributes("locked/x")).Throws<UnauthorizedAccessException>();
+
+        await rig.Sftp.DisposeAsync();
+        await Assert.That(fs.File.Exists(Home + "/anything")).IsFalse();
+        await Assert.That(fs.Directory.Exists(Home)).IsFalse();
+        await Assert.That(fs.FileInfo.New(Home + "/anything").Exists).IsFalse();
+    }
+
+    [Test]
+    public async Task WholeFileTransfers_AreTimedOnlyWithoutProgress_ButASilentServerStillTimesOut()
+    {
+        // Every answer with data (and to every WRITE) takes 100 ms and they come one after another, so a whole-file transfer takes far
+        // longer than the 600 ms timeout: it must still succeed, as each answer comes well within it.
+        var data = RandomNumberGenerator.GetBytes(1024 * 1024);
+        await using var rig = await Rig.StartAsync(f =>
+        {
+            f.AddFile(Home + "/big.bin", data);
+            f.ReplyDelay = (request, reply) => (request, reply) is (5, 103) or (6, _) ? TimeSpan.FromMilliseconds(100) : TimeSpan.Zero;
+        }, new SftpFileSystemOptions { OperationTimeout = TimeSpan.FromMilliseconds(600) });
+        var fs = rig.Fs;
+
+        var started = System.Diagnostics.Stopwatch.StartNew();
+        await Assert.That(fs.File.ReadAllBytes("big.bin").SequenceEqual(data)).IsTrue();
+        await Assert.That(started.Elapsed).IsGreaterThan(TimeSpan.FromMilliseconds(600));
+        await Assert.That((await fs.File.ReadAllBytesAsync("big.bin", Timeout())).SequenceEqual(data)).IsTrue();
+        fs.File.WriteAllBytes("copy.bin", data);
+        await Assert.That(rig.Files.FileData(Home + "/copy.bin")!.SequenceEqual(data)).IsTrue();
+        fs.File.AppendAllText("copy.bin", "tail");
+        await Assert.That(rig.Files.FileData(Home + "/copy.bin")!.Length).IsEqualTo(data.Length + 4);
+
+        // A request the server sits on is still a timeout.
+        rig.Files.ReplyDelay = (request, _) => request is 7 or 17 ? TimeSpan.FromSeconds(3) : TimeSpan.Zero;
+        await Assert.That(() => fs.File.GetAttributes("big.bin")).Throws<IOException>().WithMessageContaining("did not answer in time");
+    }
+
+    [Test]
+    public async Task Timeouts_CanBeInfinite_ButNotTooLarge()
+    {
+        await Assert.That(new SftpFileSystemOptions { OperationTimeout = System.Threading.Timeout.InfiniteTimeSpan }.OperationTimeout)
+            .IsEqualTo(System.Threading.Timeout.InfiniteTimeSpan);
+        await Assert.That(() => new SftpFileSystemOptions { OperationTimeout = TimeSpan.MaxValue }).Throws<ArgumentOutOfRangeException>();
+        await Assert.That(() => new SftpFileSystemOptions { OperationTimeout = TimeSpan.Zero }).Throws<ArgumentOutOfRangeException>();
+
+        await using var rig = await Rig.StartAsync(f => f.AddFile(Home + "/f", [1, 2, 3]),
+            new SftpFileSystemOptions { OperationTimeout = System.Threading.Timeout.InfiniteTimeSpan });
+        await Assert.That(rig.Fs.File.ReadAllBytes("f")).IsEquivalentTo(new byte[] { 1, 2, 3 });
+    }
+
+    [Test]
+    public async Task AsynchronousStreamErrors_AreSystemIOExceptions()
+    {
+        await using var rig = await Rig.StartAsync(f => f.AddFile(Home + "/f.txt", Encoding.UTF8.GetBytes("one\ntwo\n")));
+        var fs = rig.Fs;
+
+        await Assert.That(async () =>
+        {
+            await foreach (var _ in fs.File.ReadLinesAsync("missing.txt", Timeout()))
+            {
+            }
+        }).Throws<FileNotFoundException>();
+
+        await using var stream = fs.File.OpenRead("f.txt");
+        var reader = fs.File.OpenRead("f.txt");
+        await rig.Sftp.DisposeAsync(); // the session goes away under open streams
+        await Assert.That(async () => await stream.ReadAsync(new byte[16], Timeout())).Throws<IOException>();
+        await Assert.That(async () =>
+        {
+            await foreach (var _ in fs.File.ReadLinesAsync("f.txt", Timeout()))
+            {
+            }
+        }).Throws<IOException>();
+        await Assert.That(async () => await reader.DisposeAsync()).ThrowsNothing();
+    }
+
+    [Test]
+    public async Task Move_RenamesFilesOnly_AndNeedsPosixRenameOnlyToReplace()
+    {
+        await using var rig = await Rig.StartAsync(f =>
+        {
+            f.AddDirectory(Home + "/dir");
+            f.AddFile(Home + "/a.txt", [1]);
+            f.AddFile(Home + "/b.txt", [2]);
+            f.Extensions.Remove("posix-rename@openssh.com");
+        });
+        var fs = rig.Fs;
+
+        await Assert.That(() => fs.File.Move("dir", "dir2")).Throws<FileNotFoundException>();
+        await Assert.That(fs.Directory.Exists("dir")).IsTrue();
+
+        fs.File.Move("a.txt", "c.txt", overwrite: true); // nothing to replace: a plain rename
+        await Assert.That(rig.Files.FileData(Home + "/c.txt")).IsEquivalentTo(new byte[] { 1 });
+        await Assert.That(() => fs.File.Move("b.txt", "c.txt", overwrite: true)).Throws<NotSupportedException>(); // replacing needs posix-rename
+    }
+
+    [Test]
+    public async Task EnumeratedLinks_DescribeTheLink_AsGetAttributesDoes()
+    {
+        await using var rig = await Rig.StartAsync(f =>
+        {
+            f.AddDirectory(Home + "/d");
+            f.AddFile(Home + "/d/target.txt", [1, 2, 3]);
+            f.AddLink(Home + "/d/link.txt", "target.txt");
+        });
+        var fs = rig.Fs;
+
+        var link = fs.DirectoryInfo.New("d").GetFiles().Single(f => f.Name == "link.txt");
+        await Assert.That(link.Attributes).IsEqualTo(fs.File.GetAttributes("d/link.txt"));
+        await Assert.That(link.Attributes.HasFlag(FileAttributes.ReparsePoint)).IsTrue();
+        await Assert.That(link.LinkTarget).IsEqualTo("target.txt");
+        await Assert.That(link.Length).IsEqualTo(3); // the size is the target's, as FileInfo reports it
+        var plain = fs.DirectoryInfo.New("d").GetFiles().Single(f => f.Name == "target.txt");
+        await Assert.That(plain.LinkTarget).IsNull();
+        await Assert.That(plain.Attributes.HasFlag(FileAttributes.ReparsePoint)).IsFalse();
     }
 }
