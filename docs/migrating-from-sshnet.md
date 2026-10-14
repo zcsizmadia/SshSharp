@@ -17,6 +17,24 @@ The main differences:
 - **One connection for everything.** Commands, shells, port forwarding and SCP all run over the same `SshClient`. SSH.NET's
   `ScpClient` opens its own connection.
 
+## What you gain
+
+Features that SSH.NET users have asked for in its issue tracker, and that SshSharp has:
+
+| Request | SshSharp |
+|---|---|
+| Verify host keys against `known_hosts` | `KnownHostsVerifier`, with hashed hosts, `@cert-authority`, `@revoked` and `StrictHostKeyChecking` (see [Host keys](host-keys.md)) |
+| Jump hosts / bastions | `ProxyJump` chains and `ProxyCommand`, from `ssh_config` or from options (see [Connecting](connecting.md)) |
+| Use the keys in `ssh-agent`; agent forwarding | `SshAgent` and `ForwardAgent`, on Unix sockets and the Windows OpenSSH agent |
+| A subsystem other than `sftp` | `client.StartSubsystemAsync(name)` |
+| A terminal for a single command (`ssh -t host cmd`) | `StartCommandAsync(command, new SshSessionOptions { Terminal = ... })` |
+| Send a signal to a command | `session.SendSignalAsync("TERM")` |
+| Forward to a Unix socket | `client.OpenUnixSocketTunnelAsync(path)` |
+| Detect a stalled connection, also while a write is blocked | keep-alive (`KeepAliveInterval`, `KeepAliveCountMax`): the probes don't wait for pending writes, so a server that stops reading is still detected |
+| RSA SHA-2 signatures with servers that announce them | `server-sig-algs` (RFC 8308) is used to pick `rsa-sha2-512` or `rsa-sha2-256` |
+| FIPS-approved algorithms only | `SshClientOptions.FipsMode`, including post-quantum key exchange on .NET 10 |
+| Cancellation everywhere | a `CancellationToken` on every network operation |
+
 ## Connecting
 
 SSH.NET:
@@ -162,7 +180,8 @@ await input.WriteLineAsync("uptime");
 var line = await output.ReadLineAsync();
 ```
 
-`ShellStream.Expect` has no equivalent: read the output stream and match what you need. Resize with
+`ShellStream.Expect` has no equivalent yet ([planned](https://github.com/zcsizmadia/SshSharp/issues/115)): read the output
+stream and match what you need. Resize with
 `shell.ResizeTerminalAsync(columns, rows)`. See [Commands and shells](sessions.md).
 
 ## Port forwarding
