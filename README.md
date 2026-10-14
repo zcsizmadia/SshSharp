@@ -33,7 +33,7 @@ Console.WriteLine(result.StandardOutputText);
 - **Connections:** ProxyJump chains, ProxyCommand, HTTP and SOCKS proxies, connect over any `Stream` or from a chosen local
   address (`BindAddress`, `BindInterface`), keep-alive and
   dead-connection detection; `HttpClient` through the SSH connection;
-  TCP and Unix-socket tunnels; local, remote and dynamic (SOCKS) port forwarding (`ssh -L`, `-R`, `-D`) and remote dynamic forwarding (`-R port`), also
+  TCP and Unix-socket tunnels; local, remote and dynamic (SOCKS) port forwarding (`ssh -L`, `-R`, `-D`) and remote dynamic and Unix-socket forwarding (`-R port`, `-R /socket:target`), also
   started from `ssh_config`.
 - **Sessions:** run commands, stream stdin/stdout/stderr, interactive shells with a pseudo-terminal, environment variables,
   signals and window resizing; subsystems (`ssh -s`) such as `netconf`; `expect`-style scripting of shells.
@@ -82,11 +82,11 @@ Console.WriteLine(result.StandardOutputText);
 | Local, remote and dynamic port forwarding | ✅ (also started from `ssh_config`) | ✅ |
 | Remote dynamic forwarding (`ssh -R port`, a SOCKS proxy on the client side) | ✅ | ❌ |
 | Unix-socket tunnels (Docker or database sockets on the server) | ✅ | ❌ |
+| Remote Unix-socket forwarding (`ssh -R /remote.sock:target`, for example gpg-agent forwarding) | ✅ | ❌ |
 | `HttpClient` through the SSH connection (`SocketsHttpHandler.ConnectCallback`) | ✅ | ❌ |
 | FIPS mode (FIPS-approved algorithms only) | ✅ | ❌ |
 | SCP | ✅ | ✅ |
 | SFTP | ✅ (version 3 with OpenSSH extensions, pipelined transfers; experimental API) | ✅ |
-| Remote files as an `IFileSystem` (System.IO.Abstractions: `File`, `Directory`, `Path`, streams) | ✅ (`SshSharp.IO.Abstractions`) | ❌ |
 | Remote files as an `IFileSystem` (System.IO.Abstractions: `File`, `Directory`, `Path`, streams) | ✅ (`SshSharp.IO.Abstractions`) | ❌ |
 | Remote files as an `IFileProvider` (ASP.NET Core static files, Razor, configuration) | ✅ (`SshSharp.FileProviders`) | ❌ |
 | Native AOT | ✅ (an AOT-compiled binary connects to a real server in CI) | ✅ (AOT-compatible; an AOT publish is checked in CI) |

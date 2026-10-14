@@ -139,6 +139,44 @@ public class ForwardingInteropTests
     }
 
     [Test]
+    public async Task RemoteSocketForwarding_BringsConnectionsToTheServersSocketBackHere()
+    {
+        await using var client = await ConnectAsync();
+        if (client is null || !RealServer.IsOpenSsh || RealServer.IsWindows)
+        {
+            Skip.Test("SSHSHARP_TEST_SSHD and SSHSHARP_TEST_USER with a password or key are needed, on an OpenSSH server with Unix sockets.");
+            return;
+        }
+
+        using var service = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+        service.Bind(new IPEndPoint(IPAddress.Loopback, 0));
+        service.Listen();
+        var serviceTask = Task.Run(async () =>
+        {
+            using var accepted = await service.AcceptAsync(Timeout());
+            await accepted.SendAsync("hello through a socket\n"u8.ToArray(), SocketFlags.None, Timeout());
+            accepted.Shutdown(SocketShutdown.Send);
+        });
+
+        // A fresh name: sshd does not replace an existing socket file (StreamLocalBindUnlink no).
+        var socketPath = $"/tmp/sshsharp-{Guid.NewGuid():N}.sock";
+        try
+        {
+            await using var forwarder = await client.ForwardRemoteUnixSocketAsync(socketPath, "127.0.0.1", ((IPEndPoint)service.LocalEndPoint!).Port, Timeout());
+
+            // Play the server-side application: here -> server -> its socket -> back here.
+            await using var tunnel = await client.OpenUnixSocketTunnelAsync(socketPath, Timeout());
+            var line = await ReadLineAsync(buffer => tunnel.ReadAsync(buffer, Timeout()));
+            await Assert.That(line).IsEqualTo("hello through a socket");
+            await serviceTask;
+        }
+        finally
+        {
+            await client.RunCommandAsync($"rm -f {socketPath}", Timeout());
+        }
+    }
+
+    [Test]
     [Arguments(SshProxyType.Socks5)]
     [Arguments(SshProxyType.Socks4)]
     public async Task AClientBehindASocksProxy_ConnectsThroughIt(SshProxyType type)
