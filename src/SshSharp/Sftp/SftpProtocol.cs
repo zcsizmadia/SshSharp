@@ -55,6 +55,8 @@ internal static class SftpProtocol
     public const string HardlinkExtension = "hardlink@openssh.com";
     public const string FsyncExtension = "fsync@openssh.com";
     public const string HomeDirectoryExtension = "home-directory";
+    public const string StatVfsExtension = "statvfs@openssh.com";
+    public const string CopyDataExtension = "copy-data";
 
     /// <summary>The largest packet accepted from the server: OpenSSH's sftp-server sends at most 256 KiB, so this leaves room.</summary>
     public const int MaxPacket = 1024 * 1024;

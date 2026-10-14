@@ -105,7 +105,18 @@ internal sealed class SftpFileStream(SftpClient client, byte[] handle, string pa
         client.SetHandleAttributesAsync(handle, path, new SftpFileAttributes { Size = value }, CancellationToken.None).GetAwaiter().GetResult();
     }
 
-    public override Task FlushAsync(CancellationToken cancellationToken) => Task.CompletedTask; // every write is acknowledged when it returns
+    /// <summary>
+    /// Every write is acknowledged when it returns; flushing also asks the server to write the file to disk (<c>fsync@openssh.com</c>),
+    /// when it can.
+    /// </summary>
+    public override async Task FlushAsync(CancellationToken cancellationToken)
+    {
+        ObjectDisposedException.ThrowIf(_disposed != 0, this);
+        if (canWrite)
+        {
+            await client.SyncHandleAsync(handle, path, cancellationToken).ConfigureAwait(false);
+        }
+    }
 
     public override void Flush()
     {

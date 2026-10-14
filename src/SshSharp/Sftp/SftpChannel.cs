@@ -253,14 +253,7 @@ internal sealed class SftpChannel : IAsyncDisposable
         }
 
         await _session.DisposeAsync().ConfigureAwait(false);
-        try
-        {
-            await _readLoop.ConfigureAwait(false);
-        }
-        catch (Exception)
-        {
-            // Reported to the requests already.
-        }
+        await _readLoop.ConfigureAwait(false); // never faults: it reports its failure to the requests instead
 
         _stop.Dispose();
     }

@@ -90,6 +90,11 @@ files, `DownloadAsync` is much faster.
 | `CreateSymbolicLinkAsync`, `ReadSymbolicLinkAsync` | Symbolic links. |
 | `CreateHardLinkAsync` | Hard links (`hardlink@openssh.com`). |
 | `GetFullPathAsync`, `GetHomeDirectoryAsync` | Resolve a path; the login directory. |
+| `CopyFileAsync(source, destination, overwrite)` | Copy on the server, without the data passing through this machine (`copy-data`). |
+| `GetFileSystemInfoAsync(path)` | Size and free space of the file system, as `df` shows them (`statvfs@openssh.com`). |
+
+On a writable stream, `FlushAsync` asks the server to write the file to disk (`fsync@openssh.com`) when it can; every write is
+acknowledged anyway.
 
 Remote paths are passed to the server as they are: relative paths are relative to the login directory, and `/` is the
 separator whatever this machine uses. `Extensions` lists what the server supports, and `Limits` the sizes it accepts.
