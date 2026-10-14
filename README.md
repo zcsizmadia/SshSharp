@@ -27,7 +27,7 @@ Console.WriteLine(result.StandardOutputText);
   `@cert-authority`, `@revoked`), resolved like `ssh -G`.
 - **Authentication:** password, public keys (OpenSSH, PKCS#8, PKCS#1/SEC1 and PuTTY `.ppk` formats, encrypted too),
   OpenSSH user certificates, ssh-agent (Unix sockets and the Windows OpenSSH agent) and agent forwarding,
-  keyboard-interactive (one-time codes, PAM), and multi-factor chains.
+  keyboard-interactive (one-time codes, PAM), and multi-factor chains. Key generation, saved as `ssh-keygen` does.
 - **Host verification:** `StrictHostKeyChecking` policies, host certificates, `UpdateHostKeys`, key pinning, or your own
   verifier. There is no "accept anything" default. Host key scanning, as `ssh-keyscan` does it.
 - **Connections:** ProxyJump chains, ProxyCommand, connect over any `Stream`, keep-alive and dead-connection detection;
@@ -63,6 +63,7 @@ Coming next: SFTP, as a separate package.
 | Password, public key, keyboard-interactive, multi-factor | ✅ | ✅ |
 | OpenSSH certificates | User and host | User (authentication) |
 | Private key formats | OpenSSH, PKCS#1/#8, SEC1, PuTTY `.ppk` | OpenSSH, PKCS#1/#8, PuTTY `.ppk`, ssh.com |
+| Key generation (Ed25519, ECDSA, RSA; saved in the OpenSSH format) | ✅ | ❌ |
 | Post-quantum key exchange | `mlkem768x25519-sha256`, and FIPS-compatible `mlkem768nistp256-sha256` / `mlkem1024nistp384-sha384` (.NET 10 with platform ML-KEM) | `mlkem768x25519-sha256`, `sntrup761x25519-sha512` |
 | Strict key exchange (Terrapin fix) | ✅ | ✅ |
 | Legacy algorithms (CBC, 3DES, SHA-1, `ssh-rsa`, DH group 1, zlib) | — (by design) | ✅ |

@@ -31,6 +31,23 @@ whether it accepts a key before anything is signed. `SshPrivateKey.Parse` reads 
 `Fingerprint`, `Comment`, `PublicKey` and `ToAuthorizedKeysLine()` describe a key. Dispose keys when done: it clears the
 private key material.
 
+### Generating keys
+
+`SshPrivateKey.Generate` makes a new key pair, and `SaveAsync` writes it as `ssh-keygen` does: the private key in the OpenSSH
+format (encrypted with `aes256-ctr` and `bcrypt_pbkdf` when you give a passphrase), and the public key next to it as `.pub`.
+
+```csharp
+using var key = SshPrivateKey.Generate(SshKeyType.Ed25519, comment: "deploy@build-agent");
+await key.SaveAsync("/home/deploy/.ssh/id_ed25519", passphrase);
+Console.WriteLine(key.ToAuthorizedKeysLine()); // for the server's authorized_keys
+```
+
+The private key file is created readable only by the current user (mode 0600 on Unix; on Windows an ACL with just the current
+user, as OpenSSH for Windows requires). `SaveAsync` never overwrites: it fails if either file exists. Types: `Ed25519`,
+`EcdsaNistp256/384/521`, and `Rsa` (3072 bits by default, `rsaBits` for 2048 to 16384). `ToOpenSshPrivateKey(passphrase)` returns
+the file's text instead, for a secret store; it holds the private key, so never log it. Keys loaded from any format can be
+written this way too, which converts them to the OpenSSH format; keys held by an agent cannot.
+
 ## Certificates
 
 An OpenSSH user certificate (`id_ed25519-cert.pub`, made with `ssh-keygen -s`) lets servers that trust its authority
