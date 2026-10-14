@@ -21,6 +21,8 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "samples", "samples", "{5D20
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SshSharp.Samples", "samples\SshSharp.Samples\SshSharp.Samples.csproj", "{6FE6D4A2-6E19-49E8-956B-BC46F8B5045D}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SshSharp.FileProviders", "src\SshSharp.FileProviders\SshSharp.FileProviders.csproj", "{AE3BD058-5706-4A05-9E49-7556B70417DD}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -103,6 +105,18 @@ Global
 		{6FE6D4A2-6E19-49E8-956B-BC46F8B5045D}.Release|x64.Build.0 = Release|Any CPU
 		{6FE6D4A2-6E19-49E8-956B-BC46F8B5045D}.Release|x86.ActiveCfg = Release|Any CPU
 		{6FE6D4A2-6E19-49E8-956B-BC46F8B5045D}.Release|x86.Build.0 = Release|Any CPU
+		{AE3BD058-5706-4A05-9E49-7556B70417DD}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{AE3BD058-5706-4A05-9E49-7556B70417DD}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{AE3BD058-5706-4A05-9E49-7556B70417DD}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{AE3BD058-5706-4A05-9E49-7556B70417DD}.Debug|x64.Build.0 = Debug|Any CPU
+		{AE3BD058-5706-4A05-9E49-7556B70417DD}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{AE3BD058-5706-4A05-9E49-7556B70417DD}.Debug|x86.Build.0 = Debug|Any CPU
+		{AE3BD058-5706-4A05-9E49-7556B70417DD}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{AE3BD058-5706-4A05-9E49-7556B70417DD}.Release|Any CPU.Build.0 = Release|Any CPU
+		{AE3BD058-5706-4A05-9E49-7556B70417DD}.Release|x64.ActiveCfg = Release|Any CPU
+		{AE3BD058-5706-4A05-9E49-7556B70417DD}.Release|x64.Build.0 = Release|Any CPU
+		{AE3BD058-5706-4A05-9E49-7556B70417DD}.Release|x86.ActiveCfg = Release|Any CPU
+		{AE3BD058-5706-4A05-9E49-7556B70417DD}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -114,5 +128,6 @@ Global
 		{89E35E7A-4866-4726-BDA9-102B870630F8} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 		{0F1D05A8-BF80-417A-A9AA-BDD883423FF6} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 		{6FE6D4A2-6E19-49E8-956B-BC46F8B5045D} = {5D20AA90-6969-D8BD-9DCD-8634F4692FDA}
+		{AE3BD058-5706-4A05-9E49-7556B70417DD} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 	EndGlobalSection
 EndGlobal

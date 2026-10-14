@@ -8,6 +8,9 @@
     <PackageVersion Include="Microsoft.SourceLink.GitHub" Version="10.0.401" />
     <PackageVersion Include="System.IO.Pipelines" Version="10.0.12" />
     <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.Extensions.FileProviders.Abstractions" Version="10.0.12" />
+    <!-- Tests only: a real consumer of SftpFileProvider. -->
+    <PackageVersion Include="Microsoft.Extensions.Configuration.Json" Version="10.0.12" />
     <PackageVersion Include="BenchmarkDotNet" Version="0.15.8" />
     <!-- Only the benchmark project references SSH.NET, for the comparison in docs/benchmarks.md. -->
     <PackageVersion Include="SSH.NET" Version="2026.0.0" />

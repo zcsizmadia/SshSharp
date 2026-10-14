@@ -68,6 +68,23 @@ public class SftpInteropTests
                 await synced.FlushAsync(Timeout()); // fsync@openssh.com where the server has it
             }
 
+            // The same tree through the IFileProvider adapter, read synchronously and asynchronously.
+            var provider = new SshSharp.FileProviders.SftpFileProvider(sftp, remote);
+            await Assert.That(provider.GetDirectoryContents("a").Select(f => f.Name)).Contains("middle.txt");
+            using (var reader = new StreamReader(provider.GetFileInfo("a/b/leaf.txt").CreateReadStream()))
+            {
+                await Assert.That(reader.ReadToEnd()).IsEqualTo("leaf");
+            }
+
+            await using (var served = provider.GetFileInfo("top.bin").CreateReadStream())
+            {
+                var viaProvider = new MemoryStream();
+                await served.CopyToAsync(viaProvider, Timeout());
+                await Assert.That(viaProvider.ToArray().AsSpan().SequenceEqual(big)).IsTrue();
+            }
+
+            await Assert.That(provider.GetFileInfo("../" + remote + "/top.bin").Exists).IsFalse();
+
             // Cut the copy short, then resume it.
             var partial = Path.Combine(local.FullName, "partial.bin");
             await File.WriteAllBytesAsync(partial, big[..300_000]);

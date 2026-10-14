@@ -99,6 +99,32 @@ acknowledged anyway.
 Remote paths are passed to the server as they are: relative paths are relative to the login directory, and `/` is the
 separator whatever this machine uses. `Extensions` lists what the server supports, and `Limits` the sizes it accepts.
 
+## Serving files with `IFileProvider`
+
+The `SshSharp.FileProviders` package (`dotnet add package SshSharp.FileProviders`) turns a directory on the server into an
+`IFileProvider`. Anything that reads through `Microsoft.Extensions.FileProviders` can then use the server's files: ASP.NET Core
+static files, Razor views, configuration. Nothing is mounted, so only your application sees them.
+
+```csharp
+using SshSharp.FileProviders;
+
+var provider = new SftpFileProvider(sftp, "/srv/www");
+
+app.UseStaticFiles(new StaticFileOptions { FileProvider = provider });   // ASP.NET Core
+builder.Configuration.AddJsonFile(provider, "appsettings.json", optional: false, reloadOnChange: false);
+```
+
+- **Read-only.** Paths are relative to the root; `/` and `\` both separate, and a path with `..` does not exist, so nothing
+  outside the root can be reached. Symbolic links are followed on the server; links that lead nowhere are left out of listings.
+- **Synchronous by contract.** `IFileProvider` lookups are synchronous, so each waits for an SFTP round trip, bounded by
+  `SftpFileProviderOptions.OperationTimeout` (30 s). Attributes and listings are cached for `CacheDuration` (5 s; zero turns it
+  off), and `ClearCache()` forgets them. Streams read ahead, and are fastest read asynchronously, as the static files middleware
+  does.
+- **No change notifications.** SFTP has none, so `Watch` returns a token that never fires (`reloadOnChange` has no effect).
+- A missing file, or one the server will not let you read, has `Exists` false. A broken session or connection throws
+  `SshException`.
+- The provider does not own the `SftpClient`: dispose that after the provider is no longer used.
+
 ## Errors
 
 A request the server refuses throws `SftpException`, an `SshException` with `Reason = SftpFailed`, `Status` (the SFTP status

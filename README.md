@@ -43,6 +43,8 @@ Console.WriteLine(result.StandardOutputText);
 - **File transfer:** SFTP (version 3 with OpenSSH's extensions: pipelined uploads and downloads, seekable remote file
   streams, directories, links and attributes; the API is experimental for now), and SCP uploads and downloads of files,
   streams and directories, with progress, kept times, and checks that stop a hostile server from writing outside the target.
+- **Files for the rest of .NET:** the `SshSharp.FileProviders` package serves a directory on the server as an `IFileProvider`, for
+  ASP.NET Core static files, Razor views and configuration; nothing is mounted, so only your application sees the files.
 - **Observability:** `ILogger` logging, `ActivitySource` tracing and `Meter` metrics, with no secrets recorded.
 
 ## Why not SSH.NET?
@@ -83,6 +85,7 @@ Console.WriteLine(result.StandardOutputText);
 | FIPS mode (FIPS-approved algorithms only) | ✅ | ❌ |
 | SCP | ✅ | ✅ |
 | SFTP | ✅ (version 3 with OpenSSH extensions, pipelined transfers; experimental API) | ✅ |
+| Remote files as an `IFileProvider` (ASP.NET Core static files, Razor, configuration) | ✅ (`SshSharp.FileProviders`) | ❌ |
 | Native AOT | ✅ (an AOT-compiled binary connects to a real server in CI) | ✅ (AOT-compatible; an AOT publish is checked in CI) |
 | Diagnostics | `ILogger`, `ActivitySource` tracing, `Meter` metrics | `ILogger` |
 | Fuzzing | ✅ (coverage-guided, nightly; every parser in each test run) | ❌ |
@@ -97,6 +100,7 @@ or a long track record. Moving from SSH.NET? See the
 
 ```
 dotnet add package SshSharp
+dotnet add package SshSharp.FileProviders   # optional: an IFileProvider over SFTP
 ```
 
 ## Examples
