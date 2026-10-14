@@ -50,15 +50,10 @@ internal static class SocksHandshake
         var address = header[3..7];
         await ReadNulTerminatedAsync(stream, cancellationToken).ConfigureAwait(false); // the user id, unused
 
-        string host;
-        if (address[0] == 0 && address[1] == 0 && address[2] == 0 && address[3] != 0)
-        {
-            host = await ReadNulTerminatedAsync(stream, cancellationToken).ConfigureAwait(false); // 4a: 0.0.0.x means "a name follows"
-        }
-        else
-        {
-            host = new IPAddress(address).ToString();
-        }
+        // 4a: an address of 0.0.0.x (x not 0) means "a name follows".
+        var host = address[0] == 0 && address[1] == 0 && address[2] == 0 && address[3] != 0
+            ? await ReadNulTerminatedAsync(stream, cancellationToken).ConfigureAwait(false)
+            : new IPAddress(address).ToString();
 
         var request = new SocksRequest(host, port, Socks4);
         if (command != Connect || port == 0 || !IsValidHost(host))
