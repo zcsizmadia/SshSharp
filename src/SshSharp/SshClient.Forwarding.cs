@@ -22,6 +22,23 @@ public sealed partial class SshClient
     }
 
     /// <summary>
+    /// A <see cref="System.Net.Http.SocketsHttpHandler.ConnectCallback"/> that makes <see cref="System.Net.Http.HttpClient"/>'s connections
+    /// through this SSH connection (<see cref="OpenTcpTunnelAsync"/>), so it can reach web services only the server reaches, such as an
+    /// internal API behind a bastion. Host names are resolved by the server. TLS still runs end to end, from here to the service. Set
+    /// <see cref="System.Net.Http.SocketsHttpHandler.UseProxy"/> to false: with a system proxy configured, HttpClient would otherwise
+    /// connect to that proxy, through the server, instead of to the service.
+    /// </summary>
+    /// <example>
+    /// <code>
+    /// using var http = new HttpClient(new SocketsHttpHandler { ConnectCallback = client.CreateHttpConnectCallback(), UseProxy = false });
+    /// var status = await http.GetStringAsync("https://internal-api.corp/health");
+    /// </code>
+    /// </example>
+    public Func<System.Net.Http.SocketsHttpConnectionContext, CancellationToken, ValueTask<Stream>> CreateHttpConnectCallback() =>
+        async (context, cancellationToken) =>
+            await OpenTcpTunnelAsync(context.DnsEndPoint.Host, context.DnsEndPoint.Port, cancellationToken).ConfigureAwait(false);
+
+    /// <summary>
     /// Opens a connection from the server to the Unix domain socket at <paramref name="path"/> on the server
     /// (<c>direct-streamlocal@openssh.com</c>, what <c>ssh -L port:/path</c> uses), for example a database or Docker socket.
     /// </summary>

@@ -79,7 +79,7 @@ See [Connecting](connecting.md) for streams, jump hosts and timeouts.
 | `ConnectionInfo.Timeout` | a `CancellationToken` (for example `new CancellationTokenSource(TimeSpan.FromSeconds(10))`), or `ConnectTimeout` in `ssh_config` |
 | `client.KeepAliveInterval` | `SshClientOptions.KeepAliveInterval` and `KeepAliveCountMax` (`ServerAliveInterval` in `ssh_config`) |
 | `ConnectionInfo.Encryptions` / `KeyExchangeAlgorithms` / `HostKeyAlgorithms` (removing entries) | `Ciphers`, `KexAlgorithms`, `HostKeyAlgorithms` in `ssh_config` (the defaults are modern only; `SshClientOptions.FipsMode` restricts them to FIPS algorithms) |
-| `ConnectionInfo.ProxyType` (SOCKS, HTTP) | not supported; use `ProxyJump`, `ProxyCommand`, or `SshClient.ConnectAsync(Stream, ...)` over a stream you open yourself |
+| `ConnectionInfo.ProxyType`, `ProxyHost`, `ProxyPort`, `ProxyUsername`, `ProxyPassword` | `SshClientOptions.Proxy = SshProxy.Http(host, port, credentials)` (or `Socks5`, `Socks4`, or `SshProxy.FromUri(new Uri("socks5://proxy:1080"))`) |
 | `client.IsConnected` | `client.IsConnected`; `client.ConnectionClosed` (a `CancellationToken`) fires when the connection drops |
 | `client.ErrorOccurred` event | `client.ConnectionClosed` and `client.ConnectionError` |
 | `client.ConnectionInfo.ServerVersion` | `client.ServerIdentification` |
@@ -258,7 +258,7 @@ See [File transfer (SCP)](scp.md).
 | `SshConnectionException` | `SshException` with `Reason` (`ConnectFailed`, `ConnectionClosed`, `ProtocolError`, `KeyExchangeFailed`, ...) |
 | `SshAuthenticationException` | `SshAuthenticationException` (a subclass of `SshException`) |
 | `SshOperationTimeoutException` | `OperationCanceledException` when your token was cancelled; `SshException` with `Reason = Timeout` for `ConnectTimeout` |
-| `ProxyException` | not applicable |
+| `ProxyException` | `SshException` with `Reason = ConnectFailed`, saying what the proxy answered |
 | `ScpException` | `SshException` with `Reason = TransferFailed` |
 
 See [Errors and diagnostics](diagnostics.md) for logging (`SshClientOptions.Logger`), tracing and metrics.
