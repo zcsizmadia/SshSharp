@@ -69,6 +69,12 @@ internal sealed class FakeSftpServer
     /// <summary>Hold each reply back until the next request arrives, answering them in reverse pairs (replies may come in any order).</summary>
     public bool ReorderReplies { get; set; }
 
+    /// <summary>Answer STAT and LSTAT of the paths this matches with PERMISSION_DENIED, as for a directory the user may not search.</summary>
+    public Func<string, bool>? DenyStat { get; set; }
+
+    /// <summary>How long to hold a reply back, by request type and reply type (a slow server); none by default.</summary>
+    public Func<byte, byte, TimeSpan>? ReplyDelay { get; set; }
+
     /// <summary>The protocol version to announce.</summary>
     public uint Version { get; set; } = 3;
 
@@ -184,6 +190,11 @@ internal sealed class FakeSftpServer
                 await script.StderrAsync(new byte[StderrPerReply]);
             }
 
+            if (ReplyDelay?.Invoke(packet[0], reply![0]) is { } delay && delay > TimeSpan.Zero)
+            {
+                await Task.Delay(delay);
+            }
+
             if (ReorderReplies && packet[0] != 1 && queue.Reader.TryRead(out var next))
             {
                 var nextReply = Handle(next);
@@ -251,6 +262,17 @@ internal sealed class FakeSftpServer
         }
 
         return "/" + string.Join('/', parts);
+    }
+
+    /// <summary>The path with a final symbolic link (and links it leads to) resolved; unchanged when it is not a link.</summary>
+    private string Canonical(string path)
+    {
+        for (var hops = 0; hops < 8 && _nodes.TryGetValue(path, out var node) && node.LinkTarget is { } target; hops++)
+        {
+            path = Resolve(target.StartsWith('/') ? target : path[..path.LastIndexOf('/')] + "/" + target);
+        }
+
+        return path;
     }
 
     private Node? Follow(string path)
@@ -345,6 +367,11 @@ internal sealed class FakeSftpServer
         }
 
         var id = r.ReadUInt32();
+        if (type is 7 or 17 && DenyStat is { } deny && deny(Resolve(new SshReader(r.Remaining).ReadUtf8String())))
+        {
+            return Status(id, 3, "Permission denied"); // LSTAT or STAT of a path the user may not look at
+        }
+
         switch (type)
         {
             case 3 when OpenAnswersOk:
@@ -589,9 +616,9 @@ internal sealed class FakeSftpServer
                 return _nodes.Keys.Any(k => k.StartsWith(path + "/", StringComparison.Ordinal)) ? Status(id, 4, "Directory not empty") : _nodes.Remove(path) ? Status(id, 0) : Status(id, 4);
             }
 
-            case 16: // REALPATH
+            case 16: // REALPATH (resolving links, as OpenSSH's realpath(3) does)
             {
-                var path = Resolve(r.ReadUtf8String());
+                var path = Canonical(Resolve(r.ReadUtf8String()));
                 return Build(w => { w.WriteByte(104); w.WriteUInt32(id); w.WriteUInt32(1); w.WriteString(path); w.WriteString(path); w.WriteUInt32(0); });
             }
 

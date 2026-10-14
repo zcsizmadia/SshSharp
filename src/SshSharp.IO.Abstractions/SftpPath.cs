@@ -51,7 +51,7 @@ internal sealed class SftpPath(SftpFileSystem fileSystem) : IPath
 
     public bool EndsInDirectorySeparator(string path) => EndsInDirectorySeparator(path.AsSpan());
 
-    public bool Exists(string? path) => !string.IsNullOrEmpty(path) && !path.Contains('\0') && fileSystem.Stat(fileSystem.Full(path)) is not null;
+    public bool Exists(string? path) => fileSystem.Exists(path, directory: null);
 
     public ReadOnlySpan<char> GetDirectoryName(ReadOnlySpan<char> path) => RemotePath.DirectoryName(path, out _);
 

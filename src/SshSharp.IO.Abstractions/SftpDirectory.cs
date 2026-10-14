@@ -119,15 +119,8 @@ internal sealed class SftpDirectory(SftpFileSystem fileSystem) : IDirectory
         fileSystem.Run(destination, true, ct => fileSystem.Sftp.RenameAsync(source, destination, overwrite: false, ct));
     }
 
-    public bool Exists(string? path)
-    {
-        if (string.IsNullOrEmpty(path) || path.Contains('\0'))
-        {
-            return false;
-        }
-
-        return fileSystem.Stat(fileSystem.Full(path)) is { IsDirectory: true };
-    }
+    /// <summary>Whether a directory exists; never throws (an invalid path, a denied lookup or a failed session reads as false).</summary>
+    public bool Exists(string? path) => fileSystem.Exists(path, directory: true);
 
     // ---- enumeration ----
 

@@ -28,7 +28,7 @@ public sealed class SftpFileProvider : IFileProvider
     private readonly SftpClient _sftp;
     private readonly SftpFileProviderOptions _options;
     private readonly ConcurrentDictionary<string, (long Expires, SftpFileAttributes? Attributes)> _attributes = new(StringComparer.Ordinal);
-    private readonly ConcurrentDictionary<string, (long Expires, IReadOnlyList<IFileInfo>? Entries)> _listings = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, (long Expires, List<IFileInfo>? Entries)> _listings = new(StringComparer.Ordinal);
 
     /// <summary>Serves the files under <paramref name="root"/> on the server.</summary>
     /// <param name="sftp">The SFTP session to use; it stays the caller's to dispose, after the provider is no longer used.</param>
@@ -71,14 +71,49 @@ public sealed class SftpFileProvider : IFileProvider
         var now = Environment.TickCount64;
         if (!_listings.TryGetValue(path, out var cached) || cached.Expires < now)
         {
-            cached = (now + (long)_options.CacheDuration.TotalMilliseconds, List(path));
-            if (_options.CacheDuration > TimeSpan.Zero)
-            {
-                _listings[path] = cached;
-            }
+            cached = (Expiry(now), List(path));
+            Remember(_listings, path, cached, now);
         }
 
         return cached.Entries is { } entries ? new Contents(entries) : NotFoundDirectoryContents.Singleton;
+    }
+
+    /// <summary>When an entry cached at <paramref name="now"/> expires; a huge <see cref="SftpFileProviderOptions.CacheDuration"/> saturates.</summary>
+    private long Expiry(long now)
+    {
+        var duration = _options.CacheDuration.TotalMilliseconds;
+        return duration >= long.MaxValue - now ? long.MaxValue : now + (long)duration;
+    }
+
+    /// <summary>
+    /// Caches an entry, keeping the cache within <see cref="SftpFileProviderOptions.MaxCacheEntries"/>: when it is full, expired entries go
+    /// first, and if that is not enough the cache starts over. Lookups of paths that do not exist are cached too, so without the bound
+    /// requests for random paths would grow it without limit.
+    /// </summary>
+    private void Remember<T>(ConcurrentDictionary<string, (long Expires, T Value)> cache, string path, (long Expires, T Value) entry, long now)
+    {
+        if (_options.CacheDuration <= TimeSpan.Zero)
+        {
+            return;
+        }
+
+        if (cache.Count >= _options.MaxCacheEntries && !cache.ContainsKey(path))
+        {
+            foreach (var (key, value) in cache)
+            {
+                if (value.Expires < now)
+                {
+                    cache.TryRemove(key, out _);
+                }
+            }
+
+            if (cache.Count >= _options.MaxCacheEntries)
+            {
+                cache.Clear();
+            }
+        }
+
+        cache[path] = entry;
     }
 
     /// <summary>A token that never changes: SFTP cannot tell when a file changes.</summary>
@@ -130,11 +165,7 @@ public sealed class SftpFileProvider : IFileProvider
             attributes = null; // missing, or not allowed: either way there is no file to serve
         }
 
-        if (_options.CacheDuration > TimeSpan.Zero)
-        {
-            _attributes[path] = (now + (long)_options.CacheDuration.TotalMilliseconds, attributes);
-        }
-
+        Remember(_attributes, path, (Expiry(now), attributes), now);
         return attributes;
     }
 
@@ -178,18 +209,22 @@ public sealed class SftpFileProvider : IFileProvider
 
     /// <summary>
     /// Runs an SFTP operation to completion for a synchronous caller, bounded by <see cref="SftpFileProviderOptions.OperationTimeout"/>.
-    /// It runs on the thread pool, so a caller with a synchronization context (a UI thread) cannot deadlock it.
+    /// It runs on the thread pool, so a caller with a synchronization context (a UI thread) cannot deadlock it; the calling thread waits
+    /// meanwhile, which is why lookups are cached.
     /// </summary>
-    internal T Run<T>(Func<CancellationToken, Task<T>> operation)
+    internal T Run<T>(Func<CancellationToken, Task<T>> operation) => Run(_options.OperationTimeout, operation);
+
+    /// <summary>Runs <paramref name="operation"/> as <see cref="Run{T}(Func{CancellationToken, Task{T}})"/> does, with the given timeout; a timeout is an <see cref="SshException"/> (<see cref="SshFailureReason.Timeout"/>).</summary>
+    internal static T Run<T>(TimeSpan timeout, Func<CancellationToken, Task<T>> operation)
     {
-        using var timeout = new CancellationTokenSource(_options.OperationTimeout);
+        using var cancel = new CancellationTokenSource(timeout);
         try
         {
-            return Task.Run(() => operation(timeout.Token), CancellationToken.None).GetAwaiter().GetResult();
+            return Task.Run(() => operation(cancel.Token), CancellationToken.None).GetAwaiter().GetResult();
         }
-        catch (OperationCanceledException ex) when (timeout.IsCancellationRequested)
+        catch (OperationCanceledException ex) when (cancel.IsCancellationRequested)
         {
-            throw new SshException(SshFailureReason.Timeout, $"The SFTP server did not answer within {_options.OperationTimeout.TotalSeconds:0.#} s.", ex);
+            throw new SshException(SshFailureReason.Timeout, $"The SFTP server did not answer within {timeout.TotalSeconds:0.#} s.", ex);
         }
     }
 
@@ -221,13 +256,37 @@ public sealed class SftpFileProviderOptions
         }
     } = TimeSpan.FromSeconds(5);
 
-    /// <summary>How long one SFTP operation may take before the lookup or read fails with a timeout (default 30 seconds).</summary>
+    /// <summary>
+    /// How many paths the attribute cache, and separately the listing cache, may hold (default 10,000). Paths that do not exist are cached
+    /// too, so this bounds the memory requests for random paths can take; when a cache is full, expired entries are dropped, and if that
+    /// is not enough it starts over.
+    /// </summary>
+    public int MaxCacheEntries
+    {
+        get;
+        init
+        {
+            ArgumentOutOfRangeException.ThrowIfLessThan(value, 1);
+            field = value;
+        }
+    } = 10_000;
+
+    /// <summary>
+    /// How long one SFTP request may take before the lookup or read fails with an <see cref="SshException"/> (<see cref="SshFailureReason.Timeout"/>;
+    /// default 30 seconds, <see cref="Timeout.InfiniteTimeSpan"/> for no limit). Each waiting synchronous lookup holds a thread-pool thread
+    /// for up to this long, so keep it short.
+    /// </summary>
     public TimeSpan OperationTimeout
     {
         get;
         init
         {
-            ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(value, TimeSpan.Zero);
+            if (value != Timeout.InfiniteTimeSpan)
+            {
+                ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(value, TimeSpan.Zero);
+                ArgumentOutOfRangeException.ThrowIfGreaterThan(value, TimeSpan.FromMilliseconds(int.MaxValue));
+            }
+
             field = value;
         }
     } = TimeSpan.FromSeconds(30);

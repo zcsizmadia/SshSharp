@@ -243,5 +243,70 @@ public class SftpFileProviderTests
         await Assert.That(() => new SftpFileProvider(rig.Sftp, "")).Throws<ArgumentException>();
         await Assert.That(() => new SftpFileProviderOptions { CacheDuration = TimeSpan.FromSeconds(-1) }).Throws<ArgumentOutOfRangeException>();
         await Assert.That(() => new SftpFileProviderOptions { OperationTimeout = TimeSpan.Zero }).Throws<ArgumentOutOfRangeException>();
+        await Assert.That(() => new SftpFileProviderOptions { OperationTimeout = TimeSpan.MaxValue }).Throws<ArgumentOutOfRangeException>();
+        await Assert.That(() => new SftpFileProviderOptions { MaxCacheEntries = 0 }).Throws<ArgumentOutOfRangeException>();
     }
+
+    // ---- found in the pre-0.5.0 review ----
+
+    [Test]
+    public async Task TheCache_StaysWithinItsBound_UnderRequestsForPathsThatDoNotExist()
+    {
+        await using var rig = await Rig.StartAsync();
+        var provider = new SftpFileProvider(rig.Sftp, "site", new SftpFileProviderOptions { CacheDuration = TimeSpan.FromMinutes(5), MaxCacheEntries = 8 });
+        provider.GetFileInfo("index.html");
+        var before = rig.Requests;
+        provider.GetFileInfo("index.html");
+        await Assert.That(rig.Requests).IsEqualTo(before); // cached
+
+        // Probes for random paths (each one cached as missing) fill the cache: it starts over rather than growing.
+        for (var i = 0; i < 50; i++)
+        {
+            await Assert.That(provider.GetFileInfo($"probe-{i}.php").Exists).IsFalse();
+        }
+
+        var probed = rig.Requests;
+        provider.GetFileInfo("index.html");
+        await Assert.That(rig.Requests).IsGreaterThan(probed); // evicted, so asked again
+        await Assert.That(CacheCount(provider)).IsLessThanOrEqualTo(8);
+    }
+
+    [Test]
+    public async Task TimeoutsAndCacheDurations_AtTheirExtremes()
+    {
+        await using var rig = await Rig.StartAsync();
+
+        // A cache duration far beyond any process lifetime caches (rather than overflowing into "always expired").
+        var forever = new SftpFileProvider(rig.Sftp, "site", new SftpFileProviderOptions { CacheDuration = TimeSpan.MaxValue });
+        forever.GetFileInfo("index.html");
+        var before = rig.Requests;
+        forever.GetFileInfo("index.html");
+        await Assert.That(rig.Requests).IsEqualTo(before);
+
+        // No time limit at all.
+        var patient = new SftpFileProvider(rig.Sftp, "site", new SftpFileProviderOptions { OperationTimeout = System.Threading.Timeout.InfiniteTimeSpan });
+        await Assert.That(patient.GetFileInfo("index.html").Exists).IsTrue();
+    }
+
+    [Test]
+    public async Task ASynchronousReadThatTimesOut_IsTheSameTimeoutError_AsALookup()
+    {
+        await using var rig = await Rig.StartAsync();
+        var provider = new SftpFileProvider(rig.Sftp, "site", new SftpFileProviderOptions { OperationTimeout = TimeSpan.FromMilliseconds(300) });
+        var file = provider.GetFileInfo("index.html");
+        using var stream = file.CreateReadStream();
+        rig.Files.ReplyDelay = (request, _) => request == 5 ? TimeSpan.FromSeconds(2) : TimeSpan.Zero;
+
+        var error = Assert.Throws<SshException>(() => stream.ReadExactly(new byte[4]));
+        await Assert.That(error!.Reason).IsEqualTo(SshFailureReason.Timeout);
+        error = Assert.Throws<SshException>(() => stream.ReadExactly(new byte[4].AsSpan()));
+        await Assert.That(error!.Reason).IsEqualTo(SshFailureReason.Timeout);
+    }
+
+    /// <summary>How many entries the provider's two caches hold together (read through reflection: they are private).</summary>
+    private static int CacheCount(SftpFileProvider provider) =>
+        typeof(SftpFileProvider).GetFields(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+            .Select(f => f.GetValue(provider))
+            .OfType<System.Collections.ICollection>()
+            .Sum(c => c.Count);
 }

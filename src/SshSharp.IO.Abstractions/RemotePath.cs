@@ -101,19 +101,23 @@ internal static class RemotePath
         return directory.IsEmpty ? "/" : directory;
     }
 
-    /// <summary>The extension of the file name, with its dot; empty when there is none (a trailing dot counts as none).</summary>
+    /// <summary>
+    /// The extension of the file name, with its dot; empty when there is none (a trailing dot counts as none). As .NET's
+    /// <c>Path.GetExtension</c>, a name that starts with its only dot is all extension: <c>.bashrc</c>.
+    /// </summary>
     public static ReadOnlySpan<char> Extension(ReadOnlySpan<char> path)
     {
         var name = FileName(path);
         var dot = name.LastIndexOf('.');
-        return dot <= 0 || dot == name.Length - 1 ? ReadOnlySpan<char>.Empty : name[dot..];
+        return dot < 0 || dot == name.Length - 1 ? ReadOnlySpan<char>.Empty : name[dot..];
     }
 
+    /// <summary>The file name without its extension, as <c>Path.GetFileNameWithoutExtension</c>: empty for <c>.bashrc</c>.</summary>
     public static ReadOnlySpan<char> FileNameWithoutExtension(ReadOnlySpan<char> path)
     {
         var name = FileName(path);
         var dot = name.LastIndexOf('.');
-        return dot <= 0 ? name : name[..dot];
+        return dot < 0 ? name : name[..dot];
     }
 
     /// <summary>The path of <paramref name="path"/> relative to <paramref name="relativeTo"/>, both absolute and normalized.</summary>

@@ -4,10 +4,10 @@ using SshSharp.Sftp;
 namespace SshSharp.IO.Abstractions;
 
 /// <summary><see cref="IFileInfo"/> for a server path.</summary>
-internal sealed class SftpFileInfoEntry(SftpFileSystem fileSystem, string path, SftpFileAttributes? known = null)
+internal sealed class SftpFileInfoEntry(SftpFileSystem fileSystem, string path, SftpFileSystemInfo.KnownAttributes? known = null)
     : SftpFileSystemInfo(fileSystem, path, known), IFileInfo
 {
-    public override bool Exists => Current is { IsDirectory: false };
+    public override bool Exists => CurrentOrNull is { IsDirectory: false };
 
     public long Length => Current is { IsDirectory: false } attributes
         ? attributes.Size ?? 0
@@ -86,10 +86,10 @@ internal sealed class SftpFileInfoEntry(SftpFileSystem fileSystem, string path, 
 }
 
 /// <summary><see cref="IDirectoryInfo"/> for a server path.</summary>
-internal sealed class SftpDirectoryInfoEntry(SftpFileSystem fileSystem, string path, SftpFileAttributes? known = null)
+internal sealed class SftpDirectoryInfoEntry(SftpFileSystem fileSystem, string path, SftpFileSystemInfo.KnownAttributes? known = null)
     : SftpFileSystemInfo(fileSystem, path, known), IDirectoryInfo
 {
-    public override bool Exists => Current is { IsDirectory: true };
+    public override bool Exists => CurrentOrNull is { IsDirectory: true };
 
     public IDirectoryInfo? Parent => Fs.Directory.GetParent(FullName);
 
@@ -191,13 +191,15 @@ internal sealed class SftpDirectoryInfoEntry(SftpFileSystem fileSystem, string p
     public override IFileSystemInfo? ResolveLinkTarget(bool returnFinalTarget) => Fs.Directory.ResolveLinkTarget(FullName, returnFinalTarget);
 
     private IEnumerable<IDirectoryInfo> Directories(string pattern, EnumerationOptions options) =>
-        Search.Entries(Fs, FullName, pattern, options, Search.Kind.Directories).Select(e => (IDirectoryInfo)new SftpDirectoryInfoEntry(Fs, e.FullPath, e.Attributes));
+        Search.Entries(Fs, FullName, pattern, options, Search.Kind.Directories).Select(e => (IDirectoryInfo)new SftpDirectoryInfoEntry(Fs, e.FullPath, Known(e)));
 
     private IEnumerable<IFileInfo> Files(string pattern, EnumerationOptions options) =>
-        Search.Entries(Fs, FullName, pattern, options, Search.Kind.Files).Select(e => (IFileInfo)new SftpFileInfoEntry(Fs, e.FullPath, e.Attributes));
+        Search.Entries(Fs, FullName, pattern, options, Search.Kind.Files).Select(e => (IFileInfo)new SftpFileInfoEntry(Fs, e.FullPath, Known(e)));
 
     private IEnumerable<IFileSystemInfo> Infos(string pattern, EnumerationOptions options) =>
         Search.Entries(Fs, FullName, pattern, options, Search.Kind.Both).Select(e => e.IsDirectory
-            ? (IFileSystemInfo)new SftpDirectoryInfoEntry(Fs, e.FullPath, e.Attributes)
-            : new SftpFileInfoEntry(Fs, e.FullPath, e.Attributes));
+            ? (IFileSystemInfo)new SftpDirectoryInfoEntry(Fs, e.FullPath, Known(e))
+            : new SftpFileInfoEntry(Fs, e.FullPath, Known(e)));
+
+    private static SftpFileSystemInfo.KnownAttributes Known(Search.Entry entry) => new(entry.Attributes, entry.Attributes.IsSymbolicLink ? entry.Target : entry.Attributes);
 }

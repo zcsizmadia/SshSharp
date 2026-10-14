@@ -4,6 +4,14 @@ An `IFileSystem` ([System.IO.Abstractions](https://github.com/TestableIO/System.
 [SshSharp](https://www.nuget.org/packages/SshSharp): code written against `IFileSystem` instead of `File`, `Directory` and `Path`
 reads and writes files on an SSH server. Nothing is mounted, so only your application sees them.
 
+The API is experimental: using it reports diagnostic `SSHSHARP001`, which is an error until you acknowledge it in the project file:
+
+```xml
+<PropertyGroup>
+  <NoWarn>$(NoWarn);SSHSHARP001</NoWarn>
+</PropertyGroup>
+```
+
 ```csharp
 using System.IO.Abstractions;
 using SshSharp;
@@ -23,5 +31,7 @@ foreach (var path in fs.Directory.EnumerateFiles("reports", "*.txt", SearchOptio
 ```
 
 Paths are POSIX paths on the server (`fs.Path` uses `/` on every OS), relative to the login directory. Errors are the usual
-`System.IO` exceptions. Not supported: `FileSystemWatcher`, `DriveInfo`, `FileVersionInfo`, `RandomAccess`, handles,
-encryption and `Replace`. The API is experimental (diagnostic `SSHSHARP001`). Documentation: https://zcsizmadia.github.io/SshSharp/
+`System.IO` exceptions, from synchronous and asynchronous calls alike, and `Exists` never throws. The synchronous calls wait for
+the server, bounded by `SftpFileSystemOptions.OperationTimeout`; whole-file reads, writes and copies are bounded by the time
+without progress, so large files are not cut off. Not supported: `FileSystemWatcher`, `DriveInfo`, `FileVersionInfo`,
+`RandomAccess`, handles, encryption and `Replace`. Documentation: https://zcsizmadia.github.io/SshSharp/

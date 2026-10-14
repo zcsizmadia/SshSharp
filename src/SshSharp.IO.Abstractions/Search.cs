@@ -12,8 +12,11 @@ internal static class Search
         Both,
     }
 
-    /// <summary>An entry found: the path to return (the given path joined with names), the server path, and what it is.</summary>
-    public readonly record struct Entry(string Path, string FullPath, string Name, SftpFileAttributes Attributes, bool IsDirectory);
+    /// <summary>
+    /// An entry found: the path to return (the given path joined with names), the server path, its own attributes (a link's are the
+    /// link's), what a link points to (null for other entries, and for a link that leads nowhere), and whether it is a directory.
+    /// </summary>
+    public readonly record struct Entry(string Path, string FullPath, string Name, SftpFileAttributes Attributes, SftpFileAttributes? Target, bool IsDirectory);
 
     /// <summary>
     /// The options the <see cref="SearchOption"/> overloads use: recursion as asked, nothing skipped, and inaccessible directories an
@@ -69,7 +72,7 @@ internal static class Search
             {
                 if (Matches(special, pattern, options))
                 {
-                    yield return new Entry(RemotePath.Join(display, special), RemotePath.Join(full, special), special, new SftpFileAttributes { FileType = SftpFileType.Directory }, true);
+                    yield return new Entry(RemotePath.Join(display, special), RemotePath.Join(full, special), special, new SftpFileAttributes { FileType = SftpFileType.Directory }, null, true);
                 }
             }
         }
@@ -89,7 +92,7 @@ internal static class Search
             var wanted = kind == Kind.Both || (kind == Kind.Directories) == isDirectory;
             if (wanted && Matches(item.Name, pattern, options))
             {
-                yield return new Entry(childDisplay, childFull, item.Name, target ?? attributes, isDirectory);
+                yield return new Entry(childDisplay, childFull, item.Name, attributes, target, isDirectory);
             }
 
             // Links to directories are listed but not followed, so a link cannot loop the search.

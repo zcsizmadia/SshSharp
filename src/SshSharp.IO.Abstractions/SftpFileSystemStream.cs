@@ -3,8 +3,13 @@ using System.IO.Abstractions;
 namespace SshSharp.IO.Abstractions;
 
 /// <summary>A remote file as the <see cref="FileSystemStream"/> the abstraction hands out: buffered, synchronous and asynchronous.</summary>
-internal sealed class SftpFileSystemStream(Stream inner, string path) : FileSystemStream(inner, path, isAsync: true)
+internal sealed class SftpFileSystemStream : FileSystemStream
 {
+    private SftpFileSystemStream(Stream inner, string path)
+        : base(inner, path, isAsync: true)
+    {
+    }
+
     /// <summary>
     /// Opens <paramref name="path"/> as a stream: the SFTP stream with synchronous reads and writes added, behind a buffer, so the many
     /// small writes of a <see cref="StreamWriter"/> become few requests.
@@ -14,12 +19,18 @@ internal sealed class SftpFileSystemStream(Stream inner, string path) : FileSyst
         var full = fileSystem.Full(path);
         var remote = fileSystem.Run(full, mode is FileMode.Create or FileMode.CreateNew or FileMode.OpenOrCreate or FileMode.Append,
             ct => fileSystem.Sftp.OpenAsync(full, mode, access, ct));
-        var blocking = new BlockingStream(remote, fileSystem.Options.OperationTimeout);
-        return new SftpFileSystemStream(new BufferedStream(blocking, Math.Max(bufferSize, 64 * 1024)), full);
+        return Wrap(fileSystem, remote, full, bufferSize);
     }
 
-    /// <summary>Synchronous calls on top of the asynchronous SFTP stream, each bounded by the timeout.</summary>
-    private sealed class BlockingStream(Stream remote, TimeSpan timeout) : Stream
+    /// <summary>An open SFTP stream as a file system stream: errors, synchronous or asynchronous, are <c>System.IO</c> exceptions.</summary>
+    public static SftpFileSystemStream Wrap(SftpFileSystem fileSystem, Stream remote, string full, int bufferSize) =>
+        new(new BufferedStream(new IOStream(remote, full, fileSystem.Options.OperationTimeout), Math.Max(bufferSize, 64 * 1024)), full);
+
+    /// <summary>
+    /// The SFTP stream with synchronous calls added (each bounded by the timeout) and every failure, synchronous or asynchronous,
+    /// turned into the <c>System.IO</c> exception <see cref="SftpFileSystem.Translate"/> gives.
+    /// </summary>
+    private sealed class IOStream(Stream remote, string path, TimeSpan timeout) : Stream
     {
         public override bool CanRead => remote.CanRead;
 
@@ -27,7 +38,8 @@ internal sealed class SftpFileSystemStream(Stream inner, string path) : FileSyst
 
         public override bool CanWrite => remote.CanWrite;
 
-        public override long Length => Wait(ct => Task.FromResult(remote.Length));
+        // The SFTP stream answers from what it knows; the wait is still bounded, should it have to ask the server.
+        public override long Length => Wait(ct => Task.Run(() => remote.Length, CancellationToken.None).WaitAsync(ct));
 
         public override long Position
         {
@@ -38,10 +50,20 @@ internal sealed class SftpFileSystemStream(Stream inner, string path) : FileSyst
         public override int Read(byte[] buffer, int offset, int count) =>
             Wait(ct => remote.ReadAsync(buffer.AsMemory(offset, count), ct).AsTask());
 
-        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) => remote.ReadAsync(buffer, cancellationToken);
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                return await remote.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (SftpFileSystem.Translate(ex, path, false, timedOut: false) is { } translated)
+            {
+                throw translated;
+            }
+        }
 
         public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) =>
-            remote.ReadAsync(buffer, offset, count, cancellationToken);
+            ReadAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
 
         public override void Write(byte[] buffer, int offset, int count) =>
             Wait(async ct =>
@@ -50,10 +72,20 @@ internal sealed class SftpFileSystemStream(Stream inner, string path) : FileSyst
                 return true;
             });
 
-        public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default) => remote.WriteAsync(buffer, cancellationToken);
+        public override async ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                await remote.WriteAsync(buffer, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (SftpFileSystem.Translate(ex, path, false, timedOut: false) is { } translated)
+            {
+                throw translated;
+            }
+        }
 
         public override Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) =>
-            remote.WriteAsync(buffer, offset, count, cancellationToken);
+            WriteAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
 
         public override long Seek(long offset, SeekOrigin origin) => origin == SeekOrigin.End ? remote.Position = Length + offset : remote.Seek(offset, origin);
 
@@ -69,11 +101,29 @@ internal sealed class SftpFileSystemStream(Stream inner, string path) : FileSyst
             return true;
         });
 
-        public override Task FlushAsync(CancellationToken cancellationToken) => remote.FlushAsync(cancellationToken);
+        public override async Task FlushAsync(CancellationToken cancellationToken)
+        {
+            try
+            {
+                await remote.FlushAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (SftpFileSystem.Translate(ex, path, false, timedOut: false) is { } translated)
+            {
+                throw translated;
+            }
+        }
 
         public override async ValueTask DisposeAsync()
         {
-            await remote.DisposeAsync().ConfigureAwait(false);
+            try
+            {
+                await remote.DisposeAsync().ConfigureAwait(false);
+            }
+            catch (Exception ex) when (SftpFileSystem.Translate(ex, path, false, timedOut: false) is { } translated)
+            {
+                throw translated;
+            }
+
             await base.DisposeAsync().ConfigureAwait(false);
         }
 
@@ -98,7 +148,7 @@ internal sealed class SftpFileSystemStream(Stream inner, string path) : FileSyst
             {
                 return Task.Run(() => operation(cancel.Token), CancellationToken.None).GetAwaiter().GetResult();
             }
-            catch (Exception ex) when (SftpFileSystem.Translate(ex, null, false, cancel.IsCancellationRequested) is { } translated)
+            catch (Exception ex) when (SftpFileSystem.Translate(ex, path, false, cancel.IsCancellationRequested) is { } translated)
             {
                 throw translated;
             }
