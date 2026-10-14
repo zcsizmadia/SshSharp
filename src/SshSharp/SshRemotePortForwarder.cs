@@ -260,7 +260,7 @@ public sealed class SshRemotePortForwarder : IAsyncDisposable
 
         if (ParseAddressLiteral(target.Host) is { } literal)
         {
-            return Allowed(literal.ToString()) ? ([literal], null) : (null, "the destination is not allowed");
+            return Allowed(FilterText(literal)) ? ([literal], null) : (null, "the destination is not allowed");
         }
 
         if (!Allowed(target.Host))
@@ -280,7 +280,7 @@ public sealed class SshRemotePortForwarder : IAsyncDisposable
             return (null, ex is SocketException socketError ? socketError.SocketErrorCode.ToString() : "the name could not be resolved");
         }
 
-        var allowed = resolved.Select(Canonical).Distinct().Where(a => Allowed(a.ToString())).ToArray();
+        var allowed = resolved.Select(Canonical).Distinct().Where(a => Allowed(FilterText(a))).ToArray();
         return allowed.Length > 0 ? (allowed, null) : (null, "the destination is not allowed");
     }
 
@@ -291,16 +291,12 @@ public sealed class SshRemotePortForwarder : IAsyncDisposable
         return IPAddress.TryParse(text, out var address) ? Canonical(address) : null;
     }
 
-    private static IPAddress Canonical(IPAddress address)
-    {
-        if (address.IsIPv4MappedToIPv6)
-        {
-            return address.MapToIPv4();
-        }
+    /// <summary>The address to connect to: an IPv4-mapped IPv6 address as plain IPv4; an IPv6 scope is kept (link-local needs it).</summary>
+    private static IPAddress Canonical(IPAddress address) => address.IsIPv4MappedToIPv6 ? address.MapToIPv4() : address;
 
-        // Without the scope: a zone index does not change which host it is.
-        return address.AddressFamily == AddressFamily.InterNetworkV6 && address.ScopeId != 0 ? new IPAddress(address.GetAddressBytes()) : address;
-    }
+    /// <summary>What the filter sees for an address: its canonical text, without an IPv6 zone index (which does not change the host).</summary>
+    internal static string FilterText(IPAddress address) =>
+        address.AddressFamily == AddressFamily.InterNetworkV6 && address.ScopeId != 0 ? new IPAddress(address.GetAddressBytes()).ToString() : address.ToString();
 
     private async Task RefuseAsync(SshChannelStream stream, SocksRequest target, string reason)
     {
