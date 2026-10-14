@@ -67,6 +67,9 @@ internal sealed class SshTransport : IAsyncDisposable
     /// <summary>The host key the server proved possession of.</summary>
     public HostKeyInfo? HostKey { get; private set; }
 
+    /// <summary>The host key algorithms the server offered in its first KEXINIT; set before negotiation, so also when it fails.</summary>
+    public IReadOnlyList<string>? ServerHostKeyAlgorithms { get; private set; }
+
     /// <summary>How many key exchanges have completed, including the first.</summary>
     public int KeyExchangeCount { get; private set; }
 
@@ -305,6 +308,11 @@ internal sealed class SshTransport : IAsyncDisposable
     private async Task ExchangeKeysAsync(KexInitMessage clientInit, byte[] clientInitPayload, byte[] serverInitPayload, bool initial, uint serverInitSequence, CancellationToken cancellationToken)
     {
         var serverInit = KexInitMessage.Parse(serverInitPayload);
+        if (initial)
+        {
+            ServerHostKeyAlgorithms = serverInit.ServerHostKeyAlgorithms;
+        }
+
         var negotiated = AlgorithmNegotiator.Negotiate(clientInit, serverInit);
 
         // Strict KEX is decided by the first exchange only (the markers are not repeated afterwards).

@@ -164,6 +164,9 @@ internal sealed class FakeServerOptions
     /// <summary>The host key algorithm to offer; defaults to the key's type.</summary>
     public string? HostKeyAlgorithm { get; init; }
 
+    /// <summary>More host keys of other types, offered after <see cref="HostKey"/> (as sshd with several HostKey lines).</summary>
+    public IReadOnlyList<FakeHostKey> ExtraHostKeys { get; init; } = [];
+
     /// <summary>A host certificate offered in addition to <see cref="HostKey"/> (see <see cref="FakeHostKey.Certified"/>).</summary>
     public FakeHostKey? HostCertificate { get; init; }
 
@@ -396,6 +399,9 @@ internal sealed class FakeSshServer : IAsyncDisposable
 
     public static byte[] IgnorePayload() => [SshMessage.Ignore, 0, 0, 0, 1, 0x41];
 
+    /// <summary>The host key algorithms a plain key is offered under.</summary>
+    private static string[] AlgorithmsFor(FakeHostKey key) => key.KeyType == "ssh-rsa" ? ["rsa-sha2-512", "rsa-sha2-256"] : [key.KeyType];
+
     public static byte[] DisconnectPayload(string description)
     {
         var buffer = new ArrayBufferWriter<byte>();
@@ -487,7 +493,8 @@ internal sealed class FakeSshServer : IAsyncDisposable
 
         var hostKey = SshCertificate.IsCertificateAlgorithm(negotiated.HostKey) && Options.HostCertificate is { } certificate
             ? certificate
-            : !initial && Options.RekeyHostKey is { } replacement ? replacement : Options.HostKey;
+            : !initial && Options.RekeyHostKey is { } replacement ? replacement
+            : Options.ExtraHostKeys.FirstOrDefault(k => AlgorithmsFor(k).Contains(negotiated.HostKey)) ?? Options.HostKey;
         var (reply, secret, hash, kexHash) = RunKex(negotiated.Kex, negotiated.HostKey, hostKey, init, clientInitPayload, serverInitPayload);
         await SendKexAsync(reply, cancellationToken);
 
@@ -628,9 +635,8 @@ internal sealed class FakeSshServer : IAsyncDisposable
             ServerHostKeyAlgorithms =
             [
                 .. Options.HostCertificate is { } certificate ? [Options.HostCertificateAlgorithm ?? certificate.KeyType] : Array.Empty<string>(),
-                .. Options.HostKeyAlgorithm is { } algorithm
-                    ? new[] { algorithm }
-                    : hostKey.KeyType == "ssh-rsa" ? ["rsa-sha2-512", "rsa-sha2-256"] : [hostKey.KeyType],
+                .. Options.HostKeyAlgorithm is { } algorithm ? new[] { algorithm } : AlgorithmsFor(hostKey),
+                .. Options.ExtraHostKeys.SelectMany(AlgorithmsFor),
             ],
             EncryptionClientToServer = [cipher],
             EncryptionServerToClient = [cipher],

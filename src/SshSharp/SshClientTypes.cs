@@ -75,6 +75,25 @@ public sealed class SshNegotiatedAlgorithms
     private static bool IsAead(string cipher) => Protocol.SshAlgorithms.TryGetCipher(cipher, out var info) && info.IsAead;
 }
 
+/// <summary>Options for <see cref="SshClient.ScanHostKeysAsync(string, int, SshHostKeyScanOptions?, CancellationToken)"/>.</summary>
+public sealed class SshHostKeyScanOptions
+{
+    /// <summary>
+    /// The host key algorithms to ask for, for example <c>ssh-ed25519</c> or <c>rsa-sha2-512</c>; null for every plain key type SshSharp
+    /// supports. Algorithms of one key type (<c>rsa-sha2-512</c> and <c>rsa-sha2-256</c>) find the same key, so it is reported once.
+    /// </summary>
+    public IReadOnlyList<string>? HostKeyAlgorithms { get; init; }
+
+    /// <summary>Also ask for host certificates (<c>-cert-v01@openssh.com</c>), when <see cref="HostKeyAlgorithms"/> is null.</summary>
+    public bool IncludeCertificates { get; init; }
+
+    /// <summary>Use only FIPS-approved algorithms, as <see cref="SshClientOptions.FipsMode"/> does (no Ed25519 keys are found then).</summary>
+    public bool FipsMode { get; init; }
+
+    /// <summary>Where diagnostics go. Never receives secrets.</summary>
+    public ILogger? Logger { get; init; }
+}
+
 /// <summary>Options for <see cref="SshClient"/>.</summary>
 public sealed class SshClientOptions
 {

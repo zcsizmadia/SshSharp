@@ -29,7 +29,7 @@ Console.WriteLine(result.StandardOutputText);
   OpenSSH user certificates, ssh-agent (Unix sockets and the Windows OpenSSH agent) and agent forwarding,
   keyboard-interactive (one-time codes, PAM), and multi-factor chains.
 - **Host verification:** `StrictHostKeyChecking` policies, host certificates, `UpdateHostKeys`, key pinning, or your own
-  verifier. There is no "accept anything" default.
+  verifier. There is no "accept anything" default. Host key scanning, as `ssh-keyscan` does it.
 - **Connections:** ProxyJump chains, ProxyCommand, connect over any `Stream`, keep-alive and dead-connection detection;
   TCP and Unix-socket tunnels; local, remote and dynamic (SOCKS) port forwarding (`ssh -L`, `-R`, `-D`), also
   started from `ssh_config`.

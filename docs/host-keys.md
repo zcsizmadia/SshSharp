@@ -77,6 +77,27 @@ var verifier = SshHostKeyVerifier.FromDelegate(async (context, ct) =>
 Or derive from `SshHostKeyVerifier` and return `SshHostKeyVerdict.Accept()` or `SshHostKeyVerdict.Reject(reason)`; the
 reason ends up in the `SshHostKeyException`.
 
+## Scanning a server's keys
+
+`SshClient.ScanHostKeysAsync` fetches a server's host keys without logging in, as `ssh-keyscan` does. It runs one key exchange
+for each key type the server has and disconnects before authentication:
+
+```csharp
+var keys = await SshClient.ScanHostKeysAsync("new-server.example.com");
+foreach (var key in keys)
+{
+    Console.WriteLine($"{key.KeyType} {key.Fingerprint}");
+    await KnownHostsFile.AppendAsync(knownHostsPath, "new-server.example.com", 22, key.KeyType, key.PublicKey, hash: true);
+}
+```
+
+Each key is one the server proved it holds, but a scan cannot tell whether you reached the right server. Compare the fingerprints
+with ones you got another way (the server's console or its provisioning output) before you trust them, or use host certificates.
+
+`SshHostKeyScanOptions` limits the scan to some algorithms (`HostKeyAlgorithms`), adds host certificates (`IncludeCertificates`),
+or keeps to FIPS-approved algorithms (`FipsMode`). For a host behind a jump host, pass a callback that opens each connection:
+`SshClient.ScanHostKeysAsync(ct => new ValueTask<Stream>(jump.OpenTcpTunnelAsync("internal-host", 22, ct)))`.
+
 ## After connecting
 
 `client.HostKey` is the verified key (`KeyType`, `Algorithm`, `Fingerprint`, `PublicKey`, `KeySizeBits`, and `Certificate`
