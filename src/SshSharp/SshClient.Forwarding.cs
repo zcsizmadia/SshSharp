@@ -109,8 +109,8 @@ public sealed partial class SshClient
     /// <summary>Reads a SOCKS request, opens the channel it names, and answers the application.</summary>
     private async Task<SshChannel?> OpenSocksAsync(Socket socket, CancellationToken cancellationToken)
     {
-        // Not disposed: the socket belongs to the listener, which relays it once the channel is open.
-        var stream = new NetworkStream(socket, ownsSocket: false);
+        // Only for the handshake: it does not own the socket, which the listener relays once the channel is open.
+        await using var stream = new NetworkStream(socket, ownsSocket: false);
         SocksRequest? request;
         using (var handshake = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
         {
