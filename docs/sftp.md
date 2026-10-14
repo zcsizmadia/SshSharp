@@ -125,6 +125,36 @@ builder.Configuration.AddJsonFile(provider, "appsettings.json", optional: false,
   `SshException`.
 - The provider does not own the `SftpClient`: dispose that after the provider is no longer used.
 
+## Using `IFileSystem` (System.IO.Abstractions)
+
+The `SshSharp.IO.Abstractions` package (`dotnet add package SshSharp.IO.Abstractions`) implements
+[System.IO.Abstractions](https://github.com/TestableIO/System.IO.Abstractions)' `IFileSystem` over SFTP. Code written against
+`IFileSystem` instead of `File`, `Directory` and `Path` then reads and writes files on the server, unchanged. Nothing is mounted,
+so only your application sees them.
+
+```csharp
+using System.IO.Abstractions;
+using SshSharp.IO.Abstractions;
+
+IFileSystem fs = new SftpFileSystem(sftp);
+fs.Directory.CreateDirectory("reports/2026");
+fs.File.WriteAllText("reports/2026/summary.txt", "All green.");
+var reports = fs.Directory.GetFiles("reports", "*.txt", SearchOption.AllDirectories);
+```
+
+| Area | Behaviour |
+|---|---|
+| Paths | POSIX paths on the server, on every client OS: `fs.Path` uses `/`, and `\` is an ordinary character. Relative paths start from the current directory, initially the login directory; `Directory.SetCurrentDirectory` changes it (client-side). |
+| `File` | Reads and writes of bytes, text and lines (sync and async; UTF-8 without BOM by default, BOMs honoured when reading), streams, `Copy` (on the server with `copy-data`), `Move`, `Delete`, times, attributes, Unix modes, symbolic links. |
+| `Directory` | `CreateDirectory` with parents, `Delete` (recursive removes links, never follows them), enumeration with `*` and `?` patterns, `SearchOption` and `EnumerationOptions` (recursion, case, hidden entries, special directories), `Move`, times. |
+| `FileInfo`, `DirectoryInfo` | Attributes are read on first use and kept until `Refresh()`, as in `System.IO`; enumerations carry each entry's attributes, so no request per entry. |
+| Streams | Buffered (64 KiB), sync and async, seekable; read-only streams read ahead. |
+| Errors | The `System.IO` exceptions: `FileNotFoundException`, `DirectoryNotFoundException`, `UnauthorizedAccessException`, `IOException` (also a failed session or a timeout, `SftpFileSystemOptions.OperationTimeout`, 60 s). |
+| Not supported | `FileSystemWatcher`, `DriveInfo`, `FileVersionInfo`, `RandomAccess`, `SafeFileHandle` overloads, encryption, `Replace`: they throw `NotSupportedException`. SFTP has no creation times: they read as the last write time, and setting one does nothing. |
+
+The synchronous methods wait for SFTP round trips; the `...Async` ones do not block. `IFile`'s Unix-mode methods are marked
+Unix-only for local files, but work over SFTP from any client OS (suppress CA1416 where you call them).
+
 ## Errors
 
 A request the server refuses throws `SftpException`, an `SshException` with `Reason = SftpFailed`, `Status` (the SFTP status

@@ -19,5 +19,6 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\SshSharp.FileProviders\SshSharp.FileProviders.csproj" />
+    <ProjectReference Include="..\..\src\SshSharp.IO.Abstractions\SshSharp.IO.Abstractions.csproj" />
   </ItemGroup>
 </Project>
