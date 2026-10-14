@@ -1,7 +1,7 @@
 # Migrating from SSH.NET
 
 This guide maps [SSH.NET](https://github.com/sshnet/SSH.NET) code to SshSharp. Before you start, check that SshSharp covers what you
-need (see "Why not SSH.NET?" in the README): it targets .NET 8 and later only, has no SFTP yet, and does not speak legacy algorithms
+need (see "Why not SSH.NET?" in the README): it targets .NET 8 and later only, its SFTP API is still experimental, and it does not speak legacy algorithms
 (CBC ciphers, SHA-1 MACs, `ssh-rsa` signatures, DH group 1).
 
 The main differences:
@@ -220,6 +220,43 @@ await using var forward = await client.ForwardLocalPortAsync(new IPEndPoint(IPAd
 
 With `ssh_config`, `LocalForward`, `RemoteForward` and `DynamicForward` start with the connection when
 `SshConfigConnectOptions.StartForwardings` is set.
+
+## SFTP
+
+SSH.NET:
+
+```csharp
+using var sftp = new SftpClient("files.example.com", "deploy", password);
+sftp.Connect();
+using var file = File.OpenRead("report.pdf");
+sftp.UploadFile(file, "incoming/report.pdf");
+```
+
+SshSharp (the SFTP API is experimental: see [File transfer (SFTP)](sftp.md)):
+
+```csharp
+using SshSharp.Sftp;
+
+await using var sftp = await client.OpenSftpAsync();
+await sftp.UploadFileAsync("report.pdf", "incoming/report.pdf");
+```
+
+| SSH.NET | SshSharp (`using SshSharp.Sftp;`) |
+|---|---|
+| `new SftpClient(...)`, `Connect()` | `await client.OpenSftpAsync()` on a connected `SshClient` (one connection for SFTP, commands and forwarding) |
+| `UploadFile(stream, path)`, `UploadFileAsync` | `UploadAsync(stream, path)`, or `UploadFileAsync(localPath, path)` |
+| `DownloadFile(path, stream)`, `DownloadFileAsync` | `DownloadAsync(path, stream)`, or `DownloadFileAsync(path, localPath)` |
+| `ListDirectory(path)`, `ListDirectoryAsync` | `ListDirectoryAsync(path)`: `IAsyncEnumerable<SftpFileInfo>`, without `.` and `..` |
+| `Exists`, `Get`, `GetAttributes` | `ExistsAsync`, `GetAttributesAsync` |
+| `CreateDirectory`, `DeleteDirectory`, `DeleteFile`, `Delete` | `CreateDirectoryAsync`, `DeleteDirectoryAsync`, `DeleteFileAsync` |
+| `RenameFile(old, new, isPosix)` | `RenameAsync(old, new, overwrite)` |
+| `Open`, `OpenRead`, `OpenWrite`, `Create`, `AppendText` | `OpenAsync(path, FileMode, FileAccess)`, `OpenReadAsync`, `OpenWriteAsync` |
+| `ChangePermissions`, `SetLastWriteTime`, `SetAttributes` | `SetAttributesAsync(path, new SftpFileAttributes { Permissions = ..., LastWriteTime = ... })` |
+| `SymbolicLink`, `ReadLink`-style calls | `CreateSymbolicLinkAsync`, `ReadSymbolicLinkAsync`; also `CreateHardLinkAsync` |
+| `WorkingDirectory`, `ChangeDirectory` | none: pass full paths, or paths relative to the login directory (`GetHomeDirectoryAsync`) |
+| `SftpPathNotFoundException`, `SftpPermissionDeniedException` | `SftpException` with `Status` `NoSuchFile`, `PermissionDenied` (and `Path`) |
+| upload/download callbacks | `SftpTransferOptions.Progress` |
+| `BufferSize`, `MaxPendingReads` | taken from the server's limits; `SftpTransferOptions.MaxRequestsInFlight` |
 
 ## SCP
 
