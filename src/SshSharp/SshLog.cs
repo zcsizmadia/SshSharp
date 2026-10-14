@@ -92,7 +92,7 @@ internal static partial class SshLog
     [LoggerMessage(EventId = 29, Level = LogLevel.Warning, Message = "{Keyword} {Spec} was skipped: {Reason}")]
     public static partial void ConfiguredForwardingSkipped(ILogger logger, string keyword, string spec, string reason);
 
-    [LoggerMessage(EventId = 30, Level = LogLevel.Information, Message = "The key exchange {Kex} is not post-quantum: traffic recorded now could be decrypted by a future quantum computer. The server needs to offer a post-quantum key exchange: mlkem768x25519-sha256 (OpenSSH 9.9 or later), or in FIPS mode mlkem768nistp256-sha256 or mlkem1024nistp384-sha384")]
+    [LoggerMessage(EventId = 30, Level = LogLevel.Information, Message = "The key exchange {Kex} is not post-quantum: traffic recorded now could be decrypted by a future quantum computer. The server needs to offer a post-quantum key exchange: mlkem768x25519-sha256 (OpenSSH 9.9 or later), sntrup761x25519-sha512 (OpenSSH 8.5 or later), or in FIPS mode mlkem768nistp256-sha256 or mlkem1024nistp384-sha384")]
     public static partial void KeyExchangeNotPostQuantum(ILogger logger, string kex);
 
     [LoggerMessage(EventId = 31, Level = LogLevel.Information, Message = "The server forwards its port {RemotePort} to a SOCKS proxy on this machine (remote dynamic forwarding)")]

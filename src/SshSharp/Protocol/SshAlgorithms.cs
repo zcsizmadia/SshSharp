@@ -27,6 +27,8 @@ internal static class SshAlgorithms
     public const string MlKem768X25519Sha256 = "mlkem768x25519-sha256";
     public const string MlKem768Nistp256Sha256 = "mlkem768nistp256-sha256";
     public const string MlKem1024Nistp384Sha384 = "mlkem1024nistp384-sha384";
+    public const string Sntrup761X25519Sha512 = "sntrup761x25519-sha512";
+    public const string Sntrup761X25519Sha512OpenSsh = "sntrup761x25519-sha512@openssh.com";
     public const string Curve25519Sha256 = "curve25519-sha256";
     public const string Curve25519Sha256Libssh = "curve25519-sha256@libssh.org";
     public const string EcdhNistp256 = "ecdh-sha2-nistp256";
@@ -36,7 +38,8 @@ internal static class SshAlgorithms
     public const string DhGroup16Sha512 = "diffie-hellman-group16-sha512";
 
     /// <summary>Whether a key exchange method resists a future quantum computer (a hybrid with a post-quantum KEM), as OpenSSH's WarnWeakCrypto judges it.</summary>
-    public static bool IsPostQuantum(string kex) => kex is MlKem768X25519Sha256 or MlKem768Nistp256Sha256 or MlKem1024Nistp384Sha384;
+    public static bool IsPostQuantum(string kex) =>
+        kex is MlKem768X25519Sha256 or MlKem768Nistp256Sha256 or MlKem1024Nistp384Sha384 or Sntrup761X25519Sha512 or Sntrup761X25519Sha512OpenSsh;
 
     // Extension and strict-KEX markers carried in the kex_algorithms list.
     public const string ExtInfoClient = "ext-info-c";
@@ -62,12 +65,13 @@ internal static class SshAlgorithms
     ];
 
     /// <summary>
-    /// The post-quantum hybrids first, where the platform has ML-KEM (.NET 10 with OpenSSL 3.5+ or a recent Windows): the X25519 one, as
-    /// OpenSSH 10 orders it, then the NIST-curve ones of RFC 10042 (the FIPS-compatible choices); otherwise the classic methods.
+    /// The post-quantum hybrids first. Where the platform has ML-KEM (.NET 10 with OpenSSL 3.5+ or a recent Windows): the X25519 one, as
+    /// OpenSSH 10 orders it, then the NIST-curve ones of RFC 10042 (the FIPS-compatible choices). Then sntrup761 (managed, so everywhere),
+    /// which OpenSSH 8.5 to 9.8 servers offer as their only post-quantum method; then the classic methods.
     /// </summary>
     public static IReadOnlyList<string> DefaultKex { get; } = HasMlKem
-        ? [MlKem768X25519Sha256, MlKem768Nistp256Sha256, MlKem1024Nistp384Sha384, .. ClassicKex]
-        : ClassicKex;
+        ? [MlKem768X25519Sha256, MlKem768Nistp256Sha256, MlKem1024Nistp384Sha384, Sntrup761X25519Sha512, Sntrup761X25519Sha512OpenSsh, .. ClassicKex]
+        : [Sntrup761X25519Sha512, Sntrup761X25519Sha512OpenSsh, .. ClassicKex];
 
 #if NET10_0_OR_GREATER
     internal static bool HasMlKem => System.Security.Cryptography.MLKem.IsSupported;

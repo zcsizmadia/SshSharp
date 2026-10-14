@@ -53,6 +53,7 @@ internal abstract class ClientKeyExchange : IDisposable
         SshAlgorithms.MlKem768Nistp256Sha256 when MLKem.IsSupported => new MlKemNistKeyExchange(MLKemAlgorithm.MLKem768, NistCurve.P256),
         SshAlgorithms.MlKem1024Nistp384Sha384 when MLKem.IsSupported => new MlKemNistKeyExchange(MLKemAlgorithm.MLKem1024, NistCurve.P384),
 #endif
+        SshAlgorithms.Sntrup761X25519Sha512 or SshAlgorithms.Sntrup761X25519Sha512OpenSsh => new Sntrup761X25519KeyExchange(),
         SshAlgorithms.Curve25519Sha256 or SshAlgorithms.Curve25519Sha256Libssh => new Curve25519KeyExchange(),
         SshAlgorithms.EcdhNistp256 => new EcdhKeyExchange(NistCurve.P256),
         SshAlgorithms.EcdhNistp384 => new EcdhKeyExchange(NistCurve.P384),
@@ -293,6 +294,77 @@ internal sealed class DhKeyExchange : ClientKeyExchange
     }
 
     private static byte[] Magnitude(BigInteger value) => value.ToByteArray(isUnsigned: true, isBigEndian: true);
+}
+
+/// <summary>
+/// <c>sntrup761x25519-sha512</c> (RFC 9941; <c>sntrup761x25519-sha512@openssh.com</c> in OpenSSH 8.5 to 9.8): Streamlined NTRU Prime 761
+/// combined with X25519, so the session keys stay secret unless both are broken. The client sends its sntrup761 public key and X25519
+/// public key; the server answers with the sntrup761 ciphertext and its X25519 public key; K = SHA-512(sntrup761 secret || X25519 secret),
+/// encoded as a string. Managed (<see cref="Sntrup761"/>), so it works on every platform and on .NET 8.
+/// </summary>
+internal sealed class Sntrup761X25519KeyExchange : ClientKeyExchange
+{
+    private readonly byte[] _secretKey = new byte[Sntrup761.SecretKeySize];
+    private readonly byte[] _privateKey = RandomNumberGenerator.GetBytes(X25519.KeySize);
+    private readonly byte[] _clientInit = new byte[Sntrup761.PublicKeySize + X25519.KeySize];
+
+    public Sntrup761X25519KeyExchange()
+    {
+        Sntrup761.GenerateKeyPair(_clientInit.AsSpan(0, Sntrup761.PublicKeySize), _secretKey);
+        X25519.GetPublicKey(_privateKey, _clientInit.AsSpan(Sntrup761.PublicKeySize));
+    }
+
+    public override HashAlgorithmName Hash => HashAlgorithmName.SHA512;
+
+    public override byte[] CreateInit() => BuildInit(SshMessage.KexEcdhInit, w => w.WriteString(_clientInit));
+
+    public override KexResult ProcessReply(ReadOnlySpan<byte> reply, KexContext context)
+    {
+        var reader = new SshReader(reply);
+        var hostKey = ExpectReply(ref reader);
+        var serverReply = reader.ReadString().ToArray();
+        var signature = reader.ReadString().ToArray();
+        if (!reader.IsEmpty)
+        {
+            throw new SshProtocolException("Trailing data in the key exchange reply.");
+        }
+
+        if (serverReply.Length != Sntrup761.CiphertextSize + X25519.KeySize)
+        {
+            throw new SshProtocolException($"The sntrup761/X25519 reply must be {Sntrup761.CiphertextSize + X25519.KeySize} bytes.");
+        }
+
+        // Both secrets, then K = SHA-512(sntrup761 secret || X25519 secret). A tampered ciphertext decapsulates to an unrelated secret,
+        // so the mismatch shows as a failed host signature check, as with OpenSSH.
+        var secrets = new byte[Sntrup761.SharedSecretSize + X25519.KeySize];
+        var shared = new byte[64];
+        try
+        {
+            Sntrup761.Decapsulate(secrets.AsSpan(0, Sntrup761.SharedSecretSize), serverReply.AsSpan(0, Sntrup761.CiphertextSize), _secretKey);
+            if (!X25519.TryAgree(_privateKey, serverReply.AsSpan(Sntrup761.CiphertextSize), secrets.AsSpan(Sntrup761.SharedSecretSize)))
+            {
+                throw new SshException(SshFailureReason.KeyExchangeFailed, "The server sent a low-order Curve25519 point.");
+            }
+
+            SHA512.HashData(secrets, shared);
+            return Finish(Hash, context, hostKey, signature, w =>
+            {
+                w.WriteString(_clientInit);
+                w.WriteString(serverReply);
+            }, shared, sharedSecretIsString: true);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(secrets);
+            CryptographicOperations.ZeroMemory(shared);
+        }
+    }
+
+    public override void Dispose()
+    {
+        CryptographicOperations.ZeroMemory(_secretKey);
+        CryptographicOperations.ZeroMemory(_privateKey);
+    }
 }
 
 #if NET10_0_OR_GREATER
