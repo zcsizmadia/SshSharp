@@ -164,3 +164,16 @@ The defaults prefer modern algorithms: the post-quantum hybrid `mlkem768x25519-s
 ciphers; `ssh-ed25519`, `ecdsa-sha2-*` and `rsa-sha2-256/512` host keys, and OpenSSH host certificates. Strict key exchange
 (the Terrapin fix) is always on. `FipsMode = true` limits negotiation to FIPS-approved algorithms. Keys are renewed after
 `RekeyAfterBytes` (default 1 GiB) or `RekeyAfterTime` (default 1 hour).
+
+`client.Algorithms` shows what a connection negotiated: key exchange, host key algorithm, ciphers and MACs (empty for AEAD
+ciphers), and whether strict key exchange is on. `client.Algorithms.IsPostQuantum` tells whether the key exchange resists a
+future quantum computer. When it does not, the client logs it at `Information` level, the counterpart of OpenSSH 10.1's
+`WarnWeakCrypto`, and traces and the connect-duration metric carry `ssh.kex.post_quantum`, so the hosts that still negotiate
+a classical key exchange are easy to find:
+
+```csharp
+if (!client.Algorithms.IsPostQuantum)
+{
+    Console.WriteLine($"{host} uses {client.Algorithms.KeyExchange}; upgrade it to OpenSSH 9.9 or later for post-quantum key exchange.");
+}
+```

@@ -59,6 +59,9 @@ internal sealed class SshConnection : IAsyncDisposable
     /// <summary>When the last packet arrived (a <see cref="TimeProvider"/> timestamp), for tests.</summary>
     internal long LastReceived => Interlocked.Read(ref _lastReceived);
 
+    /// <summary>The algorithms in use now (updated by each key re-exchange).</summary>
+    internal NegotiatedAlgorithms Algorithms => _transport.Algorithms!;
+
     /// <summary>Cancelled when the connection ends, for any reason (see <see cref="Failure"/>).</summary>
     public CancellationToken Closed => _closed.Token;
 

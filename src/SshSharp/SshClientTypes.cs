@@ -30,6 +30,51 @@ public sealed record SshHostKey(string Algorithm, string KeyType, string Fingerp
     public override int GetHashCode() => HashCode.Combine(Algorithm, KeyType, Fingerprint, KeySizeBits);
 }
 
+/// <summary>The algorithms a connection negotiated (they can change at a key re-exchange). See <see cref="SshClient.Algorithms"/>.</summary>
+public sealed class SshNegotiatedAlgorithms
+{
+    internal SshNegotiatedAlgorithms(Protocol.NegotiatedAlgorithms negotiated)
+    {
+        KeyExchange = negotiated.Kex;
+        HostKeyAlgorithm = negotiated.HostKey;
+        EncryptionClientToServer = negotiated.CipherClientToServer;
+        EncryptionServerToClient = negotiated.CipherServerToClient;
+        // The negotiator may still pick a MAC name next to an AEAD cipher (when both lists have one), but it is not used: report none.
+        MacClientToServer = IsAead(negotiated.CipherClientToServer) ? string.Empty : negotiated.MacClientToServer;
+        MacServerToClient = IsAead(negotiated.CipherServerToClient) ? string.Empty : negotiated.MacServerToClient;
+        StrictKeyExchange = negotiated.StrictKex;
+    }
+
+    /// <summary>The key exchange method, for example <c>mlkem768x25519-sha256</c> or <c>curve25519-sha256</c>.</summary>
+    public string KeyExchange { get; }
+
+    /// <summary>
+    /// Whether the key exchange is post-quantum: a hybrid with a post-quantum KEM, so traffic recorded today stays protected against a
+    /// future quantum computer ("store now, decrypt later"). OpenSSH 10.1 and later warn when it is not (<c>WarnWeakCrypto</c>).
+    /// </summary>
+    public bool IsPostQuantum => Protocol.SshAlgorithms.IsPostQuantum(KeyExchange);
+
+    /// <summary>The host key signature algorithm, for example <c>ssh-ed25519</c> or <c>rsa-sha2-512</c>.</summary>
+    public string HostKeyAlgorithm { get; }
+
+    /// <summary>The cipher for data from the client to the server.</summary>
+    public string EncryptionClientToServer { get; }
+
+    /// <summary>The cipher for data from the server to the client.</summary>
+    public string EncryptionServerToClient { get; }
+
+    /// <summary>The MAC from the client to the server; empty with an AEAD cipher (AES-GCM, ChaCha20-Poly1305), which needs none.</summary>
+    public string MacClientToServer { get; }
+
+    /// <summary>The MAC from the server to the client; empty with an AEAD cipher.</summary>
+    public string MacServerToClient { get; }
+
+    /// <summary>Whether strict key exchange (the Terrapin fix, CVE-2023-48795) is in effect: the server supports it.</summary>
+    public bool StrictKeyExchange { get; }
+
+    private static bool IsAead(string cipher) => Protocol.SshAlgorithms.TryGetCipher(cipher, out var info) && info.IsAead;
+}
+
 /// <summary>Options for <see cref="SshClient"/>.</summary>
 public sealed class SshClientOptions
 {
