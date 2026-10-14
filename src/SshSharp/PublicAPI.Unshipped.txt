@@ -239,3 +239,23 @@ static SshSharp.SshProxy.FromUri(System.Uri! uri) -> SshSharp.SshProxy!
 static SshSharp.SshProxy.Http(string! host, int port, System.Net.NetworkCredential? credentials = null) -> SshSharp.SshProxy!
 static SshSharp.SshProxy.Socks4(string! host, int port, string? userId = null) -> SshSharp.SshProxy!
 static SshSharp.SshProxy.Socks5(string! host, int port, System.Net.NetworkCredential? credentials = null) -> SshSharp.SshProxy!
+SshSharp.SshAllowedSigners
+SshSharp.SshAllowedSigners.Count.get -> int
+SshSharp.SshAllowedSigners.FindPrincipals(SshSharp.SshSignature! signature, System.DateTimeOffset? time = null) -> System.Collections.Generic.IReadOnlyList<string!>!
+SshSharp.SshAllowedSigners.Verify(SshSharp.SshSignature! signature, string! principal, System.ReadOnlySpan<byte> message, string! namespace, System.DateTimeOffset? time = null) -> bool
+SshSharp.SshAllowedSigners.VerifyAsync(SshSharp.SshSignature! signature, string! principal, System.IO.Stream! message, string! namespace, System.DateTimeOffset? time = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
+SshSharp.SshSignature
+SshSharp.SshSignature.Certificate.get -> SshSharp.SshCertificate?
+SshSharp.SshSignature.Fingerprint.get -> string!
+SshSharp.SshSignature.HashAlgorithm.get -> string!
+SshSharp.SshSignature.KeyType.get -> string!
+SshSharp.SshSignature.Namespace.get -> string!
+SshSharp.SshSignature.PublicKey.get -> System.ReadOnlyMemory<byte>
+SshSharp.SshSignature.Verify(System.ReadOnlySpan<byte> message, string! namespace) -> bool
+SshSharp.SshSignature.VerifyAsync(System.IO.Stream! message, string! namespace, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
+override SshSharp.SshSignature.ToString() -> string!
+static SshSharp.SshAllowedSigners.LoadFileAsync(string! path, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SshSharp.SshAllowedSigners!>!
+static SshSharp.SshAllowedSigners.Parse(string! text) -> SshSharp.SshAllowedSigners!
+static SshSharp.SshSignature.Parse(string! text) -> SshSharp.SshSignature!
+static SshSharp.SshSignature.SignAsync(SshSharp.SshPrivateKey! key, System.IO.Stream! message, string! namespace, string! hashAlgorithm = "sha512", System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SshSharp.SshSignature!>!
+static SshSharp.SshSignature.SignAsync(SshSharp.SshPrivateKey! key, System.ReadOnlyMemory<byte> message, string! namespace, string! hashAlgorithm = "sha512", System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SshSharp.SshSignature!>!
