@@ -53,6 +53,9 @@ internal sealed class FakeSftpServer
     /// <summary>Answer home-directory for the empty user name with Failure, as OpenSSH 9.x does.</summary>
     public bool HomeDirectoryFailsForEmptyUser { get; set; }
 
+    /// <summary>What home-directory answers when not <see cref="Home"/>: OpenSSH answers the passwd home even inside a ChrootDirectory.</summary>
+    public string? HomeDirectoryAnswer { get; set; }
+
     /// <summary>How many fsync@openssh.com requests arrived.</summary>
     public int Fsyncs { get; private set; }
 
@@ -623,7 +626,7 @@ internal sealed class FakeSftpServer
                     case "home-directory" when HomeDirectoryFailsForEmptyUser && r.ReadUtf8String().Length == 0:
                         return Status(id, 4, "Failure"); // OpenSSH before 10.x looks the empty name up as a user
                     case "home-directory":
-                        return Build(w => { w.WriteByte(104); w.WriteUInt32(id); w.WriteUInt32(1); w.WriteString(Home); w.WriteString(Home); w.WriteUInt32(0); });
+                        return Build(w => { w.WriteByte(104); w.WriteUInt32(id); w.WriteUInt32(1); w.WriteString(HomeDirectoryAnswer ?? Home); w.WriteString(HomeDirectoryAnswer ?? Home); w.WriteUInt32(0); });
                     default:
                         return Status(id, 8, "Unsupported");
                 }

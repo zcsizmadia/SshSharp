@@ -386,6 +386,18 @@ public class SftpFileSystemTests
     }
 
     [Test]
+    public async Task InAChroot_RelativePathsStartWhereTheServerResolvesThem_NotAtThePasswdHome()
+    {
+        // OpenSSH's home-directory answers /home/<user> even with ChrootDirectory, where that path does not exist.
+        await using var rig = await Rig.StartAsync(f => f.HomeDirectoryAnswer = "/outside/the/chroot");
+        var fs = rig.Fs;
+
+        await Assert.That(fs.Directory.GetCurrentDirectory()).IsEqualTo(Home);
+        fs.Directory.CreateDirectory("upload/a/b");
+        await Assert.That(fs.Directory.Exists(Home + "/upload/a/b")).IsTrue();
+    }
+
+    [Test]
     public async Task Directory_MoveAndTimes()
     {
         await using var rig = await Rig.StartAsync(f =>
