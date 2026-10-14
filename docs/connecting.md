@@ -105,7 +105,8 @@ await using var client = await SshClient.ConnectAsync("ssh.example.com", 22, new
 if given), and `SshProxy.Socks4` SOCKS 4, or 4a for host names. `SshProxy.FromUri(new Uri("socks5://user:pass@proxy:1080"))`
 reads the usual URI form (`http`, `socks5`, `socks5h`, `socks4`, `socks4a`). The server's host name is sent to the proxy, which
 resolves it. A refusal, such as a 407 or a SOCKS error code, is an `SshException` with `Reason = ConnectFailed` saying what
-the proxy answered.
+the proxy answered. A proxy that does not finish its handshake within 30 seconds fails the same way. Host names must be ASCII
+(use the punycode form of an internationalized name), since the proxy protocols cannot carry anything else.
 
 With `ssh_config`, `SshConfigConnectOptions.Proxy` applies to the first network hop: the destination, or the first
 `ProxyJump` host (later hops go through SSH). `proxy.ConnectAsync(host, port)` returns the proxied stream itself, for
@@ -193,7 +194,13 @@ await using var socks = await client.ForwardRemoteDynamicPortAsync("localhost", 
 
 The destinations come from the server's side, so anyone who can reach the forwarded port there can use this machine's network.
 Like ssh, every destination is allowed when `allowDestination` is null; pass a filter unless you trust everyone on the server.
-Host names are resolved on this machine, after the filter. `IsDynamic` (`socks.IsDynamic` here) tells the two kinds of remote forwarding apart.
+The filter cannot be sidestepped by spelling: an address in any form (`127.1`, `0x7f.1`, `::ffff:127.0.0.1`, `[::1]`) reaches it
+in canonical form (`127.0.0.1`, `::1`), and a host name is checked as given, then resolved on this machine and each address it
+resolves to is checked as well; the connection goes only to an address that passed. A filter that throws refuses that
+connection. `IsDynamic` (`socks.IsDynamic` here) tells the two kinds of remote forwarding apart.
+
+The server can open at most `SshClientOptions.MaxForwardedConnections` (1,000) forwarded connections at a time over all remote
+forwardings; more are refused until some close.
 
 Remote Unix-socket forwarding (`ssh -R /remote/socket:target`, `streamlocal-forward@openssh.com`, OpenSSH 6.7 and later) has
 the server listen on a Unix socket instead of a port, and relays each connection to a host and port, or to a Unix socket on this
