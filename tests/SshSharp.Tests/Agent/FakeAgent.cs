@@ -42,6 +42,14 @@ internal sealed class FakeAgent : IAsyncDisposable
     /// <summary>Replace the reply to every request (a broken agent).</summary>
     public byte[]? RawReply { get; set; }
 
+    /// <summary>
+    /// The extensions the agent lists for RFC 9987's <c>query</c>, or null for an agent that does not implement it. Answered with
+    /// SSH_AGENT_EXTENSION_RESPONSE, or SSH_AGENT_SUCCESS when <see cref="QueryRepliesWithSuccess"/> is set (older OpenSSH agents).
+    /// </summary>
+    public string[]? Extensions { get; set; }
+
+    public bool QueryRepliesWithSuccess { get; set; }
+
     /// <summary>The flags of every signing request.</summary>
     public List<uint> SignFlags { get; } = [];
 
@@ -157,6 +165,17 @@ internal sealed class FakeAgent : IAsyncDisposable
                     w.WriteString(signature);
                 });
             }
+
+            case 27 when reader.ReadUtf8String() == "query" && Extensions is { } extensions:
+                return Build(w =>
+                {
+                    w.WriteByte(QueryRepliesWithSuccess ? (byte)6 : (byte)29);
+                    w.WriteString("query");
+                    foreach (var name in extensions)
+                    {
+                        w.WriteString(name);
+                    }
+                });
 
             default:
                 return [5];

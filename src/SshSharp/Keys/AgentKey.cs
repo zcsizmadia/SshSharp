@@ -30,6 +30,13 @@ internal sealed class AgentKey : SshPrivateKey
             return null;
         }
 
+        // A FIDO security-key certificate: the agent (and the key's touch) signs, the server checks the certificate and the signature, so the
+        // client never needs to look inside it. It is offered as it is, under its certificate algorithm.
+        if (keyType is "sk-ssh-ed25519-cert-v01@openssh.com" or "sk-ecdsa-sha2-nistp256-cert-v01@openssh.com")
+        {
+            return new AgentKey(agent, keyType, blob, comment, [keyType], certificate: null);
+        }
+
         SshCertificate? certificate = null;
         var plainType = keyType;
         if (SshCertificate.IsCertificateAlgorithm(keyType))

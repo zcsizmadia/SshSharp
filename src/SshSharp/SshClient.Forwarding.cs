@@ -212,9 +212,10 @@ public sealed partial class SshClient
     /// <summary>Routes the channels the server opens (installed once, by the first feature that receives them).</summary>
     private void EnsureChannelDispatch() => _connection.AcceptChannel ??= (type, data) =>
     {
-        if (type == "auth-agent@openssh.com")
+        if (type is "auth-agent@openssh.com" or "agent-connect")
         {
-            // Agent forwarding: only when this client forwards an agent (the server asks for it after auth-agent-req@openssh.com).
+            // Agent forwarding: only when this client forwards an agent (the server asks for it after the agent request). RFC 9987 calls
+            // the channel "agent-connect"; OpenSSH's older name is accepted too, whichever request the server answered.
             return _options.ForwardAgent is { } agent ? channel => _ = RelayAgentAsync(channel, agent) : null;
         }
 

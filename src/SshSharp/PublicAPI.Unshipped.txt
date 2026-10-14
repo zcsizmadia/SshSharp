@@ -10,3 +10,4 @@ SshSharp.SshNegotiatedAlgorithms.KeyExchange.get -> string!
 SshSharp.SshNegotiatedAlgorithms.MacClientToServer.get -> string!
 SshSharp.SshNegotiatedAlgorithms.MacServerToClient.get -> string!
 SshSharp.SshNegotiatedAlgorithms.StrictKeyExchange.get -> bool
+SshSharp.SshAgent.QueryExtensionsAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<string!>!>!

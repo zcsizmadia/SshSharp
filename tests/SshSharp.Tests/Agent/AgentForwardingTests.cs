@@ -86,6 +86,35 @@ public sealed class AgentForwardingTests : IDisposable
     }
 
     [Test]
+    public async Task AServerAnnouncingAgentForward_GetsTheRfc9987Names()
+    {
+        // RFC 9987 section 7: "agent-req" and "agent-connect" are used only when the server announces "agent-forward" in EXT_INFO.
+        await using var agent = new FakeAgent();
+        using var key = SshPrivateKey.Parse(TestKeys.OpenSshEd25519(out _));
+        agent.Keys.Add((key, "laptop"));
+        var options = new FakeServerOptions { ExtraExtensions = new Dictionary<string, string> { ["agent-forward"] = "0" } };
+        await using var server = new FakeSessionServer(options) { OnShell = IdleAsync };
+        await using var client = await ConnectAsync(server, new SshAgent(agent.Path));
+        await using var shell = await client.StartShellAsync(cancellationToken: Timeout());
+
+        await Assert.That(Requests(server).Select(r => r.Type)).IsEquivalentTo(new[] { "agent-req", "shell" });
+        await using (var channel = await server.OpenAgentChannelAsync("agent-connect"))
+        {
+            await Assert.That(channel).IsNotNull();
+            await Assert.That(await ListKeysAsync(channel!)).IsEqualTo(((byte)12, 1u));
+        }
+
+        // A server that still opens the channel under OpenSSH's name is served too.
+        await using (var channel = await server.OpenAgentChannelAsync("auth-agent@openssh.com"))
+        {
+            await Assert.That(channel).IsNotNull();
+        }
+
+        await shell.CloseInputAsync(Timeout());
+        await shell.WaitForExitAsync(Timeout());
+    }
+
+    [Test]
     public async Task WithoutForwarding_NothingIsAsked_AndAgentChannelsAreRefused()
     {
         await using var server = new FakeSessionServer { OnShell = IdleAsync };

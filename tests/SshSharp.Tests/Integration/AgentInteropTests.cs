@@ -7,6 +7,24 @@ namespace SshSharp.Tests.Integration;
 public class AgentInteropTests
 {
     [Test]
+    public async Task OpenSshsAgent_AnswersTheQuery_OrDeclinesIt()
+    {
+        if (Environment.GetEnvironmentVariable("SSHSHARP_TEST_AGENT") != "1" || SshAgent.FromEnvironment() is not { } agent)
+        {
+            Skip.Test("SSHSHARP_TEST_AGENT=1 and SSH_AUTH_SOCK are needed.");
+            return;
+        }
+
+        // An agent without the query extension (OpenSSH 9.6, for one) declines it, which is an empty list, not an error. One that
+        // answers lists session-bind@openssh.com, which OpenSSH's agent has had since 8.9.
+        var extensions = await agent.QueryExtensionsAsync(new CancellationTokenSource(TimeSpan.FromSeconds(30)).Token);
+        if (extensions.Count > 0)
+        {
+            await Assert.That(extensions).Contains("session-bind@openssh.com");
+        }
+    }
+
+    [Test]
     public async Task TheForwardedAgent_IsUsableOnTheServer()
     {
         var user = Environment.GetEnvironmentVariable("SSHSHARP_TEST_USER");

@@ -59,6 +59,9 @@ internal sealed class SshConnection : IAsyncDisposable
     /// <summary>When the last packet arrived (a <see cref="TimeProvider"/> timestamp), for tests.</summary>
     internal long LastReceived => Interlocked.Read(ref _lastReceived);
 
+    /// <summary>The extensions the server announced in <c>SSH_MSG_EXT_INFO</c> (RFC 8308).</summary>
+    internal IReadOnlyDictionary<string, string> ServerExtensions => _transport.ServerExtensions;
+
     /// <summary>The algorithms in use now (updated by each key re-exchange).</summary>
     internal NegotiatedAlgorithms Algorithms => _transport.Algorithms!;
 

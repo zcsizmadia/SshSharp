@@ -126,14 +126,28 @@ public sealed class SshCertificate
     /// <summary>Whether <paramref name="algorithm"/> is a certificate algorithm (<c>...-cert-v01@openssh.com</c>).</summary>
     internal static bool IsCertificateAlgorithm(string algorithm) => algorithm.EndsWith(Suffix, StringComparison.Ordinal);
 
-    /// <summary>The plain signature algorithm behind a certificate algorithm: <c>rsa-sha2-512-cert-v01@openssh.com</c> signs as <c>rsa-sha2-512</c>.</summary>
-    internal static string BaseAlgorithm(string certificateAlgorithm) =>
-        IsCertificateAlgorithm(certificateAlgorithm) ? certificateAlgorithm[..^Suffix.Length] : certificateAlgorithm;
+    private const string OpenSshDomain = "@openssh.com";
+
+    /// <summary>
+    /// The plain signature algorithm behind a certificate algorithm: <c>rsa-sha2-512-cert-v01@openssh.com</c> signs as <c>rsa-sha2-512</c>.
+    /// Security-key types keep their domain: <c>sk-ssh-ed25519-cert-v01@openssh.com</c> signs as <c>sk-ssh-ed25519@openssh.com</c>.
+    /// </summary>
+    internal static string BaseAlgorithm(string certificateAlgorithm)
+    {
+        if (!IsCertificateAlgorithm(certificateAlgorithm))
+        {
+            return certificateAlgorithm;
+        }
+
+        var name = certificateAlgorithm[..^Suffix.Length];
+        return name.StartsWith("sk-", StringComparison.Ordinal) ? name + OpenSshDomain : name;
+    }
 
     /// <summary>The certificate key type for a signature algorithm: RSA certificates are <c>ssh-rsa-cert-v01@openssh.com</c> whatever the hash.</summary>
     internal static string CertificateKeyType(string certificateAlgorithm) => BaseAlgorithm(certificateAlgorithm) switch
     {
         SshAlgorithms.RsaSha2_256 or SshAlgorithms.RsaSha2_512 => "ssh-rsa" + Suffix,
+        var sk when sk.StartsWith("sk-", StringComparison.Ordinal) && sk.EndsWith(OpenSshDomain, StringComparison.Ordinal) => sk[..^OpenSshDomain.Length] + Suffix,
         var other => other + Suffix,
     };
 

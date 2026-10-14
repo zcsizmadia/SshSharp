@@ -222,8 +222,11 @@ internal sealed class FakeSessionServer : IAsyncDisposable
             w.WriteUInt32((uint)originatorPort);
         });
 
-    /// <summary>Plays a program on the server using the forwarded agent: opens an auth-agent@openssh.com channel, or null when refused.</summary>
-    public Task<Stream?> OpenAgentChannelAsync() => OpenChannelToClientAsync("auth-agent@openssh.com", null);
+    /// <summary>
+    /// Plays a program on the server using the forwarded agent: opens an agent channel (OpenSSH's <c>auth-agent@openssh.com</c>, or RFC
+    /// 9987's <c>agent-connect</c>), or null when refused.
+    /// </summary>
+    public Task<Stream?> OpenAgentChannelAsync(string type = "auth-agent@openssh.com") => OpenChannelToClientAsync(type, null);
 
     /// <summary>Opens a channel to the client and returns its far end as a stream, or null when the client refuses it.</summary>
     private async Task<Stream?> OpenChannelToClientAsync(string type, Action<SshWriter>? data)
