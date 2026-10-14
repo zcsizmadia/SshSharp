@@ -189,6 +189,13 @@ public sealed class SshClientOptions
     public SshProxy? Proxy { get; init; }
 
     /// <summary>
+    /// The local address (and usually port 0) to connect from, as <c>ssh -b</c>, for machines on several networks; null lets the system
+    /// choose. Only destination addresses of the same family are tried. Used by
+    /// <see cref="SshClient.ConnectAsync(string, int, SshClientOptions, CancellationToken)"/>, also for the connection to <see cref="Proxy"/>.
+    /// </summary>
+    public System.Net.IPEndPoint? LocalEndPoint { get; init; }
+
+    /// <summary>
     /// Restrict key exchange, host key, cipher and MAC algorithms to FIPS-approved ones (NIST curves and DH groups, RSA/ECDSA, AES, HMAC-SHA2).
     /// Curve25519, Ed25519 and ChaCha20-Poly1305 are excluded. This limits what is negotiated; it does not make the process FIPS-validated.
     /// </summary>

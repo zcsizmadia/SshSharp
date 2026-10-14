@@ -59,3 +59,9 @@ static SshSharp.SshProxy.FromUri(System.Uri! uri) -> SshSharp.SshProxy!
 static SshSharp.SshProxy.Http(string! host, int port, System.Net.NetworkCredential? credentials = null) -> SshSharp.SshProxy!
 static SshSharp.SshProxy.Socks4(string! host, int port, string? userId = null) -> SshSharp.SshProxy!
 static SshSharp.SshProxy.Socks5(string! host, int port, System.Net.NetworkCredential? credentials = null) -> SshSharp.SshProxy!
+SshSharp.Config.SshHostConfig.BindAddress.get -> string?
+SshSharp.Config.SshHostConfig.BindAddress.init -> void
+SshSharp.Config.SshHostConfig.BindInterface.get -> string?
+SshSharp.Config.SshHostConfig.BindInterface.init -> void
+SshSharp.SshClientOptions.LocalEndPoint.get -> System.Net.IPEndPoint?
+SshSharp.SshClientOptions.LocalEndPoint.init -> void

@@ -237,6 +237,8 @@ public sealed class SshConfig
             ServerAliveCountMax = int.TryParse(First("serveralivecountmax"), NumberStyles.None, CultureInfo.InvariantCulture, out var count) ? count : 3,
             ConnectTimeout = Time(First("connecttimeout")),
             AddressFamily = ParseFamily(First("addressfamily")),
+            BindAddress = First("bindaddress") is { Length: > 0 } bindAddress ? bindAddress : null,
+            BindInterface = First("bindinterface") is { Length: > 0 } bindInterface ? bindInterface : null,
             ForwardAgent = First("forwardagent") is { } fa && !IsNo(fa),
             RequestTty = ParseTty(First("requesttty")),
             PreferredAuthentications = [.. All("preferredauthentications").SelectMany(v => v.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))],

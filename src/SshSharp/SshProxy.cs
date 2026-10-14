@@ -21,7 +21,7 @@ public enum SshProxyType
 
 /// <summary>
 /// An HTTP or SOCKS proxy to reach the SSH server through, for networks that allow outbound connections only that way. Set it as
-/// <see cref="SshClientOptions.Proxy"/> or <see cref="SshConfigConnectOptions.Proxy"/>, or open a stream with <see cref="ConnectAsync"/>
+/// <see cref="SshClientOptions.Proxy"/> or <see cref="SshConfigConnectOptions.Proxy"/>, or open a stream with <see cref="ConnectAsync(string, int, CancellationToken)"/>
 /// and pass it to <see cref="SshClient.ConnectAsync(Stream, SshClientOptions, bool, CancellationToken)"/>.
 /// </summary>
 /// <remarks>
@@ -122,7 +122,11 @@ public sealed class SshProxy
     /// </summary>
     /// <exception cref="SshException">The proxy could not be reached, refused the connection or the credentials, or answered something
     /// that is not its protocol (<see cref="SshFailureReason.ConnectFailed"/>).</exception>
-    public async Task<Stream> ConnectAsync(string host, int port, CancellationToken cancellationToken = default)
+    public Task<Stream> ConnectAsync(string host, int port, CancellationToken cancellationToken = default) =>
+        ConnectAsync(host, port, null, cancellationToken);
+
+    /// <summary>Connects like <see cref="ConnectAsync(string, int, CancellationToken)"/>, from <paramref name="local"/> when given.</summary>
+    internal async Task<Stream> ConnectAsync(string host, int port, IReadOnlyList<IPEndPoint>? local, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrEmpty(host);
         if (host.Any(c => char.IsControl(c) || c == ' '))
@@ -133,19 +137,9 @@ public sealed class SshProxy
         ArgumentOutOfRangeException.ThrowIfLessThan(port, 1);
         ArgumentOutOfRangeException.ThrowIfGreaterThan(port, 65535);
 
-        var tcp = new TcpClient { NoDelay = true };
+        var stream = await Protocol.TcpConnector.ConnectAsync(Host, Port, local, Config.SshAddressFamily.Any, "the proxy", cancellationToken).ConfigureAwait(false);
         try
         {
-            try
-            {
-                await tcp.ConnectAsync(Host, Port, cancellationToken).ConfigureAwait(false);
-            }
-            catch (SocketException ex)
-            {
-                throw new SshException(SshFailureReason.ConnectFailed, $"Could not connect to the proxy: {ex.SocketErrorCode}.", ex);
-            }
-
-            var stream = tcp.GetStream(); // owns the socket
             try
             {
                 switch (Type)
@@ -170,7 +164,7 @@ public sealed class SshProxy
         }
         catch
         {
-            tcp.Dispose();
+            await stream.DisposeAsync().ConfigureAwait(false);
             throw;
         }
     }

@@ -117,6 +117,12 @@ public sealed class SshHostConfig
     /// <summary>The address family restriction.</summary>
     public SshAddressFamily AddressFamily { get; init; }
 
+    /// <summary>The local address to connect from (<c>BindAddress</c>, <c>ssh -b</c>), or null.</summary>
+    public string? BindAddress { get; init; }
+
+    /// <summary>The network interface to connect from (<c>BindInterface</c>, <c>ssh -B</c>), or null; <see cref="BindAddress"/> wins.</summary>
+    public string? BindInterface { get; init; }
+
     /// <summary>Whether agent forwarding is requested.</summary>
     public bool ForwardAgent { get; init; }
 

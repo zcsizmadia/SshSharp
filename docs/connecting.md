@@ -64,6 +64,25 @@ replaces the configured one, `UseAgent`/`Agent`, `AllowProxyCommand`, `Authentic
 authenticated with its own configuration. `ProxyCommand` runs a local command and speaks SSH over its standard input and
 output, as `ssh` does; set `AllowProxyCommand = false` to refuse configurations that name one.
 
+## From a chosen local address
+
+On a machine with several networks (a VPN, a management network), `LocalEndPoint` picks the address the connection comes from, as
+`ssh -b` does:
+
+```csharp
+var options = new SshClientOptions
+{
+    UserName = "deploy",
+    PrivateKeys = [key],
+    HostKeyVerifier = verifier,
+    LocalEndPoint = new IPEndPoint(IPAddress.Parse("10.20.0.5"), 0), // port 0: any local port
+};
+```
+
+With `ssh_config`, `BindAddress 10.20.0.5` does the same, and `BindInterface eth1` (`ssh -B`) uses that interface's addresses.
+An IPv4 address reaches only IPv4 destinations and an IPv6 one only IPv6: the server's addresses are filtered to match, and
+the error says so when none is left. The connection to a proxy is made from the same address.
+
 ## Through an HTTP or SOCKS proxy
 
 Where outbound connections must go through a proxy, set `Proxy`:
