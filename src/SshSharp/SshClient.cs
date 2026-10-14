@@ -289,6 +289,72 @@ public sealed partial class SshClient : IAsyncDisposable
         using var activity = SshTelemetry.Activities.StartActivity("SshSharp.Connect");
         var started = Stopwatch.GetTimestamp();
 
+        SshTransportOptions transportOptions;
+        try
+        {
+            transportOptions = await TransportOptionsAsync(options, host, port, logger, cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            // The stream is this method's to dispose from the start, also when preparing fails (a cancellation while known_hosts is read).
+            if (!leaveOpen)
+            {
+                await DisposeQuietlyAsync(stream).ConfigureAwait(false);
+            }
+
+            throw;
+        }
+
+        var transport = new SshTransport(stream, transportOptions);
+        try
+        {
+            await transport.ConnectAsync(cancellationToken).ConfigureAwait(false);
+            await AuthenticateAsync(transport, options, logger, cancellationToken).ConfigureAwait(false);
+            return CompleteConnection(transport, stream, options, leaveOpen, owner, host, port, logger, activity, started);
+        }
+        catch (Exception ex)
+        {
+            activity?.SetStatus(ActivityStatusCode.Error, ex.GetType().Name);
+
+            // Cleanup must not replace the real error with one from a stream that is already broken.
+            try
+            {
+                await transport.DisposeAsync().ConfigureAwait(false);
+                if (!leaveOpen)
+                {
+                    await stream.DisposeAsync().ConfigureAwait(false);
+                }
+            }
+            catch (Exception cleanup) when (cleanup is IOException or ObjectDisposedException)
+            {
+                // Already broken.
+            }
+
+            // The stream failing (socket reset, a ProxyCommand that exited) is a lost connection, reported as an SshException.
+            if (ex is IOException)
+            {
+                throw SshConnection.ConnectionLost(ex);
+            }
+
+            throw;
+        }
+    }
+
+    private static async Task DisposeQuietlyAsync(Stream stream)
+    {
+        try
+        {
+            await stream.DisposeAsync().ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is IOException or ObjectDisposedException)
+        {
+            // Already broken.
+        }
+    }
+
+    /// <summary>The transport's settings: algorithm preferences (certificate host keys first when an authority is trusted) and host key checks.</summary>
+    private static async Task<SshTransportOptions> TransportOptionsAsync(SshClientOptions options, string? host, int port, ILogger logger, CancellationToken cancellationToken)
+    {
         var preferences = options.AlgorithmPreferences ?? (options.FipsMode ? AlgorithmPreferences.Fips() : new AlgorithmPreferences());
         bool prefersCertificates;
         try
@@ -306,7 +372,7 @@ public sealed partial class SshClient : IAsyncDisposable
             preferences = preferences.WithCertificateHostKeysFirst();
         }
 
-        var transportOptions = new SshTransportOptions
+        return new SshTransportOptions
         {
             Preferences = preferences,
             MinimumRsaBits = options.MinimumRsaBits,
@@ -338,69 +404,42 @@ public sealed partial class SshClient : IAsyncDisposable
                 return true;
             },
         };
-        var transport = new SshTransport(stream, transportOptions);
-        try
+    }
+
+    /// <summary>Starts the connection layer over an authenticated transport and records the outcome.</summary>
+    private static SshClient CompleteConnection(SshTransport transport, Stream stream, SshClientOptions options, bool leaveOpen, IAsyncDisposable? owner,
+        string? host, int port, ILogger logger, Activity? activity, long started)
+    {
+        var hostKey = transport.HostKey!;
+        var algorithms = transport.Algorithms!;
+        var publicHostKey = new SshHostKey(hostKey.Algorithm, hostKey.KeyType, hostKey.Fingerprint, hostKey.Blob, hostKey.KeySizeBits) { Certificate = hostKey.Certificate };
+        var connection = new SshConnection(transport, logger, options.TimeProvider);
+
+        // Before the receive loop starts: the server announces its host keys right after authentication.
+        WatchHostKeyUpdates(connection, options, host, port, publicHostKey, logger);
+        connection.Start();
+        if (options.KeepAliveInterval is { } keepAlive)
         {
-            await transport.ConnectAsync(cancellationToken).ConfigureAwait(false);
-            await AuthenticateAsync(transport, options, logger, cancellationToken).ConfigureAwait(false);
-
-            var hostKey = transport.HostKey!;
-            var algorithms = transport.Algorithms!;
-            var publicHostKey = new SshHostKey(hostKey.Algorithm, hostKey.KeyType, hostKey.Fingerprint, hostKey.Blob, hostKey.KeySizeBits) { Certificate = hostKey.Certificate };
-            var connection = new SshConnection(transport, logger, options.TimeProvider);
-
-            // Before the receive loop starts: the server announces its host keys right after authentication.
-            WatchHostKeyUpdates(connection, options, host, port, publicHostKey, logger);
-            connection.Start();
-            if (options.KeepAliveInterval is { } keepAlive)
-            {
-                connection.StartKeepAlive(keepAlive, options.KeepAliveCountMax);
-            }
-
-            SshTelemetry.Connections.Add(1);
-            var postQuantum = SshAlgorithms.IsPostQuantum(algorithms.Kex);
-            SshTelemetry.ConnectDuration.Record(Stopwatch.GetElapsedTime(started).TotalSeconds, new KeyValuePair<string, object?>("ssh.kex.post_quantum", postQuantum));
-            activity?.SetTag("ssh.kex", algorithms.Kex);
-            activity?.SetTag("ssh.kex.post_quantum", postQuantum);
-            activity?.SetTag("ssh.cipher", algorithms.CipherClientToServer);
-            activity?.SetTag("ssh.host_key.type", hostKey.KeyType);
-            SshLog.Connected(logger, algorithms.Kex, algorithms.CipherClientToServer, hostKey.KeyType, hostKey.Fingerprint);
-            if (!postQuantum)
-            {
-                // Like OpenSSH 10.1's WarnWeakCrypto, but at Information level: common servers (OpenSSH before 9.9) cannot do better yet.
-                SshLog.KeyExchangeNotPostQuantum(logger, algorithms.Kex);
-            }
-
-            return new SshClient(
-                connection, options, stream, leaveOpen, owner, transport.ServerIdentification!.Line,
-                publicHostKey, logger) { AgentBinding = transport.AgentBinding };
+            connection.StartKeepAlive(keepAlive, options.KeepAliveCountMax);
         }
-        catch (Exception ex)
+
+        SshTelemetry.Connections.Add(1);
+        var postQuantum = SshAlgorithms.IsPostQuantum(algorithms.Kex);
+        SshTelemetry.ConnectDuration.Record(Stopwatch.GetElapsedTime(started).TotalSeconds, new KeyValuePair<string, object?>("ssh.kex.post_quantum", postQuantum));
+        activity?.SetTag("ssh.kex", algorithms.Kex);
+        activity?.SetTag("ssh.kex.post_quantum", postQuantum);
+        activity?.SetTag("ssh.cipher", algorithms.CipherClientToServer);
+        activity?.SetTag("ssh.host_key.type", hostKey.KeyType);
+        SshLog.Connected(logger, algorithms.Kex, algorithms.CipherClientToServer, hostKey.KeyType, hostKey.Fingerprint);
+        if (!postQuantum)
         {
-            activity?.SetStatus(ActivityStatusCode.Error, ex.GetType().Name);
-
-            // Cleanup must not replace the real error with one from a stream that is already broken.
-            try
-            {
-                await transport.DisposeAsync().ConfigureAwait(false);
-                if (!leaveOpen)
-                {
-                    await stream.DisposeAsync().ConfigureAwait(false);
-                }
-            }
-            catch (Exception cleanup) when (cleanup is IOException or ObjectDisposedException)
-            {
-                // Already broken.
-            }
-
-            // The stream failing (socket reset, a ProxyCommand that exited) is a lost connection, reported as an SshException.
-            if (ex is IOException)
-            {
-                throw SshConnection.ConnectionLost(ex);
-            }
-
-            throw;
+            // Like OpenSSH 10.1's WarnWeakCrypto, but at Information level: common servers (OpenSSH before 9.9) cannot do better yet.
+            SshLog.KeyExchangeNotPostQuantum(logger, algorithms.Kex);
         }
+
+        return new SshClient(
+            connection, options, stream, leaveOpen, owner, transport.ServerIdentification!.Line,
+            publicHostKey, logger) { AgentBinding = transport.AgentBinding };
     }
 
     /// <summary>ssh's default order, less the methods SshSharp does not implement (gssapi-with-mic, hostbased).</summary>

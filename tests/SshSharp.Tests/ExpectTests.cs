@@ -77,6 +77,49 @@ public class ExpectTests
     }
 
     [Test]
+    public async Task ManyTinyReads_CostTimeInProportionToTheOutput()
+    {
+        // A server sending one character per packet: each read used to copy and rescan everything pending (quadratic). 300,000 reads of
+        // one character, then the prompt split one character per read too.
+        var chunks = Enumerable.Repeat("x", 300_000).Concat("ready$ ".Select(c => c.ToString())).Concat(["after"]);
+        var expect = Over([.. chunks]);
+        var started = System.Diagnostics.Stopwatch.StartNew();
+
+        var match = await expect.ExpectAsync("ready$ ", Timeout());
+
+        await Assert.That(match.Before.Length).IsEqualTo(300_000);
+        await Assert.That(match.Value).IsEqualTo("ready$ ");
+        await Assert.That(started.Elapsed).IsLessThan(TimeSpan.FromSeconds(10));
+        await Assert.That((await expect.ExpectAsync("ter", Timeout())).Before).IsEqualTo("af");
+    }
+
+    [Test]
+    public async Task TheBufferKeepsExactlyTheLastCharacters_WhenItOverflows()
+    {
+        var chunks = Enumerable.Range(0, 50).Select(i => $"{i:D4}|").ToArray();
+        var expect = new SshExpect(new ScriptedStream(chunks.Select(Encoding.UTF8.GetBytes), endAfter: true), new MemoryStream()) { MaxBufferLength = 12 };
+
+        await Assert.That(async () => await expect.ExpectAsync("never", Timeout())).Throws<EndOfStreamException>();
+        await Assert.That(expect.Pending).IsEqualTo("7|0048|0049|"); // the last 12 characters
+
+        // A match across a trim boundary is still found when it fits in the buffer.
+        string[] parts = ["aaaaaaaaaaPRO", "MPT"];
+        var straddling = new SshExpect(new ScriptedStream(parts.Select(Encoding.UTF8.GetBytes)), new MemoryStream()) { MaxBufferLength = 8 };
+        await Assert.That((await straddling.ExpectAsync("PROMPT", Timeout())).Value).IsEqualTo("PROMPT");
+    }
+
+    [Test]
+    public async Task ARegexThatTakesTooLong_EndsTheWaitWithItsTimeout()
+    {
+        // Catastrophic backtracking on output the server chose: the pattern's MatchTimeout bounds it.
+        var expect = Over(new string('a', 40) + "!");
+        var pattern = new Regex("^(a+)+$", RegexOptions.None, TimeSpan.FromMilliseconds(50));
+
+        await Assert.That(async () => await expect.ExpectAsync(pattern, Timeout())).Throws<RegexMatchTimeoutException>();
+        await Assert.That(expect.Pending).IsEqualTo(new string('a', 40) + "!");
+    }
+
+    [Test]
     public async Task TextAlreadyBuffered_IsFoundWithoutReading()
     {
         var stream = new ScriptedStream([Encoding.UTF8.GetBytes("one two three")]);

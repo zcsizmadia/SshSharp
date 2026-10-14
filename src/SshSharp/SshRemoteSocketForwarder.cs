@@ -47,7 +47,7 @@ public sealed class SshRemoteSocketForwarder : IAsyncDisposable
     public int ActiveConnections => Volatile.Read(ref _active);
 
     /// <summary>Takes a <c>forwarded-streamlocal@openssh.com</c> channel the server opened for a connection to the socket.</summary>
-    internal void Accept(SshChannel channel)
+    internal Task Accept(SshChannel channel)
     {
         Task connection;
         lock (_connections)
@@ -66,8 +66,10 @@ public sealed class SshRemoteSocketForwarder : IAsyncDisposable
                 }
             },
             CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+        return connection;
     }
 
+    /// <summary>Serves one connection; it never faults, so <see cref="DisposeAsync"/> is not left with an exception to rethrow.</summary>
     private async Task ServeAsync(SshChannel channel)
     {
         try
@@ -80,10 +82,10 @@ public sealed class SshRemoteSocketForwarder : IAsyncDisposable
             }
             catch (Exception ex) when (ex is SocketException or OperationCanceledException or ObjectDisposedException)
             {
-                // Nothing listens locally: close the channel, as ssh does, so the remote client sees the connection end.
-                SshLog.RemoteForwardingConnectFailed(_logger, LocalPort, ex.Message);
-                await channel.CloseAsync(CancellationToken.None).ConfigureAwait(false);
-                channel.DiscardUnread();
+                // Nothing listens locally: close the channel, as ssh does, so the remote client sees the connection end. The reason is the
+                // error code only: socket exception text can name the path.
+                SshLog.RemoteForwardingConnectFailed(_logger, LocalPort, ex is SocketException socketError ? socketError.SocketErrorCode.ToString() : ex.GetType().Name);
+                await SshRemotePortForwarder.CloseQuietlyAsync(channel).ConfigureAwait(false);
                 return;
             }
 
@@ -91,6 +93,11 @@ public sealed class SshRemoteSocketForwarder : IAsyncDisposable
             {
                 await SocketChannelRelay.RunAsync(socket, channel, _stop.Token).ConfigureAwait(false);
             }
+        }
+        catch (Exception ex)
+        {
+            SshLog.RemoteForwardingConnectFailed(_logger, LocalPort, ex.GetType().Name);
+            await SshRemotePortForwarder.CloseQuietlyAsync(channel).ConfigureAwait(false);
         }
         finally
         {
@@ -153,7 +160,8 @@ public sealed class SshRemoteSocketForwarder : IAsyncDisposable
             open = [.. _connections];
         }
 
-        await Task.WhenAll(open).ConfigureAwait(false);
+        await Task.WhenAll(open.Select(t => t.ContinueWith(_ => { }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default)))
+            .ConfigureAwait(false);
         _stop.Dispose();
     }
 }

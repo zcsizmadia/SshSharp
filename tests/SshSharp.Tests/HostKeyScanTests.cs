@@ -52,6 +52,27 @@ public class HostKeyScanTests
     }
 
     [Test]
+    public async Task AServerThatSaysNothing_TimesOut_AsSshKeyscanDoes()
+    {
+        // Accepts, then never sends its identification.
+        using var listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((System.Net.IPEndPoint)listener.LocalEndpoint).Port;
+        var held = listener.AcceptSocketAsync();
+
+        var started = System.Diagnostics.Stopwatch.StartNew();
+        var ex = await Assert.That(async () => await SshClient.ScanHostKeysAsync("127.0.0.1", port,
+            new SshHostKeyScanOptions { Timeout = TimeSpan.FromMilliseconds(500) }, Timeout())).Throws<SshException>();
+
+        await Assert.That(ex!.Reason).IsEqualTo(SshFailureReason.Timeout);
+        await Assert.That(started.Elapsed).IsLessThan(TimeSpan.FromSeconds(30));
+        (await held).Dispose();
+        await Assert.That(new SshHostKeyScanOptions().Timeout).IsEqualTo(TimeSpan.FromSeconds(5));
+        await Assert.That(() => new SshHostKeyScanOptions { Timeout = TimeSpan.Zero }).Throws<ArgumentOutOfRangeException>();
+        await Assert.That(new SshHostKeyScanOptions { Timeout = System.Threading.Timeout.InfiniteTimeSpan }.Timeout).IsEqualTo(System.Threading.Timeout.InfiniteTimeSpan);
+    }
+
+    [Test]
     public async Task OnlyTheRequestedAlgorithms_AreAskedFor()
     {
         await using var servers = new Servers(new FakeServerOptions { HostKey = Ed25519Key, ExtraHostKeys = [EcdsaKey, RsaKey] });

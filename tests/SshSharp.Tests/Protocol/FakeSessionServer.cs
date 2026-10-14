@@ -292,6 +292,12 @@ internal sealed class FakeSessionServer : IAsyncDisposable
     /// <summary>Never answer global requests (a server that has stopped responding).</summary>
     public bool IgnoreGlobalRequests { get; set; }
 
+    /// <summary>
+    /// When set, a forwarding request (tcpip-forward, streamlocal-forward) is carried out at once but answered only once this completes,
+    /// and nothing after it is processed before then: a slow server, for cancelling a request it has already accepted.
+    /// </summary>
+    public TaskCompletionSource? HoldForwardReplies { get; set; }
+
     /// <summary>A certificate authority's public key: user certificates it signed are accepted (sshd's TrustedUserCAKeys).</summary>
     public byte[]? TrustedUserAuthority { get; init; }
 
@@ -615,6 +621,11 @@ internal sealed class FakeSessionServer : IAsyncDisposable
                         }
                     }
 
+                    if (HoldForwardReplies is { } hold && name == "streamlocal-forward@openssh.com")
+                    {
+                        await hold.Task;
+                    }
+
                     if (wantReply)
                     {
                         await _server.SendAsync(new[] { accepted ? SshMessage.RequestSuccess : SshMessage.RequestFailure });
@@ -642,6 +653,11 @@ internal sealed class FakeSessionServer : IAsyncDisposable
                             ok = RemoteForwards.Remove(port);
                             CancelledRemoteForwards.Add(port);
                         }
+                    }
+
+                    if (HoldForwardReplies is { } hold && name == "tcpip-forward")
+                    {
+                        await hold.Task;
                     }
 
                     if (wantReply)

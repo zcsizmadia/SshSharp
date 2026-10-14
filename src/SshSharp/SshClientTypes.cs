@@ -92,6 +92,27 @@ public sealed class SshHostKeyScanOptions
 
     /// <summary>Where diagnostics go. Never receives secrets.</summary>
     public ILogger? Logger { get; init; }
+
+    /// <summary>
+    /// How long each connection of the scan (connecting and one key exchange) may take before the scan fails with
+    /// <see cref="SshFailureReason.Timeout"/>, as <c>ssh-keyscan -T</c>. Default 5 seconds, as ssh-keyscan;
+    /// <see cref="System.Threading.Timeout.InfiniteTimeSpan"/> for no limit but the cancellation token.
+    /// </summary>
+    public TimeSpan Timeout
+    {
+        get => _timeout;
+        init
+        {
+            if (value != System.Threading.Timeout.InfiniteTimeSpan && (value <= TimeSpan.Zero || value.TotalMilliseconds > int.MaxValue))
+            {
+                throw new ArgumentOutOfRangeException(nameof(value), value, "The timeout must be positive (at most about 24 days), or infinite.");
+            }
+
+            _timeout = value;
+        }
+    }
+
+    private readonly TimeSpan _timeout = TimeSpan.FromSeconds(5);
 }
 
 /// <summary>Options for <see cref="SshClient"/>.</summary>
@@ -166,6 +187,23 @@ public sealed class SshClientOptions
 
     /// <summary>The most output (stdout plus stderr) <see cref="SshClient.RunCommandAsync"/> will collect before failing. Default 128 MiB.</summary>
     public long MaxCommandOutputBytes { get; init; } = 128L * 1024 * 1024;
+
+    /// <summary>
+    /// The most connections the server may have forwarded to this client at once, across all remote forwardings (port, dynamic and
+    /// Unix-socket). Each one makes a connection on this machine, so this bounds what a misbehaving server can make it open; above it, the
+    /// server's channel is refused (resource shortage) and its client sees the connection fail. Default 1000.
+    /// </summary>
+    public int MaxForwardedConnections
+    {
+        get => _maxForwardedConnections;
+        init
+        {
+            ArgumentOutOfRangeException.ThrowIfLessThan(value, 1);
+            _maxForwardedConnections = value;
+        }
+    }
+
+    private readonly int _maxForwardedConnections = 1000;
 
     /// <summary>
     /// Negotiate new keys after this many bytes have been transferred under the current ones. Default 1 GiB (RFC 4253 section 9).

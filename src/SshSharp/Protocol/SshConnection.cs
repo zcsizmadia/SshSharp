@@ -233,6 +233,9 @@ internal sealed class SshConnection : IAsyncDisposable
     /// </summary>
     public Func<string, byte[], Action<SshChannel>?>? AcceptChannel { get; set; }
 
+    /// <summary>What <see cref="AcceptChannel"/> returns to refuse a channel for lack of resources (too many open), not as unsupported.</summary>
+    public static readonly Action<SshChannel> RefuseResourceShortage = _ => { };
+
     /// <summary>Opens a <c>session</c> channel.</summary>
     public Task<SshChannel> OpenSessionAsync(CancellationToken cancellationToken) => OpenChannelAsync("session", null, cancellationToken);
 
@@ -622,6 +625,12 @@ internal sealed class SshConnection : IAsyncDisposable
         if (AcceptChannel?.Invoke(channelType, typeSpecificData) is not { } start)
         {
             Post(SshChannel.BuildOpenFailure(senderChannel, ChannelOpenFailureReason.AdministrativelyProhibited, "Channel type not supported."));
+            return;
+        }
+
+        if (ReferenceEquals(start, RefuseResourceShortage))
+        {
+            Post(SshChannel.BuildOpenFailure(senderChannel, ChannelOpenFailureReason.ResourceShortage, "Too many forwarded connections."));
             return;
         }
 

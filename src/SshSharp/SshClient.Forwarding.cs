@@ -186,8 +186,11 @@ public sealed partial class SshClient
     /// <param name="remotePort">The port the server listens on; 0 lets it pick one (see <see cref="SshRemotePortForwarder.Port"/>).</param>
     /// <param name="allowDestination">
     /// Decides whether to connect to a requested host and port. The destinations are chosen on the server's side, so whoever can reach
-    /// the forwarded port there can use this machine's network: like ssh, everything is allowed when this is null. Host names are
-    /// resolved on this machine, after this check.
+    /// the forwarded port there can use this machine's network: like ssh, everything is allowed when this is null. An address is passed
+    /// in its canonical form, whatever spelling was requested (<c>127.1</c>, <c>0x7f.1</c> and <c>::ffff:127.0.0.1</c> all arrive as
+    /// <c>127.0.0.1</c>; <c>[::1]</c> as <c>::1</c>). A host name is passed as given, then resolved on this machine and passed again as
+    /// each address it resolves to: the name and an address must both be allowed, and only the allowed addresses are connected to, so a
+    /// name that resolves to a refused address is refused too. A filter that throws refuses the destination.
     /// </param>
     /// <param name="cancellationToken">Cancels the request to the server.</param>
     /// <exception cref="SshException">The server refused (sshd's <c>AllowTcpForwarding</c>, or the port is in use).</exception>
@@ -246,7 +249,20 @@ public sealed partial class SshClient
             throw new SshException(SshFailureReason.ChannelClosed, $"The socket '{remoteSocketPath}' is already forwarded on this connection.");
         }
 
-        var reply = await _connection.SendGlobalRequestAsync("streamlocal-forward@openssh.com", true, w => w.WriteString(remoteSocketPath), cancellationToken).ConfigureAwait(false);
+        GlobalReply reply;
+        try
+        {
+            reply = await _connection.SendGlobalRequestAsync("streamlocal-forward@openssh.com", true, w => w.WriteString(remoteSocketPath), cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is OperationCanceledException or SshException or ObjectDisposedException)
+        {
+            // Not started: drop the registration, so a later attempt with this path is not "already forwarded". After a cancellation the
+            // server may have accepted the request all the same; disposing the forwarder withdraws it there (cancel-streamlocal-forward,
+            // answered after the request it follows) and refuses anything forwarded meanwhile. Its first step, the removal, runs at once.
+            _ = forwarder.DisposeAsync().AsTask();
+            throw;
+        }
+
         if (!reply.Success)
         {
             _remoteSocketForwards.TryRemove(remoteSocketPath, out _);
@@ -285,11 +301,40 @@ public sealed partial class SshClient
         ObjectDisposedException.ThrowIf(_disposed != 0, this);
         EnsureChannelDispatch();
 
-        var reply = await _connection.SendGlobalRequestAsync("tcpip-forward", true, w =>
+        GlobalReply reply;
+        try
         {
-            w.WriteString(bindAddress);
-            w.WriteUInt32((uint)remotePort);
-        }, cancellationToken).ConfigureAwait(false);
+            reply = await _connection.SendGlobalRequestAsync("tcpip-forward", true, w =>
+            {
+                w.WriteString(bindAddress);
+                w.WriteUInt32((uint)remotePort);
+            }, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (remotePort != 0)
+        {
+            // The server may have accepted it anyway: withdraw it, so it does not listen with nothing here to take its connections (with
+            // port 0 the port it picked is unknown, and its connections are refused as unrouted).
+            _ = WithdrawAsync();
+            throw;
+        }
+
+        async Task WithdrawAsync()
+        {
+            try
+            {
+                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+                await _connection.SendGlobalRequestAsync("cancel-tcpip-forward", true, w =>
+                {
+                    w.WriteString(bindAddress);
+                    w.WriteUInt32((uint)remotePort);
+                }, timeout.Token).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is OperationCanceledException or SshException or ObjectDisposedException)
+            {
+                // The connection is gone, and the forwarding with it.
+            }
+        }
+
         if (!reply.Success)
         {
             throw new SshException(SshFailureReason.ChannelClosed, $"The server refused to listen on port {remotePort} (forwarding not allowed, or the port is in use).");
@@ -351,38 +396,49 @@ public sealed partial class SshClient
             return _options.ForwardAgent is { } agent ? channel => _ = RelayAgentAsync(channel, agent) : null;
         }
 
-        if (type == "forwarded-streamlocal@openssh.com")
-        {
-            // The socket path that was connected, then a reserved string; only sockets this client asked for are served.
-            try
-            {
-                var reader = new SshReader(data);
-                return _remoteSocketForwards.TryGetValue(reader.ReadUtf8String(), out var socketForwarder) ? socketForwarder.Accept : null;
-            }
-            catch (SshProtocolException)
-            {
-                return null;
-            }
-        }
-
-        if (type != "forwarded-tcpip")
-        {
-            return null;
-        }
-
+        Func<SshChannel, Task>? accept = null;
         try
         {
-            // RFC 4254 section 7.2: the address and port that were connected, then the originator's.
-            var reader = new SshReader(data);
-            reader.ReadUtf8String();
-            var port = (int)reader.ReadUInt32();
-            return _remoteForwards.TryGetValue(port, out var forwarder) ? forwarder.Accept : null;
+            if (type == "forwarded-streamlocal@openssh.com")
+            {
+                // The socket path that was connected, then a reserved string; only sockets this client asked for are served.
+                var reader = new SshReader(data);
+                accept = _remoteSocketForwards.TryGetValue(reader.ReadUtf8String(), out var socketForwarder) ? socketForwarder.Accept : null;
+            }
+            else if (type == "forwarded-tcpip")
+            {
+                // RFC 4254 section 7.2: the address and port that were connected, then the originator's.
+                var reader = new SshReader(data);
+                reader.ReadUtf8String();
+                var port = (int)reader.ReadUInt32();
+                accept = _remoteForwards.TryGetValue(port, out var forwarder) ? forwarder.Accept : null;
+            }
         }
         catch (SshProtocolException)
         {
             return null;
         }
+
+        if (accept is null)
+        {
+            return null;
+        }
+
+        // Each one is a local connection (or a SOCKS exchange) on this machine: a server cannot make this client open without limit.
+        if (Interlocked.Increment(ref _forwardedConnections) > _options.MaxForwardedConnections)
+        {
+            Interlocked.Decrement(ref _forwardedConnections);
+            return SshConnection.RefuseResourceShortage;
+        }
+
+        return channel => _ = accept(channel).ContinueWith(
+            _ => Interlocked.Decrement(ref _forwardedConnections), CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
     };
+
+    private int _forwardedConnections;
+
+    /// <summary>How many connections the server has forwarded to this client that are still open (all remote forwardings together).</summary>
+    internal int ForwardedConnections => Volatile.Read(ref _forwardedConnections);
 
     /// <summary>Relays one forwarded agent connection: the server's requests to the local agent and its answers back.</summary>
     private async Task RelayAgentAsync(SshChannel channel, SshAgent agent)
@@ -499,18 +555,33 @@ public sealed partial class SshClient
 
         async Task TryForwardAsync(string keyword, string spec, Func<Task> start)
         {
+            // Which one, by position: the specification and the exception text can name hosts, addresses and socket paths, which stay
+            // out of logs and error messages (see SshLog); the inner exception keeps the details for the caller.
+            var index = (keyword switch
+            {
+                "LocalForward" => hostConfig.LocalForwards,
+                "RemoteForward" => hostConfig.RemoteForwards,
+                _ => hostConfig.DynamicForwards,
+            }).ToList().IndexOf(spec) + 1;
             try
             {
                 await start().ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is FormatException or SocketException or SshException or ArgumentException)
             {
+                var reason = ex switch
+                {
+                    FormatException => "this form is not supported",
+                    SocketException socketError => "the local address could not be used (" + socketError.SocketErrorCode + ")",
+                    SshException sshError => "the server did not set it up (" + sshError.Reason + ")",
+                    _ => "the specification is invalid",
+                };
                 if (hostConfig.ExitOnForwardFailure)
                 {
-                    throw new SshException(SshFailureReason.ConnectFailed, $"{keyword} {spec} could not be set up: {ex.Message}", ex);
+                    throw new SshException(SshFailureReason.ConnectFailed, $"{keyword} number {index} could not be set up: {reason}.", ex);
                 }
 
-                SshLog.ConfiguredForwardingSkipped(_logger, keyword, spec, ex.Message);
+                SshLog.ConfiguredForwardingSkipped(_logger, keyword, index, reason);
             }
         }
     }

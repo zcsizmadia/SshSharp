@@ -1,4 +1,8 @@
 #nullable enable
+SshSharp.SshClientOptions.MaxForwardedConnections.get -> int
+SshSharp.SshClientOptions.MaxForwardedConnections.init -> void
+SshSharp.SshHostKeyScanOptions.Timeout.get -> System.TimeSpan
+SshSharp.SshHostKeyScanOptions.Timeout.init -> void
 [SSHSHARP001]const SshSharp.Sftp.SftpClient.ExperimentalId = "SSHSHARP001" -> string!
 [SSHSHARP001]override SshSharp.Sftp.SftpFileInfo.Equals(object? obj) -> bool
 [SSHSHARP001]override SshSharp.Sftp.SftpFileInfo.GetHashCode() -> int
