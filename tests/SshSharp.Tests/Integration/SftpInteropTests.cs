@@ -46,6 +46,28 @@ public class SftpInteropTests
             await Assert.That((await File.ReadAllBytesAsync(Path.Combine(copy, "top.bin"))).AsSpan().SequenceEqual(big)).IsTrue();
             await Assert.That(await File.ReadAllTextAsync(Path.Combine(copy, "a", "b", "leaf.txt"))).IsEqualTo("leaf");
 
+            // The OpenSSH extensions, where this server version has them.
+            if (sftp.Extensions.ContainsKey("statvfs@openssh.com"))
+            {
+                var space = await sftp.GetFileSystemInfoAsync(remote, Timeout());
+                await Assert.That(space.TotalBytes).IsGreaterThan(0L);
+                await Assert.That(space.AvailableBytes).IsLessThanOrEqualTo(space.TotalBytes);
+            }
+
+            if (sftp.Extensions.ContainsKey("copy-data"))
+            {
+                await sftp.CopyFileAsync(remote + "/top.bin", remote + "/top-copy.bin", cancellationToken: Timeout());
+                var copied = new MemoryStream();
+                await sftp.DownloadAsync(remote + "/top-copy.bin", copied, cancellationToken: Timeout());
+                await Assert.That(copied.ToArray().AsSpan().SequenceEqual(big)).IsTrue();
+            }
+
+            await using (var synced = await sftp.OpenWriteAsync(remote + "/synced", Timeout()))
+            {
+                await synced.WriteAsync("durable"u8.ToArray(), Timeout());
+                await synced.FlushAsync(Timeout()); // fsync@openssh.com where the server has it
+            }
+
             // Cut the copy short, then resume it.
             var partial = Path.Combine(local.FullName, "partial.bin");
             await File.WriteAllBytesAsync(partial, big[..300_000]);

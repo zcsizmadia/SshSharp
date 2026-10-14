@@ -45,7 +45,13 @@ internal sealed class FakeSftpServer
         ["hardlink@openssh.com"] = "1",
         ["limits@openssh.com"] = "1",
         ["home-directory"] = "1",
+        ["fsync@openssh.com"] = "1",
+        ["statvfs@openssh.com"] = "2",
+        ["copy-data"] = "1",
     };
+
+    /// <summary>How many fsync@openssh.com requests arrived.</summary>
+    public int Fsyncs { get; private set; }
 
     /// <summary>The read and write lengths announced with limits@openssh.com.</summary>
     public (ulong Read, ulong Write) Limits { get; set; } = (64 * 1024, 64 * 1024);
@@ -567,6 +573,47 @@ internal sealed class FakeSftpServer
                         }
 
                         _nodes[link] = node; // the same node: a write through either name shows in both
+                        return Status(id, 0);
+                    }
+
+                    case "fsync@openssh.com":
+                        Fsyncs++;
+                        return _handles.ContainsKey(r.ReadUtf8String()) ? Status(id, 0) : Status(id, 4, "Bad handle");
+                    case "statvfs@openssh.com":
+                        r.ReadUtf8String();
+                        return Build(w =>
+                        {
+                            w.WriteByte(201);
+                            w.WriteUInt32(id);
+                            foreach (var value in new ulong[] { 4096, 4096, 1000, 400, 300, 5000, 2000, 1500, 42, 1, 255 })
+                            {
+                                w.WriteUInt64(value);
+                            }
+                        });
+                    case "copy-data":
+                    {
+                        var from = r.ReadUtf8String();
+                        var fromOffset = (int)r.ReadUInt64();
+                        var length = (int)r.ReadUInt64();
+                        var to = r.ReadUtf8String();
+                        var toOffset = (int)r.ReadUInt64();
+                        if (!_handles.TryGetValue(from, out var source) || !_handles.TryGetValue(to, out var target)
+                            || Follow(source.Path) is not { } sourceNode || Follow(target.Path) is not { } targetNode)
+                        {
+                            return Status(id, 4, "Bad handle");
+                        }
+
+                        var data = sourceNode.Data.Skip(fromOffset).Take(length == 0 ? int.MaxValue : length).ToArray();
+                        if (targetNode.Data.Count < toOffset + data.Length)
+                        {
+                            targetNode.Data.AddRange(new byte[toOffset + data.Length - targetNode.Data.Count]);
+                        }
+
+                        for (var i = 0; i < data.Length; i++)
+                        {
+                            targetNode.Data[toOffset + i] = data[i];
+                        }
+
                         return Status(id, 0);
                     }
 

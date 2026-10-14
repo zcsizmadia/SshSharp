@@ -285,7 +285,8 @@ public sealed class SshProxy
 
         var portBytes = new byte[2];
         BinaryPrimitives.WriteUInt16BigEndian(portBytes, (ushort)port);
-        await stream.WriteAsync((byte[])[5, 1, 0, .. destination, .. portBytes], cancellationToken).ConfigureAwait(false);
+        byte[] connect = [5, 1, 0, .. destination, .. portBytes];
+        await stream.WriteAsync(connect, cancellationToken).ConfigureAwait(false);
 
         // Reply: VER REP RSV ATYP BND.ADDR BND.PORT. Read exactly its length, so nothing of the SSH server's is consumed.
         var reply = await ReadAsync(stream, 4, cancellationToken).ConfigureAwait(false);

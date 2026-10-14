@@ -95,6 +95,7 @@ public sealed partial class SftpClient : IAsyncDisposable
                 break;
             case SftpProtocol.ExtendedReply:
                 ParseLimits(reply);
+                ParseStatVfs(reply);
                 break;
             case SftpProtocol.Attrs:
                 ExpectAttributes(reply, "Fuzzing", "path");
@@ -668,7 +669,7 @@ public sealed partial class SftpClient : IAsyncDisposable
                 {
                     await pending.ConfigureAwait(false);
                 }
-                catch (Exception)
+                catch (Exception ex) when (ex is SshException or OperationCanceledException or ObjectDisposedException)
                 {
                     // Already failing.
                 }
@@ -754,7 +755,7 @@ public sealed partial class SftpClient : IAsyncDisposable
                 {
                     await inFlight.Dequeue().Reply.ConfigureAwait(false);
                 }
-                catch (Exception)
+                catch (Exception ex) when (ex is SshException or OperationCanceledException or ObjectDisposedException)
                 {
                     // Already failing.
                 }
