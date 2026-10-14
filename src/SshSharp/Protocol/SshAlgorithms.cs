@@ -32,11 +32,11 @@ internal static class SshAlgorithms
     public const string EcdhNistp256 = "ecdh-sha2-nistp256";
     public const string EcdhNistp384 = "ecdh-sha2-nistp384";
     public const string EcdhNistp521 = "ecdh-sha2-nistp521";
+    public const string DhGroup14Sha256 = "diffie-hellman-group14-sha256";
+    public const string DhGroup16Sha512 = "diffie-hellman-group16-sha512";
 
     /// <summary>Whether a key exchange method resists a future quantum computer (a hybrid with a post-quantum KEM), as OpenSSH's WarnWeakCrypto judges it.</summary>
     public static bool IsPostQuantum(string kex) => kex is MlKem768X25519Sha256 or MlKem768Nistp256Sha256 or MlKem1024Nistp384Sha384;
-    public const string DhGroup14Sha256 = "diffie-hellman-group14-sha256";
-    public const string DhGroup16Sha512 = "diffie-hellman-group16-sha512";
 
     // Extension and strict-KEX markers carried in the kex_algorithms list.
     public const string ExtInfoClient = "ext-info-c";

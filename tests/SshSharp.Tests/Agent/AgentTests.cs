@@ -107,6 +107,28 @@ public sealed class AgentTests : IDisposable
     }
 
     [Test]
+    [Arguments("sk-ssh-ed25519-cert-v01@openssh.com", "sk-ssh-ed25519@openssh.com")]
+    [Arguments("sk-ecdsa-sha2-nistp256-cert-v01@openssh.com", "sk-ecdsa-sha2-nistp256@openssh.com")]
+    public async Task ASecurityKeyCertificate_SignsThroughTheAgent_UnderItsPlainAlgorithm(string certificateType, string plainAlgorithm)
+    {
+        // The agent signs with the certificate's plain security-key algorithm (the name keeps its @openssh.com domain); the client must
+        // ask for that and accept it. Before the name mapping was fixed, it expected "sk-ssh-ed25519" and every such signature failed.
+        var blob = Blob(w => { w.WriteString(certificateType); w.WriteString(new byte[32]); });
+        await using var agent = new FakeAgent { ClaimAlgorithm = plainAlgorithm };
+        agent.RawIdentities.Add(blob);
+        var key = (await new SshAgent(agent.Path).GetKeysAsync(Timeout())).Single();
+
+        var signature = await key.SignAsync(certificateType, new byte[] { 1, 2, 3 }, Timeout());
+        await Assert.That(new SshReader(signature).ReadUtf8String()).IsEqualTo(plainAlgorithm);
+        await Assert.That(agent.LastSignedBlob).IsEquivalentTo(blob); // the certificate itself was sent to the agent
+
+        // An agent that signs with anything else is caught here, not by the server.
+        agent.ClaimAlgorithm = "ssh-ed25519";
+        var error = await Assert.ThrowsAsync<SshException>(async () => await key.SignAsync(certificateType, new byte[] { 1, 2, 3 }, Timeout()));
+        await Assert.That(error!.Reason).IsEqualTo(SshFailureReason.AgentFailed);
+    }
+
+    [Test]
     [Arguments("ssh-ed25519-cert-v01@openssh.com", "ssh-ed25519")]
     [Arguments("rsa-sha2-512-cert-v01@openssh.com", "rsa-sha2-512")]
     [Arguments("sk-ssh-ed25519-cert-v01@openssh.com", "sk-ssh-ed25519@openssh.com")]
