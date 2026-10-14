@@ -413,6 +413,22 @@ jobs:
             'SSHSHARP_TEST_SERVER=OpenSSH'
             'SSHSHARP_TEST_SERVER_OS=windows'
           ) >> $env:GITHUB_ENV
+      - name: PuTTY's Pageant, running with no keys (the test adds one)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          choco install putty --no-progress -y | Out-Null
+          $pageant = Get-ChildItem "$env:ProgramFiles\PuTTY\pageant.exe", "${env:ProgramFiles(x86)}\PuTTY\pageant.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $pageant) { throw "pageant.exe was not installed" }
+          Start-Process -FilePath $pageant.FullName
+          foreach ($i in 1..30) {
+            if (Get-ChildItem '\\.\pipe\' | Where-Object Name -like 'pageant.*') { break }
+            Start-Sleep -Seconds 1
+          }
+          $pipe = Get-ChildItem '\\.\pipe\' | Where-Object Name -like 'pageant.*'
+          if (-not $pipe) { throw "Pageant did not create its pipe" }
+          Write-Output "Pageant $((Get-Item $pageant.FullName).VersionInfo.ProductVersion) is listening"
+          'SSHSHARP_TEST_PAGEANT=1' >> $env:GITHUB_ENV
       - run: dotnet restore
       - run: dotnet build -c Release --no-restore
       - name: Interop tests against OpenSSH for Windows

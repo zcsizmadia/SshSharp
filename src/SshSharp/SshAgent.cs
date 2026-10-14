@@ -62,14 +62,44 @@ public sealed class SshAgent
     public string Path { get; }
 
     /// <summary>
-    /// The user's agent, as ssh finds it: <c>SSH_AUTH_SOCK</c>, or on Windows the OpenSSH agent service's pipe when that is not set. Null
-    /// when there is none to try. Whether an agent is actually running shows on the first request.
+    /// The user's agent, as ssh finds it: <c>SSH_AUTH_SOCK</c>; on Windows, when that is not set, the OpenSSH agent service's pipe, or
+    /// PuTTY's Pageant (0.75 and later) when only Pageant is running. Null when there is none to try. Whether an agent is actually running
+    /// shows on the first request.
     /// </summary>
-    public static SshAgent? FromEnvironment() =>
-        FromSocketVariable(Environment.GetEnvironmentVariable("SSH_AUTH_SOCK"), OperatingSystem.IsWindows());
+    public static SshAgent? FromEnvironment()
+    {
+        if (Environment.GetEnvironmentVariable("SSH_AUTH_SOCK") is { Length: > 0 } socket || !OperatingSystem.IsWindows())
+        {
+            return FromSocketVariable(Environment.GetEnvironmentVariable("SSH_AUTH_SOCK"), windows: false);
+        }
+
+        // The OpenSSH agent service first, as ssh does; Pageant only when that is not running and Pageant is.
+        return !PipeExists(WindowsPipe[PipePrefix.Length..]) && Pageant() is { } pageant ? pageant : new SshAgent(WindowsPipe);
+    }
 
     internal static SshAgent? FromSocketVariable(string? socket, bool windows) =>
         !string.IsNullOrEmpty(socket) ? new SshAgent(socket) : windows ? new SshAgent(WindowsPipe) : null;
+
+    /// <summary>
+    /// PuTTY's Pageant (0.75 and later), on the named pipe it creates for the current user (<c>\\.\pipe\pageant.&lt;user&gt;.&lt;hash&gt;</c>),
+    /// or null when Pageant is not running or this is not Windows. Its keys work like any agent's.
+    /// </summary>
+    public static SshAgent? Pageant() =>
+        OperatingSystem.IsWindows() && PageantPipe.Name() is { } name && PipeExists(name) ? new SshAgent(PipePrefix + name) : null;
+
+    /// <summary>Whether a named pipe exists, by listing the pipes (opening one would take one of its instances).</summary>
+    private static bool PipeExists(string name)
+    {
+        try
+        {
+            var listing = Task.Run(() => Directory.EnumerateFiles(PipePrefix, name).Any());
+            return listing.Wait(PipeListingTimeout) && listing.Result;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or AggregateException)
+        {
+            return false;
+        }
+    }
 
     /// <summary>
     /// The keys the agent holds, ready for <see cref="SshClientOptions.PrivateKeys"/>. Keys of types SshSharp cannot authenticate with
