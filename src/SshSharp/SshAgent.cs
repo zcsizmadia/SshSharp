@@ -31,6 +31,10 @@ public sealed class SshAgent
     private const byte IdentitiesAnswer = 12;
     private const byte SignRequest = 13;
     private const byte SignResponse = 14;
+    private const byte Success = 6;
+    private const byte Extension = 27;
+    private const byte ExtensionFailure = 28;
+    private const byte ExtensionResponse = 29;
     private const uint RsaSha2_256 = 2;
     private const uint RsaSha2_512 = 4;
 
@@ -101,6 +105,58 @@ public sealed class SshAgent
         catch (SshProtocolException ex)
         {
             throw new SshException(SshFailureReason.AgentFailed, "The agent's key list is malformed.", ex);
+        }
+    }
+
+    /// <summary>
+    /// The protocol extensions the agent supports (RFC 9987's <c>query</c> extension), for example <c>session-bind@openssh.com</c>. An
+    /// agent that does not implement <c>query</c> yields an empty list.
+    /// </summary>
+    /// <exception cref="SshException">The agent is not running or sent a malformed reply (<see cref="SshFailureReason.AgentFailed"/>).</exception>
+    public async Task<IReadOnlyList<string>> QueryExtensionsAsync(CancellationToken cancellationToken = default)
+    {
+        var request = SshPrivateKey.Encode(w =>
+        {
+            w.WriteByte(Extension);
+            w.WriteString("query");
+        });
+        var reply = await RequestAsync(request, cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var reader = new SshReader(reply);
+            var type = reader.ReadByte();
+            if (type is Failure or ExtensionFailure)
+            {
+                return []; // the agent does not implement query (MUST reply with SSH_AGENT_FAILURE)
+            }
+
+            // RFC 9987 answers with SSH_AGENT_EXTENSION_RESPONSE; SSH_AGENT_SUCCESS is also a valid success reply (older OpenSSH agents).
+            if (type is not (ExtensionResponse or Success))
+            {
+                throw new SshException(SshFailureReason.AgentFailed, $"The agent answered the query with message {type}.");
+            }
+
+            if (reader.IsEmpty)
+            {
+                return [];
+            }
+
+            if (reader.ReadUtf8String() != "query")
+            {
+                throw new SshException(SshFailureReason.AgentFailed, "The agent answered a different extension than the query.");
+            }
+
+            var names = new List<string>();
+            while (!reader.IsEmpty && names.Count < MaxKeys)
+            {
+                names.Add(reader.ReadUtf8String());
+            }
+
+            return names;
+        }
+        catch (SshProtocolException ex)
+        {
+            throw new SshException(SshFailureReason.AgentFailed, "The agent's extension list is malformed.", ex);
         }
     }
 

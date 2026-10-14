@@ -61,6 +61,9 @@ var options = new SshClientOptions { UserName = "deploy", PrivateKeys = keys, Ho
 
 `new SshAgent(path)` names a Unix socket or, on Windows, a pipe such as `\\.\pipe\openssh-ssh-agent`. Agent keys work with
 `WithCertificate` too. A key the agent will not sign with (removed, or a declined `ssh-add -c` confirmation) is skipped.
+FIDO security keys (`sk-ssh-ed25519@openssh.com`, `sk-ecdsa-sha2-nistp256@openssh.com`) and their certificates work through
+the agent: the agent and the key's touch make the signature. `QueryExtensionsAsync` lists the protocol extensions an agent
+supports (RFC 9987).
 
 Connecting by `ssh_config` alias uses the agent automatically, as `ssh` does: `IdentityAgent`, else `SSH_AUTH_SOCK`.
 Agent keys that match an `IdentityFile` come first (and an encrypted identity file is not opened at all), and
@@ -81,7 +84,9 @@ var options = new SshClientOptions
 };
 ```
 
-Each session asks the server for it, and the agent connections the server opens are relayed to the local agent. Forward only to
+Each session asks the server for it, and the agent connections the server opens are relayed to the local agent. A server that
+announces RFC 9987's `agent-forward` (OpenSSH 10.3+) is asked with the standard `agent-req`; others with OpenSSH's
+`auth-agent-req@openssh.com`. Forward only to
 servers you trust: while you are connected, anyone with enough rights on the server can make your agent sign (they cannot read
 the keys). Connecting by `ssh_config` alias follows `ForwardAgent yes`.
 

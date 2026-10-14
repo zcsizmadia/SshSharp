@@ -177,6 +177,9 @@ internal sealed class FakeServerOptions
     /// <summary>The <c>server-sig-algs</c> extension value (what OpenSSH sends by default).</summary>
     public string ServerSigAlgs { get; init; } = "ssh-ed25519,ecdsa-sha2-nistp256,ecdsa-sha2-nistp384,ecdsa-sha2-nistp521,rsa-sha2-512,rsa-sha2-256";
 
+    /// <summary>More EXT_INFO entries after <c>server-sig-algs</c>, for example RFC 9987's <c>agent-forward</c>.</summary>
+    public IReadOnlyDictionary<string, string> ExtraExtensions { get; init; } = new Dictionary<string, string>();
+
     public string[] BannerLines { get; init; } = [];
 
     public string Identification { get; init; } = "SSH-2.0-FakeServer_1.0";
@@ -547,9 +550,14 @@ internal sealed class FakeSshServer : IAsyncDisposable
             {
                 var w = new SshWriter(output);
                 w.WriteByte(SshMessage.ExtInfo);
-                w.WriteUInt32(1);
+                w.WriteUInt32((uint)(1 + Options.ExtraExtensions.Count));
                 w.WriteString("server-sig-algs");
                 w.WriteString(Options.ServerSigAlgs);
+                foreach (var (name, value) in Options.ExtraExtensions)
+                {
+                    w.WriteString(name);
+                    w.WriteString(value);
+                }
             }), cancellationToken);
         }
     }

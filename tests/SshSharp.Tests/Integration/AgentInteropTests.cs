@@ -7,6 +7,20 @@ namespace SshSharp.Tests.Integration;
 public class AgentInteropTests
 {
     [Test]
+    public async Task OpenSshsAgent_AnswersTheQueryExtension()
+    {
+        if (Environment.GetEnvironmentVariable("SSHSHARP_TEST_AGENT") != "1" || SshAgent.FromEnvironment() is not { } agent)
+        {
+            Skip.Test("SSHSHARP_TEST_AGENT=1 and SSH_AUTH_SOCK are needed.");
+            return;
+        }
+
+        // OpenSSH's agent has supported query and session-bind@openssh.com since 8.9; whichever reply form it uses, it must parse.
+        var extensions = await agent.QueryExtensionsAsync(new CancellationTokenSource(TimeSpan.FromSeconds(30)).Token);
+        await Assert.That(extensions).Contains("session-bind@openssh.com");
+    }
+
+    [Test]
     public async Task TheForwardedAgent_IsUsableOnTheServer()
     {
         var user = Environment.GetEnvironmentVariable("SSHSHARP_TEST_USER");

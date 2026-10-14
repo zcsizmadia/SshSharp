@@ -225,9 +225,11 @@ public sealed partial class SshClient : IAsyncDisposable
 
             if (_options.ForwardAgent is not null)
             {
-                // No reply, as ssh sends it: a server that does not forward agents just ignores it.
+                // No reply, as ssh sends it: a server that does not forward agents just ignores it. RFC 9987 names the request "agent-req",
+                // to be used only when the server announces "agent-forward"; otherwise OpenSSH's name, which servers have long understood.
                 EnsureChannelDispatch();
-                await channel.RequestAsync("auth-agent-req@openssh.com", false, null, cancellationToken).ConfigureAwait(false);
+                var request = _connection.ServerExtensions.ContainsKey("agent-forward") ? "agent-req" : "auth-agent-req@openssh.com";
+                await channel.RequestAsync(request, false, null, cancellationToken).ConfigureAwait(false);
             }
 
             foreach (var (name, value) in environment)

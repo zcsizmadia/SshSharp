@@ -65,6 +65,60 @@ public sealed class AgentTests : IDisposable
     }
 
     [Test]
+    [Arguments(false)]
+    [Arguments(true)]
+    public async Task QueryExtensions_ListsWhatTheAgentSupports(bool replyWithSuccess)
+    {
+        // RFC 9987 section 5.8.1; older OpenSSH agents answer with SSH_AGENT_SUCCESS instead of SSH_AGENT_EXTENSION_RESPONSE.
+        await using var agent = new FakeAgent
+        {
+            Extensions = ["session-bind@openssh.com", "query"],
+            QueryRepliesWithSuccess = replyWithSuccess,
+        };
+        var extensions = await new SshAgent(agent.Path).QueryExtensionsAsync(Timeout());
+        await Assert.That(extensions).IsEquivalentTo(new[] { "session-bind@openssh.com", "query" });
+    }
+
+    [Test]
+    public async Task QueryExtensions_IsEmpty_ForAnAgentWithoutIt()
+    {
+        await using var agent = new FakeAgent(); // answers SSH_AGENT_FAILURE, as RFC 9987 requires for unknown extensions
+        await Assert.That(await new SshAgent(agent.Path).QueryExtensionsAsync(Timeout())).IsEmpty();
+    }
+
+    [Test]
+    public async Task SecurityKeyCertificates_AreOfferedAsTheyAre_UnderTheirCertificateAlgorithm()
+    {
+        // The agent and the key's touch make the signature and the server checks the certificate, so the client passes it on unopened.
+        await using var agent = new FakeAgent();
+        agent.RawIdentities.Add(Blob(w => { w.WriteString("sk-ssh-ed25519-cert-v01@openssh.com"); w.WriteString(new byte[32]); }));
+        agent.RawIdentities.Add(Blob(w => { w.WriteString("sk-ecdsa-sha2-nistp256-cert-v01@openssh.com"); w.WriteString(new byte[32]); }));
+
+        var keys = await new SshAgent(agent.Path).GetKeysAsync(Timeout());
+        await Assert.That(keys.Select(k => k.KeyType)).IsEquivalentTo(new[]
+        {
+            "sk-ssh-ed25519-cert-v01@openssh.com", "sk-ecdsa-sha2-nistp256-cert-v01@openssh.com",
+        });
+
+        // server-sig-algs lists the plain security-key algorithms, which keep their @openssh.com domain.
+        var extensions = new Dictionary<string, string> { ["server-sig-algs"] = "ssh-ed25519,sk-ssh-ed25519@openssh.com,sk-ecdsa-sha2-nistp256@openssh.com" };
+        await Assert.That(SshUserAuth.ChooseSignatureAlgorithm(keys[0], extensions)).IsEqualTo("sk-ssh-ed25519-cert-v01@openssh.com");
+        await Assert.That(SshUserAuth.ChooseSignatureAlgorithm(keys[1], extensions)).IsEqualTo("sk-ecdsa-sha2-nistp256-cert-v01@openssh.com");
+    }
+
+    [Test]
+    [Arguments("ssh-ed25519-cert-v01@openssh.com", "ssh-ed25519")]
+    [Arguments("rsa-sha2-512-cert-v01@openssh.com", "rsa-sha2-512")]
+    [Arguments("sk-ssh-ed25519-cert-v01@openssh.com", "sk-ssh-ed25519@openssh.com")]
+    [Arguments("sk-ecdsa-sha2-nistp256-cert-v01@openssh.com", "sk-ecdsa-sha2-nistp256@openssh.com")]
+    public async Task CertificateAlgorithms_MapToTheirPlainAlgorithm_AndBack(string certificate, string plain)
+    {
+        await Assert.That(SshCertificate.BaseAlgorithm(certificate)).IsEqualTo(plain);
+        var expectedKeyType = plain.StartsWith("rsa-", StringComparison.Ordinal) ? "ssh-rsa-cert-v01@openssh.com" : certificate;
+        await Assert.That(SshCertificate.CertificateKeyType(certificate)).IsEqualTo(expectedKeyType);
+    }
+
+    [Test]
     public async Task EachKeyType_AuthenticatesThroughTheAgent_RsaWithSha512()
     {
         await using var agent = new FakeAgent();
