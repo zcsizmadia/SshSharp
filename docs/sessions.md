@@ -117,7 +117,7 @@ await netconf.StandardInput.WriteAsync(helloMessage);
 ```
 
 A server that does not offer the subsystem refuses it with `SshException` (`ChannelClosed`), and the connection stays
-usable. SFTP itself will come as the separate `SshSharp.Sftp` package, built on this.
+usable. For SFTP, use `client.OpenSftpAsync()` (see [File transfer (SFTP)](sftp.md)) rather than the raw subsystem.
 
 ## Ending a session
 

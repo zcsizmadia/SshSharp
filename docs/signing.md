@@ -8,7 +8,8 @@ verify with `ssh-keygen`, and the reverse is also true.
 
 ```csharp
 using var key = await SshPrivateKey.LoadFileAsync("/home/me/.ssh/id_ed25519", passphrase);
-var signature = await SshSignature.SignAsync(key, File.OpenRead("release.tar.gz"), "file");
+await using var release = File.OpenRead("release.tar.gz");
+var signature = await SshSignature.SignAsync(key, release, "file");
 await File.WriteAllTextAsync("release.tar.gz.sig", signature.ToString());   // -----BEGIN SSH SIGNATURE----- ...
 ```
 

@@ -24,12 +24,20 @@ Features that SSH.NET users have asked for in its issue tracker, and that SshSha
 | Request | SshSharp |
 |---|---|
 | Verify host keys against `known_hosts` | `KnownHostsVerifier`, with hashed hosts, `@cert-authority`, `@revoked` and `StrictHostKeyChecking` (see [Host keys](host-keys.md)) |
-| Jump hosts / bastions | `ProxyJump` chains and `ProxyCommand`, from `ssh_config` or from options (see [Connecting](connecting.md)) |
+| Jump hosts / bastions | `ProxyJump` chains and `ProxyCommand` from `ssh_config`, or by hand: `OpenTcpTunnelAsync` to the next host and `SshClient.ConnectAsync(stream, ...)` over it (see [Connecting](connecting.md)) |
 | Use the keys in `ssh-agent`; agent forwarding | `SshAgent` and `ForwardAgent`, on Unix sockets and the Windows OpenSSH agent |
 | A subsystem other than `sftp` | `client.StartSubsystemAsync(name)` |
 | A terminal for a single command (`ssh -t host cmd`) | `StartCommandAsync(command, new SshSessionOptions { Terminal = ... })` |
 | Send a signal to a command | `session.SendSignalAsync("TERM")` |
-| Forward to a Unix socket | `client.OpenUnixSocketTunnelAsync(path)` |
+| Forward to a Unix socket | `client.OpenUnixSocketTunnelAsync(path)`; the other way, the server's socket to this machine, with `client.ForwardRemoteUnixSocketAsync(remotePath, ...)` |
+| A SOCKS proxy on the server's side (`ssh -R port`) | `client.ForwardRemoteDynamicPortAsync(bindAddress, port, allowDestination)` |
+| `HttpClient` through the connection | `client.CreateHttpConnectCallback()` for `SocketsHttpHandler.ConnectCallback` |
+| Fetch host keys without logging in (`ssh-keyscan`) | `SshClient.ScanHostKeysAsync(host, port)` |
+| Generate keys (`ssh-keygen -t`) | `SshPrivateKey.Generate(type)` and `SaveAsync(path, passphrase)` |
+| Sign and verify files or git commits (`ssh-keygen -Y`) | `SshSignature` and `SshAllowedSigners` (see [Signing](signing.md)) |
+| Connect from a chosen local address or interface | `SshClientOptions.LocalEndPoint`, `BindAddress` and `BindInterface` in `ssh_config` |
+| Agent keys limited to some hosts (`ssh-add -h`) | session binding and `publickey-hostbound`, automatically |
+| Remote files as an `IFileSystem` or `IFileProvider` | the `SshSharp.IO.Abstractions` and `SshSharp.FileProviders` packages |
 | Detect a stalled connection, also while a write is blocked | keep-alive (`KeepAliveInterval`, `KeepAliveCountMax`): the probes don't wait for pending writes, so a server that stops reading is still detected |
 | RSA SHA-2 signatures with servers that announce them | `server-sig-algs` (RFC 8308) is used to pick `rsa-sha2-512` or `rsa-sha2-256` |
 | FIPS-approved algorithms only | `SshClientOptions.FipsMode`, including post-quantum key exchange on .NET 10 |
@@ -215,7 +223,8 @@ await using var forward = await client.ForwardLocalPortAsync(new IPEndPoint(IPAd
 | (no remote dynamic forwarding) | `client.ForwardRemoteDynamicPortAsync(bindAddress, remotePort, allowDestination)` (`ssh -R port`) |
 | `ForwardedPortDynamic` (`ssh -D`) | `client.ForwardDynamicPortAsync(localEndPoint)` |
 | `forward.Start()`, `Stop()` | started when returned; stopped by `DisposeAsync` |
-| `client.ForwardedPorts` | `client.LocalForwardings`, `RemoteForwardings`, `DynamicForwardings` (the ones started from `ssh_config`) |
+| (no remote Unix-socket forwarding) | `client.ForwardRemoteUnixSocketAsync(remoteSocketPath, localHost, localPort)` or `(remoteSocketPath, localSocketPath)` (`ssh -R /socket:target`) |
+| `client.ForwardedPorts` | `client.LocalForwardings`, `RemoteForwardings`, `RemoteSocketForwardings`, `DynamicForwardings` (the ones started from `ssh_config`) |
 | (none) | `client.OpenTcpTunnelAsync(host, port)` and `OpenUnixSocketTunnelAsync(path)`: a `Stream` to the far end, without a local listener |
 
 With `ssh_config`, `LocalForward`, `RemoteForward` and `DynamicForward` start with the connection when

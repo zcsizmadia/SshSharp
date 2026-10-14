@@ -15,7 +15,9 @@ Everything SshSharp raises for SSH-level problems is an `SshException` with a `R
 | `ChannelClosed` | A channel was refused or closed (for example the server refused a command or a terminal) | `SshException` |
 | `Timeout` | `ConnectTimeout` passed, or the server missed `KeepAliveCountMax` keep-alives | `SshException` |
 | `AgentFailed` | The SSH agent could not be reached or refused a request | `SshException` |
-| `TransferFailed` | An SCP transfer failed on the server's side (a missing file, no permission); the message has the server's words | `SshException` |
+| `TransferFailed` | An SCP transfer failed on the server's side (a missing file, no permission; the message has the server's words), or an SCP or SFTP directory download met a name it will not write (`..`, a path separator, a device name) | `SshException` |
+| `SftpFailed` | An SFTP request failed; `Status` has the server's status code (`NoSuchFile`, `PermissionDenied`, ...) and `Path` the path | `SftpException` |
+| `Unknown` | Not otherwise classified | `SshException` |
 
 ```csharp
 try

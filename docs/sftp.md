@@ -5,8 +5,8 @@ as your commands. SshSharp speaks SFTP version 3, the version OpenSSH's `sftp-se
 OpenSSH's extensions.
 
 > **Experimental.** The SFTP API is new and may still change between minor releases. Its types are marked
-> `[Experimental("SSHSHARP001")]`, so the compiler warns where you use them; suppress the warning
-> (`<NoWarn>$(NoWarn);SSHSHARP001</NoWarn>`) once you accept that.
+> `[Experimental("SSHSHARP001")]`, so the compiler reports error SSHSHARP001 where you use them until you opt in, in the project
+> file (`<NoWarn>$(NoWarn);SSHSHARP001</NoWarn>`) or around the code (`#pragma warning disable SSHSHARP001`).
 
 ```csharp
 using SshSharp.Sftp;
@@ -39,7 +39,6 @@ latency. Each request is as large as the server allows (`limits@openssh.com`; 32
 | `PreserveTimes` | Copy the modification and access times. |
 | `Progress` | An `IProgress<long>` with the bytes transferred so far. |
 | `MaxRequestsInFlight` | The window of outstanding requests (1 to 1024). |
-
 | `Resume` | Continue an interrupted transfer, as `reget` and `reput` do: only the part the destination lacks is sent. |
 
 A failed download leaves no partial local file behind, unless `Resume` is set, in which case what arrived is kept for the

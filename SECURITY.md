@@ -1,7 +1,7 @@
 # Security policy
 
-SshSharp implements SSH, including managed cryptography (X25519, Ed25519, ChaCha20-Poly1305) that the .NET base library
-does not provide. Security reports are welcome and taken seriously.
+SshSharp implements SSH, including managed cryptography (X25519, Ed25519, sntrup761, ChaCha20-Poly1305, bcrypt_pbkdf,
+BLAKE2b, Argon2) that the .NET base library does not provide. Security reports are welcome and taken seriously.
 
 ## Reporting a vulnerability
 
@@ -18,8 +18,9 @@ SshSharp is pre-1.0. Only the latest release (and `main`) receives security fixe
 
 ## Scope
 
-In scope: anything a malicious or compromised **server**, a network attacker, or untrusted **input files** (keys,
-`known_hosts`, `ssh_config`) can do to an application using SshSharp, for example memory exhaustion, crashes or hangs,
+In scope: anything a malicious or compromised **server** (including what it sends over SFTP and through forwarded
+connections), a **proxy**, a network attacker, or untrusted **input files** (keys, certificates, `known_hosts`, `ssh_config`,
+SSH signatures and allowed-signers files) can do to an application using SshSharp, for example memory exhaustion, crashes or hangs,
 authentication or host-key verification bypasses, downgrade attacks, key or secret disclosure (including through timing),
 and command injection through configuration handling.
 

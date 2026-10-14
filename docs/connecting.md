@@ -51,12 +51,16 @@ What is taken from the configuration: `HostName`, `Port`, `User`, `IdentityFile`
 `IdentitiesOnly`, `UserKnownHostsFile`, `GlobalKnownHostsFile`, `StrictHostKeyChecking`, `HashKnownHosts`,
 `UpdateHostKeys`, `HostKeyAlias`, `KexAlgorithms`, `HostKeyAlgorithms`, `Ciphers`, `MACs`, `PubkeyAcceptedAlgorithms`,
 `PreferredAuthentications`, `PubkeyAuthentication`, `PasswordAuthentication`, `KbdInteractiveAuthentication`, `BatchMode`,
-`ProxyJump`, `ProxyCommand`, `ServerAliveInterval`, `ServerAliveCountMax`, `ConnectTimeout` and `AddressFamily`.
+`ProxyJump`, `ProxyCommand`, `ServerAliveInterval`, `ServerAliveCountMax`, `ConnectTimeout`, `AddressFamily`,
+`BindAddress`, `BindInterface` and `ForwardAgent`; with `StartForwardings`, also `LocalForward`, `RemoteForward`,
+`DynamicForward`, `GatewayPorts`, `ExitOnForwardFailure` and `ClearAllForwardings`.
 `Match` (including `Match exec`, which needs an opt-in) and `Include` work as in OpenSSH.
 
 `SshConfigConnectOptions` also takes a `Config` (default: the user's and the system's files), `ResolveOptions` (home
-directory, environment, local user), a `Password`, extra `PrivateKeys`, `KeyboardInteractive`, a `HostKeyVerifier` that
-replaces the configured one, `UseAgent`/`Agent`, `AllowProxyCommand`, `AuthenticationBanner` and a `Logger`.
+directory, environment, local user), a `Password`, extra `PrivateKeys`, a `PassphraseProvider` for encrypted identity files,
+`KeyboardInteractive`, a `HostKeyVerifier` that replaces the configured one, `AskHostKey` and `ConfirmHostKeyUpdate`,
+`UseAgent`/`Agent`, `AllowProxyCommand`, a `Proxy` (HTTP or SOCKS), `StartForwardings`, `AuthenticationBanner` and a
+`Logger`.
 
 ### Jump hosts and proxy commands
 
@@ -189,7 +193,7 @@ await using var socks = await client.ForwardRemoteDynamicPortAsync("localhost", 
 
 The destinations come from the server's side, so anyone who can reach the forwarded port there can use this machine's network.
 Like ssh, every destination is allowed when `allowDestination` is null; pass a filter unless you trust everyone on the server.
-Host names are resolved on this machine, after the filter. `remote.IsDynamic` tells the two kinds of remote forwarding apart.
+Host names are resolved on this machine, after the filter. `IsDynamic` (`socks.IsDynamic` here) tells the two kinds of remote forwarding apart.
 
 Remote Unix-socket forwarding (`ssh -R /remote/socket:target`, `streamlocal-forward@openssh.com`, OpenSSH 6.7 and later) has
 the server listen on a Unix socket instead of a port, and relays each connection to a host and port, or to a Unix socket on this
