@@ -1,9 +1,9 @@
 namespace SshSharp.Config;
 
-/// <summary>OpenSSH-style glob matching (<c>*</c> and <c>?</c>), case-insensitive.</summary>
+/// <summary>OpenSSH-style glob matching (<c>*</c> and <c>?</c>), case-insensitive unless asked otherwise (as for user names and principals).</summary>
 internal static class Glob
 {
-    public static bool IsMatch(ReadOnlySpan<char> pattern, ReadOnlySpan<char> text)
+    public static bool IsMatch(ReadOnlySpan<char> pattern, ReadOnlySpan<char> text, bool ignoreCase = true)
     {
         int p = 0, t = 0, starP = -1, starT = 0;
         while (t < text.Length)
@@ -13,7 +13,7 @@ internal static class Glob
                 starP = p++;
                 starT = t;
             }
-            else if (p < pattern.Length && (pattern[p] == '?' || CharsEqual(pattern[p], text[t])))
+            else if (p < pattern.Length && (pattern[p] == '?' || pattern[p] == text[t] || (ignoreCase && CharsEqual(pattern[p], text[t]))))
             {
                 p++;
                 t++;
@@ -41,7 +41,7 @@ internal static class Glob
     /// Matches <paramref name="text"/> against a comma-separated pattern list with <c>!</c> negation: a matching negated pattern
     /// rejects the text, otherwise any matching positive pattern accepts it.
     /// </summary>
-    public static bool IsMatchList(ReadOnlySpan<char> patterns, ReadOnlySpan<char> text)
+    public static bool IsMatchList(ReadOnlySpan<char> patterns, ReadOnlySpan<char> text, bool ignoreCase = true)
     {
         var matched = false;
         var remaining = patterns;
@@ -57,12 +57,12 @@ internal static class Glob
 
             if (pattern[0] == '!')
             {
-                if (IsMatch(pattern[1..], text))
+                if (IsMatch(pattern[1..], text, ignoreCase))
                 {
                     return false;
                 }
             }
-            else if (IsMatch(pattern, text))
+            else if (IsMatch(pattern, text, ignoreCase))
             {
                 matched = true;
             }

@@ -14,6 +14,8 @@
       href: sftp.md
     - name: File transfer (SCP)
       href: scp.md
+    - name: Signing files and commits
+      href: signing.md
     - name: Configuration files
       href: config-files.md
     - name: Errors and diagnostics
