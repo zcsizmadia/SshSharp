@@ -12,7 +12,11 @@ namespace SshSharp;
 /// signs with them, so the keys never enter this process. List its keys with <see cref="GetKeysAsync"/> and pass them in
 /// <see cref="SshClientOptions.PrivateKeys"/>; every signature is then made by the agent.
 /// </summary>
-/// <remarks>Each request opens a new connection to the agent, so an agent restarted between connections is picked up.</remarks>
+/// <remarks>
+/// Each request opens a new connection to the agent, so an agent restarted between connections is picked up. Signatures for
+/// authentication are made on a connection bound to the SSH session (<c>session-bind@openssh.com</c>), so keys added with destination
+/// constraints (<c>ssh-add -h</c>) work as they do with <c>ssh</c>.
+/// </remarks>
 public sealed class SshAgent
 {
     /// <summary>The Windows OpenSSH agent service's pipe, used when <c>SSH_AUTH_SOCK</c> is not set.</summary>
@@ -161,7 +165,7 @@ public sealed class SshAgent
     }
 
     /// <summary>Asks the agent to sign <paramref name="data"/> with the key <paramref name="blob"/>, returning the SSH signature blob.</summary>
-    internal async ValueTask<byte[]> SignAsync(ReadOnlyMemory<byte> blob, string algorithm, ReadOnlyMemory<byte> data, CancellationToken cancellationToken)
+    internal async ValueTask<byte[]> SignAsync(ReadOnlyMemory<byte> blob, string algorithm, ReadOnlyMemory<byte> data, AgentBinding? binding, CancellationToken cancellationToken)
     {
         uint flags = algorithm switch
         {
@@ -176,7 +180,7 @@ public sealed class SshAgent
         writer.WriteString(data.Span);
         writer.WriteUInt32(flags);
 
-        var reply = await RequestAsync(request.WrittenMemory, cancellationToken).ConfigureAwait(false);
+        var reply = await RequestAsync(request.WrittenMemory, cancellationToken, binding).ConfigureAwait(false);
         try
         {
             var reader = new SshReader(reply);
@@ -222,8 +226,13 @@ public sealed class SshAgent
         }
     }
 
-    /// <summary>One request and its reply over a fresh connection, each framed as <c>uint32 length || message</c>.</summary>
-    private async Task<byte[]> RequestAsync(ReadOnlyMemory<byte> message, CancellationToken cancellationToken)
+    /// <summary>
+    /// One request and its reply over a fresh connection, each framed as <c>uint32 length || message</c>. With
+    /// <paramref name="binding"/>, the connection is first bound to the SSH session (<c>session-bind@openssh.com</c>), so the agent can
+    /// apply destination constraints (<c>ssh-add -h</c>) to the request; an agent that does not know the extension just refuses the
+    /// binding, and the request goes ahead as before.
+    /// </summary>
+    private async Task<byte[]> RequestAsync(ReadOnlyMemory<byte> message, CancellationToken cancellationToken, AgentBinding? binding = null)
     {
         Stream stream;
         try
@@ -239,29 +248,61 @@ public sealed class SshAgent
         {
             try
             {
-                var frame = new byte[4 + message.Length];
-                BinaryPrimitives.WriteUInt32BigEndian(frame, (uint)message.Length);
-                message.CopyTo(frame.AsMemory(4));
-                await stream.WriteAsync(frame, cancellationToken).ConfigureAwait(false);
-                await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
-
-                var header = new byte[4];
-                await stream.ReadExactlyAsync(header, cancellationToken).ConfigureAwait(false);
-                var length = BinaryPrimitives.ReadUInt32BigEndian(header);
-                if (length is 0 or > MaxMessageLength)
+                if (binding is not null)
                 {
-                    throw new SshException(SshFailureReason.AgentFailed, $"The agent sent a message of {length} bytes.");
+                    await BindAsync(stream, binding, forwarding: false, cancellationToken).ConfigureAwait(false);
                 }
 
-                var reply = new byte[length];
-                await stream.ReadExactlyAsync(reply, cancellationToken).ConfigureAwait(false);
-                return reply;
+                return await ExchangeAsync(stream, message, cancellationToken).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is IOException or SocketException)
             {
                 throw new SshException(SshFailureReason.AgentFailed, $"The connection to the SSH agent failed: {ex.Message}", ex);
             }
         }
+    }
+
+    /// <summary>
+    /// Binds an agent connection to an SSH session (PROTOCOL.agent, <c>session-bind@openssh.com</c>): the server's host key, the session
+    /// identifier and the host key's signature over it, which the agent verifies. <paramref name="forwarding"/> marks a connection the
+    /// server reaches through agent forwarding, as <c>ssh -A</c> does. Returns whether the agent accepted the binding; agents that do not
+    /// implement it (older OpenSSH, other agents) refuse, which is not an error.
+    /// </summary>
+    internal static async Task<bool> BindAsync(Stream stream, AgentBinding binding, bool forwarding, CancellationToken cancellationToken)
+    {
+        var request = SshPrivateKey.Encode(w =>
+        {
+            w.WriteByte(Extension);
+            w.WriteString("session-bind@openssh.com");
+            w.WriteString(binding.HostKey.Span);
+            w.WriteString(binding.SessionId.Span);
+            w.WriteString(binding.Signature.Span);
+            w.WriteBoolean(forwarding);
+        });
+        var reply = await ExchangeAsync(stream, request, cancellationToken).ConfigureAwait(false);
+        return reply[0] == Success;
+    }
+
+    /// <summary>Sends one framed message on an open agent connection and reads one framed reply.</summary>
+    private static async Task<byte[]> ExchangeAsync(Stream stream, ReadOnlyMemory<byte> message, CancellationToken cancellationToken)
+    {
+        var frame = new byte[4 + message.Length];
+        BinaryPrimitives.WriteUInt32BigEndian(frame, (uint)message.Length);
+        message.CopyTo(frame.AsMemory(4));
+        await stream.WriteAsync(frame, cancellationToken).ConfigureAwait(false);
+        await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+
+        var header = new byte[4];
+        await stream.ReadExactlyAsync(header, cancellationToken).ConfigureAwait(false);
+        var length = BinaryPrimitives.ReadUInt32BigEndian(header);
+        if (length is 0 or > MaxMessageLength)
+        {
+            throw new SshException(SshFailureReason.AgentFailed, $"The agent sent a message of {length} bytes.");
+        }
+
+        var reply = new byte[length];
+        await stream.ReadExactlyAsync(reply, cancellationToken).ConfigureAwait(false);
+        return reply;
     }
 
     /// <summary>
@@ -338,3 +379,9 @@ public sealed class SshAgent
         }
     }
 }
+
+/// <summary>
+/// What binds an agent connection to an SSH session (PROTOCOL.agent, <c>session-bind@openssh.com</c>): the host key the server
+/// presented, the session identifier, and the host key's signature over it from the first key exchange.
+/// </summary>
+internal sealed record AgentBinding(ReadOnlyMemory<byte> HostKey, ReadOnlyMemory<byte> SessionId, ReadOnlyMemory<byte> Signature);

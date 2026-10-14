@@ -56,14 +56,28 @@ internal sealed class SshUserAuth(SshTransport transport, string userName, Func<
     /// The <c>publickey</c> method (RFC 4252 section 7). First asks whether the server would accept the key at all (no signature, so a
     /// refused key costs no private-key operation), then signs: session id, the request, and the chosen algorithm and public key.
     /// </summary>
+    /// <remarks>
+    /// When the server advertises <c>publickey-hostbound@openssh.com</c> (OpenSSH 8.9 and later), the request is host-bound
+    /// (<c>publickey-hostbound-v00@openssh.com</c>, PROTOCOL section 3.1): it also carries the server's host key, which is then part of
+    /// what is signed, so an agent can check the destination of a constrained key (<c>ssh-add -h</c>). Agent keys sign on a connection
+    /// bound to this session (<c>session-bind@openssh.com</c>).
+    /// </remarks>
     public async Task<AuthOutcome> PublicKeyAsync(SshPrivateKey key, string algorithm, CancellationToken cancellationToken)
     {
         var publicKey = key.PublicKey;
-        var query = await RequestAsync("publickey", w =>
+        var hostBound = transport.ServerExtensions.TryGetValue(HostBoundExtension, out var version) && version == "0" && transport.HostKey is not null;
+        var method = hostBound ? HostBoundMethod : "publickey";
+        var hostKey = hostBound ? transport.HostKey!.Presented : ReadOnlyMemory<byte>.Empty;
+
+        var query = await RequestAsync(method, w =>
         {
             w.WriteBoolean(false);
             w.WriteString(algorithm);
             w.WriteString(publicKey.Span);
+            if (hostBound)
+            {
+                w.WriteString(hostKey.Span);
+            }
         }, Reply.PkOk, cancellationToken).ConfigureAwait(false);
         if (!query.KeyAcceptable)
         {
@@ -77,20 +91,35 @@ internal sealed class SshUserAuth(SshTransport transport, string userName, Func<
             w.WriteByte(SshMessage.UserAuthRequest);
             w.WriteString(userName);
             w.WriteString(ConnectionService);
-            w.WriteString("publickey");
+            w.WriteString(method);
             w.WriteBoolean(true);
             w.WriteString(algorithm);
             w.WriteString(publicKey.Span);
+            if (hostBound)
+            {
+                w.WriteString(hostKey.Span);
+            }
         });
-        var signature = await key.SignAsync(algorithm, signed, cancellationToken).ConfigureAwait(false);
-        return await RequestAsync("publickey", w =>
+        var signature = await key.SignAsync(algorithm, signed, transport.AgentBinding, cancellationToken).ConfigureAwait(false);
+        return await RequestAsync(method, w =>
         {
             w.WriteBoolean(true);
             w.WriteString(algorithm);
             w.WriteString(publicKey.Span);
+            if (hostBound)
+            {
+                w.WriteString(hostKey.Span);
+            }
+
             w.WriteString(signature);
         }, Reply.None, cancellationToken).ConfigureAwait(false);
     }
+
+    /// <summary>The EXT_INFO extension a server advertises host-bound public key authentication with (value "0").</summary>
+    internal const string HostBoundExtension = "publickey-hostbound@openssh.com";
+
+    /// <summary>The host-bound public key method (PROTOCOL section 3.1).</summary>
+    internal const string HostBoundMethod = "publickey-hostbound-v00@openssh.com";
 
     /// <summary>
     /// The <c>keyboard-interactive</c> method (RFC 4256): the server sends rounds of prompts and <paramref name="respond"/> answers each.

@@ -63,7 +63,7 @@ Coming next: SFTP, as a separate package.
 | HTTP and SOCKS 4/5 proxies | ✅ | ✅ |
 | Connect over any `Stream` (WebSocket, named pipe, your own tunnel) | ✅ | ❌ |
 | Keep-alive that detects a dead server (`ServerAliveCountMax`) | ✅ | ❌ (keep-alives get no reply) |
-| SSH agent (`ssh-agent`, Windows OpenSSH agent) | ✅ | ❌ |
+| SSH agent (`ssh-agent`, Windows OpenSSH agent), including destination-constrained keys (`ssh-add -h`) | ✅ | ❌ |
 | Agent forwarding | ✅ | ❌ |
 | Password, public key, keyboard-interactive, multi-factor | ✅ | ✅ |
 | OpenSSH certificates | User and host | User (authentication) |

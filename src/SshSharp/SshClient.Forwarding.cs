@@ -320,6 +320,23 @@ public sealed partial class SshClient
 
         await using (stream.ConfigureAwait(false))
         {
+            // As ssh -A does: bind the agent connection to this session as a forwarding one, so the agent can apply destination
+            // constraints to what the server's side asks of it. An agent without the extension refuses, and the relay goes ahead.
+            if (AgentBinding is { } binding)
+            {
+                try
+                {
+                    await SshAgent.BindAsync(stream, binding, forwarding: true, _connection.Closed).ConfigureAwait(false);
+                }
+                catch (Exception ex) when (ex is IOException or SshException or OperationCanceledException)
+                {
+                    SshLog.AgentUnavailable(_logger, ex.Message);
+                    await channel.CloseAsync(CancellationToken.None).ConfigureAwait(false);
+                    channel.DiscardUnread();
+                    return;
+                }
+            }
+
             await StreamChannelRelay.RunAsync(stream, channel, _connection.Closed).ConfigureAwait(false);
         }
     }

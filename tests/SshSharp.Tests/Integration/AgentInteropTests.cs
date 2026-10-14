@@ -4,6 +4,7 @@ namespace SshSharp.Tests.Integration;
 /// Keys held by OpenSSH's ssh-agent, signing for a real server. Needs SSHSHARP_TEST_AGENT=1 (so a developer's own agent is used only on
 /// purpose), SSH_AUTH_SOCK, SSHSHARP_TEST_SSHD and SSHSHARP_TEST_USER, with the agent's keys in the user's authorized_keys.
 /// </summary>
+[NotInParallel("ssh-agent")] // one agent for all of them, and one test adds constrained keys to it
 public class AgentInteropTests
 {
     [Test]
@@ -88,5 +89,90 @@ public class AgentInteropTests
         await using var client = await SshClient.ConnectAsync(host, port, options, new CancellationTokenSource(TimeSpan.FromSeconds(60)).Token);
         var result = await client.RunCommandAsync("echo agent", new CancellationTokenSource(TimeSpan.FromSeconds(60)).Token);
         await Assert.That(result.StandardOutputText.Trim()).IsEqualTo("agent");
+    }
+
+    [Test]
+    public async Task ADestinationConstrainedKey_WorksForItsHost_AndNotForAnother()
+    {
+        // ssh-add -h: the agent signs with such a key only on a connection bound to a session with an allowed host key
+        // (session-bind@openssh.com), for a host-bound authentication request naming that host key.
+        var user = Environment.GetEnvironmentVariable("SSHSHARP_TEST_USER");
+        var keyDir = Environment.GetEnvironmentVariable("SSHSHARP_TEST_KEYDIR");
+        var sshAdd = FindOnPath(OperatingSystem.IsWindows() ? "ssh-add.exe" : "ssh-add");
+        if (Environment.GetEnvironmentVariable("SSHSHARP_TEST_AGENT") != "1" || RealServer.Endpoint is not var (host, port)
+            || string.IsNullOrEmpty(user) || string.IsNullOrEmpty(keyDir) || sshAdd is null || SshAgent.FromEnvironment() is not { } agent
+            || !File.Exists(Path.Combine(keyDir, "ecdsa256")) || !File.Exists(Path.Combine(keyDir, "ecdsa384")))
+        {
+            Skip.Test("SSHSHARP_TEST_AGENT=1, SSH_AUTH_SOCK, ssh-add, SSHSHARP_TEST_SSHD, SSHSHARP_TEST_USER and SSHSHARP_TEST_KEYDIR are needed.");
+            return;
+        }
+
+        var token = new CancellationTokenSource(TimeSpan.FromSeconds(90)).Token;
+
+        // A known_hosts file for ssh-add -H: this server's keys under one name, and an unrelated key under another.
+        var serverKeys = await SshClient.ScanHostKeysAsync(host, port, cancellationToken: token);
+        using var unrelated = SshPrivateKey.Generate(SshKeyType.Ed25519);
+        var knownHosts = Path.Combine(Path.GetTempPath(), "sshsharp-constrained-" + Guid.NewGuid().ToString("N"));
+        await File.WriteAllLinesAsync(knownHosts,
+        [
+            .. serverKeys.Select(k => $"sshsharp-destination {k.KeyType} {Convert.ToBase64String(k.PublicKey.Span)}"),
+            $"sshsharp-elsewhere {unrelated.KeyType} {Convert.ToBase64String(unrelated.PublicKey.Span)}",
+        ], token);
+
+        // Both keys are in the server's authorized_keys; only the agent's constraints tell them apart.
+        var allowedFile = Path.Combine(keyDir, "ecdsa256");
+        var otherFile = Path.Combine(keyDir, "ecdsa384");
+        using var allowedKey = await SshPrivateKey.LoadFileAsync(allowedFile, cancellationToken: token);
+        using var otherKey = await SshPrivateKey.LoadFileAsync(otherFile, cancellationToken: token);
+        try
+        {
+            await RunAsync(sshAdd, ["-q", "-H", knownHosts, "-h", "sshsharp-destination", allowedFile], token);
+            await RunAsync(sshAdd, ["-q", "-H", knownHosts, "-h", "sshsharp-elsewhere", otherFile], token);
+            var held = await agent.GetKeysAsync(token);
+
+            SshClientOptions With(string fingerprint) => new()
+            {
+                UserName = user,
+                PrivateKeys = [held.Single(k => k.Fingerprint == fingerprint)],
+                HostKeyVerifier = SshHostKeyVerifier.FromDelegate((_, _) => ValueTask.FromResult(true)),
+            };
+
+            await using (var client = await SshClient.ConnectAsync(host, port, With(allowedKey.Fingerprint), token))
+            {
+                var result = await client.RunCommandAsync("echo constrained", token);
+                await Assert.That(result.StandardOutputText.Trim()).IsEqualTo("constrained");
+            }
+
+            await Assert.That(async () => await SshClient.ConnectAsync(host, port, With(otherKey.Fingerprint), token)).Throws<SshAuthenticationException>();
+        }
+        finally
+        {
+            await RunAsync(sshAdd, ["-q", "-d", allowedFile, otherFile], CancellationToken.None, check: false);
+            File.Delete(knownHosts);
+        }
+    }
+
+    private static string? FindOnPath(string name) =>
+        (Environment.GetEnvironmentVariable("PATH") ?? string.Empty)
+            .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
+            .Select(dir => Path.Combine(dir, name))
+            .FirstOrDefault(File.Exists);
+
+    private static async Task RunAsync(string program, string[] arguments, CancellationToken cancellationToken, bool check = true)
+    {
+        var start = new System.Diagnostics.ProcessStartInfo(program) { RedirectStandardError = true, RedirectStandardOutput = true };
+        foreach (var argument in arguments)
+        {
+            start.ArgumentList.Add(argument);
+        }
+
+        using var process = System.Diagnostics.Process.Start(start)!;
+        var error = await process.StandardError.ReadToEndAsync(cancellationToken);
+        await process.StandardOutput.ReadToEndAsync(cancellationToken);
+        await process.WaitForExitAsync(cancellationToken);
+        if (check && process.ExitCode != 0)
+        {
+            throw new InvalidOperationException($"{Path.GetFileName(program)} failed ({process.ExitCode}): {error}");
+        }
     }
 }

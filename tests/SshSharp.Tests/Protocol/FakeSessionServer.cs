@@ -131,6 +131,9 @@ internal sealed class FakeSessionServer : IAsyncDisposable
 
     public Stream ClientStream => _server.ClientStream;
 
+    /// <summary>The session identifier (the exchange hash of the first key exchange).</summary>
+    public byte[]? SessionId => _server.SessionId;
+
     public FakeSshServer Raw => _server;
 
     public string Password { get; init; } = "secret";
@@ -437,12 +440,24 @@ internal sealed class FakeSessionServer : IAsyncDisposable
                     break;
                 }
 
-                if (method == "publickey")
+                if (method is "publickey" or HostBoundMethod)
                 {
                     var hasSignature = reader.ReadBoolean();
                     var algorithm = reader.ReadUtf8String();
                     var blob = reader.ReadString().ToArray();
-                    var authorized = user == UserName && (AuthorizedKeys.Any(k => k.AsSpan().SequenceEqual(blob)) || CertificateTrusted(algorithm, blob, user));
+
+                    // Host-bound (PROTOCOL 3.1): the client names the host key it verified, which must be the one this server presented.
+                    var boundHostKey = method == HostBoundMethod ? reader.ReadString().ToArray() : null;
+                    if (boundHostKey is not null)
+                    {
+                        lock (HostBoundKeys)
+                        {
+                            HostBoundKeys.Add(boundHostKey);
+                        }
+                    }
+
+                    var authorized = user == UserName && (AuthorizedKeys.Any(k => k.AsSpan().SequenceEqual(blob)) || CertificateTrusted(algorithm, blob, user))
+                        && (boundHostKey is null || boundHostKey.AsSpan().SequenceEqual(PresentedHostKey));
                     if (!hasSignature)
                     {
                         // RFC 4252 section 7: PK_OK says "this key would do; now sign".
@@ -459,12 +474,12 @@ internal sealed class FakeSessionServer : IAsyncDisposable
                     }
 
                     var signature = reader.ReadString().ToArray();
-                    ok = authorized && SignatureValid(user, algorithm, blob, signature);
+                    ok = authorized && SignatureValid(user, method, algorithm, blob, boundHostKey, signature);
                     if (ok)
                     {
                         lock (AuthAttempts)
                         {
-                            AuthAttempts.Add("publickey-signed:" + algorithm);
+                            AuthAttempts.Add((boundHostKey is null ? "publickey-signed:" : "publickey-hostbound-signed:") + algorithm);
                         }
                     }
 
@@ -1043,7 +1058,16 @@ internal sealed class FakeSessionServer : IAsyncDisposable
     }
 
     /// <summary>Checks a publickey signature exactly as a server must: over the session id and the request.</summary>
-    private bool SignatureValid(string user, string algorithm, byte[] blob, byte[] signature)
+    /// <summary>The host-bound public key method (PROTOCOL 3.1).</summary>
+    private const string HostBoundMethod = "publickey-hostbound-v00@openssh.com";
+
+    /// <summary>The host keys clients named in host-bound authentication requests.</summary>
+    public List<byte[]> HostBoundKeys { get; } = [];
+
+    /// <summary>What this server presented as its host key (its certificate, when it has one).</summary>
+    private byte[] PresentedHostKey => (_server.Options.HostCertificate ?? _server.Options.HostKey).Blob;
+
+    private bool SignatureValid(string user, string method, string algorithm, byte[] blob, byte[]? boundHostKey, byte[] signature)
     {
         var signed = Build(w =>
         {
@@ -1051,10 +1075,14 @@ internal sealed class FakeSessionServer : IAsyncDisposable
             w.WriteByte(SshMessage.UserAuthRequest);
             w.WriteString(user);
             w.WriteString("ssh-connection");
-            w.WriteString("publickey");
+            w.WriteString(method);
             w.WriteBoolean(true);
             w.WriteString(algorithm);
             w.WriteString(blob);
+            if (boundHostKey is not null)
+            {
+                w.WriteString(boundHostKey);
+            }
         });
         try
         {
