@@ -40,11 +40,10 @@ Console.WriteLine(result.StandardOutputText);
 - **Modern algorithms:** post-quantum `mlkem768x25519-sha256`, and the FIPS-compatible `mlkem768nistp256-sha256` and `mlkem1024nistp384-sha384` (on .NET 10 where the platform has ML-KEM), `curve25519-sha256`,
   ECDH and DH group 14/16 key exchange; ChaCha20-Poly1305, AES-GCM and
   AES-CTR with HMAC-SHA2 ETM; Ed25519, ECDSA and RSA (SHA-2) keys; strict key exchange (Terrapin) always on; a FIPS mode.
-- **File transfer:** SCP uploads and downloads of files, streams and directories, with progress, kept times, and checks
-  that stop a hostile server from writing outside the target.
+- **File transfer:** SFTP (version 3 with OpenSSH's extensions: pipelined uploads and downloads, seekable remote file
+  streams, directories, links and attributes; the API is experimental for now), and SCP uploads and downloads of files,
+  streams and directories, with progress, kept times, and checks that stop a hostile server from writing outside the target.
 - **Observability:** `ILogger` logging, `ActivitySource` tracing and `Meter` metrics, with no secrets recorded.
-
-Coming next: SFTP, as a separate package.
 
 ## Why not SSH.NET?
 
@@ -83,14 +82,14 @@ Coming next: SFTP, as a separate package.
 | `HttpClient` through the SSH connection (`SocketsHttpHandler.ConnectCallback`) | ✅ | ❌ |
 | FIPS mode (FIPS-approved algorithms only) | ✅ | ❌ |
 | SCP | ✅ | ✅ |
-| SFTP | Planned (`SshSharp.Sftp`) | ✅ |
+| SFTP | ✅ (version 3 with OpenSSH extensions, pipelined transfers; experimental API) | ✅ |
 | Native AOT | ✅ (an AOT-compiled binary connects to a real server in CI) | ✅ (AOT-compatible; an AOT publish is checked in CI) |
 | Diagnostics | `ILogger`, `ActivitySource` tracing, `Meter` metrics | `ILogger` |
 | Fuzzing | ✅ (coverage-guided, nightly; every parser in each test run) | ❌ |
 | Mutation testing | ✅ (Stryker.NET, weekly) | ❌ |
 | Maturity | New, pre-1.0; managed crypto awaiting an outside review | More than a decade of production use |
 
-**Use SSH.NET instead** when you need .NET Framework or .NET Standard, SFTP today, servers that only speak legacy algorithms,
+**Use SSH.NET instead** when you need .NET Framework or .NET Standard, a settled (non-experimental) SFTP API, servers that only speak legacy algorithms,
 or a long track record. Moving from SSH.NET? See the
 [migration guide](https://github.com/zcsizmadia/SshSharp/blob/main/docs/migrating-from-sshnet.md).
 
@@ -150,6 +149,7 @@ latest release.
   certificates, the agent, keyboard-interactive
 - [Host keys](https://github.com/zcsizmadia/SshSharp/blob/main/docs/host-keys.md): `known_hosts`, policies, pinning
 - [Commands and shells](https://github.com/zcsizmadia/SshSharp/blob/main/docs/sessions.md)
+- [File transfer (SFTP)](https://github.com/zcsizmadia/SshSharp/blob/main/docs/sftp.md)
 - [File transfer (SCP)](https://github.com/zcsizmadia/SshSharp/blob/main/docs/scp.md)
 - [Configuration files](https://github.com/zcsizmadia/SshSharp/blob/main/docs/config-files.md)
 - [Errors and diagnostics](https://github.com/zcsizmadia/SshSharp/blob/main/docs/diagnostics.md): exceptions, logging,

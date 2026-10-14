@@ -35,6 +35,9 @@ public enum SshFailureReason
 
     /// <summary>A file transfer (SCP) failed: the remote side reported an error, or broke the protocol.</summary>
     TransferFailed,
+
+    /// <summary>An SFTP request failed with an error status from the server (see <c>SftpException.Status</c>).</summary>
+    SftpFailed,
 }
 
 /// <summary>The base class for errors raised by SshSharp when talking SSH.</summary>
