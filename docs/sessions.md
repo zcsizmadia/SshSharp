@@ -76,6 +76,34 @@ of RFC 4254 section 8, named as in POSIX `termios`.
 
 `StartCommandAsync(command, options)` takes the same options, for commands that need a terminal (`sudo`, `top`, editors).
 
+## Scripting a shell (expect)
+
+`SshExpect` drives an interactive program the way `expect` does: wait for a prompt or other output, then send the next line.
+Timeouts are cancellation tokens.
+
+```csharp
+await using var shell = await client.StartShellAsync(new SshSessionOptions { Terminal = new SshTerminalOptions { TerminalType = "dumb" } });
+var expect = new SshExpect(shell);
+
+await expect.ExpectAsync(new Regex(@"[$#] $"), cancellationToken);          // the first prompt
+await expect.SendLineAsync("sudo systemctl restart myservice", cancellationToken);
+await expect.ExpectAsync("[sudo] password", cancellationToken);
+await expect.SendLineAsync(sudoPassword, cancellationToken);
+var match = await expect.ExpectAsync(new Regex(@"[$#] $"), cancellationToken);
+Console.WriteLine(match.Before);                                             // what the command printed
+```
+
+Each match returns the output before it (`Before`), the matched text (`Value`) and, for a regular expression, its groups
+(`Match`). Output after a match is kept for the next call. If the output ends first, `ExpectAsync` throws
+`EndOfStreamException`; if the token is cancelled, nothing is lost, and `Pending` holds what has arrived. Output is decoded
+with `Encoding` (UTF-8 by default), and a character split between two packets is decoded whole. The buffer keeps the newest
+`MaxBufferLength` characters (1 Mi) while nothing matches.
+
+Patterns are tried against the output received so far, so anchor them to what follows: `\d+` could match the first digits of a
+number still arriving. With a terminal the program's input is echoed, so the text you send can match too: wait for something
+the echo does not contain, such as the prompt that follows. `SshExpect` reads the output stream itself; do not read it
+elsewhere at the same time.
+
 ## Subsystems
 
 A subsystem is a protocol the server runs by name instead of a command: `sftp`, `netconf`, or anything configured with

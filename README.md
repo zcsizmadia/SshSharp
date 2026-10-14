@@ -34,7 +34,7 @@ Console.WriteLine(result.StandardOutputText);
   TCP and Unix-socket tunnels; local, remote and dynamic (SOCKS) port forwarding (`ssh -L`, `-R`, `-D`) and remote dynamic forwarding (`-R port`), also
   started from `ssh_config`.
 - **Sessions:** run commands, stream stdin/stdout/stderr, interactive shells with a pseudo-terminal, environment variables,
-  signals and window resizing; subsystems (`ssh -s`) such as `netconf`.
+  signals and window resizing; subsystems (`ssh -s`) such as `netconf`; `expect`-style scripting of shells.
 - **Modern algorithms:** post-quantum `mlkem768x25519-sha256`, and the FIPS-compatible `mlkem768nistp256-sha256` and `mlkem1024nistp384-sha384` (on .NET 10 where the platform has ML-KEM), `curve25519-sha256`,
   ECDH and DH group 14/16 key exchange; ChaCha20-Poly1305, AES-GCM and
   AES-CTR with HMAC-SHA2 ETM; Ed25519, ECDSA and RSA (SHA-2) keys; strict key exchange (Terrapin) always on; a FIPS mode.
@@ -67,7 +67,7 @@ Coming next: SFTP, as a separate package.
 | Post-quantum key exchange | `mlkem768x25519-sha256`, and FIPS-compatible `mlkem768nistp256-sha256` / `mlkem1024nistp384-sha384` (.NET 10 with platform ML-KEM) | `mlkem768x25519-sha256`, `sntrup761x25519-sha512` |
 | Strict key exchange (Terrapin fix) | ✅ | ✅ |
 | Legacy algorithms (CBC, 3DES, SHA-1, `ssh-rsa`, DH group 1, zlib) | — (by design) | ✅ |
-| Commands, shells with a terminal | ✅ | ✅ |
+| Commands, shells with a terminal, `expect`-style scripting | ✅ | ✅ |
 | Local, remote and dynamic port forwarding | ✅ (also Unix-socket tunnels, and from `ssh_config`) | ✅ |
 | Remote dynamic forwarding (`ssh -R port`, a SOCKS proxy on the client side) | ✅ | ❌ |
 | SCP | ✅ | ✅ |
