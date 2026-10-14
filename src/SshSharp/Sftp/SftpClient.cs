@@ -22,6 +22,12 @@ public sealed partial class SftpClient : IAsyncDisposable
     /// <summary>The diagnostic id of the experimental SFTP API.</summary>
     public const string ExperimentalId = "SSHSHARP001";
 
+    /// <summary>The most entries one directory listing returns before the server is taken to be looping.</summary>
+    internal const long MaxListingEntries = 1_000_000;
+
+    /// <summary>The most empty NAME replies in a row a listing accepts before the server is taken to be looping.</summary>
+    internal const int MaxEmptyBatches = 1_000;
+
     private readonly SftpChannel _channel;
 
     private SftpClient(SftpChannel channel, SftpLimits limits)
@@ -159,14 +165,22 @@ public sealed partial class SftpClient : IAsyncDisposable
     /// Lists a directory, without <c>.</c> and <c>..</c>. Entries arrive in batches as the server sends them; names that cannot be
     /// file names in one directory (empty, or with a <c>/</c>) are left out.
     /// </summary>
+    /// <remarks>
+    /// Names are UTF-8 in SFTP version 3 as OpenSSH uses it; a name that is not valid UTF-8 (a legacy encoding on the server) is listed with
+    /// U+FFFD in place of the bytes it cannot decode, so <see cref="SftpFileInfo.FullPath"/> cannot open it. A listing stops with an error
+    /// (<see cref="SshFailureReason.ProtocolError"/>) after 1,000,000 entries or 1,000 empty batches in a row, so a hostile server cannot make it
+    /// run forever.
+    /// </remarks>
     public async IAsyncEnumerable<SftpFileInfo> ListDirectoryAsync(string path, [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         CheckPath(path);
-        var opened = await _channel.RequestAsync(SftpProtocol.OpenDir, w => w.WriteString(path), cancellationToken).ConfigureAwait(false);
+        var opened = await _channel.RequestAsync(SftpProtocol.OpenDir, w => w.WriteString(path), cancellationToken, CloseOrphanedHandle).ConfigureAwait(false);
         var handle = ExpectHandle(opened, "Listing", path);
         try
         {
             var prefix = path.EndsWith('/') ? path : path + "/";
+            var total = 0L;
+            var emptyBatches = 0;
             while (true)
             {
                 var reply = await _channel.RequestAsync(SftpProtocol.ReadDir, w => w.WriteString(handle), cancellationToken).ConfigureAwait(false);
@@ -175,7 +189,16 @@ public sealed partial class SftpClient : IAsyncDisposable
                     yield break;
                 }
 
-                foreach (var (name, longName, attributes) in ExpectNames(reply, "Listing", path))
+                var names = ExpectNames(reply, "Listing", path);
+                total += names.Count;
+                emptyBatches = names.Count == 0 ? emptyBatches + 1 : 0;
+                if (total > MaxListingEntries || emptyBatches > MaxEmptyBatches)
+                {
+                    throw new SshException(SshFailureReason.ProtocolError,
+                        $"The SFTP server's listing of '{path}' does not end ({total} entries, {emptyBatches} empty batches in a row).");
+                }
+
+                foreach (var (name, longName, attributes) in names)
                 {
                     if (name is "." or ".." || name.Length == 0 || name.Contains('/') || name.Contains('\0'))
                     {
@@ -347,21 +370,21 @@ public sealed partial class SftpClient : IAsyncDisposable
     public async Task<Stream> OpenAsync(string path, FileMode mode, FileAccess access, CancellationToken cancellationToken = default)
     {
         var (handle, flags) = await OpenHandleAsync(path, mode, access, cancellationToken).ConfigureAwait(false);
-        long position = 0;
-        if (mode == FileMode.Append)
+
+        // The size once, now: Length (which Stream.CopyToAsync reads) then needs no round trip, and Append starts at the end.
+        long? length;
+        try
         {
-            try
-            {
-                position = (await GetHandleAttributesAsync(handle, path, cancellationToken).ConfigureAwait(false)).Size ?? 0;
-            }
-            catch
-            {
-                await CloseHandleAsync(handle).ConfigureAwait(false);
-                throw;
-            }
+            length = (await GetHandleAttributesAsync(handle, path, cancellationToken).ConfigureAwait(false)).Size;
+        }
+        catch
+        {
+            await CloseHandleAsync(handle).ConfigureAwait(false);
+            throw;
         }
 
-        return new SftpFileStream(this, handle, path, (flags & SftpProtocol.OpenRead) != 0, (flags & SftpProtocol.OpenWrite) != 0, position);
+        var position = mode == FileMode.Append ? length ?? 0 : 0;
+        return new SftpFileStream(this, handle, path, (flags & SftpProtocol.OpenRead) != 0, (flags & SftpProtocol.OpenWrite) != 0, position, length);
     }
 
     /// <summary>Opens a remote file for reading, as <see cref="OpenAsync"/> with <see cref="FileMode.Open"/> and <see cref="FileAccess.Read"/>.</summary>
@@ -539,13 +562,37 @@ public sealed partial class SftpClient : IAsyncDisposable
             throw new ArgumentException($"FileMode.{mode} needs write access.", nameof(access));
         }
 
+        if (mode == FileMode.Append && access != FileAccess.Write)
+        {
+            // As FileStream: the server writes at the end whatever the offset, so reading and seeking would not match where writes land.
+            throw new ArgumentException("FileMode.Append can only be used with FileAccess.Write.", nameof(access));
+        }
+
         var reply = await _channel.RequestAsync(SftpProtocol.Open, w =>
         {
             w.WriteString(path);
             w.WriteUInt32(flags);
             w.WriteUInt32(0); // no attributes: the server's defaults (0666 less its umask)
-        }, cancellationToken).ConfigureAwait(false);
+        }, cancellationToken, CloseOrphanedHandle).ConfigureAwait(false);
         return (ExpectHandle(reply, "Opening", path), flags);
+    }
+
+    /// <summary>The reply to an OPEN or OPENDIR its caller stopped waiting for: a handle it holds is closed, so it does not stay open.</summary>
+    private void CloseOrphanedHandle(SftpResponse reply)
+    {
+        if (reply.Type != SftpProtocol.Handle)
+        {
+            return;
+        }
+
+        try
+        {
+            _ = CloseHandleAsync(ExpectHandle(reply, "Opening", "(cancelled)"));
+        }
+        catch (SshException)
+        {
+            // A malformed handle: nothing to close.
+        }
     }
 
     internal async Task<SftpFileAttributes> GetHandleAttributesAsync(byte[] handle, string path, CancellationToken cancellationToken)
@@ -845,7 +892,10 @@ public sealed partial class SftpClient : IAsyncDisposable
             var names = new List<(string, string, SftpFileAttributes)>((int)Math.Min(count, 1024));
             for (var i = 0; i < count; i++)
             {
-                names.Add((r.ReadUtf8String(), r.ReadUtf8String(), SftpFileAttributes.Read(ref r)));
+                // Lenient: one name in a legacy encoding must not fail the whole listing (it shows U+FFFD where bytes do not decode).
+                var name = SftpChannel.Lenient(r.ReadString());
+                var longName = SftpChannel.Lenient(r.ReadString());
+                names.Add((name, longName, SftpFileAttributes.Read(ref r)));
             }
 
             return names;
@@ -884,10 +934,16 @@ public sealed partial class SftpClient : IAsyncDisposable
         var (code, text) = Parse(reply, static (ref SshReader r) =>
         {
             var status = r.ReadUInt32();
-            var message = r.IsEmpty ? string.Empty : r.ReadUtf8String(); // optional in some servers' replies
+            var message = r.IsEmpty ? string.Empty : SftpChannel.Lenient(r.ReadString()); // optional in some servers' replies
             return (status, message);
         });
         var status = (SftpStatusCode)code;
+        if (status == SftpStatusCode.Ok)
+        {
+            // Success where a handle, data, attributes or names were expected is not an error this client can report as one.
+            throw new SshException(SshFailureReason.ProtocolError, $"The SFTP server answered OK where a result was expected ({operation}).");
+        }
+
         var reason = SanitizedMessage(text) is { Length: > 0 } said ? said : status switch
         {
             SftpStatusCode.NoSuchFile => "No such file",

@@ -118,7 +118,7 @@ public sealed class SftpTests : IDisposable
         await Assert.That(file.Size).IsEqualTo(5L);
         await Assert.That(file.Permissions).IsEqualTo(UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead | UnixFileMode.OtherRead);
         await Assert.That(file.LastWriteTime).IsEqualTo(DateTimeOffset.FromUnixTimeSeconds(1_600_000_000));
-        await Assert.That(file.UserId).IsEqualTo(1000);
+        await Assert.That(file.UserId).IsEqualTo(1000u);
 
         await Assert.That((await rig.Sftp.GetAttributesAsync(Home, cancellationToken: Timeout())).IsDirectory).IsTrue();
         await Assert.That((await rig.Sftp.GetAttributesAsync("link", followSymbolicLinks: false, Timeout())).IsSymbolicLink).IsTrue();

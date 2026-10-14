@@ -50,7 +50,7 @@
 [SSHSHARP001]SshSharp.Sftp.SftpFileAttributes.Extended.init -> void
 [SSHSHARP001]SshSharp.Sftp.SftpFileAttributes.FileType.get -> SshSharp.Sftp.SftpFileType
 [SSHSHARP001]SshSharp.Sftp.SftpFileAttributes.FileType.init -> void
-[SSHSHARP001]SshSharp.Sftp.SftpFileAttributes.GroupId.get -> int?
+[SSHSHARP001]SshSharp.Sftp.SftpFileAttributes.GroupId.get -> uint?
 [SSHSHARP001]SshSharp.Sftp.SftpFileAttributes.GroupId.init -> void
 [SSHSHARP001]SshSharp.Sftp.SftpFileAttributes.IsDirectory.get -> bool
 [SSHSHARP001]SshSharp.Sftp.SftpFileAttributes.IsRegularFile.get -> bool
@@ -64,7 +64,7 @@
 [SSHSHARP001]SshSharp.Sftp.SftpFileAttributes.SftpFileAttributes() -> void
 [SSHSHARP001]SshSharp.Sftp.SftpFileAttributes.Size.get -> long?
 [SSHSHARP001]SshSharp.Sftp.SftpFileAttributes.Size.init -> void
-[SSHSHARP001]SshSharp.Sftp.SftpFileAttributes.UserId.get -> int?
+[SSHSHARP001]SshSharp.Sftp.SftpFileAttributes.UserId.get -> uint?
 [SSHSHARP001]SshSharp.Sftp.SftpFileAttributes.UserId.init -> void
 [SSHSHARP001]SshSharp.Sftp.SftpFileInfo
 [SSHSHARP001]SshSharp.Sftp.SftpFileInfo.<Clone>$() -> SshSharp.Sftp.SftpFileInfo!

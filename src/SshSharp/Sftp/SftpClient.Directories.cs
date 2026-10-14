@@ -14,11 +14,12 @@ public sealed partial class SftpClient
     /// files are skipped, so a link cannot lead the download outside the tree.
     /// </summary>
     /// <remarks>
-    /// Every name the server lists is checked before it becomes a local path, as for SCP downloads: no separators, <c>.</c> or
-    /// <c>..</c>, and on Windows no device names (<c>CON</c>, <c>NUL</c>, ...) or trailing dots; and the resulting path must stay inside
-    /// <paramref name="localDirectory"/>. A server that lists anything else is treated as hostile and the download stops.
+    /// Every name the server lists is checked before it becomes a local path: names that cannot be a file name on this system (a
+    /// separator, <c>.</c> or <c>..</c>, control characters, a name that is not valid UTF-8; on Windows also <c>\</c>, <c>:</c>, device
+    /// names such as <c>CON</c> or <c>NUL</c>, and trailing dots) are skipped and counted in <see cref="SftpTransferSummary.Skipped"/>, and
+    /// the resulting path must stay inside <paramref name="localDirectory"/>.
     /// </remarks>
-    /// <exception cref="SshException">The server listed an unacceptable name (<see cref="SshFailureReason.TransferFailed"/>), or the tree is
+    /// <exception cref="SshException">A path would end up outside the target (<see cref="SshFailureReason.TransferFailed"/>), or the tree is
     /// deeper than 64 levels.</exception>
     public async Task<SftpTransferSummary> DownloadDirectoryAsync(string remoteDirectory, string localDirectory, SftpTransferOptions? options = null, CancellationToken cancellationToken = default)
     {
@@ -35,7 +36,7 @@ public sealed partial class SftpClient
     /// <summary>
     /// Uploads the local directory <paramref name="localDirectory"/> and everything under it to <paramref name="remoteDirectory"/> (created
     /// if needed), file by file with <see cref="UploadFileAsync"/> and the same <paramref name="options"/>. Symbolic links, junctions and
-    /// other reparse points are skipped.
+    /// other reparse points are skipped, and so are special files on Unix (FIFOs, sockets, devices).
     /// </summary>
     /// <exception cref="DirectoryNotFoundException"><paramref name="localDirectory"/> does not exist.</exception>
     public async Task<SftpTransferSummary> UploadDirectoryAsync(string localDirectory, string remoteDirectory, SftpTransferOptions? options = null, CancellationToken cancellationToken = default)
@@ -71,7 +72,12 @@ public sealed partial class SftpClient
 
         foreach (var entry in entries)
         {
-            var local = SafeLocalPath(localDirectory, entry.Name, root);
+            if (LocalPathFor(localDirectory, entry.Name, root) is not { } local)
+            {
+                summary.Skipped++; // a name this system cannot hold, or one that was not valid UTF-8
+                continue;
+            }
+
             if (entry.Attributes.IsDirectory)
             {
                 Directory.CreateDirectory(local);
@@ -112,7 +118,14 @@ public sealed partial class SftpClient
                 continue;
             }
 
+            cancellationToken.ThrowIfCancellationRequested();
             var remote = prefix + entry.Name;
+            if (entry is FileInfo && !LocalFileType.IsRegularFile(entry.FullName))
+            {
+                summary.Skipped++; // a FIFO (opening it would wait for a writer), a socket or a device
+                continue;
+            }
+
             if (entry is DirectoryInfo directory)
             {
                 await UploadTreeAsync(directory, remote, depth + 1, options, summary, cancellationToken).ConfigureAwait(false);
@@ -160,11 +173,18 @@ public sealed partial class SftpClient
     }
 
     /// <summary>
-    /// The local path for a name from a remote listing, checked: an acceptable file name (as SCP checks them), and inside the root.
+    /// The local path for a name from a remote listing, or null when the name cannot be a file name here (it is skipped): empty,
+    /// <c>.</c>, <c>..</c>, a separator, NUL or another control character, or the replacement character a name that was not valid
+    /// UTF-8 decodes to; on Windows also <c>\</c>, <c>:</c>, device names and trailing dots or spaces. A path that would still end up
+    /// outside the root stops the download (<see cref="SshFailureReason.TransferFailed"/>).
     /// </summary>
-    private static string SafeLocalPath(string localDirectory, string name, string root)
+    internal static string? LocalPathFor(string localDirectory, string name, string root, bool? windows = null)
     {
-        SshScpExtensions.CheckName(name);
+        if (!IsAcceptableName(name, windows ?? OperatingSystem.IsWindows()))
+        {
+            return null;
+        }
+
         var path = Path.GetFullPath(Path.Join(localDirectory, name));
         var inside = root.EndsWith(Path.DirectorySeparatorChar) ? root : root + Path.DirectorySeparatorChar;
         if (!path.StartsWith(inside, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
@@ -173,6 +193,29 @@ public sealed partial class SftpClient
         }
 
         return path;
+    }
+
+    internal static bool IsAcceptableName(string name, bool windows)
+    {
+        if (name.Length == 0 || name is "." or ".." || name.Any(c => c is '/' or '�' || char.IsControl(c)))
+        {
+            return false;
+        }
+
+        if (!windows)
+        {
+            return true; // ':' and '\' are ordinary characters in POSIX names
+        }
+
+        try
+        {
+            SshScpExtensions.CheckName(name, windows: true);
+            return true;
+        }
+        catch (SshException)
+        {
+            return false;
+        }
     }
 
     private sealed class SummaryCounter
@@ -193,6 +236,6 @@ public sealed partial class SftpClient
 /// <param name="Files">Files transferred.</param>
 /// <param name="Directories">Directories created or entered below the top one.</param>
 /// <param name="Bytes">Bytes transferred.</param>
-/// <param name="Skipped">Entries left out: symbolic links, special files, and reparse points.</param>
+/// <param name="Skipped">Entries left out: symbolic links, special files, reparse points, and names this system cannot hold.</param>
 [Experimental(SftpClient.ExperimentalId)]
 public sealed record SftpTransferSummary(int Files, int Directories, long Bytes, int Skipped);
