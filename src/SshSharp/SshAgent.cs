@@ -68,9 +68,10 @@ public sealed class SshAgent
     /// </summary>
     public static SshAgent? FromEnvironment()
     {
-        if (Environment.GetEnvironmentVariable("SSH_AUTH_SOCK") is { Length: > 0 } socket || !OperatingSystem.IsWindows())
+        var socket = Environment.GetEnvironmentVariable("SSH_AUTH_SOCK");
+        if (!string.IsNullOrEmpty(socket) || !OperatingSystem.IsWindows())
         {
-            return FromSocketVariable(Environment.GetEnvironmentVariable("SSH_AUTH_SOCK"), windows: false);
+            return FromSocketVariable(socket, windows: false);
         }
 
         // The OpenSSH agent service first, as ssh does; Pageant only when that is not running and Pageant is.
