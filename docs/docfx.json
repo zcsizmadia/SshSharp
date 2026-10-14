@@ -4,8 +4,8 @@
     {
       "src": [
         {
-          "src": "../src/SshSharp",
-          "files": [ "SshSharp.csproj" ]
+          "src": "../src",
+          "files": [ "SshSharp/SshSharp.csproj", "SshSharp.FileProviders/SshSharp.FileProviders.csproj" ]
         }
       ],
       "output": "api",

@@ -48,11 +48,14 @@ jobs:
         run: |
           set -euo pipefail
           dotnet pack src/SshSharp -c Release --no-build -o packages
+          dotnet pack src/SshSharp.FileProviders -c Release --no-build -o packages
           version="${GITHUB_REF_NAME#v}"
-          if [ ! -f "packages/SshSharp.$version.nupkg" ]; then
-            echo "::error::Expected packages/SshSharp.$version.nupkg for tag $GITHUB_REF_NAME; got: $(ls packages)"
-            exit 1
-          fi
+          for id in SshSharp SshSharp.FileProviders; do
+            if [ ! -f "packages/$id.$version.nupkg" ]; then
+              echo "::error::Expected packages/$id.$version.nupkg for tag $GITHUB_REF_NAME; got: $(ls packages)"
+              exit 1
+            fi
+          done
           ls packages
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

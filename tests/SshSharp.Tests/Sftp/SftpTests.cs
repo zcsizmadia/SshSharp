@@ -300,6 +300,46 @@ public sealed class SftpTests : IDisposable
     }
 
     [Test]
+    [Arguments(false)]
+    [Arguments(true)]
+    public async Task AReadOnlyStream_ReadsAhead_AndStaysCorrectAcrossSeeksShortReadsAndReordering(bool misbehave)
+    {
+        await using var rig = await Rig.StartAsync(f =>
+        {
+            f.Limits = (8 * 1024, 8 * 1024);
+            f.ShortReads = misbehave;
+            f.ReorderReplies = misbehave;
+        });
+        var data = RandomNumberGenerator.GetBytes(400_003);
+        rig.Files.AddFile(Home + "/ahead", data);
+
+        await using var stream = await rig.Sftp.OpenReadAsync("ahead", Timeout());
+
+        // Sequential reads in odd sizes, smaller and larger than a request.
+        var copy = new MemoryStream();
+        var buffer = new byte[3000];
+        int read;
+        while ((read = await stream.ReadAsync(buffer.AsMemory(0, copy.Length % 2 == 0 ? 3000 : 1001), Timeout())) > 0)
+        {
+            copy.Write(buffer, 0, read);
+        }
+
+        await Assert.That(copy.ToArray().AsSpan().SequenceEqual(data)).IsTrue();
+        await Assert.That(rig.Files.MaxOutstanding).IsGreaterThan(1); // reads were in flight together
+
+        // Seeks back and forward, then reads: the bytes at each new position.
+        foreach (var at in new long[] { 12_345, 300_000, 5, 399_999 })
+        {
+            stream.Seek(at, SeekOrigin.Begin);
+            var piece = new byte[Math.Min(5000, data.Length - (int)at)];
+            await stream.ReadExactlyAsync(piece, Timeout());
+            await Assert.That(piece.AsSpan().SequenceEqual(data.AsSpan((int)at, piece.Length))).IsTrue();
+        }
+
+        await Assert.That(await stream.ReadAsync(buffer, Timeout())).IsEqualTo(0);
+    }
+
+    [Test]
     public async Task AReadOnlyStream_RefusesWrites_AndSyncCallsAreNotSupported()
     {
         await using var rig = await Rig.StartAsync(f => f.AddFile(Home + "/r", "data"u8.ToArray()));
