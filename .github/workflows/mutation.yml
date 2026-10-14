@@ -1,12 +1,18 @@
 name: Mutation testing
 
 # Stryker.NET mutates the library and runs the TUnit suite against every mutant: a mutant no test notices is a gap in the tests.
-# A full run takes hours, so it runs weekly and on demand, split into scopes that run in parallel. Reports are uploaded as
+# The weekly run is incremental: it mutates only what changed in the last eight days. A manual run is full by default; a full run takes
+# hours on the hosted runners (about a minute per mutant), so the large files run as jobs of their own. Reports are uploaded as
 # artifacts; the score is not a gate.
 on:
   schedule:
     - cron: '17 3 * * 6' # weekly
   workflow_dispatch:
+    inputs:
+      full:
+        description: Mutate everything, not only what changed in the last eight days
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -21,8 +27,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - scope: curve25519
-            mutate: -m "**/Crypto/Field25519.cs" -m "**/Crypto/X25519.cs" -m "**/Crypto/Ed25519.cs"
+          - scope: field25519
+            mutate: -m "**/Crypto/Field25519.cs"
+          - scope: x25519
+            mutate: -m "**/Crypto/X25519.cs"
+          - scope: ed25519
+            mutate: -m "**/Crypto/Ed25519.cs"
           - scope: symmetric
             mutate: -m "**/Crypto/ChaCha20*.cs" -m "**/Crypto/Poly1305.cs" -m "**/Crypto/AesCtr.cs" -m "**/Crypto/XorHelper.cs"
           - scope: kdf
@@ -31,8 +41,12 @@ jobs:
             mutate: -m "**/Crypto/NistCurve.cs" -m "**/Crypto/ModpGroup.cs"
           - scope: packet-codec
             mutate: -m "**/Protocol/PacketCodec.cs"
-          - scope: config
-            mutate: -m "**/Config/*.cs"
+          - scope: config-parser
+            mutate: -m "**/Config/SshConfig.cs" -m "**/Config/SshConfigLine.cs" -m "**/Config/SshTokens.cs" -m "**/Config/Glob.cs"
+          - scope: config-resolver
+            mutate: -m "**/Config/SshConfigResolver.cs" -m "**/Config/SshConfigResolveOptions.cs" -m "**/Config/SshHostConfig.cs" -m "**/Config/SshAlgorithmList.cs"
+          - scope: config-known-hosts
+            mutate: -m "**/Config/KnownHosts*.cs" -m "**/Config/ForwardSpec.cs" -m "**/Config/SshExecMatcher.cs" -m "**/Config/SshTime.cs"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -44,10 +58,19 @@ jobs:
       - name: Stryker
         working-directory: tests/SshSharp.Tests
         # MTP is Stryker's runner for Microsoft.Testing.Platform, which TUnit is built on (a preview runner in Stryker.NET 5).
-        run: >
-          dotnet stryker --test-runner mtp --project SshSharp.csproj --target-framework net10.0
-          ${{ matrix.mutate }} --reporter html --reporter json --reporter progress --output "$RUNNER_TEMP/stryker"
-          | tee "$RUNNER_TEMP/stryker.log"
+        env:
+          FULL: ${{ github.event_name == 'workflow_dispatch' && inputs.full }}
+        run: |
+          set -euo pipefail
+          since=""
+          if [ "$FULL" != "true" ]; then
+            base="$(git rev-list -1 --before='8 days ago' HEAD)"
+            if [ -n "$base" ]; then since="--since:$base"; fi
+          fi
+          echo "Mode: ${since:-full}"
+          dotnet stryker --test-runner mtp --project SshSharp.csproj --target-framework net10.0 $since \
+            ${{ matrix.mutate }} --reporter html --reporter json --reporter progress --output "$RUNNER_TEMP/stryker" \
+            | tee "$RUNNER_TEMP/stryker.log"
       - name: Summary
         if: always()
         run: |
