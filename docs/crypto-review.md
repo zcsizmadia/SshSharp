@@ -1,6 +1,6 @@
 # Managed cryptography review
 
-SshSharp implements X25519, Ed25519, ChaCha20, Poly1305, bcrypt_pbkdf, BLAKE2b and Argon2 in managed code, because the .NET base
+SshSharp implements X25519, Ed25519, sntrup761, ChaCha20, Poly1305, bcrypt_pbkdf, BLAKE2b and Argon2 in managed code, because the .NET base
 library does not provide them on every target. Everything else (AES, SHA-2, HMAC, RSA, ECDSA, ECDH, random numbers) comes from the
 platform. This page records what was reviewed, how, and what is still open. It is an internal review, not an independent audit; an
 outside review is planned before 1.0.
@@ -16,6 +16,7 @@ outside review is planned before 1.0.
 | bcrypt_pbkdf | pyca/bcrypt known answer; keys encrypted by ssh-keygen with every supported cipher |
 | BLAKE2b | RFC 7693 |
 | Argon2d/i/id | RFC 9106 section 5 vectors; .ppk files written by PuTTY's puttygen (CI) |
+| sntrup761 | The NTRU Prime round-3 known-answer tests (key pair, ciphertext and shared secret, replayed with NIST's AES-256 CTR DRBG); `sntrup761x25519-sha512` and its `@openssh.com` name against OpenSSH (CI: Alpine 3.19 and 3.22, Windows); implicit rejection of tampered ciphertexts |
 
 ## Constant-time review of the secret-key paths (M3)
 
@@ -59,6 +60,37 @@ It does not run in CI, because shared runners are too noisy for a statistical ti
 Measured with the 51-bit field on an Intel Core i7-12800H, Windows 11, .NET 10, x64 (the 16-bit field it replaced measured 0.90 and
 -0.77). |t| below 4.5 means no evidence; it is not a proof.
 
+## Constant-time review of sntrup761
+
+`sntrup761x25519-sha512` makes the client generate an sntrup761 key pair and decapsulate the server's ciphertext once per key
+exchange. The secrets are ephemeral, but a leak in decapsulation would expose that session's post-quantum half.
+
+**Method.** `Crypto/Sntrup761.cs` is a line-by-line port of the public-domain reference implementation (the code OpenSSH carries in
+`sntrup761.c`), compared with it function by function, then the timing test below.
+
+**Findings.**
+
+- Reduction modulo 3 and modulo q = 4591 uses the reference's `int32_divmod_uint14`: multiply by a precomputed reciprocal, shift, and
+  correct with masks. The only `/` divides by a public modulus.
+- The inversions in R3 and Rq are fixed 1,521-step divstep loops. Each step's swap is mask-based, and so is the sign.
+- Polynomial products accumulate the reference's per-step reductions in a 32-bit sum (at most 761 × 2,295 in magnitude) and
+  reduce once per coefficient. The result is identical, and the loop bounds depend only on the degree.
+- The weight-w random vector is made by sorting random keys. The reference uses djbsort; this port uses Batcher's merge-exchange
+  network (Knuth, algorithm 5.2.2M). The pairs compared depend only on the length, and each compare-exchange is branch-free.
+- Decapsulation re-encrypts, compares the ciphertexts with an OR-accumulated difference, and selects between the real secret and
+  the implicit-rejection secret (rho) with a mask. The session hash takes `1 + mask` as its prefix, as in the reference.
+- The rejection loop in key generation, which retries until g is invertible in R3, runs a data-dependent number of times, as in the
+  reference. The discarded g values are independent of the key that is kept.
+- Buffers that hold secrets are cleared. Intermediate polynomials are heap arrays, cleared in `finally` blocks.
+- The platform caveat above applies to the 64-bit multiplication in the reduction: the constant-time claim covers x64 and Arm64.
+
+| Check (2,000 samples per class) | t | Verdict |
+|---|---|---|
+| sntrup761 decapsulation: one secret key vs fresh secret keys | -0.49 | no evidence of a leak |
+| sntrup761 decapsulation: a valid ciphertext vs random bytes (implicit rejection) | 1.27 | no evidence of a leak |
+
+Measured on Windows 11, .NET 10, x64. Decapsulation takes about 0.9 ms.
+
 ## Accepted risks
 
 - **DH group 14/16** uses `BigInteger.ModPow` on its ephemeral exponent, which is not constant-time. The exponent is used once and the
@@ -69,4 +101,6 @@ Measured with the 51-bit field on an Intel Core i7-12800H, Windows 11, .NET 10, 
 ## Open
 
 - A vectorised ChaCha20 would need the same review again.
+- The JIT output of sntrup761's inner loops has not been inspected yet (the mask arithmetic could, in principle, be compiled into
+  branches).
 - An independent review before 1.0.

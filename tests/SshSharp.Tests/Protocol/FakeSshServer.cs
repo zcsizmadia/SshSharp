@@ -726,6 +726,25 @@ internal sealed class FakeSshServer : IAsyncDisposable
             }
 #endif
 
+            case SshAlgorithms.Sntrup761X25519Sha512 or SshAlgorithms.Sntrup761X25519Sha512OpenSsh:
+            {
+                // The server side of sntrup761x25519-sha512: encapsulate to the client's sntrup761 key, add an X25519 share, K = SHA-512 of both.
+                var clientInitValue = reader.ReadString().ToArray();
+                var ciphertext = new byte[Sntrup761.CiphertextSize];
+                var pqSecret = new byte[Sntrup761.SharedSecretSize];
+                Sntrup761.Encapsulate(ciphertext, pqSecret, clientInitValue.AsSpan(0, Sntrup761.PublicKeySize));
+                var priv = RandomNumberGenerator.GetBytes(32);
+                var qs = new byte[32];
+                X25519.GetPublicKey(priv, qs);
+                var classic = new byte[32];
+                X25519.TryAgree(priv, clientInitValue.AsSpan(Sntrup761.PublicKeySize), classic);
+                var k = SHA512.HashData([.. pqSecret, .. classic]);
+                byte[] serverReply = [.. ciphertext, .. qs];
+                var h = ExchangeHash.Compute(HashAlgorithmName.SHA512, clientVersion, serverVersion, clientInit, serverInit, hostKey.Blob,
+                    w => { w.WriteString(clientInitValue); w.WriteString(serverReply); }, k, sharedSecretIsString: true);
+                return (Reply(w => w.WriteString(serverReply), h), k, h, HashAlgorithmName.SHA512);
+            }
+
             case SshAlgorithms.Curve25519Sha256 or SshAlgorithms.Curve25519Sha256Libssh:
             {
                 var qc = reader.ReadString().ToArray();

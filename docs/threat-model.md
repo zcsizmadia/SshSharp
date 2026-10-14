@@ -29,8 +29,9 @@ A man in the middle can read, change, drop and inject bytes. The server itself m
   A peer that overruns the window is a protocol error.
 - **Keys and nonces:** keys are renewed after 1 GiB (configurable, capped at 64 GiB), 2^31 packets or one hour, so sequence
   numbers (the ChaCha20-Poly1305 nonce) never wrap under one key.
-- **Post-quantum key exchange:** `mlkem768x25519-sha256` uses the platform's ML-KEM (on .NET 10 where the OS provides it), checks
-  the server's reply length exactly and still rejects low-order X25519 points, so it is never weaker than curve25519 alone.
+- **Post-quantum key exchange:** `mlkem768x25519-sha256` uses the platform's ML-KEM (on .NET 10 where the OS provides it), and
+  `sntrup761x25519-sha512` a managed sntrup761 (everywhere; see the [cryptography review](crypto-review.md)). Both check the
+  server's reply length exactly and still reject low-order X25519 points, so neither is weaker than curve25519 alone.
 - **Host key rotation (`UpdateHostKeys`):** off by default. A new key is recorded only after the server proves it holds it
   (`hostkeys-prove-00@openssh.com`), and any invalid proof cancels the whole update. Nothing is updated when the connection's
   own key is not in `known_hosts`: a changed key let through by `StrictHostKeyChecking no` proves nothing, and must not get the

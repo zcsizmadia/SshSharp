@@ -27,18 +27,42 @@ internal static class TimingLeakCheck
         var lowScalar = new byte[32];
         lowScalar[31] = 0x40;
         Check("X25519", samples, lowScalar, secret => X25519.TryAgree(secret, peer, shared));
+
+        // sntrup761 decapsulation is about a millisecond, so it gets a tenth of the samples. First a fixed secret key against fresh ones
+        // (each with a valid ciphertext of its own), then the implicit-rejection path: one key, a valid ciphertext against random bytes.
+        var kemSamples = Math.Max(1000, samples / 10);
+        var pool = Enumerable.Range(0, 32).Select(_ => KemCase()).ToArray();
+        var next = 0;
+        var kemSecret = new byte[Sntrup761.SharedSecretSize];
+        var (fixedKey, fixedCiphertext) = KemCase();
+        Check("sntrup761 key", kemSamples, [.. fixedKey, .. fixedCiphertext], input =>
+            Sntrup761.Decapsulate(kemSecret, input.AsSpan(Sntrup761.SecretKeySize), input.AsSpan(0, Sntrup761.SecretKeySize)),
+            () => { var (k, c) = pool[next++ % pool.Length]; return [.. k, .. c]; });
+        Check("sntrup761 rej", kemSamples, fixedCiphertext, ciphertext => Sntrup761.Decapsulate(kemSecret, ciphertext, fixedKey),
+            () => RandomNumberGenerator.GetBytes(Sntrup761.CiphertextSize));
     }
 
-    private static void Check(string name, int samples, byte[] fixedSecret, Action<byte[]> operation)
+    private static (byte[] SecretKey, byte[] Ciphertext) KemCase()
+    {
+        var publicKey = new byte[Sntrup761.PublicKeySize];
+        var secretKey = new byte[Sntrup761.SecretKeySize];
+        Sntrup761.GenerateKeyPair(publicKey, secretKey);
+        var ciphertext = new byte[Sntrup761.CiphertextSize];
+        Sntrup761.Encapsulate(ciphertext, new byte[Sntrup761.SharedSecretSize], publicKey);
+        return (secretKey, ciphertext);
+    }
+
+    private static void Check(string name, int samples, byte[] fixedSecret, Action<byte[]> operation, Func<byte[]>? randomSecret = null)
     {
         // Inputs and the class order are prepared up front, so nothing but the operation is timed.
+        randomSecret ??= () => RandomNumberGenerator.GetBytes(32);
         var coin = new Random(1);
         var inputs = Enumerable.Range(0, 2 * samples)
-            .Select(_ => coin.Next(2) == 0 ? (Fixed: true, Secret: fixedSecret) : (Fixed: false, Secret: RandomNumberGenerator.GetBytes(32)))
+            .Select(_ => coin.Next(2) == 0 ? (Fixed: true, Secret: fixedSecret) : (Fixed: false, Secret: randomSecret()))
             .ToArray();
 
         // Warm up so tiering does not land in one class.
-        for (var i = 0; i < 2000; i++)
+        for (var i = 0; i < Math.Min(2000, inputs.Length); i++)
         {
             operation(inputs[i % inputs.Length].Secret);
         }

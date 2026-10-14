@@ -34,6 +34,10 @@ public class TransportInteropTests
         {
             yield return (SshAlgorithms.MlKem768X25519Sha256, ciphers[0], hostKeys[0]);
         }
+
+        // sntrup761 everywhere: under its RFC name (OpenSSH 9.9+) and its original one (OpenSSH 8.5+); Dropbear 2022.83+ has the latter.
+        yield return (SshAlgorithms.Sntrup761X25519Sha512, ciphers[0], hostKeys[0]);
+        yield return (SshAlgorithms.Sntrup761X25519Sha512OpenSsh, ciphers[0], hostKeys[0]);
     }
 
     private static SshTransportOptions Options(string kex, string cipher, string hostKey, List<HostKeyInfo> seen) => new()
