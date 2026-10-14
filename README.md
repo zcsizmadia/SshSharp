@@ -30,7 +30,8 @@ Console.WriteLine(result.StandardOutputText);
   keyboard-interactive (one-time codes, PAM), and multi-factor chains. Key generation, saved as `ssh-keygen` does.
 - **Host verification:** `StrictHostKeyChecking` policies, host certificates, `UpdateHostKeys`, key pinning, or your own
   verifier. There is no "accept anything" default. Host key scanning, as `ssh-keyscan` does it.
-- **Connections:** ProxyJump chains, ProxyCommand, connect over any `Stream`, keep-alive and dead-connection detection;
+- **Connections:** ProxyJump chains, ProxyCommand, HTTP and SOCKS proxies, connect over any `Stream`, keep-alive and
+  dead-connection detection; `HttpClient` through the SSH connection;
   TCP and Unix-socket tunnels; local, remote and dynamic (SOCKS) port forwarding (`ssh -L`, `-R`, `-D`) and remote dynamic forwarding (`-R port`), also
   started from `ssh_config`.
 - **Sessions:** run commands, stream stdin/stdout/stderr, interactive shells with a pseudo-terminal, environment variables,
@@ -57,7 +58,11 @@ Coming next: SFTP, as a separate package.
 | `ssh_config` (`Host`, `Match`, `Include`; connect by alias) | ✅ | ❌ |
 | `known_hosts` verification (hashed hosts, `@cert-authority`, `@revoked`, `StrictHostKeyChecking`) | ✅ | ❌ (verify in a `HostKeyReceived` handler) |
 | `UpdateHostKeys` (key rotation) | ✅ | ❌ |
-| ProxyJump chains, ProxyCommand | ✅ | ❌ (SOCKS4/5 and HTTP proxies) |
+| Host key scanning (`ssh-keyscan`) | ✅ | ❌ |
+| ProxyJump chains, ProxyCommand | ✅ | ❌ |
+| HTTP and SOCKS 4/5 proxies | ✅ | ✅ |
+| Connect over any `Stream` (WebSocket, named pipe, your own tunnel) | ✅ | ❌ |
+| Keep-alive that detects a dead server (`ServerAliveCountMax`) | ✅ | ❌ (keep-alives get no reply) |
 | SSH agent (`ssh-agent`, Windows OpenSSH agent) | ✅ | ❌ |
 | Agent forwarding | ✅ | ❌ |
 | Password, public key, keyboard-interactive, multi-factor | ✅ | ✅ |
@@ -68,8 +73,13 @@ Coming next: SFTP, as a separate package.
 | Strict key exchange (Terrapin fix) | ✅ | ✅ |
 | Legacy algorithms (CBC, 3DES, SHA-1, `ssh-rsa`, DH group 1, zlib) | — (by design) | ✅ |
 | Commands, shells with a terminal, `expect`-style scripting | ✅ | ✅ |
-| Local, remote and dynamic port forwarding | ✅ (also Unix-socket tunnels, and from `ssh_config`) | ✅ |
+| Signals to a running command | ✅ | ❌ |
+| Any subsystem (`ssh -s`) | ✅ | ❌ (SFTP and NETCONF only) |
+| Local, remote and dynamic port forwarding | ✅ (also started from `ssh_config`) | ✅ |
 | Remote dynamic forwarding (`ssh -R port`, a SOCKS proxy on the client side) | ✅ | ❌ |
+| Unix-socket tunnels (Docker or database sockets on the server) | ✅ | ❌ |
+| `HttpClient` through the SSH connection (`SocketsHttpHandler.ConnectCallback`) | ✅ | ❌ |
+| FIPS mode (FIPS-approved algorithms only) | ✅ | ❌ |
 | SCP | ✅ | ✅ |
 | SFTP | Planned (`SshSharp.Sftp`) | ✅ |
 | Native AOT | ✅ (an AOT-compiled binary connects to a real server in CI) | ✅ (AOT-compatible; an AOT publish is checked in CI) |
@@ -79,7 +89,7 @@ Coming next: SFTP, as a separate package.
 | Maturity | New, pre-1.0; managed crypto awaiting an outside review | More than a decade of production use |
 
 **Use SSH.NET instead** when you need .NET Framework or .NET Standard, SFTP today, servers that only speak legacy algorithms,
-a connection through an HTTP or SOCKS proxy, or a long track record. Moving from SSH.NET? See the
+or a long track record. Moving from SSH.NET? See the
 [migration guide](https://github.com/zcsizmadia/SshSharp/blob/main/docs/migrating-from-sshnet.md).
 
 ## Install

@@ -74,6 +74,12 @@ public sealed class SshConfigConnectOptions
     /// <summary>Receives diagnostics for this connection and every jump host.</summary>
     public ILogger? Logger { get; init; }
 
+    /// <summary>
+    /// An HTTP or SOCKS proxy for the first network hop: the destination, or the first ProxyJump host (later hops are reached through
+    /// SSH). Not used for a host with a <c>ProxyCommand</c>, which makes its own connection.
+    /// </summary>
+    public SshProxy? Proxy { get; init; }
+
     /// <summary>Opens TCP connections; replaceable in tests.</summary>
     internal Func<string, int, SshAddressFamily, CancellationToken, ValueTask<(Stream Stream, IAsyncDisposable? Owner)>>? TcpConnector { get; init; }
 

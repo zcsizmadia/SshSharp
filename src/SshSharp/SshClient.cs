@@ -64,6 +64,13 @@ public sealed partial class SshClient : IAsyncDisposable
         ArgumentException.ThrowIfNullOrWhiteSpace(host);
         ArgumentOutOfRangeException.ThrowIfLessThan(port, 1);
         ArgumentOutOfRangeException.ThrowIfGreaterThan(port, 65535);
+        ArgumentNullException.ThrowIfNull(options);
+        if (options.Proxy is { } proxy)
+        {
+            var proxied = await proxy.ConnectAsync(host, port, cancellationToken).ConfigureAwait(false);
+            return await ConnectCoreAsync(proxied, options, leaveOpen: false, owner: null, host, port, cancellationToken).ConfigureAwait(false);
+        }
+
         var tcp = new TcpClient { NoDelay = true };
         try
         {

@@ -137,6 +137,37 @@ public class ForwardingInteropTests
     }
 
     [Test]
+    [Arguments(SshProxyType.Socks5)]
+    [Arguments(SshProxyType.Socks4)]
+    public async Task AClientBehindASocksProxy_ConnectsThroughIt(SshProxyType type)
+    {
+        // The proxy is SshSharp's own ssh -D on a first connection; the second connection goes through it to the server's sshd, by name.
+        await using var first = await ConnectAsync();
+        if (first is null || await RealServer.OptionsAsync() is not { } options)
+        {
+            Skip.Test("SSHSHARP_TEST_SSHD and SSHSHARP_TEST_USER with a password or key are needed.");
+            return;
+        }
+
+        await using var socks = await first.ForwardDynamicPortAsync(new IPEndPoint(IPAddress.Loopback, 0), Timeout());
+        var proxy = type == SshProxyType.Socks5
+            ? SshProxy.Socks5("127.0.0.1", socks.LocalEndPoint.Port)
+            : SshProxy.Socks4("127.0.0.1", socks.LocalEndPoint.Port, "tester");
+
+        await using var second = await SshClient.ConnectAsync("localhost", ServerSidePort, new SshClientOptions
+        {
+            UserName = options.UserName,
+            Password = options.Password,
+            PrivateKeys = options.PrivateKeys,
+            HostKeyVerifier = options.HostKeyVerifier,
+            Proxy = proxy,
+        }, Timeout());
+
+        var result = await second.RunCommandAsync("echo through-the-proxy", Timeout());
+        await Assert.That(result.StandardOutputText.Trim()).IsEqualTo("through-the-proxy");
+    }
+
+    [Test]
     public async Task TheSocksProxy_ReachesTheServersOwnSshd()
     {
         await using var client = await ConnectAsync();

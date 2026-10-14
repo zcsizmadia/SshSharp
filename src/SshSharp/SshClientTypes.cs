@@ -183,6 +183,12 @@ public sealed class SshClientOptions
     public ILogger? Logger { get; init; }
 
     /// <summary>
+    /// An HTTP or SOCKS proxy to reach the server through, for <see cref="SshClient.ConnectAsync(string, int, SshClientOptions, CancellationToken)"/>.
+    /// The server's host name is resolved by the proxy. Ignored when connecting over a stream you opened.
+    /// </summary>
+    public SshProxy? Proxy { get; init; }
+
+    /// <summary>
     /// Restrict key exchange, host key, cipher and MAC algorithms to FIPS-approved ones (NIST curves and DH groups, RSA/ECDSA, AES, HMAC-SHA2).
     /// Curve25519, Ed25519 and ChaCha20-Poly1305 are excluded. This limits what is negotiated; it does not make the process FIPS-validated.
     /// </summary>

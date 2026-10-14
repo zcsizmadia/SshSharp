@@ -64,6 +64,33 @@ replaces the configured one, `UseAgent`/`Agent`, `AllowProxyCommand`, `Authentic
 authenticated with its own configuration. `ProxyCommand` runs a local command and speaks SSH over its standard input and
 output, as `ssh` does; set `AllowProxyCommand = false` to refuse configurations that name one.
 
+## Through an HTTP or SOCKS proxy
+
+Where outbound connections must go through a proxy, set `Proxy`:
+
+```csharp
+await using var client = await SshClient.ConnectAsync("ssh.example.com", 22, new SshClientOptions
+{
+    UserName = "deploy",
+    PrivateKeys = [key],
+    HostKeyVerifier = verifier,
+    Proxy = SshProxy.Http("proxy.corp", 3128, new NetworkCredential("me", proxyPassword)),
+});
+```
+
+`SshProxy.Http` uses `CONNECT` (with Basic credentials if given), `SshProxy.Socks5` SOCKS 5 (with username and password
+if given), and `SshProxy.Socks4` SOCKS 4, or 4a for host names. `SshProxy.FromUri(new Uri("socks5://user:pass@proxy:1080"))`
+reads the usual URI form (`http`, `socks5`, `socks5h`, `socks4`, `socks4a`). The server's host name is sent to the proxy, which
+resolves it. A refusal, such as a 407 or a SOCKS error code, is an `SshException` with `Reason = ConnectFailed` saying what
+the proxy answered.
+
+With `ssh_config`, `SshConfigConnectOptions.Proxy` applies to the first network hop: the destination, or the first
+`ProxyJump` host (later hops go through SSH). `proxy.ConnectAsync(host, port)` returns the proxied stream itself, for
+`SshClient.ConnectAsync(stream, ...)` or anything else.
+
+Basic and SOCKS 5 credentials cross the network to the proxy unencrypted, as with every client of these protocols; the SSH
+connection inside is encrypted end to end as usual.
+
 ## Tunnels and port forwarding
 
 A tunnel is a connection the server makes on your behalf, returned as a `Stream`. The server resolves the host name, so it
@@ -89,6 +116,23 @@ Each forwarded connection gets its own channel, and a half-close travels both wa
 address unless other machines should use the tunnel. Forwarding stops when the forwarder or the client is disposed, or the
 connection ends. A server that does not allow forwarding (sshd's `AllowTcpForwarding no`) refuses each connection, and
 `OpenTcpTunnelAsync` throws an `SshException` with `SshFailureReason.ChannelClosed`.
+
+### `HttpClient` through the connection
+
+`CreateHttpConnectCallback()` plugs the tunnels into `HttpClient`, so it reaches web services only the server can reach, without
+a local listener or port:
+
+```csharp
+using var http = new HttpClient(new SocketsHttpHandler
+{
+    ConnectCallback = client.CreateHttpConnectCallback(),
+    UseProxy = false, // otherwise a system proxy setting would be the destination, reached through the server
+});
+var health = await http.GetStringAsync("https://internal-api.corp/health");
+```
+
+Host names are resolved by the server, and TLS runs from here to the service as usual. The same handler works with
+`IHttpClientFactory` (`ConfigurePrimaryHttpMessageHandler`).
 
 Dynamic forwarding (`ssh -D 1080`) runs a SOCKS proxy: applications name their destination, and the server makes each
 connection (and resolves the host names). SOCKS 4, 4a and 5 are supported, with CONNECT and no authentication.

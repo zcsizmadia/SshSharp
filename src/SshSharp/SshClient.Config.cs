@@ -103,7 +103,7 @@ public sealed partial class SshClient
             }
             else
             {
-                var connector = options.TcpConnector ?? ConnectTcpAsync;
+                var connector = options.TcpConnector ?? (options.Proxy is { } proxy ? ProxyConnector(proxy) : ConnectTcpAsync);
                 var (tcpStream, tcpOwner) = await connector(hostConfig.HostName, hostConfig.Port, hostConfig.AddressFamily, token).ConfigureAwait(false);
                 if (tcpOwner is not null)
                 {
@@ -188,6 +188,10 @@ public sealed partial class SshClient
             throw new SshException(SshFailureReason.ConnectFailed, "The jump host could not open a connection to the next host: " + ex.Message, ex);
         }
     }
+
+    /// <summary>Opens the first hop through a proxy; the address family is the proxy's business, since it makes the connection.</summary>
+    private static Func<string, int, SshAddressFamily, CancellationToken, ValueTask<(Stream Stream, IAsyncDisposable? Owner)>> ProxyConnector(SshProxy proxy) =>
+        async (host, port, _, cancellationToken) => (await proxy.ConnectAsync(host, port, cancellationToken).ConfigureAwait(false), null);
 
     private static async ValueTask<(Stream Stream, IAsyncDisposable? Owner)> ConnectTcpAsync(string host, int port, SshAddressFamily family, CancellationToken cancellationToken)
     {
