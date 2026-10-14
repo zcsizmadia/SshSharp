@@ -67,6 +67,17 @@ internal sealed class SshTransport : IAsyncDisposable
     /// <summary>The host key the server proved possession of.</summary>
     public HostKeyInfo? HostKey { get; private set; }
 
+    /// <summary>
+    /// The server's signature over the session identifier from the first key exchange (the host key's proof), which an SSH agent
+    /// verifies when a connection is bound to this session (<c>session-bind@openssh.com</c>).
+    /// </summary>
+    public byte[]? InitialSignature { get; private set; }
+
+    /// <summary>What binds an agent connection to this session, once the first key exchange is done.</summary>
+    public AgentBinding? AgentBinding => HostKey is { } hostKey && SessionId is { } sessionId && InitialSignature is { } signature
+        ? new AgentBinding(hostKey.Presented, sessionId, signature)
+        : null;
+
     /// <summary>The host key algorithms the server offered in its first KEXINIT; set before negotiation, so also when it fails.</summary>
     public IReadOnlyList<string>? ServerHostKeyAlgorithms { get; private set; }
 
@@ -752,6 +763,7 @@ internal sealed class SshTransport : IAsyncDisposable
 
         var info = new HostKeyInfo(negotiated.HostKey, key.KeyType, key.Blob, key.Fingerprint, key.KeySizeBits, result.HostKeyBlob, certificate);
         HostKey = info;
+        InitialSignature = result.Signature;
         if (!await _options.VerifyHostKey(info, cancellationToken).ConfigureAwait(false))
         {
             throw new SshHostKeyException($"The host key {info.Fingerprint} was not accepted.");

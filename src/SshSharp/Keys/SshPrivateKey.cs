@@ -46,8 +46,11 @@ public abstract class SshPrivateKey : IDisposable
     /// <summary>Signs <paramref name="data"/> and returns the SSH signature blob (<c>string algorithm || string signature</c>).</summary>
     internal abstract byte[] Sign(string algorithm, ReadOnlySpan<byte> data);
 
-    /// <summary>Signs like <see cref="Sign"/>; keys held elsewhere (an SSH agent) sign only this way.</summary>
-    internal virtual ValueTask<byte[]> SignAsync(string algorithm, ReadOnlyMemory<byte> data, CancellationToken cancellationToken) =>
+    /// <summary>
+    /// Signs like <see cref="Sign"/>; keys held elsewhere (an SSH agent) sign only this way. <paramref name="binding"/> is the SSH session
+    /// an agent connection is bound to before signing (for destination-constrained agent keys); local keys ignore it.
+    /// </summary>
+    internal virtual ValueTask<byte[]> SignAsync(string algorithm, ReadOnlyMemory<byte> data, AgentBinding? binding, CancellationToken cancellationToken) =>
         ValueTask.FromResult(Sign(algorithm, data.Span));
 
     /// <summary>Parses a private key.</summary>
@@ -267,8 +270,8 @@ public abstract class SshPrivateKey : IDisposable
 
         internal override byte[] Sign(string algorithm, ReadOnlySpan<byte> data) => _key.Sign(SshCertificate.BaseAlgorithm(algorithm), data);
 
-        internal override ValueTask<byte[]> SignAsync(string algorithm, ReadOnlyMemory<byte> data, CancellationToken cancellationToken) =>
-            _key.SignAsync(SshCertificate.BaseAlgorithm(algorithm), data, cancellationToken);
+        internal override ValueTask<byte[]> SignAsync(string algorithm, ReadOnlyMemory<byte> data, AgentBinding? binding, CancellationToken cancellationToken) =>
+            _key.SignAsync(SshCertificate.BaseAlgorithm(algorithm), data, binding, cancellationToken);
 
         private protected override void DisposeCore()
         {

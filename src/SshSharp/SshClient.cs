@@ -34,6 +34,9 @@ public sealed partial class SshClient : IAsyncDisposable
     /// <summary>The connection layer, for tests of channel behaviour that has no public API yet.</summary>
     internal SshConnection Connection => _connection;
 
+    /// <summary>What binds an agent connection to this session; forwarded agent connections are bound with it (<c>is_forwarding</c>).</summary>
+    internal AgentBinding? AgentBinding { get; init; }
+
     /// <summary>The server's identification string, for example <c>SSH-2.0-OpenSSH_9.9</c>.</summary>
     public string ServerIdentification { get; }
 
@@ -386,7 +389,7 @@ public sealed partial class SshClient : IAsyncDisposable
 
             return new SshClient(
                 connection, options, stream, leaveOpen, owner, transport.ServerIdentification!.Line,
-                publicHostKey, logger);
+                publicHostKey, logger) { AgentBinding = transport.AgentBinding };
         }
         catch (Exception ex)
         {

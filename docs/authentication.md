@@ -82,6 +82,13 @@ FIDO security keys (`sk-ssh-ed25519@openssh.com`, `sk-ecdsa-sha2-nistp256@openss
 the agent: the agent and the key's touch make the signature. `QueryExtensionsAsync` lists the protocol extensions an agent
 supports (RFC 9987).
 
+Keys added with destination constraints (`ssh-add -h host`) work as they do with `ssh`. Before each signature the agent connection
+is bound to the SSH session (`session-bind@openssh.com`: the server's host key, the session identifier and the host key's
+signature over it, which the agent verifies). Authentication is host-bound (`publickey-hostbound-v00@openssh.com`, signing the
+server's host key too) whenever the server offers it, as OpenSSH 8.9 and later do. The agent then signs with a constrained key only
+for the hosts it allows. Forwarded agent connections are bound as forwarding ones, so constraints along a chain of hosts
+(`ssh-add -h "a>b"`) apply too. Agents without the extension sign as before.
+
 Connecting by `ssh_config` alias uses the agent automatically, as `ssh` does: `IdentityAgent`, else `SSH_AUTH_SOCK`.
 Agent keys that match an `IdentityFile` come first (and an encrypted identity file is not opened at all), and
 `IdentitiesOnly yes` leaves the agent's other keys out. `UseAgent = false` turns it off.

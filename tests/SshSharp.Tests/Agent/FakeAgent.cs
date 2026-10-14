@@ -56,6 +56,30 @@ internal sealed class FakeAgent : IAsyncDisposable
     /// <summary>The flags of every signing request.</summary>
     public List<uint> SignFlags { get; } = [];
 
+    /// <summary>A session-bind@openssh.com request the agent received, and whether the host key's signature over the session id verified.</summary>
+    public sealed record Binding(byte[] HostKey, byte[] SessionId, bool IsForwarding, bool SignatureValid);
+
+    /// <summary>Every session binding received, in order.</summary>
+    public List<Binding> Bindings { get; } = [];
+
+    /// <summary>Answer session-bind with failure, as agents without the extension do (OpenSSH before 8.9, other agents).</summary>
+    public bool RejectBinding { get; set; }
+
+    /// <summary>
+    /// Refuse to sign on a connection not bound to a session, as ssh-agent does for a destination-constrained key (<c>ssh-add -h</c>):
+    /// "refusing use of destination-constrained key to sign on unbound connection".
+    /// </summary>
+    public bool RequireBinding { get; set; }
+
+    /// <summary>The data of the last signing request.</summary>
+    public byte[]? LastSignedData { get; private set; }
+
+    /// <summary>The state of one agent connection: its session binding, which lasts as long as the connection.</summary>
+    private sealed class ConnectionState
+    {
+        public Binding? Bound { get; set; }
+    }
+
     public int Connections { get; private set; }
 
     private async Task AcceptLoopAsync()
@@ -83,6 +107,7 @@ internal sealed class FakeAgent : IAsyncDisposable
         try
         {
             var header = new byte[4];
+            var state = new ConnectionState();
             while (true)
             {
                 try
@@ -96,7 +121,7 @@ internal sealed class FakeAgent : IAsyncDisposable
 
                 var request = new byte[BinaryPrimitives.ReadUInt32BigEndian(header)];
                 await stream.ReadExactlyAsync(request, _cts.Token);
-                var reply = RawReply ?? Handle(request);
+                var reply = RawReply ?? Handle(request, state);
                 if (RawReply is null)
                 {
                     var frame = new byte[4 + reply.Length];
@@ -118,7 +143,7 @@ internal sealed class FakeAgent : IAsyncDisposable
         }
     }
 
-    private byte[] Handle(byte[] request)
+    private byte[] Handle(byte[] request, ConnectionState state)
     {
         var reader = new SshReader(request);
         switch (reader.ReadByte())
@@ -151,6 +176,12 @@ internal sealed class FakeAgent : IAsyncDisposable
                     SignFlags.Add(flags);
                 }
 
+                LastSignedData = data;
+                if (RequireBinding && state.Bound is null)
+                {
+                    return [5];
+                }
+
                 var key = Keys.Select(k => k.Key).FirstOrDefault(k => k.PublicKey.Span.SequenceEqual(blob));
                 if (key is null && ClaimAlgorithm is { } rawClaim && RawIdentities.Any(raw => raw.AsSpan().SequenceEqual(blob)))
                 {
@@ -181,16 +212,50 @@ internal sealed class FakeAgent : IAsyncDisposable
                 });
             }
 
-            case 27 when reader.ReadUtf8String() == "query" && Extensions is { } extensions:
-                return Build(w =>
+            case 27:
+            {
+                var extension = reader.ReadUtf8String();
+                if (extension == "query" && Extensions is { } extensions)
                 {
-                    w.WriteByte(QueryRepliesWithSuccess ? (byte)6 : (byte)29);
-                    w.WriteString("query");
-                    foreach (var name in extensions)
+                    return Build(w =>
                     {
-                        w.WriteString(name);
+                        w.WriteByte(QueryRepliesWithSuccess ? (byte)6 : (byte)29);
+                        w.WriteString("query");
+                        foreach (var name in extensions)
+                        {
+                            w.WriteString(name);
+                        }
+                    });
+                }
+
+                if (extension == "session-bind@openssh.com" && !RejectBinding)
+                {
+                    // As ssh-agent does: verify the host key's signature over the session id; one binding per connection.
+                    var hostKey = reader.ReadString().ToArray();
+                    var sessionId = reader.ReadString().ToArray();
+                    var signature = reader.ReadString().ToArray();
+                    var forwarding = reader.ReadBoolean();
+                    var plain = global::SshSharp.SshCertificate.IsCertificateAlgorithm(new SshReader(hostKey).ReadUtf8String())
+                        ? global::SshSharp.SshCertificate.FromBlob(hostKey).Key
+                        : global::SshSharp.Keys.SshPublicKey.Parse(hostKey);
+                    var signatureAlgorithm = new SshReader(signature).ReadUtf8String();
+                    var binding = new Binding(hostKey, sessionId, forwarding, plain.VerifySignature(signatureAlgorithm, signature, sessionId));
+                    lock (Bindings)
+                    {
+                        Bindings.Add(binding);
                     }
-                });
+
+                    if (!binding.SignatureValid || state.Bound is not null)
+                    {
+                        return [5];
+                    }
+
+                    state.Bound = binding;
+                    return [6];
+                }
+
+                return [5];
+            }
 
             default:
                 return [5];
