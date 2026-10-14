@@ -222,6 +222,71 @@ public class ProxyTests
         await Assert.That(ex!.Message).Contains("refused the user name or password");
     }
 
+    [Test]
+    public async Task Socks5_AnAuthenticationReplyWithTheWrongVersion_IsRefused()
+    {
+        await using var proxy = new FakeProxy(async stream =>
+        {
+            await ReadAsync(stream, 4);
+            await stream.WriteAsync(new byte[] { 5, 2 });
+            await ReadAsync(stream, 1 + 1 + 1 + 1 + 1);
+            await stream.WriteAsync(new byte[] { 5, 0 }); // "success", but not an RFC 1929 reply (version 1)
+            return false;
+        });
+
+        var ex = await Assert.That(async () => await SshProxy.Socks5("127.0.0.1", proxy.Port, new NetworkCredential("u", "p")).ConnectAsync("h", 22, Timeout())).Throws<SshException>();
+
+        await Assert.That(ex!.Message).Contains("wrong version");
+    }
+
+    [Test]
+    [Arguments(SshProxyType.Http)]
+    [Arguments(SshProxyType.Socks4)]
+    [Arguments(SshProxyType.Socks5)]
+    public async Task ANonAsciiHostName_IsRejected_BeforeTheProxyIsContacted(SshProxyType type)
+    {
+        var contacted = false;
+        await using var proxy = new FakeProxy(_ =>
+        {
+            contacted = true;
+            return Task.FromResult(false);
+        });
+        var client = type switch
+        {
+            SshProxyType.Http => SshProxy.Http("127.0.0.1", proxy.Port),
+            SshProxyType.Socks4 => SshProxy.Socks4("127.0.0.1", proxy.Port),
+            _ => SshProxy.Socks5("127.0.0.1", proxy.Port),
+        };
+
+        // As ASCII, "bücher.example" would have reached the proxy as "b?cher.example": another name.
+        await Assert.That(async () => await client.ConnectAsync("bücher.example", 22, Timeout())).Throws<ArgumentException>();
+        await Assert.That(contacted).IsFalse();
+        await Assert.That(() => SshProxy.Socks4("127.0.0.1", 1080, "jürgen")).Throws<ArgumentException>();
+    }
+
+    [Test]
+    public async Task AProxyThatSaysNothing_TimesOut()
+    {
+        var release = new TaskCompletionSource();
+        await using var proxy = new FakeProxy(async _ =>
+        {
+            await release.Task; // accepts, then never answers
+            return false;
+        });
+        var client = SshProxy.Socks5("127.0.0.1", proxy.Port);
+        client.HandshakeTimeout = TimeSpan.FromMilliseconds(300);
+
+        try
+        {
+            var ex = await Assert.That(async () => await client.ConnectAsync("h", 22, Timeout())).Throws<SshException>();
+            await Assert.That(ex!.Reason).IsEqualTo(SshFailureReason.Timeout);
+        }
+        finally
+        {
+            release.SetResult();
+        }
+    }
+
     // ---- SOCKS 4 / 4a ----
 
     [Test]

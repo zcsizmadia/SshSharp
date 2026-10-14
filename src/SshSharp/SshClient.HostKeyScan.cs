@@ -129,6 +129,23 @@ public sealed partial class SshClient
     private static async Task<(SshHostKey? Key, IReadOnlyList<string>? ServerAlgorithms)> ScanOnceAsync(
         Func<CancellationToken, ValueTask<Stream>> connect, List<string> hostKeyAlgorithms, SshHostKeyScanOptions options, CancellationToken cancellationToken)
     {
+        // Each connection gets options.Timeout, as ssh-keyscan -T: a server that accepts and then says nothing does not hang the scan.
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(options.Timeout);
+        try
+        {
+            return await ScanOnceCoreAsync(connect, hostKeyAlgorithms, options, timeout.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (timeout.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+        {
+            throw new SshException(SshFailureReason.Timeout,
+                $"The server did not complete a key exchange within {options.Timeout.TotalSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture)} s.");
+        }
+    }
+
+    private static async Task<(SshHostKey? Key, IReadOnlyList<string>? ServerAlgorithms)> ScanOnceCoreAsync(
+        Func<CancellationToken, ValueTask<Stream>> connect, List<string> hostKeyAlgorithms, SshHostKeyScanOptions options, CancellationToken cancellationToken)
+    {
         var defaults = options.FipsMode ? AlgorithmPreferences.Fips() : new AlgorithmPreferences();
         SshHostKey? key = null;
         var stream = await connect(cancellationToken).ConfigureAwait(false)

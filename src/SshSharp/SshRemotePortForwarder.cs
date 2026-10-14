@@ -1,3 +1,4 @@
+using System.Net;
 using System.Net.Sockets;
 using Microsoft.Extensions.Logging;
 using SshSharp.Protocol;
@@ -69,8 +70,8 @@ public sealed class SshRemotePortForwarder : IAsyncDisposable
         }
     }
 
-    /// <summary>Takes a <c>forwarded-tcpip</c> channel the server opened for a connection to the forwarded port.</summary>
-    internal void Accept(SshChannel channel)
+    /// <summary>Takes a <c>forwarded-tcpip</c> channel the server opened for a connection to the forwarded port; the task ends with it.</summary>
+    internal Task Accept(SshChannel channel)
     {
         Task connection;
         lock (_connections)
@@ -89,18 +90,40 @@ public sealed class SshRemotePortForwarder : IAsyncDisposable
                 }
             },
             CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+        return connection;
     }
 
-    /// <summary>Counts the connection until it has finished, so <see cref="ActiveConnections"/> is exact once it is awaited.</summary>
+    /// <summary>
+    /// Counts the connection until it has finished, so <see cref="ActiveConnections"/> is exact once it is awaited. It never faults: a
+    /// connection that fails unexpectedly is closed, so neither the remote application nor <see cref="DisposeAsync"/> is left hanging.
+    /// </summary>
     private async Task ServeAsync(SshChannel channel)
     {
         try
         {
             await ServeCoreAsync(channel).ConfigureAwait(false);
         }
+        catch (Exception ex)
+        {
+            SshLog.RemoteForwardingConnectFailed(_logger, IsDynamic ? Port : LocalPort, ex.GetType().Name);
+            await CloseQuietlyAsync(channel).ConfigureAwait(false);
+        }
         finally
         {
             Interlocked.Decrement(ref _active);
+        }
+    }
+
+    internal static async Task CloseQuietlyAsync(SshChannel channel)
+    {
+        try
+        {
+            await channel.CloseAsync(CancellationToken.None).ConfigureAwait(false);
+            channel.DiscardUnread();
+        }
+        catch (Exception ex) when (ex is IOException or SshException or OperationCanceledException or ObjectDisposedException)
+        {
+            // The connection is going away anyway.
         }
     }
 
@@ -121,7 +144,7 @@ public sealed class SshRemotePortForwarder : IAsyncDisposable
         catch (Exception ex) when (ex is SocketException or OperationCanceledException or ObjectDisposedException)
         {
             // Nothing listens locally: close the channel, as ssh does, so the remote client sees the connection end.
-            SshLog.RemoteForwardingConnectFailed(_logger, LocalPort, ex.Message);
+            SshLog.RemoteForwardingConnectFailed(_logger, LocalPort, ex is SocketException socketError ? socketError.SocketErrorCode.ToString() : ex.GetType().Name);
             socket.Dispose();
             await channel.CloseAsync(CancellationToken.None).ConfigureAwait(false);
             channel.DiscardUnread();
@@ -160,16 +183,29 @@ public sealed class SshRemotePortForwarder : IAsyncDisposable
         }
 
         // The destination is chosen on the server's side, so this is the trust boundary: by default anything this machine reaches, as ssh.
-        if (_allowDestination is { } allow && !allow(target.Host, target.Port))
+        IPAddress[]? addresses = null;
+        if (_allowDestination is { } allow)
         {
-            await RefuseAsync(stream, target, "the destination is not allowed").ConfigureAwait(false);
-            return;
+            (addresses, var refusal) = await CheckDestinationAsync(allow, target).ConfigureAwait(false);
+            if (refusal is not null)
+            {
+                await RefuseAsync(stream, target, refusal).ConfigureAwait(false);
+                return;
+            }
         }
 
         var socket = new Socket(SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
         try
         {
-            await socket.ConnectAsync(target.Host, target.Port, _stop.Token).ConfigureAwait(false);
+            // With a filter, only the addresses it allowed: the name is not resolved a second time.
+            if (addresses is null)
+            {
+                await socket.ConnectAsync(target.Host, target.Port, _stop.Token).ConfigureAwait(false);
+            }
+            else
+            {
+                await socket.ConnectAsync(addresses, target.Port, _stop.Token).ConfigureAwait(false);
+            }
         }
         catch (Exception ex) when (ex is SocketException or OperationCanceledException or ObjectDisposedException)
         {
@@ -200,6 +236,67 @@ public sealed class SshRemotePortForwarder : IAsyncDisposable
             await SocketChannelRelay.RunAsync(socket, channel, _stop.Token).ConfigureAwait(false);
         }
     }
+
+    /// <summary>
+    /// Applies the destination filter so that no spelling of an address gets past it. An address literal, in any form the platform
+    /// accepts (<c>127.1</c>, <c>2130706433</c>, <c>0x7f.1</c>, <c>[::1]</c>, an IPv4-mapped IPv6 address), is checked in its canonical
+    /// form. A name is checked as given, then resolved here, and each address it resolves to is checked too; only the allowed ones are
+    /// returned, to be connected to as they are. A filter that throws refuses the destination.
+    /// </summary>
+    private async Task<(IPAddress[]? Addresses, string? Refusal)> CheckDestinationAsync(Func<string, int, bool> allow, SocksRequest target)
+    {
+        bool Allowed(string host)
+        {
+            try
+            {
+                return allow(host, target.Port);
+            }
+            catch (Exception)
+            {
+                // The caller's filter failed: refuse, rather than let its exception end the forwarding.
+                return false;
+            }
+        }
+
+        if (ParseAddressLiteral(target.Host) is { } literal)
+        {
+            return Allowed(FilterText(literal)) ? ([literal], null) : (null, "the destination is not allowed");
+        }
+
+        if (!Allowed(target.Host))
+        {
+            return (null, "the destination is not allowed");
+        }
+
+        IPAddress[] resolved;
+        try
+        {
+            using var lookup = CancellationTokenSource.CreateLinkedTokenSource(_stop.Token);
+            lookup.CancelAfter(SshClient.SocksHandshakeTimeout);
+            resolved = await Dns.GetHostAddressesAsync(target.Host, lookup.Token).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is SocketException or OperationCanceledException or ArgumentException)
+        {
+            return (null, ex is SocketException socketError ? socketError.SocketErrorCode.ToString() : "the name could not be resolved");
+        }
+
+        var allowed = resolved.Select(Canonical).Distinct().Where(a => Allowed(FilterText(a))).ToArray();
+        return allowed.Length > 0 ? (allowed, null) : (null, "the destination is not allowed");
+    }
+
+    /// <summary>The address a host string denotes when it is a literal (brackets allowed), in canonical form; null for a name.</summary>
+    internal static IPAddress? ParseAddressLiteral(string host)
+    {
+        var text = host.Length > 2 && host[0] == '[' && host[^1] == ']' ? host[1..^1] : host;
+        return IPAddress.TryParse(text, out var address) ? Canonical(address) : null;
+    }
+
+    /// <summary>The address to connect to: an IPv4-mapped IPv6 address as plain IPv4; an IPv6 scope is kept (link-local needs it).</summary>
+    private static IPAddress Canonical(IPAddress address) => address.IsIPv4MappedToIPv6 ? address.MapToIPv4() : address;
+
+    /// <summary>What the filter sees for an address: its canonical text, without an IPv6 zone index (which does not change the host).</summary>
+    internal static string FilterText(IPAddress address) =>
+        address.AddressFamily == AddressFamily.InterNetworkV6 && address.ScopeId != 0 ? new IPAddress(address.GetAddressBytes()).ToString() : address.ToString();
 
     private async Task RefuseAsync(SshChannelStream stream, SocksRequest target, string reason)
     {
@@ -242,7 +339,9 @@ public sealed class SshRemotePortForwarder : IAsyncDisposable
             open = [.. _connections];
         }
 
-        await Task.WhenAll(open).ConfigureAwait(false);
+        // The connections never fault (see ServeAsync); this only waits for them.
+        await Task.WhenAll(open.Select(t => t.ContinueWith(_ => { }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default)))
+            .ConfigureAwait(false);
         _stop.Dispose();
     }
 }

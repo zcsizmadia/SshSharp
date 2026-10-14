@@ -107,11 +107,9 @@ public sealed partial class SshClient
                 var local = TcpConnector.FromConfig(hostConfig.BindAddress, hostConfig.BindInterface);
                 var connector = options.TcpConnector ?? (options.Proxy is { } proxy ? ProxyConnector(proxy, local) : DirectConnector(local));
                 var (tcpStream, tcpOwner) = await connector(hostConfig.HostName, hostConfig.Port, hostConfig.AddressFamily, token).ConfigureAwait(false);
-                if (tcpOwner is not null)
-                {
-                    owner.Add(tcpOwner);
-                }
 
+                // Owned from here, so the socket is closed if anything fails before the client takes it (disposing it twice is harmless).
+                owner.Add(tcpOwner ?? tcpStream);
                 stream = tcpStream;
             }
 

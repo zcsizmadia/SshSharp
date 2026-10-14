@@ -18,6 +18,13 @@ namespace SshSharp;
 /// A regular expression is tried against the output received so far, so a pattern that could also match a shorter prefix (<c>\d+</c>
 /// against a number still arriving) may match early; anchor patterns to what follows them, such as a prompt's trailing <c>$ </c>.
 /// </para>
+/// <para>
+/// Plain text is searched for only in the output that arrived since the last search (and the few characters before it), so waiting
+/// costs time in proportion to the output. A regular expression is tried against all the pending output after each read, up to
+/// <see cref="MaxBufferLength"/>: the program on the other side decides what that output is, so give patterns a
+/// <see cref="Regex.MatchTimeout"/> (a <see cref="RegexMatchTimeoutException"/> then ends the wait) and keep
+/// <see cref="MaxBufferLength"/> no larger than needed.
+/// </para>
 /// </remarks>
 public sealed class SshExpect
 {
@@ -26,7 +33,15 @@ public sealed class SshExpect
     private readonly Decoder _decoder;
     private readonly byte[] _bytes = new byte[8192];
     private readonly char[] _chars;
-    private readonly StringBuilder _pending = new();
+
+    // The pending output is _buffer[_start.._length]: dropping old text moves _start (no copying); the buffer is compacted only when the
+    // dropped part is at least as long as what is kept, so the work stays in proportion to the output.
+    private char[] _buffer = new char[1024];
+    private int _start;
+    private int _length;
+
+    // Where the last fruitless plain-text search ended: the next one starts there (less the text's length, for a match across reads).
+    private int _searched;
     private bool _ended;
 
     /// <summary>Drives <paramref name="session"/>: reads its standard output, writes its standard input.</summary>
@@ -73,7 +88,7 @@ public sealed class SshExpect
     } = 1 << 20;
 
     /// <summary>Output received but not yet consumed by a match.</summary>
-    public string Pending => _pending.ToString();
+    public string Pending => new(_buffer, _start, _length - _start);
 
     /// <summary>Waits until the output contains <paramref name="text"/> (an ordinal match).</summary>
     /// <param name="text">The text to wait for, for example a prompt.</param>
@@ -84,10 +99,14 @@ public sealed class SshExpect
     public Task<SshExpectMatch> ExpectAsync(string text, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrEmpty(text);
-        return ExpectCoreAsync(pending =>
+        _searched = _start; // a new search: everything pending is new to it
+        return ExpectCoreAsync(() =>
         {
-            var index = pending.IndexOf(text, StringComparison.Ordinal);
-            return index < 0 ? null : (index, text.Length, null);
+            // Only what arrived since the last search, plus enough before it for a match that straddles two reads.
+            var from = Math.Max(_start, _searched - (text.Length - 1));
+            var index = _buffer.AsSpan(from, _length - from).IndexOf(text.AsSpan(), StringComparison.Ordinal);
+            _searched = _length;
+            return index < 0 ? null : (from + index - _start, text.Length, null);
         }, cancellationToken);
     }
 
@@ -97,12 +116,30 @@ public sealed class SshExpect
     /// <returns>The output before the match, and the match with its groups; both are consumed.</returns>
     /// <exception cref="EndOfStreamException">The output ended without a match (<see cref="Pending"/> holds what came).</exception>
     /// <exception cref="OperationCanceledException">Cancelled; nothing is lost, and the output read so far stays in <see cref="Pending"/>.</exception>
+    /// <exception cref="RegexMatchTimeoutException">Matching took longer than the pattern's <see cref="Regex.MatchTimeout"/>; the output stays
+    /// in <see cref="Pending"/>.</exception>
     public Task<SshExpectMatch> ExpectAsync(Regex pattern, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(pattern);
-        return ExpectCoreAsync(pending =>
+        return ExpectCoreAsync(() =>
         {
-            var match = pattern.Match(pending);
+            // Tested on the buffer itself; the string (for the match's groups) is made only once there is a match.
+            bool any;
+            try
+            {
+                any = pattern.IsMatch(_buffer.AsSpan(_start, _length - _start));
+            }
+            catch (NotSupportedException)
+            {
+                any = true; // a construct the span API does not take: let Match decide
+            }
+
+            if (!any)
+            {
+                return null;
+            }
+
+            var match = pattern.Match(Pending);
             return match.Success ? (match.Index, match.Length, match) : null;
         }, cancellationToken);
     }
@@ -122,15 +159,18 @@ public sealed class SshExpect
         return SendAsync(line + NewLine, cancellationToken);
     }
 
-    private async Task<SshExpectMatch> ExpectCoreAsync(Func<string, (int Index, int Length, Match? Match)?> find, CancellationToken cancellationToken)
+    /// <summary><paramref name="find"/> returns the match's index relative to the pending output, or null to read more.</summary>
+    private async Task<SshExpectMatch> ExpectCoreAsync(Func<(int Index, int Length, Match? Match)?> find, CancellationToken cancellationToken)
     {
         while (true)
         {
-            var pending = _pending.ToString();
-            if (find(pending) is { } found)
+            if (find() is { } found)
             {
-                _pending.Remove(0, found.Index + found.Length);
-                return new SshExpectMatch(pending[..found.Index], pending.Substring(found.Index, found.Length), found.Match);
+                var before = new string(_buffer, _start, found.Index);
+                var value = new string(_buffer, _start + found.Index, found.Length);
+                _start += found.Index + found.Length;
+                _searched = _start;
+                return new SshExpectMatch(before, value, found.Match);
             }
 
             if (_ended)
@@ -148,12 +188,36 @@ public sealed class SshExpect
         var read = await _output.ReadAsync(_bytes, cancellationToken).ConfigureAwait(false);
         var flush = read == 0;
         var count = _decoder.GetChars(_bytes, 0, read, _chars, 0, flush); // keeps a split character's first bytes for the next read
-        _pending.Append(_chars, 0, count);
         _ended = flush;
-        if (_pending.Length > MaxBufferLength)
+        Append(_chars.AsSpan(0, count));
+
+        // Keep at most MaxBufferLength characters: the oldest go first.
+        if (_length - _start > MaxBufferLength)
         {
-            _pending.Remove(0, _pending.Length - MaxBufferLength);
+            _start = _length - MaxBufferLength;
+            _searched = Math.Max(_searched, _start);
         }
+    }
+
+    private void Append(ReadOnlySpan<char> chars)
+    {
+        if (_length + chars.Length > _buffer.Length)
+        {
+            // Compact (drop what is consumed) when that frees enough room; otherwise grow. Either way each character is moved O(1) times
+            // on average.
+            var kept = _length - _start;
+            var target = _start >= kept && kept + chars.Length <= _buffer.Length
+                ? _buffer
+                : new char[Math.Max(_buffer.Length * 2, kept + chars.Length)];
+            Array.Copy(_buffer, _start, target, 0, kept);
+            _searched -= _start;
+            _buffer = target;
+            _start = 0;
+            _length = kept;
+        }
+
+        chars.CopyTo(_buffer.AsSpan(_length));
+        _length += chars.Length;
     }
 }
 

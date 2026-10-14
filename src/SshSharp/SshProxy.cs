@@ -49,6 +49,11 @@ public sealed class SshProxy
             throw new ArgumentException("SOCKS 5 user names are 1 to 255 bytes, and passwords at most 255.", nameof(credentials));
         }
 
+        if (type == SshProxyType.Socks4 && credentials is not null && credentials.UserName.Any(c => char.IsControl(c) || c > '~'))
+        {
+            throw new ArgumentException("A SOCKS 4 user id is printable ASCII.", nameof(credentials));
+        }
+
         Type = type;
         Host = host;
         Port = port;
@@ -66,6 +71,9 @@ public sealed class SshProxy
 
     /// <summary>The credentials sent to the proxy, if any (for SOCKS 4, just the user id).</summary>
     public NetworkCredential? Credentials { get; }
+
+    /// <summary>How long the proxy has, once connected to, to complete its handshake (30 seconds); replaceable in tests.</summary>
+    internal TimeSpan HandshakeTimeout { get; set; } = TimeSpan.FromSeconds(30);
 
     /// <summary>An HTTP proxy, reached with <c>CONNECT</c>; <paramref name="credentials"/> are sent with Basic authentication.</summary>
     public static SshProxy Http(string host, int port, NetworkCredential? credentials = null) => new(SshProxyType.Http, host, port, credentials);
@@ -121,7 +129,10 @@ public sealed class SshProxy
     /// that connection; disposing it closes the connection to the proxy.
     /// </summary>
     /// <exception cref="SshException">The proxy could not be reached, refused the connection or the credentials, or answered something
-    /// that is not its protocol (<see cref="SshFailureReason.ConnectFailed"/>).</exception>
+    /// that is not its protocol (<see cref="SshFailureReason.ConnectFailed"/>); or, once connected, did not complete its handshake within 30
+    /// seconds (<see cref="SshFailureReason.Timeout"/>).</exception>
+    /// <exception cref="ArgumentException"><paramref name="host"/> is not an ASCII host name or address (give an internationalized name in
+    /// its punycode form).</exception>
     public Task<Stream> ConnectAsync(string host, int port, CancellationToken cancellationToken = default) =>
         ConnectAsync(host, port, null, cancellationToken);
 
@@ -134,30 +145,45 @@ public sealed class SshProxy
             throw new ArgumentException("The host name must not contain spaces or control characters.", nameof(host));
         }
 
+        // Every proxy protocol carries the name as ASCII; anything else would reach the proxy as '?' (another name). Internationalized
+        // names go in their punycode form (System.Globalization.IdnMapping).
+        if (host.Any(c => c > '~'))
+        {
+            throw new ArgumentException("A host name given to a proxy must be ASCII; use its punycode form.", nameof(host));
+        }
+
         ArgumentOutOfRangeException.ThrowIfLessThan(port, 1);
         ArgumentOutOfRangeException.ThrowIfGreaterThan(port, 65535);
 
         var stream = await Protocol.TcpConnector.ConnectAsync(Host, Port, local, Config.SshAddressFamily.Any, "the proxy", cancellationToken).ConfigureAwait(false);
         try
         {
+            // A proxy that accepts the connection and then says nothing must not hang the caller: the handshake has a time limit.
+            using var handshake = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            handshake.CancelAfter(HandshakeTimeout);
             try
             {
                 switch (Type)
                 {
                     case SshProxyType.Http:
-                        await HttpConnectAsync(stream, host, port, cancellationToken).ConfigureAwait(false);
+                        await HttpConnectAsync(stream, host, port, handshake.Token).ConfigureAwait(false);
                         break;
                     case SshProxyType.Socks5:
-                        await Socks5ConnectAsync(stream, host, port, cancellationToken).ConfigureAwait(false);
+                        await Socks5ConnectAsync(stream, host, port, handshake.Token).ConfigureAwait(false);
                         break;
                     default:
-                        await Socks4ConnectAsync(stream, host, port, cancellationToken).ConfigureAwait(false);
+                        await Socks4ConnectAsync(stream, host, port, handshake.Token).ConfigureAwait(false);
                         break;
                 }
             }
             catch (IOException ex)
             {
                 throw new SshException(SshFailureReason.ConnectFailed, "The proxy closed the connection during its handshake.", ex);
+            }
+            catch (OperationCanceledException) when (handshake.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+            {
+                throw new SshException(SshFailureReason.Timeout,
+                    $"The proxy did not complete its handshake within {HandshakeTimeout.TotalSeconds.ToString(CultureInfo.InvariantCulture)} s.");
             }
 
             return stream;
@@ -249,7 +275,13 @@ public sealed class SshProxy
                     Array.Clear(password);
                 }
 
+                // RFC 1929: VER (the sub-negotiation's version, 1) | STATUS (0 for success).
                 var verdict = await ReadAsync(stream, 2, cancellationToken).ConfigureAwait(false);
+                if (verdict[0] != 1)
+                {
+                    throw new SshException(SshFailureReason.ConnectFailed, "The SOCKS 5 proxy's authentication reply has the wrong version.");
+                }
+
                 if (verdict[1] != 0)
                 {
                     throw new SshException(SshFailureReason.ConnectFailed, "The SOCKS 5 proxy refused the user name or password.");
