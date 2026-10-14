@@ -85,7 +85,8 @@ public class SshObservabilityTests
         await Assert.That(all).DoesNotContain("hunter2");
         await Assert.That(all).DoesNotContain("top-secret");
         await Assert.That(all).DoesNotContain("deploy");
-        await Assert.That(logger.Entries.Any(e => e.Level >= LogLevel.Warning)).IsFalse();
+        // Listed, not just counted, so a failure says which warning appeared.
+        await Assert.That(logger.Entries.Where(e => e.Level >= LogLevel.Warning).Select(e => $"{e.Level}: {e.Message}").ToList()).IsEmpty();
     }
 
     [Test]
