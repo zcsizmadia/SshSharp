@@ -41,6 +41,12 @@ public sealed partial class SshClient : IAsyncDisposable
     public SshHostKey HostKey { get; }
 
     /// <summary>
+    /// The algorithms in use: key exchange (and whether it is post-quantum, <see cref="SshNegotiatedAlgorithms.IsPostQuantum"/>), host key
+    /// signature, ciphers and MACs. A key re-exchange can change them; each read returns the current ones.
+    /// </summary>
+    public SshNegotiatedAlgorithms Algorithms => new(_connection.Algorithms);
+
+    /// <summary>
     /// Whether the connection is still up: false once the server disconnected, the connection failed (including a missed keep-alive,
     /// see <see cref="SshClientOptions.KeepAliveInterval"/>), or the client was disposed.
     /// </summary>
@@ -356,11 +362,18 @@ public sealed partial class SshClient : IAsyncDisposable
             }
 
             SshTelemetry.Connections.Add(1);
-            SshTelemetry.ConnectDuration.Record(Stopwatch.GetElapsedTime(started).TotalSeconds);
+            var postQuantum = SshAlgorithms.IsPostQuantum(algorithms.Kex);
+            SshTelemetry.ConnectDuration.Record(Stopwatch.GetElapsedTime(started).TotalSeconds, new KeyValuePair<string, object?>("ssh.kex.post_quantum", postQuantum));
             activity?.SetTag("ssh.kex", algorithms.Kex);
+            activity?.SetTag("ssh.kex.post_quantum", postQuantum);
             activity?.SetTag("ssh.cipher", algorithms.CipherClientToServer);
             activity?.SetTag("ssh.host_key.type", hostKey.KeyType);
             SshLog.Connected(logger, algorithms.Kex, algorithms.CipherClientToServer, hostKey.KeyType, hostKey.Fingerprint);
+            if (!postQuantum)
+            {
+                // Like OpenSSH 10.1's WarnWeakCrypto, but at Information level: common servers (OpenSSH before 9.9) cannot do better yet.
+                SshLog.KeyExchangeNotPostQuantum(logger, algorithms.Kex);
+            }
 
             return new SshClient(
                 connection, options, stream, leaveOpen, owner, transport.ServerIdentification!.Line,

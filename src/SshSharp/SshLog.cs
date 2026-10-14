@@ -91,4 +91,7 @@ internal static partial class SshLog
 
     [LoggerMessage(EventId = 29, Level = LogLevel.Warning, Message = "{Keyword} {Spec} was skipped: {Reason}")]
     public static partial void ConfiguredForwardingSkipped(ILogger logger, string keyword, string spec, string reason);
+
+    [LoggerMessage(EventId = 30, Level = LogLevel.Information, Message = "The key exchange {Kex} is not post-quantum: traffic recorded now could be decrypted by a future quantum computer. The server needs mlkem768x25519-sha256 (OpenSSH 9.9 or later)")]
+    public static partial void KeyExchangeNotPostQuantum(ILogger logger, string kex);
 }

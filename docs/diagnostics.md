@@ -71,13 +71,13 @@ builder.Services.AddOpenTelemetry()
 
 | Activity | Tags |
 |---|---|
-| `SshSharp.Connect` | `ssh.kex`, `ssh.cipher`, `ssh.host_key.type` |
+| `SshSharp.Connect` | `ssh.kex`, `ssh.kex.post_quantum`, `ssh.cipher`, `ssh.host_key.type` |
 | `SshSharp.Command` | `ssh.command.exit_status` |
 
 | Instrument | Unit | Description |
 |---|---|---|
 | `sshsharp.connections` | `{connection}` | Open connections |
-| `sshsharp.connect.duration` | `s` | Time to connect, exchange keys and authenticate |
+| `sshsharp.connect.duration` | `s` | Time to connect, exchange keys and authenticate; tagged `ssh.kex.post_quantum` |
 | `sshsharp.bytes.sent` / `sshsharp.bytes.received` | `By` | Message payload bytes |
 | `sshsharp.key_exchanges` | `{exchange}` | Completed key exchanges |
 | `sshsharp.channels` | `{channel}` | Open channels |
