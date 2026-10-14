@@ -214,6 +214,39 @@ public class SshSignatureTests
     }
 
     [Test]
+    [Arguments("namespaces=\"git\",namespaces=\"file\"")]
+    [Arguments("valid-after=\"20260101\",valid-after=\"20270101\"")]
+    [Arguments("valid-before=\"20260101\",VALID-BEFORE=\"20270101\"")]
+    [Arguments("cert-authority,cert-authority")]
+    public async Task ARepeatedOption_RejectsTheFile_AsSshKeygenDoes(string options)
+    {
+        using var key = Generate(SshKeyType.Ed25519, 0);
+        await Assert.That(() => SshAllowedSigners.Parse($"# first\nalice@example.com {options} {KeyText(key)}"))
+            .Throws<FormatException>().WithMessageContaining("line 2");
+    }
+
+    [Test]
+    public async Task FindPrincipals_AnswersFromTheFirstMatchingLine_AsSshKeygenDoes()
+    {
+        using var key = Generate(SshKeyType.Ed25519, 0);
+        using var other = Generate(SshKeyType.Ed25519, 0);
+        var signers = SshAllowedSigners.Parse($"""
+            nobody@example.com {KeyText(other)}
+            old@example.com valid-before="20200101Z" {KeyText(key)}
+            first@example.com,first-alias@example.com {KeyText(key)}
+            second@example.com {KeyText(key)}
+            """);
+        var signature = await SshSignature.SignAsync(key, Message, "git");
+
+        // The expired line is skipped; the first line that matches answers, the later one is not merged in.
+        await Assert.That(signers.FindPrincipals(signature)).IsEquivalentTo(["first@example.com", "first-alias@example.com"]);
+        await Assert.That(signers.FindPrincipals(signature, new DateTimeOffset(2019, 6, 1, 0, 0, 0, TimeSpan.Zero))).IsEquivalentTo(["old@example.com"]);
+
+        // Verification still accepts every line's principals.
+        await Assert.That(signers.Verify(signature, "second@example.com", Message, "git")).IsTrue();
+    }
+
+    [Test]
     public async Task MalformedAllowedSigners_AreRejected_WithTheLineNumber()
     {
         using var key = Generate(SshKeyType.Ed25519, 0);

@@ -39,6 +39,8 @@ jobs:
             mutate: -m "**/Crypto/Argon2.cs" -m "**/Crypto/BcryptPbkdf.cs" -m "**/Crypto/Blake2b.cs"
           - scope: ecdh-dh
             mutate: -m "**/Crypto/NistCurve.cs" -m "**/Crypto/ModpGroup.cs"
+          - scope: sntrup761
+            mutate: -m "**/Crypto/Sntrup761.cs"
           - scope: packet-codec
             mutate: -m "**/Protocol/PacketCodec.cs"
           - scope: config-parser

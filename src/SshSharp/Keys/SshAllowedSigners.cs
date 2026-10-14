@@ -12,7 +12,8 @@ namespace SshSharp;
 /// Each line is <c>principals [options] keytype base64 [comment]</c>. The principals are a comma-separated list of patterns
 /// (<c>*</c>, <c>?</c>, <c>!</c> to exclude; case-sensitive). The options are <c>cert-authority</c> (the key is a certificate authority, and
 /// a signature by any user certificate it issued for the principal is accepted), <c>namespaces="git,file"</c> (patterns, too), and
-/// <c>valid-after</c> / <c>valid-before</c> (<c>YYYYMMDD[HHMM[SS]]</c>, with a trailing <c>Z</c> for UTC, otherwise local time).
+/// <c>valid-after</c> / <c>valid-before</c> (<c>YYYYMMDD[HHMM[SS]]</c>, with a trailing <c>Z</c> for UTC, otherwise local time). An
+/// unknown or repeated option rejects the file, as in ssh-keygen.
 /// </remarks>
 public sealed class SshAllowedSigners
 {
@@ -94,14 +95,14 @@ public sealed class SshAllowedSigners
 
     /// <summary>
     /// The principals this file allows the signature's key to sign as, at <paramref name="time"/> (now by default), as
-    /// <c>ssh-keygen -Y find-principals</c> prints them: a line's principal patterns for a plain key, and for a certificate, its principals
-    /// that a <c>cert-authority</c> line for its authority allows. It does not check the signature itself.
+    /// <c>ssh-keygen -Y find-principals</c> prints them. Like ssh-keygen, it answers from the first line that matches: a plain key's
+    /// line gives its principal patterns; for a certificate, a <c>cert-authority</c> line for its authority gives the certificate's
+    /// principals that the line allows. Empty when no line matches. It does not check the signature itself.
     /// </summary>
     public IReadOnlyList<string> FindPrincipals(SshSignature signature, DateTimeOffset? time = null)
     {
         ArgumentNullException.ThrowIfNull(signature);
         var at = time ?? DateTimeOffset.UtcNow;
-        var found = new List<string>();
         foreach (var entry in _entries)
         {
             if (!entry.IsValidAt(at))
@@ -109,20 +110,20 @@ public sealed class SshAllowedSigners
                 continue;
             }
 
-            if (entry.CertificateAuthority)
+            List<string> found = entry.CertificateAuthority
+                ? UsableCertificate(signature, entry, at) is { } certificate
+                    ? [.. certificate.Principals.Where(p => Glob.IsMatchList(entry.Principals, p, ignoreCase: false)).Distinct(StringComparer.Ordinal)]
+                    : []
+                : signature.PublicKey.Span.SequenceEqual(entry.Key)
+                    ? [.. entry.Principals.Split(',', StringSplitOptions.RemoveEmptyEntries)]
+                    : [];
+            if (found.Count > 0)
             {
-                if (UsableCertificate(signature, entry, at) is { } certificate)
-                {
-                    found.AddRange(certificate.Principals.Where(p => Glob.IsMatchList(entry.Principals, p, ignoreCase: false)));
-                }
-            }
-            else if (signature.PublicKey.Span.SequenceEqual(entry.Key))
-            {
-                found.AddRange(entry.Principals.Split(',', StringSplitOptions.RemoveEmptyEntries));
+                return found;
             }
         }
 
-        return found.Distinct(StringComparer.Ordinal).ToList();
+        return [];
     }
 
     private bool IsAllowed(SshSignature signature, string principal, string @namespace, DateTimeOffset at)
@@ -171,11 +172,18 @@ public sealed class SshAllowedSigners
         DateTimeOffset? validAfter = null, validBefore = null;
         if (!LooksLikeKeyType(field))
         {
+            var seen = new HashSet<string>(StringComparer.Ordinal);
             foreach (var option in SplitOptions(field))
             {
                 var equals = option.IndexOf('=');
                 var name = (equals < 0 ? option : option[..equals]).ToLowerInvariant();
                 var value = equals < 0 ? null : Unquote(option[(equals + 1)..]);
+                if (!seen.Add(name))
+                {
+                    // As ssh-keygen: a repeated option ("multiple namespaces clauses") rejects the file rather than one value winning.
+                    throw new FormatException($"the option '{name}' appears more than once.");
+                }
+
                 switch (name)
                 {
                     case "cert-authority" when value is null:
