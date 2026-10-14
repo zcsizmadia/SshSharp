@@ -577,3 +577,267 @@ SshSharp.SshNegotiatedAlgorithms.MacClientToServer.get -> string!
 SshSharp.SshNegotiatedAlgorithms.MacServerToClient.get -> string!
 SshSharp.SshNegotiatedAlgorithms.StrictKeyExchange.get -> bool
 SshSharp.SshAgent.QueryExtensionsAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<string!>!>!
+SshSharp.SshClientOptions.MaxForwardedConnections.get -> int
+SshSharp.SshClientOptions.MaxForwardedConnections.init -> void
+SshSharp.SshHostKeyScanOptions.Timeout.get -> System.TimeSpan
+SshSharp.SshHostKeyScanOptions.Timeout.init -> void
+[SSHSHARP001]const SshSharp.Sftp.SftpClient.ExperimentalId = "SSHSHARP001" -> string!
+[SSHSHARP001]override SshSharp.Sftp.SftpFileInfo.Equals(object? obj) -> bool
+[SSHSHARP001]override SshSharp.Sftp.SftpFileInfo.GetHashCode() -> int
+[SSHSHARP001]override SshSharp.Sftp.SftpFileInfo.ToString() -> string!
+[SSHSHARP001]override SshSharp.Sftp.SftpFileSystemInfo.Equals(object? obj) -> bool
+[SSHSHARP001]override SshSharp.Sftp.SftpFileSystemInfo.GetHashCode() -> int
+[SSHSHARP001]override SshSharp.Sftp.SftpFileSystemInfo.ToString() -> string!
+[SSHSHARP001]override SshSharp.Sftp.SftpLimits.Equals(object? obj) -> bool
+[SSHSHARP001]override SshSharp.Sftp.SftpLimits.GetHashCode() -> int
+[SSHSHARP001]override SshSharp.Sftp.SftpLimits.ToString() -> string!
+[SSHSHARP001]override SshSharp.Sftp.SftpTransferSummary.Equals(object? obj) -> bool
+[SSHSHARP001]override SshSharp.Sftp.SftpTransferSummary.GetHashCode() -> int
+[SSHSHARP001]override SshSharp.Sftp.SftpTransferSummary.ToString() -> string!
+[SSHSHARP001]SshSharp.Sftp.SftpClient
+[SSHSHARP001]SshSharp.Sftp.SftpClient.CopyFileAsync(string! sourcePath, string! destinationPath, bool overwrite = false, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+[SSHSHARP001]SshSharp.Sftp.SftpClient.CreateDirectoryAsync(string! path, System.IO.UnixFileMode? permissions = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+[SSHSHARP001]SshSharp.Sftp.SftpClient.CreateHardLinkAsync(string! linkPath, string! existingPath, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+[SSHSHARP001]SshSharp.Sftp.SftpClient.CreateSymbolicLinkAsync(string! linkPath, string! targetPath, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+[SSHSHARP001]SshSharp.Sftp.SftpClient.DeleteDirectoryAsync(string! path, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+[SSHSHARP001]SshSharp.Sftp.SftpClient.DeleteFileAsync(string! path, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+[SSHSHARP001]SshSharp.Sftp.SftpClient.DisposeAsync() -> System.Threading.Tasks.ValueTask
+[SSHSHARP001]SshSharp.Sftp.SftpClient.DownloadAsync(string! remotePath, System.IO.Stream! destination, SshSharp.Sftp.SftpTransferOptions? options = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<long>!
+[SSHSHARP001]SshSharp.Sftp.SftpClient.DownloadDirectoryAsync(string! remoteDirectory, string! localDirectory, SshSharp.Sftp.SftpTransferOptions? options = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SshSharp.Sftp.SftpTransferSummary!>!
+[SSHSHARP001]SshSharp.Sftp.SftpClient.DownloadFileAsync(string! remotePath, string! localPath, SshSharp.Sftp.SftpTransferOptions? options = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<long>!
+[SSHSHARP001]SshSharp.Sftp.SftpClient.ExistsAsync(string! path, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
+[SSHSHARP001]SshSharp.Sftp.SftpClient.Extensions.get -> System.Collections.Generic.IReadOnlyDictionary<string!, string!>!
+[SSHSHARP001]SshSharp.Sftp.SftpClient.GetAttributesAsync(string! path, bool followSymbolicLinks = true, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SshSharp.Sftp.SftpFileAttributes!>!
+[SSHSHARP001]SshSharp.Sftp.SftpClient.GetFileSystemInfoAsync(string! path, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SshSharp.Sftp.SftpFileSystemInfo!>!
+[SSHSHARP001]SshSharp.Sftp.SftpClient.GetFullPathAsync(string! path, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<string!>!
+[SSHSHARP001]SshSharp.Sftp.SftpClient.GetHomeDirectoryAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<string!>!
+[SSHSHARP001]SshSharp.Sftp.SftpClient.Limits.get -> SshSharp.Sftp.SftpLimits!
+[SSHSHARP001]SshSharp.Sftp.SftpClient.ListDirectoryAsync(string! path, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IAsyncEnumerable<SshSharp.Sftp.SftpFileInfo!>!
+[SSHSHARP001]SshSharp.Sftp.SftpClient.OpenAsync(string! path, System.IO.FileMode mode, System.IO.FileAccess access, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.IO.Stream!>!
+[SSHSHARP001]SshSharp.Sftp.SftpClient.OpenReadAsync(string! path, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.IO.Stream!>!
+[SSHSHARP001]SshSharp.Sftp.SftpClient.OpenWriteAsync(string! path, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.IO.Stream!>!
+[SSHSHARP001]SshSharp.Sftp.SftpClient.ProtocolVersion.get -> int
+[SSHSHARP001]SshSharp.Sftp.SftpClient.ReadSymbolicLinkAsync(string! path, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<string!>!
+[SSHSHARP001]SshSharp.Sftp.SftpClient.RenameAsync(string! oldPath, string! newPath, bool overwrite = false, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+[SSHSHARP001]SshSharp.Sftp.SftpClient.SetAttributesAsync(string! path, SshSharp.Sftp.SftpFileAttributes! attributes, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+[SSHSHARP001]SshSharp.Sftp.SftpClient.UploadAsync(System.IO.Stream! source, string! remotePath, SshSharp.Sftp.SftpTransferOptions? options = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<long>!
+[SSHSHARP001]SshSharp.Sftp.SftpClient.UploadDirectoryAsync(string! localDirectory, string! remoteDirectory, SshSharp.Sftp.SftpTransferOptions? options = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SshSharp.Sftp.SftpTransferSummary!>!
+[SSHSHARP001]SshSharp.Sftp.SftpClient.UploadFileAsync(string! localPath, string! remotePath, SshSharp.Sftp.SftpTransferOptions? options = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<long>!
+[SSHSHARP001]SshSharp.Sftp.SftpException
+[SSHSHARP001]SshSharp.Sftp.SftpException.Path.get -> string?
+[SSHSHARP001]SshSharp.Sftp.SftpException.SftpException(SshSharp.Sftp.SftpStatusCode status, string! message, string? path = null) -> void
+[SSHSHARP001]SshSharp.Sftp.SftpException.Status.get -> SshSharp.Sftp.SftpStatusCode
+[SSHSHARP001]SshSharp.Sftp.SftpFileAttributes
+[SSHSHARP001]SshSharp.Sftp.SftpFileAttributes.Extended.get -> System.Collections.Generic.IReadOnlyDictionary<string!, byte[]!>!
+[SSHSHARP001]SshSharp.Sftp.SftpFileAttributes.Extended.init -> void
+[SSHSHARP001]SshSharp.Sftp.SftpFileAttributes.FileType.get -> SshSharp.Sftp.SftpFileType
+[SSHSHARP001]SshSharp.Sftp.SftpFileAttributes.FileType.init -> void
+[SSHSHARP001]SshSharp.Sftp.SftpFileAttributes.GroupId.get -> uint?
+[SSHSHARP001]SshSharp.Sftp.SftpFileAttributes.GroupId.init -> void
+[SSHSHARP001]SshSharp.Sftp.SftpFileAttributes.IsDirectory.get -> bool
+[SSHSHARP001]SshSharp.Sftp.SftpFileAttributes.IsRegularFile.get -> bool
+[SSHSHARP001]SshSharp.Sftp.SftpFileAttributes.IsSymbolicLink.get -> bool
+[SSHSHARP001]SshSharp.Sftp.SftpFileAttributes.LastAccessTime.get -> System.DateTimeOffset?
+[SSHSHARP001]SshSharp.Sftp.SftpFileAttributes.LastAccessTime.init -> void
+[SSHSHARP001]SshSharp.Sftp.SftpFileAttributes.LastWriteTime.get -> System.DateTimeOffset?
+[SSHSHARP001]SshSharp.Sftp.SftpFileAttributes.LastWriteTime.init -> void
+[SSHSHARP001]SshSharp.Sftp.SftpFileAttributes.Permissions.get -> System.IO.UnixFileMode?
+[SSHSHARP001]SshSharp.Sftp.SftpFileAttributes.Permissions.init -> void
+[SSHSHARP001]SshSharp.Sftp.SftpFileAttributes.SftpFileAttributes() -> void
+[SSHSHARP001]SshSharp.Sftp.SftpFileAttributes.Size.get -> long?
+[SSHSHARP001]SshSharp.Sftp.SftpFileAttributes.Size.init -> void
+[SSHSHARP001]SshSharp.Sftp.SftpFileAttributes.UserId.get -> uint?
+[SSHSHARP001]SshSharp.Sftp.SftpFileAttributes.UserId.init -> void
+[SSHSHARP001]SshSharp.Sftp.SftpFileInfo
+[SSHSHARP001]SshSharp.Sftp.SftpFileInfo.<Clone>$() -> SshSharp.Sftp.SftpFileInfo!
+[SSHSHARP001]SshSharp.Sftp.SftpFileInfo.Attributes.get -> SshSharp.Sftp.SftpFileAttributes!
+[SSHSHARP001]SshSharp.Sftp.SftpFileInfo.Attributes.init -> void
+[SSHSHARP001]SshSharp.Sftp.SftpFileInfo.Deconstruct(out string! Name, out string! FullPath, out string! LongName, out SshSharp.Sftp.SftpFileAttributes! Attributes) -> void
+[SSHSHARP001]SshSharp.Sftp.SftpFileInfo.Equals(SshSharp.Sftp.SftpFileInfo? other) -> bool
+[SSHSHARP001]SshSharp.Sftp.SftpFileInfo.FullPath.get -> string!
+[SSHSHARP001]SshSharp.Sftp.SftpFileInfo.FullPath.init -> void
+[SSHSHARP001]SshSharp.Sftp.SftpFileInfo.LongName.get -> string!
+[SSHSHARP001]SshSharp.Sftp.SftpFileInfo.LongName.init -> void
+[SSHSHARP001]SshSharp.Sftp.SftpFileInfo.Name.get -> string!
+[SSHSHARP001]SshSharp.Sftp.SftpFileInfo.Name.init -> void
+[SSHSHARP001]SshSharp.Sftp.SftpFileInfo.SftpFileInfo(string! Name, string! FullPath, string! LongName, SshSharp.Sftp.SftpFileAttributes! Attributes) -> void
+[SSHSHARP001]SshSharp.Sftp.SftpFileSystemInfo
+[SSHSHARP001]SshSharp.Sftp.SftpFileSystemInfo.<Clone>$() -> SshSharp.Sftp.SftpFileSystemInfo!
+[SSHSHARP001]SshSharp.Sftp.SftpFileSystemInfo.AvailableBytes.get -> long
+[SSHSHARP001]SshSharp.Sftp.SftpFileSystemInfo.AvailableBytes.init -> void
+[SSHSHARP001]SshSharp.Sftp.SftpFileSystemInfo.AvailableFiles.get -> long
+[SSHSHARP001]SshSharp.Sftp.SftpFileSystemInfo.AvailableFiles.init -> void
+[SSHSHARP001]SshSharp.Sftp.SftpFileSystemInfo.Deconstruct(out long TotalBytes, out long FreeBytes, out long AvailableBytes, out long TotalFiles, out long FreeFiles, out long AvailableFiles, out bool IsReadOnly, out int MaxNameLength) -> void
+[SSHSHARP001]SshSharp.Sftp.SftpFileSystemInfo.Equals(SshSharp.Sftp.SftpFileSystemInfo? other) -> bool
+[SSHSHARP001]SshSharp.Sftp.SftpFileSystemInfo.FreeBytes.get -> long
+[SSHSHARP001]SshSharp.Sftp.SftpFileSystemInfo.FreeBytes.init -> void
+[SSHSHARP001]SshSharp.Sftp.SftpFileSystemInfo.FreeFiles.get -> long
+[SSHSHARP001]SshSharp.Sftp.SftpFileSystemInfo.FreeFiles.init -> void
+[SSHSHARP001]SshSharp.Sftp.SftpFileSystemInfo.IsReadOnly.get -> bool
+[SSHSHARP001]SshSharp.Sftp.SftpFileSystemInfo.IsReadOnly.init -> void
+[SSHSHARP001]SshSharp.Sftp.SftpFileSystemInfo.MaxNameLength.get -> int
+[SSHSHARP001]SshSharp.Sftp.SftpFileSystemInfo.MaxNameLength.init -> void
+[SSHSHARP001]SshSharp.Sftp.SftpFileSystemInfo.SftpFileSystemInfo(long TotalBytes, long FreeBytes, long AvailableBytes, long TotalFiles, long FreeFiles, long AvailableFiles, bool IsReadOnly, int MaxNameLength) -> void
+[SSHSHARP001]SshSharp.Sftp.SftpFileSystemInfo.TotalBytes.get -> long
+[SSHSHARP001]SshSharp.Sftp.SftpFileSystemInfo.TotalBytes.init -> void
+[SSHSHARP001]SshSharp.Sftp.SftpFileSystemInfo.TotalFiles.get -> long
+[SSHSHARP001]SshSharp.Sftp.SftpFileSystemInfo.TotalFiles.init -> void
+[SSHSHARP001]SshSharp.Sftp.SftpFileType
+[SSHSHARP001]SshSharp.Sftp.SftpFileType.Directory = 2 -> SshSharp.Sftp.SftpFileType
+[SSHSHARP001]SshSharp.Sftp.SftpFileType.RegularFile = 1 -> SshSharp.Sftp.SftpFileType
+[SSHSHARP001]SshSharp.Sftp.SftpFileType.Special = 4 -> SshSharp.Sftp.SftpFileType
+[SSHSHARP001]SshSharp.Sftp.SftpFileType.SymbolicLink = 3 -> SshSharp.Sftp.SftpFileType
+[SSHSHARP001]SshSharp.Sftp.SftpFileType.Unknown = 0 -> SshSharp.Sftp.SftpFileType
+[SSHSHARP001]SshSharp.Sftp.SftpLimits
+[SSHSHARP001]SshSharp.Sftp.SftpLimits.<Clone>$() -> SshSharp.Sftp.SftpLimits!
+[SSHSHARP001]SshSharp.Sftp.SftpLimits.Deconstruct(out int MaxReadLength, out int MaxWriteLength, out int? MaxOpenHandles) -> void
+[SSHSHARP001]SshSharp.Sftp.SftpLimits.Equals(SshSharp.Sftp.SftpLimits? other) -> bool
+[SSHSHARP001]SshSharp.Sftp.SftpLimits.MaxOpenHandles.get -> int?
+[SSHSHARP001]SshSharp.Sftp.SftpLimits.MaxOpenHandles.init -> void
+[SSHSHARP001]SshSharp.Sftp.SftpLimits.MaxReadLength.get -> int
+[SSHSHARP001]SshSharp.Sftp.SftpLimits.MaxReadLength.init -> void
+[SSHSHARP001]SshSharp.Sftp.SftpLimits.MaxWriteLength.get -> int
+[SSHSHARP001]SshSharp.Sftp.SftpLimits.MaxWriteLength.init -> void
+[SSHSHARP001]SshSharp.Sftp.SftpLimits.SftpLimits(int MaxReadLength, int MaxWriteLength, int? MaxOpenHandles) -> void
+[SSHSHARP001]SshSharp.Sftp.SftpStatusCode
+[SSHSHARP001]SshSharp.Sftp.SftpStatusCode.BadMessage = 5 -> SshSharp.Sftp.SftpStatusCode
+[SSHSHARP001]SshSharp.Sftp.SftpStatusCode.ConnectionLost = 7 -> SshSharp.Sftp.SftpStatusCode
+[SSHSHARP001]SshSharp.Sftp.SftpStatusCode.EndOfFile = 1 -> SshSharp.Sftp.SftpStatusCode
+[SSHSHARP001]SshSharp.Sftp.SftpStatusCode.Failure = 4 -> SshSharp.Sftp.SftpStatusCode
+[SSHSHARP001]SshSharp.Sftp.SftpStatusCode.NoConnection = 6 -> SshSharp.Sftp.SftpStatusCode
+[SSHSHARP001]SshSharp.Sftp.SftpStatusCode.NoSuchFile = 2 -> SshSharp.Sftp.SftpStatusCode
+[SSHSHARP001]SshSharp.Sftp.SftpStatusCode.Ok = 0 -> SshSharp.Sftp.SftpStatusCode
+[SSHSHARP001]SshSharp.Sftp.SftpStatusCode.OperationUnsupported = 8 -> SshSharp.Sftp.SftpStatusCode
+[SSHSHARP001]SshSharp.Sftp.SftpStatusCode.PermissionDenied = 3 -> SshSharp.Sftp.SftpStatusCode
+[SSHSHARP001]SshSharp.Sftp.SftpTransferOptions
+[SSHSHARP001]SshSharp.Sftp.SftpTransferOptions.MaxRequestsInFlight.get -> int
+[SSHSHARP001]SshSharp.Sftp.SftpTransferOptions.MaxRequestsInFlight.init -> void
+[SSHSHARP001]SshSharp.Sftp.SftpTransferOptions.Overwrite.get -> bool
+[SSHSHARP001]SshSharp.Sftp.SftpTransferOptions.Overwrite.init -> void
+[SSHSHARP001]SshSharp.Sftp.SftpTransferOptions.PreserveTimes.get -> bool
+[SSHSHARP001]SshSharp.Sftp.SftpTransferOptions.PreserveTimes.init -> void
+[SSHSHARP001]SshSharp.Sftp.SftpTransferOptions.Progress.get -> System.IProgress<long>?
+[SSHSHARP001]SshSharp.Sftp.SftpTransferOptions.Progress.init -> void
+[SSHSHARP001]SshSharp.Sftp.SftpTransferOptions.Resume.get -> bool
+[SSHSHARP001]SshSharp.Sftp.SftpTransferOptions.Resume.init -> void
+[SSHSHARP001]SshSharp.Sftp.SftpTransferOptions.SftpTransferOptions() -> void
+[SSHSHARP001]SshSharp.Sftp.SftpTransferSummary
+[SSHSHARP001]SshSharp.Sftp.SftpTransferSummary.<Clone>$() -> SshSharp.Sftp.SftpTransferSummary!
+[SSHSHARP001]SshSharp.Sftp.SftpTransferSummary.Bytes.get -> long
+[SSHSHARP001]SshSharp.Sftp.SftpTransferSummary.Bytes.init -> void
+[SSHSHARP001]SshSharp.Sftp.SftpTransferSummary.Deconstruct(out int Files, out int Directories, out long Bytes, out int Skipped) -> void
+[SSHSHARP001]SshSharp.Sftp.SftpTransferSummary.Directories.get -> int
+[SSHSHARP001]SshSharp.Sftp.SftpTransferSummary.Directories.init -> void
+[SSHSHARP001]SshSharp.Sftp.SftpTransferSummary.Equals(SshSharp.Sftp.SftpTransferSummary? other) -> bool
+[SSHSHARP001]SshSharp.Sftp.SftpTransferSummary.Files.get -> int
+[SSHSHARP001]SshSharp.Sftp.SftpTransferSummary.Files.init -> void
+[SSHSHARP001]SshSharp.Sftp.SftpTransferSummary.SftpTransferSummary(int Files, int Directories, long Bytes, int Skipped) -> void
+[SSHSHARP001]SshSharp.Sftp.SftpTransferSummary.Skipped.get -> int
+[SSHSHARP001]SshSharp.Sftp.SftpTransferSummary.Skipped.init -> void
+[SSHSHARP001]SshSharp.Sftp.SshSftpExtensions
+[SSHSHARP001]static SshSharp.Sftp.SftpFileInfo.operator !=(SshSharp.Sftp.SftpFileInfo? left, SshSharp.Sftp.SftpFileInfo? right) -> bool
+[SSHSHARP001]static SshSharp.Sftp.SftpFileInfo.operator ==(SshSharp.Sftp.SftpFileInfo? left, SshSharp.Sftp.SftpFileInfo? right) -> bool
+[SSHSHARP001]static SshSharp.Sftp.SftpFileSystemInfo.operator !=(SshSharp.Sftp.SftpFileSystemInfo? left, SshSharp.Sftp.SftpFileSystemInfo? right) -> bool
+[SSHSHARP001]static SshSharp.Sftp.SftpFileSystemInfo.operator ==(SshSharp.Sftp.SftpFileSystemInfo? left, SshSharp.Sftp.SftpFileSystemInfo? right) -> bool
+[SSHSHARP001]static SshSharp.Sftp.SftpLimits.operator !=(SshSharp.Sftp.SftpLimits? left, SshSharp.Sftp.SftpLimits? right) -> bool
+[SSHSHARP001]static SshSharp.Sftp.SftpLimits.operator ==(SshSharp.Sftp.SftpLimits? left, SshSharp.Sftp.SftpLimits? right) -> bool
+[SSHSHARP001]static SshSharp.Sftp.SftpTransferSummary.operator !=(SshSharp.Sftp.SftpTransferSummary? left, SshSharp.Sftp.SftpTransferSummary? right) -> bool
+[SSHSHARP001]static SshSharp.Sftp.SftpTransferSummary.operator ==(SshSharp.Sftp.SftpTransferSummary? left, SshSharp.Sftp.SftpTransferSummary? right) -> bool
+[SSHSHARP001]static SshSharp.Sftp.SshSftpExtensions.OpenSftpAsync(this SshSharp.SshClient! client, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SshSharp.Sftp.SftpClient!>!
+override SshSharp.SshProxy.ToString() -> string!
+SshSharp.Config.SshHostConfig.BindAddress.get -> string?
+SshSharp.Config.SshHostConfig.BindAddress.init -> void
+SshSharp.Config.SshHostConfig.BindInterface.get -> string?
+SshSharp.Config.SshHostConfig.BindInterface.init -> void
+SshSharp.SshClient.CreateHttpConnectCallback() -> System.Func<System.Net.Http.SocketsHttpConnectionContext!, System.Threading.CancellationToken, System.Threading.Tasks.ValueTask<System.IO.Stream!>>!
+SshSharp.SshClient.ForwardRemoteDynamicPortAsync(string! bindAddress, int remotePort, System.Func<string!, int, bool>? allowDestination = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SshSharp.SshRemotePortForwarder!>!
+SshSharp.SshClient.ForwardRemoteUnixSocketAsync(string! remoteSocketPath, string! localHost, int localPort, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SshSharp.SshRemoteSocketForwarder!>!
+SshSharp.SshClient.ForwardRemoteUnixSocketAsync(string! remoteSocketPath, string! localSocketPath, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SshSharp.SshRemoteSocketForwarder!>!
+SshSharp.SshClient.RemoteSocketForwardings.get -> System.Collections.Generic.IReadOnlyList<SshSharp.SshRemoteSocketForwarder!>!
+SshSharp.SshClientOptions.LocalEndPoint.get -> System.Net.IPEndPoint?
+SshSharp.SshClientOptions.LocalEndPoint.init -> void
+SshSharp.SshClientOptions.Proxy.get -> SshSharp.SshProxy?
+SshSharp.SshClientOptions.Proxy.init -> void
+SshSharp.SshConfigConnectOptions.Proxy.get -> SshSharp.SshProxy?
+SshSharp.SshConfigConnectOptions.Proxy.init -> void
+SshSharp.SshExpect
+SshSharp.SshExpect.Encoding.get -> System.Text.Encoding!
+SshSharp.SshExpect.ExpectAsync(string! text, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SshSharp.SshExpectMatch!>!
+SshSharp.SshExpect.ExpectAsync(System.Text.RegularExpressions.Regex! pattern, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SshSharp.SshExpectMatch!>!
+SshSharp.SshExpect.MaxBufferLength.get -> int
+SshSharp.SshExpect.MaxBufferLength.init -> void
+SshSharp.SshExpect.NewLine.get -> string!
+SshSharp.SshExpect.NewLine.init -> void
+SshSharp.SshExpect.Pending.get -> string!
+SshSharp.SshExpect.SendAsync(string! text, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+SshSharp.SshExpect.SendLineAsync(string! line, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+SshSharp.SshExpect.SshExpect(SshSharp.SshSession! session, System.Text.Encoding? encoding = null) -> void
+SshSharp.SshExpect.SshExpect(System.IO.Stream! output, System.IO.Stream! input, System.Text.Encoding? encoding = null) -> void
+SshSharp.SshExpectMatch
+SshSharp.SshExpectMatch.Before.get -> string!
+SshSharp.SshExpectMatch.Match.get -> System.Text.RegularExpressions.Match?
+SshSharp.SshExpectMatch.Value.get -> string!
+SshSharp.SshFailureReason.SftpFailed = 11 -> SshSharp.SshFailureReason
+SshSharp.SshHostKeyScanOptions
+SshSharp.SshHostKeyScanOptions.FipsMode.get -> bool
+SshSharp.SshHostKeyScanOptions.FipsMode.init -> void
+SshSharp.SshHostKeyScanOptions.HostKeyAlgorithms.get -> System.Collections.Generic.IReadOnlyList<string!>?
+SshSharp.SshHostKeyScanOptions.HostKeyAlgorithms.init -> void
+SshSharp.SshHostKeyScanOptions.IncludeCertificates.get -> bool
+SshSharp.SshHostKeyScanOptions.IncludeCertificates.init -> void
+SshSharp.SshHostKeyScanOptions.Logger.get -> Microsoft.Extensions.Logging.ILogger?
+SshSharp.SshHostKeyScanOptions.Logger.init -> void
+SshSharp.SshHostKeyScanOptions.SshHostKeyScanOptions() -> void
+SshSharp.SshKeyType
+SshSharp.SshKeyType.EcdsaNistp256 = 1 -> SshSharp.SshKeyType
+SshSharp.SshKeyType.EcdsaNistp384 = 2 -> SshSharp.SshKeyType
+SshSharp.SshKeyType.EcdsaNistp521 = 3 -> SshSharp.SshKeyType
+SshSharp.SshKeyType.Ed25519 = 0 -> SshSharp.SshKeyType
+SshSharp.SshKeyType.Rsa = 4 -> SshSharp.SshKeyType
+SshSharp.SshPrivateKey.SaveAsync(string! path, string? passphrase = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+SshSharp.SshPrivateKey.ToOpenSshPrivateKey(string? passphrase = null, int kdfRounds = 16) -> string!
+SshSharp.SshProxy
+SshSharp.SshProxy.ConnectAsync(string! host, int port, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.IO.Stream!>!
+SshSharp.SshProxy.Credentials.get -> System.Net.NetworkCredential?
+SshSharp.SshProxy.Host.get -> string!
+SshSharp.SshProxy.Port.get -> int
+SshSharp.SshProxy.Type.get -> SshSharp.SshProxyType
+SshSharp.SshProxyType
+SshSharp.SshProxyType.Http = 0 -> SshSharp.SshProxyType
+SshSharp.SshProxyType.Socks4 = 1 -> SshSharp.SshProxyType
+SshSharp.SshProxyType.Socks5 = 2 -> SshSharp.SshProxyType
+SshSharp.SshRemotePortForwarder.IsDynamic.get -> bool
+SshSharp.SshRemoteSocketForwarder
+SshSharp.SshRemoteSocketForwarder.ActiveConnections.get -> int
+SshSharp.SshRemoteSocketForwarder.DisposeAsync() -> System.Threading.Tasks.ValueTask
+SshSharp.SshRemoteSocketForwarder.LocalHost.get -> string?
+SshSharp.SshRemoteSocketForwarder.LocalPort.get -> int
+SshSharp.SshRemoteSocketForwarder.LocalSocketPath.get -> string?
+SshSharp.SshRemoteSocketForwarder.SocketPath.get -> string!
+static SshSharp.SshClient.ScanHostKeysAsync(string! host, int port = 22, SshSharp.SshHostKeyScanOptions? options = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<SshSharp.SshHostKey!>!>!
+static SshSharp.SshClient.ScanHostKeysAsync(System.Func<System.Threading.CancellationToken, System.Threading.Tasks.ValueTask<System.IO.Stream!>>! connect, SshSharp.SshHostKeyScanOptions? options = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<SshSharp.SshHostKey!>!>!
+static SshSharp.SshPrivateKey.Generate(SshSharp.SshKeyType type, string? comment = null, int rsaBits = 3072) -> SshSharp.SshPrivateKey!
+static SshSharp.SshProxy.FromUri(System.Uri! uri) -> SshSharp.SshProxy!
+static SshSharp.SshProxy.Http(string! host, int port, System.Net.NetworkCredential? credentials = null) -> SshSharp.SshProxy!
+static SshSharp.SshProxy.Socks4(string! host, int port, string? userId = null) -> SshSharp.SshProxy!
+static SshSharp.SshProxy.Socks5(string! host, int port, System.Net.NetworkCredential? credentials = null) -> SshSharp.SshProxy!
+SshSharp.SshAllowedSigners
+SshSharp.SshAllowedSigners.Count.get -> int
+SshSharp.SshAllowedSigners.FindPrincipals(SshSharp.SshSignature! signature, System.DateTimeOffset? time = null) -> System.Collections.Generic.IReadOnlyList<string!>!
+SshSharp.SshAllowedSigners.Verify(SshSharp.SshSignature! signature, string! principal, System.ReadOnlySpan<byte> message, string! namespace, System.DateTimeOffset? time = null) -> bool
+SshSharp.SshAllowedSigners.VerifyAsync(SshSharp.SshSignature! signature, string! principal, System.IO.Stream! message, string! namespace, System.DateTimeOffset? time = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
+SshSharp.SshSignature
+SshSharp.SshSignature.Certificate.get -> SshSharp.SshCertificate?
+SshSharp.SshSignature.Fingerprint.get -> string!
+SshSharp.SshSignature.HashAlgorithm.get -> string!
+SshSharp.SshSignature.KeyType.get -> string!
+SshSharp.SshSignature.Namespace.get -> string!
+SshSharp.SshSignature.PublicKey.get -> System.ReadOnlyMemory<byte>
+SshSharp.SshSignature.Verify(System.ReadOnlySpan<byte> message, string! namespace) -> bool
+SshSharp.SshSignature.VerifyAsync(System.IO.Stream! message, string! namespace, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
+override SshSharp.SshSignature.ToString() -> string!
+static SshSharp.SshAllowedSigners.LoadFileAsync(string! path, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SshSharp.SshAllowedSigners!>!
+static SshSharp.SshAllowedSigners.Parse(string! text) -> SshSharp.SshAllowedSigners!
+static SshSharp.SshSignature.Parse(string! text) -> SshSharp.SshSignature!
+static SshSharp.SshSignature.SignAsync(SshSharp.SshPrivateKey! key, System.IO.Stream! message, string! namespace, string! hashAlgorithm = "sha512", System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SshSharp.SshSignature!>!
+static SshSharp.SshSignature.SignAsync(SshSharp.SshPrivateKey! key, System.ReadOnlyMemory<byte> message, string! namespace, string! hashAlgorithm = "sha512", System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SshSharp.SshSignature!>!
