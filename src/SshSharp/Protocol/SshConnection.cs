@@ -18,6 +18,7 @@ internal sealed class SshConnection : IAsyncDisposable
     private uint _nextChannelId;
     private Task? _loop;
     private Exception? _failure;
+    private bool _closing; // set when DisposeAsync starts: failures after that are the client's own doing
 
     private readonly ILogger _logger;
 
@@ -308,7 +309,9 @@ internal sealed class SshConnection : IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         // Everything still waiting (commands, channel opens, window waits) fails now with a clear reason, not with a disposed-object error.
+        // The loops see that failure too; it is the client closing, not the connection failing, so they must not log it as an error.
         SshLog.Disconnecting(_logger);
+        Volatile.Write(ref _closing, true);
         Fail(new SshException(SshFailureReason.ConnectionClosed, "The connection was closed by the client."));
         _outbox.Writer.TryComplete();
         await _stop.CancelAsync().ConfigureAwait(false);
@@ -375,6 +378,10 @@ internal sealed class SshConnection : IAsyncDisposable
         {
             // Shutting down.
         }
+        catch (Exception) when (Volatile.Read(ref _closing))
+        {
+            // The client is closing the connection: sends fail on purpose.
+        }
         catch (Exception ex)
         {
             // Window adjustments and CLOSE replies can no longer be sent, so every channel would stall: end the connection now.
@@ -415,7 +422,7 @@ internal sealed class SshConnection : IAsyncDisposable
         }
         catch (Exception ex)
         {
-            if (ex is not OperationCanceledException)
+            if (ex is not OperationCanceledException && !Volatile.Read(ref _closing))
             {
                 SshLog.ConnectionFailed(_logger, ex);
             }
