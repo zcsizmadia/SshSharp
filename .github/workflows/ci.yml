@@ -278,6 +278,79 @@ jobs:
         run: |
           docker logs server 2>&1 | grep -vE 'debug1: (enqueue packet|dequeue packet|ssh_set_newkeys)' | tail -n 300
 
+  # SFTP against servers other than a plain OpenSSH: atmoz/sftp (OpenSSH in SFTP-only, chrooted mode, a popular container image)
+  # and a server built on Go's pkg/sftp (the stack behind many Go-based SFTP products). Most SFTP bug reports against other .NET
+  # clients are about such servers. Only the SFTP interop tests run: these servers have no shell.
+  sftp-servers:
+    name: sftp (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: atmoz/sftp
+            kind: atmoz
+          - name: Go pkg/sftp
+            kind: pkgsftp
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+          dotnet-version: 8.0.x
+          cache: true
+          cache-dependency-path: '**/Directory.Packages.props'
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        if: matrix.kind == 'pkgsftp'
+        with:
+          go-version-file: tests/sftp-servers/pkgsftp/go.mod
+          cache-dependency-path: tests/sftp-servers/pkgsftp/go.sum
+      - name: Start the server
+        run: |
+          set -euo pipefail
+          PASSWORD="$(openssl rand -hex 16)"
+          echo "::add-mask::$PASSWORD"
+          if [ "${{ matrix.kind }}" = "atmoz" ]; then
+            # User tester, chrooted to its home; only the upload directory below it is writable.
+            docker run -d --name server -p 127.0.0.1:2201:22 \
+              atmoz/sftp:alpine@sha256:7e439fabeae536fa254340724c042e11999924d906417dbb5c73602ad518813f "tester:$PASSWORD:1001::upload"
+            SOFTWARE=OpenSSH
+            DIR=upload
+          else
+            (cd tests/sftp-servers/pkgsftp && go build -o "$RUNNER_TEMP/pkgsftp" .)
+            mkdir -p "$RUNNER_TEMP/sftp-root"
+            SFTP_USER=tester SFTP_PASSWORD="$PASSWORD" nohup "$RUNNER_TEMP/pkgsftp" -listen 127.0.0.1:2201 -root "$RUNNER_TEMP/sftp-root" \
+              > "$RUNNER_TEMP/server.log" 2>&1 &
+            SOFTWARE=pkg/sftp
+            DIR=
+          fi
+          for i in $(seq 1 30); do
+            if timeout 2 bash -c 'exec 3<>/dev/tcp/127.0.0.1/2201 && head -c 64 <&3' 2>/dev/null | grep -q '^SSH-'; then break; fi
+            sleep 1
+          done
+          BANNER="$(timeout 2 bash -c 'exec 3<>/dev/tcp/127.0.0.1/2201 && head -n 1 <&3' | tr -d '\r')"
+          echo "Server: $BANNER"
+          echo "Server: \`$BANNER\`" >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "SSHSHARP_TEST_SSHD=127.0.0.1:2201"
+            echo "SSHSHARP_TEST_USER=tester"
+            echo "SSHSHARP_TEST_PASSWORD=$PASSWORD"
+            echo "SSHSHARP_TEST_SERVER=$SOFTWARE"
+            echo "SSHSHARP_TEST_SFTP_ONLY=1"
+            echo "SSHSHARP_TEST_SFTP_DIR=$DIR"
+          } >> "$GITHUB_ENV"
+      - run: dotnet restore
+      - run: dotnet build -c Release --no-restore
+      - name: SFTP interop tests against the server
+        run: dotnet test --project tests/SshSharp.Tests -c Release -f net10.0 --no-build --treenode-filter "/*/*/SftpInteropTests/*"
+      - name: Server log
+        if: failure()
+        run: |
+          if [ "${{ matrix.kind }}" = "atmoz" ]; then docker logs server 2>&1 | tail -n 200; else tail -n 200 "$RUNNER_TEMP/server.log"; fi
+
   # Microsoft's OpenSSH for Windows as the server, with Git Bash as its default shell (the interop tests run POSIX commands).
   # Password-only, like the container matrix: the tests that need keys, certificates or an agent skip themselves.
   interop-windows:

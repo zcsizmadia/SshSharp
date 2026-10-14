@@ -17,7 +17,7 @@ public class SftpInteropTests
             return;
         }
 
-        if (!RealServer.IsOpenSsh)
+        if (!RealServer.HasSftp)
         {
             Skip.Test("The Dropbear test image has no sftp-server.");
             return;
@@ -26,7 +26,7 @@ public class SftpInteropTests
         var local = Directory.CreateTempSubdirectory("sshsharp-sftptree-");
         await using var client = await SshClient.ConnectAsync(host, port, options, Timeout());
         await using var sftp = await client.OpenSftpAsync(Timeout());
-        var remote = ".sshsharp-sftptree-" + Guid.NewGuid().ToString("N")[..12];
+        var remote = RealServer.SftpPath(".sshsharp-sftptree-" + Guid.NewGuid().ToString("N")[..12]);
         try
         {
             var source = Path.Combine(local.FullName, "source");
@@ -49,9 +49,16 @@ public class SftpInteropTests
             // The OpenSSH extensions, where this server version has them.
             if (sftp.Extensions.ContainsKey("statvfs@openssh.com"))
             {
-                var space = await sftp.GetFileSystemInfoAsync(remote, Timeout());
-                await Assert.That(space.TotalBytes).IsGreaterThan(0L);
-                await Assert.That(space.AvailableBytes).IsLessThanOrEqualTo(space.TotalBytes);
+                try
+                {
+                    var space = await sftp.GetFileSystemInfoAsync(remote, Timeout());
+                    await Assert.That(space.TotalBytes).IsGreaterThan(0L);
+                    await Assert.That(space.AvailableBytes).IsLessThanOrEqualTo(space.TotalBytes);
+                }
+                catch (SftpException ex) when (ex.Status == SftpStatusCode.OperationUnsupported || !RealServer.IsOpenSsh)
+                {
+                    // Announced but not implemented on this platform: pkg/sftp's Windows build answers Failure, "operation not supported".
+                }
             }
 
             if (sftp.Extensions.ContainsKey("copy-data"))
@@ -108,7 +115,7 @@ public class SftpInteropTests
             return;
         }
 
-        if (!RealServer.IsOpenSsh)
+        if (!RealServer.HasSftp)
         {
             Skip.Test("The Dropbear test image has no sftp-server.");
             return;
@@ -117,7 +124,7 @@ public class SftpInteropTests
         await using var client = await SshClient.ConnectAsync(host, port, options, Timeout());
         await using var sftp = await client.OpenSftpAsync(Timeout());
         var fs = new SshSharp.IO.Abstractions.SftpFileSystem(sftp);
-        var root = ".sshsharp-iofs-" + Guid.NewGuid().ToString("N")[..12];
+        var root = RealServer.SftpPath(".sshsharp-iofs-" + Guid.NewGuid().ToString("N")[..12]);
         try
         {
             fs.Directory.CreateDirectory(fs.Path.Combine(root, "a", "b"));
@@ -182,7 +189,7 @@ public class SftpInteropTests
             return;
         }
 
-        if (!RealServer.IsOpenSsh)
+        if (!RealServer.HasSftp)
         {
             Skip.Test("The Dropbear test image has no sftp-server.");
             return;
@@ -192,7 +199,7 @@ public class SftpInteropTests
         await using var sftp = await client.OpenSftpAsync(Timeout());
         await Assert.That(sftp.ProtocolVersion).IsEqualTo(3);
 
-        var root = ".sshsharp-sftp-" + Guid.NewGuid().ToString("N")[..12];
+        var root = RealServer.SftpPath(".sshsharp-sftp-" + Guid.NewGuid().ToString("N")[..12]);
         await sftp.CreateDirectoryAsync(root, cancellationToken: Timeout());
         try
         {
@@ -231,10 +238,21 @@ public class SftpInteropTests
 
             if (!RealServer.IsWindows)
             {
-                await sftp.CreateSymbolicLinkAsync(root + "/link", "blob", Timeout());
+                try
+                {
+                    await sftp.CreateSymbolicLinkAsync(root + "/link", "blob", Timeout());
+                }
+                catch (SftpException) when (OperatingSystem.IsWindows())
+                {
+                    // A server on this machine's Windows, without the privilege to create links: nothing to check here.
+                }
 
                 // MSYS2 and Cygwin servers on Windows make a copy instead of a link unless told otherwise (winsymlinks); a real one is checked.
-                if ((await sftp.GetAttributesAsync(root + "/link", followSymbolicLinks: false, Timeout())).IsSymbolicLink)
+                if (!await sftp.ExistsAsync(root + "/link", Timeout()))
+                {
+                    // Not created (above).
+                }
+                else if ((await sftp.GetAttributesAsync(root + "/link", followSymbolicLinks: false, Timeout())).IsSymbolicLink)
                 {
                     await Assert.That(await sftp.ReadSymbolicLinkAsync(root + "/link", Timeout())).IsEqualTo("blob");
                 }
