@@ -205,6 +205,7 @@ await using var forward = await client.ForwardLocalPortAsync(new IPEndPoint(IPAd
 |---|---|
 | `ForwardedPortLocal` (`ssh -L`) | `client.ForwardLocalPortAsync(localEndPoint, remoteHost, remotePort)` |
 | `ForwardedPortRemote` (`ssh -R`) | `client.ForwardRemotePortAsync(bindAddress, remotePort, localHost, localPort)` |
+| (no remote dynamic forwarding) | `client.ForwardRemoteDynamicPortAsync(bindAddress, remotePort, allowDestination)` (`ssh -R port`) |
 | `ForwardedPortDynamic` (`ssh -D`) | `client.ForwardDynamicPortAsync(localEndPoint)` |
 | `forward.Start()`, `Stop()` | started when returned; stopped by `DisposeAsync` |
 | `client.ForwardedPorts` | `client.LocalForwardings`, `RemoteForwardings`, `DynamicForwardings` (the ones started from `ssh_config`) |

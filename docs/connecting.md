@@ -114,11 +114,26 @@ Port 0 asks the server to pick a free port (`remote.Port` has it). Whether the s
 loopback is up to it (sshd's `GatewayPorts`). Disposing the forwarder cancels the forwarding on the server and closes its
 connections; a connection the server forwards while nothing listens locally is closed straight away.
 
+Remote dynamic forwarding (`ssh -R 1080`, OpenSSH 7.6 and later) combines the two: the server listens, and this machine
+answers each connection as a SOCKS proxy (4, 4a and 5), connecting to whatever destination the server's side asks for. It gives a
+remote machine outbound access through this machine's network, for example a build host reaching an internal package mirror.
+
+```csharp
+await using var socks = await client.ForwardRemoteDynamicPortAsync("localhost", 1080,
+    allowDestination: (host, port) => host == "mirror.internal" && port == 443);
+// on the server: curl --socks5-hostname localhost:1080 https://mirror.internal/
+```
+
+The destinations come from the server's side, so anyone who can reach the forwarded port there can use this machine's network.
+Like ssh, every destination is allowed when `allowDestination` is null; pass a filter unless you trust everyone on the server.
+Host names are resolved on this machine, after the filter. `remote.IsDynamic` tells the two kinds of remote forwarding apart.
+
 ### Forwardings from `ssh_config`
 
 `LocalForward`, `RemoteForward` and `DynamicForward` are started when connecting by alias with
 `SshConfigConnectOptions.StartForwardings = true` (off by default: they open listening ports). They are disposed with the
-client, and `client.LocalForwardings`, `RemoteForwardings` and `DynamicForwardings` list them.
+client, and `client.LocalForwardings`, `RemoteForwardings` and `DynamicForwardings` list them. `RemoteForward` with just a
+port (`RemoteForward 1080`) is remote dynamic forwarding, with every destination allowed, as in ssh.
 
 ```
 Host db-tunnel

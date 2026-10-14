@@ -31,7 +31,7 @@ Console.WriteLine(result.StandardOutputText);
 - **Host verification:** `StrictHostKeyChecking` policies, host certificates, `UpdateHostKeys`, key pinning, or your own
   verifier. There is no "accept anything" default. Host key scanning, as `ssh-keyscan` does it.
 - **Connections:** ProxyJump chains, ProxyCommand, connect over any `Stream`, keep-alive and dead-connection detection;
-  TCP and Unix-socket tunnels; local, remote and dynamic (SOCKS) port forwarding (`ssh -L`, `-R`, `-D`), also
+  TCP and Unix-socket tunnels; local, remote and dynamic (SOCKS) port forwarding (`ssh -L`, `-R`, `-D`) and remote dynamic forwarding (`-R port`), also
   started from `ssh_config`.
 - **Sessions:** run commands, stream stdin/stdout/stderr, interactive shells with a pseudo-terminal, environment variables,
   signals and window resizing; subsystems (`ssh -s`) such as `netconf`.
@@ -69,6 +69,7 @@ Coming next: SFTP, as a separate package.
 | Legacy algorithms (CBC, 3DES, SHA-1, `ssh-rsa`, DH group 1, zlib) | — (by design) | ✅ |
 | Commands, shells with a terminal | ✅ | ✅ |
 | Local, remote and dynamic port forwarding | ✅ (also Unix-socket tunnels, and from `ssh_config`) | ✅ |
+| Remote dynamic forwarding (`ssh -R port`, a SOCKS proxy on the client side) | ✅ | ❌ |
 | SCP | ✅ | ✅ |
 | SFTP | Planned (`SshSharp.Sftp`) | ✅ |
 | Native AOT | ✅ (an AOT-compiled binary connects to a real server in CI) | ✅ (AOT-compatible; an AOT publish is checked in CI) |

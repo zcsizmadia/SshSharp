@@ -95,6 +95,48 @@ public class ForwardingInteropTests
     }
 
     [Test]
+    public async Task RemoteDynamicForwarding_ConnectsWhereTheServersSideAsks()
+    {
+        await using var client = await ConnectAsync();
+        if (client is null)
+        {
+            Skip.Test("SSHSHARP_TEST_SSHD and SSHSHARP_TEST_USER with a password or key are needed.");
+            return;
+        }
+
+        // A local service only this machine reaches; the server's side names it in a SOCKS request.
+        using var service = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+        service.Bind(new IPEndPoint(IPAddress.Loopback, 0));
+        service.Listen();
+        var servicePort = ((IPEndPoint)service.LocalEndPoint!).Port;
+        var serviceTask = Task.Run(async () =>
+        {
+            using var accepted = await service.AcceptAsync(Timeout());
+            await accepted.SendAsync("hello via socks\n"u8.ToArray(), SocketFlags.None, Timeout());
+            accepted.Shutdown(SocketShutdown.Send);
+        });
+
+        var port = 43000 + Random.Shared.Next(2000);
+        await using var forwarder = await client.ForwardRemoteDynamicPortAsync("localhost", port, cancellationToken: Timeout());
+
+        // Play the server-side application through a tunnel: here -> server -> its forwarded port -> back here, as SOCKS.
+        await using var tunnel = await client.OpenTcpTunnelAsync("127.0.0.1", forwarder.Port, Timeout());
+        await tunnel.WriteAsync(new byte[] { 5, 1, 0 }, Timeout());
+        var choice = new byte[2];
+        await tunnel.ReadExactlyAsync(choice, Timeout());
+        await Assert.That(choice).IsEquivalentTo(new byte[] { 5, 0 });
+        var request = new byte[] { 5, 1, 0, 1, 127, 0, 0, 1, (byte)(servicePort >> 8), (byte)servicePort };
+        await tunnel.WriteAsync(request, Timeout());
+        var reply = new byte[10];
+        await tunnel.ReadExactlyAsync(reply, Timeout());
+        await Assert.That(reply[1]).IsEqualTo((byte)0);
+
+        var line = await ReadLineAsync(buffer => tunnel.ReadAsync(buffer, Timeout()));
+        await Assert.That(line).IsEqualTo("hello via socks");
+        await serviceTask;
+    }
+
+    [Test]
     public async Task TheSocksProxy_ReachesTheServersOwnSshd()
     {
         await using var client = await ConnectAsync();
