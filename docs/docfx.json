@@ -20,6 +20,7 @@
       { "files": [ "*.md", "toc.yml" ], "exclude": [ "README.md" ] }
     ],
     "output": "_site",
+    "sitemap": { "baseUrl": "https://zcsizmadia.github.io/SshSharp/" },
     "template": [ "default", "modern" ],
     "globalMetadata": {
       "_appName": "SshSharp",

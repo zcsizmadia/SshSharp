@@ -97,7 +97,8 @@ docs/                      # guides, design notes, the API reference site (DocFX
 - `mutation.yml`: Stryker.NET mutation testing, incremental weekly and full on demand; HTML and JSON reports as artifacts.
 - `publish.yml`: on a `v*` tag on main (`v0.3.0`, `v1.0.0-preview.1`, ...), tests, packs and pushes to nuget.org with
   trusted publishing (GitHub OIDC exchanged for a short-lived key; no API key is stored).
-- `docs.yml`: builds the API reference site.
+- `docs.yml`: builds the documentation site (guides and API reference) on every change; release tags publish it to GitHub Pages
+  (https://zcsizmadia.github.io/SshSharp/), so it matches the package on nuget.org.
 - Supply chain: actions pinned by commit SHA, Dependabot for NuGet and Actions, central package versions, NuGet audit
   failing the build on vulnerable packages, per-job timeouts.
 

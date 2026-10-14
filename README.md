@@ -126,6 +126,9 @@ var keys = agent is null ? [] : await agent.GetKeysAsync();
 
 ## Documentation
 
+**[zcsizmadia.github.io/SshSharp](https://zcsizmadia.github.io/SshSharp/)**: the guides below and the full API reference, for the
+latest release.
+
 - [Getting started](https://github.com/zcsizmadia/SshSharp/blob/main/docs/getting-started.md)
 - [Connecting](https://github.com/zcsizmadia/SshSharp/blob/main/docs/connecting.md): TCP, streams, `ssh_config` aliases,
   ProxyJump, keep-alive, algorithms
@@ -141,8 +144,9 @@ var keys = agent is null ? [] : await agent.GetKeysAsync();
   side by side
 - [Samples](https://github.com/zcsizmadia/SshSharp/tree/main/samples/SshSharp.Samples): a small `ssh`-like tool (commands,
   streaming, shell, port forwarding, SOCKS, SCP)
-- API reference: generated from the XML documentation with DocFX (`dotnet tool restore`, then
-  `dotnet docfx docs/docfx.json --serve`); every public member is documented, and IntelliSense shows the same text.
+- [API reference](https://zcsizmadia.github.io/SshSharp/api/SshSharp.html): generated from the XML documentation with DocFX
+  (to build it locally: `dotnet tool restore`, then `dotnet docfx docs/docfx.json --serve`); every public member is documented,
+  and IntelliSense shows the same text.
 - [Design notes](https://github.com/zcsizmadia/SshSharp/blob/main/docs/design.md),
   [threat model](https://github.com/zcsizmadia/SshSharp/blob/main/docs/threat-model.md),
   [cryptography review](https://github.com/zcsizmadia/SshSharp/blob/main/docs/crypto-review.md)
