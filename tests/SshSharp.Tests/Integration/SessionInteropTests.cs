@@ -65,6 +65,31 @@ public class SessionInteropTests
     }
 
     [Test]
+    public async Task Expect_DrivesARealShell()
+    {
+        await using var client = await ConnectAsync();
+        if (client is null)
+        {
+            Skip.Test("SSHSHARP_TEST_SSHD, SSHSHARP_TEST_USER and SSHSHARP_TEST_PASSWORD are needed.");
+            return;
+        }
+
+        var terminal = new SshTerminalOptions { TerminalType = "dumb", Columns = 132, Rows = 50 };
+        await using var session = await client.StartShellAsync(new SshSessionOptions { Terminal = terminal }, Timeout());
+        var expect = new SshExpect(session);
+
+        // The terminal echoes what is typed; the arithmetic makes the output differ from the echo, so only the result can match.
+        await expect.SendLineAsync("echo first-$((6*7))", Timeout());
+        await expect.ExpectAsync("first-42", Timeout());
+        await expect.SendLineAsync("echo second-$((7*8))-end", Timeout());
+        var match = await expect.ExpectAsync(new System.Text.RegularExpressions.Regex(@"second-(\d+)-end"), Timeout());
+        await Assert.That(match.Match!.Groups[1].Value).IsEqualTo("56");
+
+        await expect.SendLineAsync("exit", Timeout());
+        await Assert.That(async () => await expect.ExpectAsync("never-printed", Timeout())).Throws<EndOfStreamException>();
+    }
+
+    [Test]
     public async Task TheSftpSubsystem_AnswersTheVersionHandshake()
     {
         await using var client = await ConnectAsync();

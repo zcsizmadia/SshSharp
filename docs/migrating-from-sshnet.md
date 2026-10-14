@@ -181,9 +181,16 @@ await input.WriteLineAsync("uptime");
 var line = await output.ReadLineAsync();
 ```
 
-`ShellStream.Expect` has no equivalent yet ([planned](https://github.com/zcsizmadia/SshSharp/issues/115)): read the output
-stream and match what you need. Resize with
-`shell.ResizeTerminalAsync(columns, rows)`. See [Commands and shells](sessions.md).
+For `ShellStream.Expect`, wrap the session in `SshExpect`:
+
+| SSH.NET | SshSharp |
+|---|---|
+| `shell.Expect("$ ", timeout)` | `await expect.ExpectAsync("$ ", token)`: returns `Before` and `Value`; throws `EndOfStreamException` when the output ends first |
+| `shell.Expect(new ExpectAction(regex, action))` | `var match = await expect.ExpectAsync(regex, token)`, then act on `match.Match.Groups` |
+| `shell.WriteLine(text)` | `await expect.SendLineAsync(text, token)` |
+
+Create it with `var expect = new SshExpect(shell)`. Resize with `shell.ResizeTerminalAsync(columns, rows)`. See
+[Commands and shells](sessions.md#scripting-a-shell-expect).
 
 ## Port forwarding
 

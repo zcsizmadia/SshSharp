@@ -1,5 +1,22 @@
 #nullable enable
 SshSharp.SshClient.ForwardRemoteDynamicPortAsync(string! bindAddress, int remotePort, System.Func<string!, int, bool>? allowDestination = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SshSharp.SshRemotePortForwarder!>!
+SshSharp.SshExpect
+SshSharp.SshExpect.Encoding.get -> System.Text.Encoding!
+SshSharp.SshExpect.ExpectAsync(string! text, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SshSharp.SshExpectMatch!>!
+SshSharp.SshExpect.ExpectAsync(System.Text.RegularExpressions.Regex! pattern, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SshSharp.SshExpectMatch!>!
+SshSharp.SshExpect.MaxBufferLength.get -> int
+SshSharp.SshExpect.MaxBufferLength.init -> void
+SshSharp.SshExpect.NewLine.get -> string!
+SshSharp.SshExpect.NewLine.init -> void
+SshSharp.SshExpect.Pending.get -> string!
+SshSharp.SshExpect.SendAsync(string! text, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+SshSharp.SshExpect.SendLineAsync(string! line, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+SshSharp.SshExpect.SshExpect(SshSharp.SshSession! session, System.Text.Encoding? encoding = null) -> void
+SshSharp.SshExpect.SshExpect(System.IO.Stream! output, System.IO.Stream! input, System.Text.Encoding? encoding = null) -> void
+SshSharp.SshExpectMatch
+SshSharp.SshExpectMatch.Before.get -> string!
+SshSharp.SshExpectMatch.Match.get -> System.Text.RegularExpressions.Match?
+SshSharp.SshExpectMatch.Value.get -> string!
 SshSharp.SshHostKeyScanOptions
 SshSharp.SshHostKeyScanOptions.FipsMode.get -> bool
 SshSharp.SshHostKeyScanOptions.FipsMode.init -> void
