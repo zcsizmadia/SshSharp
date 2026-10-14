@@ -36,6 +36,7 @@ internal sealed class FakeSftpServer
     };
 
     private readonly Dictionary<string, (string Path, int Position)> _handles = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _rawListed = new(StringComparer.Ordinal);
     private int _nextHandle;
 
     /// <summary>The extensions announced in SSH_FXP_VERSION.</summary>
@@ -85,6 +86,27 @@ internal sealed class FakeSftpServer
 
     /// <summary>How many handles are open now.</summary>
     public int OpenHandles => _handles.Count;
+
+    /// <summary>Bytes written to stderr after every reply, as <c>sftp-server -e -l DEBUG</c> logs.</summary>
+    public int StderrPerReply { get; set; }
+
+    /// <summary>While set, OPEN and OPENDIR are answered only once it completes (the client may give up first).</summary>
+    public TaskCompletionSource? HoldOpens { get; set; }
+
+    /// <summary>A name in a legacy encoding (not UTF-8), added to every listing as a regular file.</summary>
+    public byte[]? RawListingName { get; set; }
+
+    /// <summary>READDIR never ends: an empty NAME batch every time.</summary>
+    public bool EndlessListing { get; set; }
+
+    /// <summary>Extensions announced with raw (possibly binary) data.</summary>
+    public List<(string Name, byte[] Data)> RawExtensions { get; } = [];
+
+    /// <summary>How many OPEN or OPENDIR requests waited for <see cref="HoldOpens"/>.</summary>
+    public int HeldOpens { get; private set; }
+
+    /// <summary>OPEN answers a status of OK instead of a handle.</summary>
+    public bool OpenAnswersOk { get; set; }
 
     public void AddDirectory(string path) => _nodes[path] = new Node { IsDirectory = true, Mode = 0x1ED };
 
@@ -146,7 +168,22 @@ internal sealed class FakeSftpServer
         await foreach (var packet in queue.Reader.ReadAllAsync())
         {
             await Task.Yield(); // lets requests the client already sent arrive behind this one
+            if (packet[0] is 3 or 11 && HoldOpens is { } hold)
+            {
+                lock (Requests)
+                {
+                    HeldOpens++;
+                }
+
+                await hold.Task;
+            }
+
             var reply = Handle(packet);
+            if (StderrPerReply > 0)
+            {
+                await script.StderrAsync(new byte[StderrPerReply]);
+            }
+
             if (ReorderReplies && packet[0] != 1 && queue.Reader.TryRead(out var next))
             {
                 var nextReply = Handle(next);
@@ -298,12 +335,21 @@ internal sealed class FakeSftpServer
                     w.WriteString(name);
                     w.WriteString(data);
                 }
+
+                foreach (var (name, data) in RawExtensions)
+                {
+                    w.WriteString(name);
+                    w.WriteString(data);
+                }
             });
         }
 
         var id = r.ReadUInt32();
         switch (type)
         {
+            case 3 when OpenAnswersOk:
+                return Status(id, 0);
+
             case 3: // OPEN
             {
                 var path = Resolve(r.ReadUtf8String());
@@ -460,6 +506,27 @@ internal sealed class FakeSftpServer
                 if (!_handles.TryGetValue(handle, out var open))
                 {
                     return Status(id, 4, "Bad handle");
+                }
+
+                if (EndlessListing)
+                {
+                    return Build(w => { w.WriteByte(104); w.WriteUInt32(id); w.WriteUInt32(0); });
+                }
+
+                if (RawListingName is not null && _rawListed.Add(handle))
+                {
+                    // The legacy-encoded name first (once per listing), then the rest as usual.
+                    var file = new Node();
+                    file.Data.AddRange("legacy"u8.ToArray());
+                    return Build(w =>
+                    {
+                        w.WriteByte(104);
+                        w.WriteUInt32(id);
+                        w.WriteUInt32(1);
+                        w.WriteString(RawListingName!);
+                        w.WriteString(RawListingName!);
+                        WriteAttributes(w, file);
+                    });
                 }
 
                 var prefix = open.Path == "/" ? "/" : open.Path + "/";

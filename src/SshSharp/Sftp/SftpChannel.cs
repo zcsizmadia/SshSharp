@@ -34,12 +34,20 @@ internal sealed class SftpChannel : IAsyncDisposable
     private readonly SemaphoreSlim _sendLock = new(1, 1);
     private readonly ConcurrentDictionary<uint, TaskCompletionSource<SftpResponse>> _pending = new();
     private readonly CancellationTokenSource _stop = new();
+    private readonly Task _errorDrain;
     private Task _readLoop = Task.CompletedTask;
     private Exception? _failure;
     private int _nextId;
     private int _disposed;
 
-    private SftpChannel(SshSession session) => _session = session;
+    private SftpChannel(SshSession session)
+    {
+        _session = session;
+
+        // The subsystem's stderr (sftp-server -e logs there) shares the channel window with the replies: unread, every byte of it would
+        // shrink the window for good, until the server could not answer at all. It is read and dropped.
+        _errorDrain = DrainAsync(session.StandardError);
+    }
 
     /// <summary>The server's protocol version (3 for OpenSSH).</summary>
     public uint Version { get; private set; }
@@ -89,11 +97,13 @@ internal sealed class SftpChannel : IAsyncDisposable
                 throw new SshException(SshFailureReason.ProtocolError, $"The SFTP server speaks version {version}; version 3 is needed.");
             }
 
+            // Extension data is defined per extension and may be binary: it is decoded leniently (invalid bytes become U+FFFD) rather than
+            // failing the session over an extension this client does not use.
             var extensions = new Dictionary<string, string>(StringComparer.Ordinal);
             while (!reader.IsEmpty)
             {
-                var name = reader.ReadUtf8String();
-                extensions[name] = reader.ReadUtf8String();
+                var name = Lenient(reader.ReadString());
+                extensions[name] = Lenient(reader.ReadString());
             }
 
             return (version, extensions);
@@ -104,8 +114,32 @@ internal sealed class SftpChannel : IAsyncDisposable
         }
     }
 
+    /// <summary>UTF-8 with invalid bytes replaced by U+FFFD.</summary>
+    internal static string Lenient(ReadOnlySpan<byte> bytes) => System.Text.Encoding.UTF8.GetString(bytes);
+
+    private static async Task DrainAsync(Stream errors)
+    {
+        var buffer = new byte[4096];
+        try
+        {
+            while (await errors.ReadAsync(buffer).ConfigureAwait(false) > 0)
+            {
+                // Dropped.
+            }
+        }
+        catch (Exception ex) when (ex is SshException or IOException or ObjectDisposedException or OperationCanceledException)
+        {
+            // The session ended.
+        }
+    }
+
     /// <summary>Sends a request and waits for its reply. <paramref name="body"/> writes what follows the request id.</summary>
-    public async Task<SftpResponse> RequestAsync(byte type, Action<SshWriter> body, CancellationToken cancellationToken)
+    /// <remarks>
+    /// When the caller gives up after the request was sent, the reply is normally dropped. <paramref name="orphaned"/> gets it instead,
+    /// when it comes: a request that opens something (OPEN, OPENDIR) passes a callback that closes the handle, which would otherwise stay
+    /// open on the server until the session ends.
+    /// </remarks>
+    public async Task<SftpResponse> RequestAsync(byte type, Action<SshWriter> body, CancellationToken cancellationToken, Action<SftpResponse>? orphaned = null)
     {
         var id = (uint)Interlocked.Increment(ref _nextId);
         var reply = new TaskCompletionSource<SftpResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -116,6 +150,7 @@ internal sealed class SftpChannel : IAsyncDisposable
             throw Ended(failed);
         }
 
+        var sent = false;
         try
         {
             await SendAsync(SshPrivateKey.Encode(w =>
@@ -124,7 +159,16 @@ internal sealed class SftpChannel : IAsyncDisposable
                 w.WriteUInt32(id);
                 body(w);
             }), cancellationToken).ConfigureAwait(false);
+            sent = true;
             return await reply.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (sent && orphaned is not null)
+        {
+            // The server will still answer: hand the reply over when it does (the session failing completes it with an exception).
+            _ = reply.Task.ContinueWith(
+                done => orphaned(done.Result),
+                CancellationToken.None, TaskContinuationOptions.OnlyOnRanToCompletion | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+            throw;
         }
         catch
         {
@@ -254,6 +298,7 @@ internal sealed class SftpChannel : IAsyncDisposable
 
         await _session.DisposeAsync().ConfigureAwait(false);
         await _readLoop.ConfigureAwait(false); // never faults: it reports its failure to the requests instead
+        await _errorDrain.ConfigureAwait(false); // never faults either
 
         _stop.Dispose();
     }

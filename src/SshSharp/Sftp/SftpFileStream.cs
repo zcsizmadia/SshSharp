@@ -4,13 +4,16 @@ namespace SshSharp.Sftp;
 /// An open remote file as a seekable stream (asynchronous only). Writes are split into requests of the server's write size. A stream
 /// opened only for reading reads ahead while it is read sequentially: a window of reads in flight that grows from 2 to 16, so reading
 /// through it approaches the speed of <see cref="SftpClient.DownloadAsync"/>; a seek starts over. A stream that also writes reads one
-/// request at a time, so what it reads always includes its own writes. Disposing closes the remote handle.
+/// request at a time, so what it reads always includes its own writes. Disposing closes the remote handle. <see cref="Length"/> is the size
+/// when the file was opened, kept up to date with this stream's own writes and <see cref="SetLength"/>; another writer's changes show in
+/// <see cref="GetLengthAsync"/>.
 /// </summary>
-internal sealed class SftpFileStream(SftpClient client, byte[] handle, string path, bool canRead, bool canWrite, long position) : Stream
+internal sealed class SftpFileStream(SftpClient client, byte[] handle, string path, bool canRead, bool canWrite, long position, long? length) : Stream
 {
     private const int MaxReadAhead = 16;
 
     private readonly Queue<(long Offset, int Length, Task<SftpResponse> Reply)> _ahead = new();
+    private long? _length = length;
     private long _position = position;
     private long _aheadNext;
     private int _depth = 2;
@@ -24,8 +27,16 @@ internal sealed class SftpFileStream(SftpClient client, byte[] handle, string pa
 
     public override bool CanSeek => _disposed == 0;
 
-    /// <summary>The remote file's size now (asks the server; prefer <see cref="GetLengthAsync"/>).</summary>
-    public override long Length => GetLengthAsync(CancellationToken.None).GetAwaiter().GetResult();
+    /// <summary>The file's size as this stream knows it, without a round trip (see the class remarks).</summary>
+    /// <exception cref="NotSupportedException">The server did not report the file's size when it was opened.</exception>
+    public override long Length
+    {
+        get
+        {
+            ObjectDisposedException.ThrowIf(_disposed != 0, this);
+            return _length ?? throw new NotSupportedException("The SFTP server did not report the file's size.");
+        }
+    }
 
     public override long Position
     {
@@ -40,8 +51,10 @@ internal sealed class SftpFileStream(SftpClient client, byte[] handle, string pa
     public async Task<long> GetLengthAsync(CancellationToken cancellationToken)
     {
         ObjectDisposedException.ThrowIf(_disposed != 0, this);
-        return (await client.GetHandleAttributesAsync(handle, path, cancellationToken).ConfigureAwait(false)).Size
+        var size = (await client.GetHandleAttributesAsync(handle, path, cancellationToken).ConfigureAwait(false)).Size
             ?? throw new NotSupportedException("The SFTP server did not report the file's size.");
+        _length = size;
+        return size;
     }
 
     public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
@@ -151,6 +164,11 @@ internal sealed class SftpFileStream(SftpClient client, byte[] handle, string pa
             var part = buffer[..Math.Min(buffer.Length, client.Limits.MaxWriteLength)];
             SftpClient.ExpectWritten(await client.SendWriteAsync(handle, _position, part, cancellationToken).ConfigureAwait(false), path);
             _position += part.Length;
+            if (_length is { } known && _position > known)
+            {
+                _length = _position;
+            }
+
             buffer = buffer[part.Length..];
         }
     }
@@ -182,6 +200,7 @@ internal sealed class SftpFileStream(SftpClient client, byte[] handle, string pa
         }
 
         client.SetHandleAttributesAsync(handle, path, new SftpFileAttributes { Size = value }, CancellationToken.None).GetAwaiter().GetResult();
+        _length = value;
     }
 
     /// <summary>

@@ -33,17 +33,35 @@ public sealed partial class SftpClient
     /// </summary>
     /// <returns>Nothing; the copy is complete when this returns.</returns>
     /// <exception cref="NotSupportedException">The server lacks <c>copy-data</c>; download and upload instead.</exception>
+    /// <exception cref="SftpException">The destination is the source itself (<see cref="SftpStatusCode.Failure"/>), or another error.</exception>
     public async Task CopyFileAsync(string sourcePath, string destinationPath, bool overwrite = false, CancellationToken cancellationToken = default)
     {
         CheckPath(sourcePath);
         CheckPath(destinationPath);
         Require(SftpProtocol.CopyDataExtension, "copy files on the server");
+
+        // A copy onto itself is refused up front (as File.Copy does): the paths are compared as the server resolves them, links included.
+        // A hard link to the source cannot be told apart, so the destination is never truncated before the copy (see below).
+        if (await IsSameFileAsync(sourcePath, destinationPath, cancellationToken).ConfigureAwait(false))
+        {
+            throw new SftpException(SftpStatusCode.Failure, $"Copying '{sourcePath}' failed: the destination is the source file itself.", destinationPath);
+        }
+
         var (source, _) = await OpenHandleAsync(sourcePath, FileMode.Open, FileAccess.Read, cancellationToken).ConfigureAwait(false);
         try
         {
-            var (destination, _) = await OpenHandleAsync(destinationPath, overwrite ? FileMode.Create : FileMode.CreateNew, FileAccess.Write, cancellationToken).ConfigureAwait(false);
+            var size = (await GetHandleAttributesAsync(source, sourcePath, cancellationToken).ConfigureAwait(false)).Size;
+
+            // Opened without truncating: the copy overwrites in place, then the size is set, so even the same file reached another way
+            // keeps its data. Only when the server does not say the source's size is the destination emptied first.
+            var (destination, _) = await OpenHandleAsync(destinationPath, overwrite ? FileMode.OpenOrCreate : FileMode.CreateNew, FileAccess.Write, cancellationToken).ConfigureAwait(false);
             try
             {
+                if (overwrite && size is null)
+                {
+                    await SetHandleAttributesAsync(destination, destinationPath, new SftpFileAttributes { Size = 0 }, cancellationToken).ConfigureAwait(false);
+                }
+
                 var reply = await _channel.RequestAsync(SftpProtocol.Extended, w =>
                 {
                     w.WriteString(SftpProtocol.CopyDataExtension);
@@ -54,6 +72,10 @@ public sealed partial class SftpClient
                     w.WriteUInt64(0);
                 }, cancellationToken).ConfigureAwait(false);
                 ExpectOk(reply, "Copying", sourcePath);
+                if (overwrite && size is { } length)
+                {
+                    await SetHandleAttributesAsync(destination, destinationPath, new SftpFileAttributes { Size = length }, cancellationToken).ConfigureAwait(false);
+                }
             }
             finally
             {
@@ -63,6 +85,37 @@ public sealed partial class SftpClient
         finally
         {
             await CloseHandleAsync(source).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Whether two paths name the same file as the server resolves them (realpath, so <c>./a</c>, <c>a</c> and a link to it are one). A
+    /// destination that cannot be resolved (it does not exist yet) is not the source.
+    /// </summary>
+    internal async Task<bool> IsSameFileAsync(string sourcePath, string destinationPath, CancellationToken cancellationToken)
+    {
+        if (sourcePath == destinationPath)
+        {
+            return true;
+        }
+
+        string destination;
+        try
+        {
+            destination = await GetFullPathAsync(destinationPath, cancellationToken).ConfigureAwait(false);
+        }
+        catch (SftpException)
+        {
+            return false;
+        }
+
+        try
+        {
+            return await GetFullPathAsync(sourcePath, cancellationToken).ConfigureAwait(false) == destination;
+        }
+        catch (SftpException)
+        {
+            return false; // the open reports the missing source
         }
     }
 

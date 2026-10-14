@@ -36,10 +36,10 @@ public sealed class SftpFileAttributes
     public long? Size { get; init; }
 
     /// <summary>The owner's numeric user id.</summary>
-    public int? UserId { get; init; }
+    public uint? UserId { get; init; }
 
     /// <summary>The owning group's numeric id.</summary>
-    public int? GroupId { get; init; }
+    public uint? GroupId { get; init; }
 
     /// <summary>The permission bits (rwx for owner, group and others, and setuid, setgid and sticky).</summary>
     public UnixFileMode? Permissions { get; init; }
@@ -69,11 +69,11 @@ public sealed class SftpFileAttributes
     {
         var flags = reader.ReadUInt32();
         long? size = (flags & SftpProtocol.AttrSize) != 0 ? (long)Math.Min(reader.ReadUInt64(), long.MaxValue) : null;
-        int? uid = null, gid = null;
+        uint? uid = null, gid = null;
         if ((flags & SftpProtocol.AttrUidGid) != 0)
         {
-            uid = unchecked((int)reader.ReadUInt32());
-            gid = unchecked((int)reader.ReadUInt32());
+            uid = reader.ReadUInt32();
+            gid = reader.ReadUInt32();
         }
 
         UnixFileMode? permissions = null;
@@ -105,7 +105,7 @@ public sealed class SftpFileAttributes
             var count = reader.ReadUInt32();
             for (var i = 0; i < count; i++)
             {
-                var name = reader.ReadUtf8String(); // each pair is at least 8 bytes, so a huge count runs out of data and throws
+                var name = SftpChannel.Lenient(reader.ReadString()); // each pair is at least 8 bytes, so a huge count runs out of data and throws
                 extended[name] = reader.ReadString().ToArray();
             }
         }
@@ -165,8 +165,8 @@ public sealed class SftpFileAttributes
 
         if (UserId is { } uid)
         {
-            writer.WriteUInt32(unchecked((uint)uid));
-            writer.WriteUInt32(unchecked((uint)GroupId!.Value));
+            writer.WriteUInt32(uid);
+            writer.WriteUInt32(GroupId!.Value);
         }
 
         if (Permissions is { } permissions)

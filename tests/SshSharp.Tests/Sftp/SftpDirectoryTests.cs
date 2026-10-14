@@ -76,26 +76,34 @@ public sealed class SftpDirectoryTests : IDisposable
     [Arguments("c:evil")]
     [Arguments("nul.txt")]
     [Arguments("trailing.")]
-    public async Task AHostileName_StopsTheDownload_BeforeAnythingIsWrittenOutside(string name)
+    public async Task AHostileName_IsNeverWrittenOutside_AndIsSkippedWhereThisSystemCannotHoldIt(string name)
     {
-        var windowsOnly = name is "nul.txt" or "trailing.";
-        if (windowsOnly && !OperatingSystem.IsWindows())
-        {
-            Skip.Test("Device names and trailing dots are only dangerous on Windows.");
-            return;
-        }
-
         var files = new FakeSftpServer();
         files.AddDirectory(Home + "/tree");
         files.AddFile(Home + "/tree/" + name, "pwned"u8.ToArray());
+        files.AddFile(Home + "/tree/ok.txt", "fine"u8.ToArray());
         var rig = await StartAsync(files);
         try
         {
             var target = Path.Combine(_dir, "inner", "down");
-            var ex = await Assert.That(async () => await rig.Sftp.DownloadDirectoryAsync("tree", target, cancellationToken: Timeout())).Throws<SshException>();
+            var summary = await rig.Sftp.DownloadDirectoryAsync("tree", target, cancellationToken: Timeout());
 
-            await Assert.That(ex!.Reason).IsEqualTo(SshFailureReason.TransferFailed);
-            await Assert.That(Directory.GetFiles(_dir, "*", SearchOption.AllDirectories)).IsEmpty();
+            // Whatever happens to the name, nothing lands outside the target, and the rest of the tree still downloads.
+            var written = Directory.GetFiles(_dir, "*", SearchOption.AllDirectories);
+            await Assert.That(written.All(f => f.StartsWith(target + Path.DirectorySeparatorChar, StringComparison.Ordinal))).IsTrue();
+            await Assert.That(File.ReadAllText(Path.Combine(target, "ok.txt"))).IsEqualTo("fine");
+            if (OperatingSystem.IsWindows())
+            {
+                // '\', ':', device names and trailing dots cannot be file names here: skipped, not written.
+                await Assert.That(summary.Skipped).IsEqualTo(1);
+                await Assert.That(summary.Files).IsEqualTo(1);
+            }
+            else
+            {
+                // On POSIX they are ordinary characters: the file keeps its name, inside the target.
+                await Assert.That(summary.Files).IsEqualTo(2);
+                await Assert.That(File.Exists(Path.Combine(target, name))).IsTrue();
+            }
         }
         finally
         {
