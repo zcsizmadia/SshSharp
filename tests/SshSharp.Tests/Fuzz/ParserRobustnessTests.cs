@@ -185,6 +185,59 @@ public class ParserRobustnessTests
     }
 
     [Test]
+    public async Task SftpReplyParsing_OnlyEverFailsWithAnSshException()
+    {
+        // Every reply an SFTP server can send passes through one of the client's parsers; SftpException is an SshException too.
+        var failures = Run(SftpReplySeeds(), global::SshSharp.Sftp.SftpClient.ParseAnyReply, ex => ex is SshException, iterations: 5000);
+        await Assert.That(failures).IsEmpty();
+    }
+
+    /// <summary>One valid example of each SFTP reply type: version, status, handle, data, name, attributes, and the limits reply.</summary>
+    internal static byte[][] SftpReplySeeds() =>
+    [
+        Reply(w => { w.WriteByte(2); w.WriteUInt32(3); w.WriteString("posix-rename@openssh.com"); w.WriteString("1"); w.WriteString("limits@openssh.com"); w.WriteString("1"); }),
+        Reply(w => { w.WriteByte(101); w.WriteUInt32(7); w.WriteUInt32(2); w.WriteString("No such file"); w.WriteString("en"); }),
+        Reply(w => { w.WriteByte(101); w.WriteUInt32(7); w.WriteUInt32(0); w.WriteString(""); w.WriteString(""); }),
+        Reply(w => { w.WriteByte(102); w.WriteUInt32(7); w.WriteString("handle-1"); }),
+        Reply(w => { w.WriteByte(103); w.WriteUInt32(7); w.WriteString("file contents"u8); }),
+        Reply(w =>
+        {
+            w.WriteByte(104);
+            w.WriteUInt32(7);
+            w.WriteUInt32(2);
+            foreach (var name in new[] { "a.txt", "dir" })
+            {
+                w.WriteString(name);
+                w.WriteString("-rw-r--r-- 1 u g 5 Jan 1 2024 " + name);
+                SftpAttributes(w);
+            }
+        }),
+        Reply(w => { w.WriteByte(105); w.WriteUInt32(7); SftpAttributes(w); }),
+        Reply(w => { w.WriteByte(201); w.WriteUInt32(7); w.WriteUInt64(262144); w.WriteUInt64(261120); w.WriteUInt64(261120); w.WriteUInt64(0); }),
+    ];
+
+    private static void SftpAttributes(SshWriter w)
+    {
+        w.WriteUInt32(0x8000000F); // size, uid/gid, permissions, times, extended
+        w.WriteUInt64(5);
+        w.WriteUInt32(1000);
+        w.WriteUInt32(1000);
+        w.WriteUInt32(0x81A4);
+        w.WriteUInt32(1_700_000_000);
+        w.WriteUInt32(1_700_000_000);
+        w.WriteUInt32(1);
+        w.WriteString("vendor@example");
+        w.WriteString("data");
+    }
+
+    private static byte[] Reply(Action<SshWriter> write)
+    {
+        var buffer = new ArrayBufferWriter<byte>();
+        write(new SshWriter(buffer));
+        return buffer.WrittenSpan.ToArray();
+    }
+
+    [Test]
     public async Task TheHarness_ReportsUnexpectedExceptions_AndMutates()
     {
         // A harness that silently swallowed everything would make every test above pass.

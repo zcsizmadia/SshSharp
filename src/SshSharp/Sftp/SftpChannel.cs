@@ -61,7 +61,7 @@ internal sealed class SftpChannel : IAsyncDisposable
 
             var version = await channel.ReadPacketAsync(cancellationToken).ConfigureAwait(false)
                 ?? throw new SshException(SshFailureReason.ProtocolError, "The SFTP server closed the session before saying its version.");
-            channel.ParseVersion(version);
+            (channel.Version, channel.Extensions) = ParseVersion(version);
             channel._readLoop = Task.Run(channel.ReadLoopAsync, CancellationToken.None);
             return channel;
         }
@@ -72,7 +72,8 @@ internal sealed class SftpChannel : IAsyncDisposable
         }
     }
 
-    private void ParseVersion(byte[] packet)
+    /// <summary>SSH_FXP_VERSION: the server's version and its extensions.</summary>
+    internal static (uint Version, IReadOnlyDictionary<string, string> Extensions) ParseVersion(byte[] packet)
     {
         try
         {
@@ -82,10 +83,10 @@ internal sealed class SftpChannel : IAsyncDisposable
                 throw new SshException(SshFailureReason.ProtocolError, "The SFTP server did not answer with its version.");
             }
 
-            Version = reader.ReadUInt32();
-            if (Version < SftpProtocol.Version)
+            var version = reader.ReadUInt32();
+            if (version < SftpProtocol.Version)
             {
-                throw new SshException(SshFailureReason.ProtocolError, $"The SFTP server speaks version {Version}; version 3 is needed.");
+                throw new SshException(SshFailureReason.ProtocolError, $"The SFTP server speaks version {version}; version 3 is needed.");
             }
 
             var extensions = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -95,7 +96,7 @@ internal sealed class SftpChannel : IAsyncDisposable
                 extensions[name] = reader.ReadUtf8String();
             }
 
-            Extensions = extensions;
+            return (version, extensions);
         }
         catch (SshProtocolException ex)
         {
