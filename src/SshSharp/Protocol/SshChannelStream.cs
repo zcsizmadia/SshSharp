@@ -130,6 +130,17 @@ internal sealed class SshChannelStream(SshChannel channel) : Stream
         base.Dispose(disposing);
     }
 
+    /// <summary>
+    /// Takes the data received but not yet read (the rest of the last packet), so a caller that read a handshake through this stream can
+    /// relay the channel directly afterwards without losing bytes the peer sent right after it. The stream must not be read again.
+    /// </summary>
+    public byte[] TakeBuffered()
+    {
+        var rest = _current is null ? [] : _current.Data.Span[_offset..].ToArray();
+        ReleaseCurrent();
+        return rest;
+    }
+
     private void ReleaseCurrent()
     {
         _current?.Dispose();

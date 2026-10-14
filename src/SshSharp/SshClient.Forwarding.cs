@@ -109,11 +109,13 @@ public sealed partial class SshClient
     /// <summary>Reads a SOCKS request, opens the channel it names, and answers the application.</summary>
     private async Task<SshChannel?> OpenSocksAsync(Socket socket, CancellationToken cancellationToken)
     {
+        // Not disposed: the socket belongs to the listener, which relays it once the channel is open.
+        var stream = new NetworkStream(socket, ownsSocket: false);
         SocksRequest? request;
         using (var handshake = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
         {
             handshake.CancelAfter(SocksHandshakeTimeout); // an application that connects and says nothing does not hold a slot forever
-            request = await SocksHandshake.ReadRequestAsync(socket, handshake.Token).ConfigureAwait(false);
+            request = await SocksHandshake.ReadRequestAsync(stream, handshake.Token).ConfigureAwait(false);
         }
 
         if (request is not { } target)
@@ -124,7 +126,7 @@ public sealed partial class SshClient
         var channel = await OpenForwardedAsync(socket, target.Host, target.Port, cancellationToken).ConfigureAwait(false);
         try
         {
-            await SocksHandshake.ReplyAsync(socket, target, success: channel is not null, cancellationToken).ConfigureAwait(false);
+            await SocksHandshake.ReplyAsync(stream, target, success: channel is not null, cancellationToken).ConfigureAwait(false);
         }
         catch when (channel is not null)
         {
@@ -147,7 +149,40 @@ public sealed partial class SshClient
     /// (see <see cref="SshRemotePortForwarder.Port"/>).
     /// </summary>
     /// <exception cref="SshException">The server refused (sshd's <c>AllowTcpForwarding</c>, or the port is in use).</exception>
-    public async Task<SshRemotePortForwarder> ForwardRemotePortAsync(string bindAddress, int remotePort, string localHost, int localPort, CancellationToken cancellationToken = default)
+    public Task<SshRemotePortForwarder> ForwardRemotePortAsync(string bindAddress, int remotePort, string localHost, int localPort, CancellationToken cancellationToken = default)
+    {
+        ValidateRemoteListen(bindAddress, remotePort);
+        ValidateDestination(localHost, localPort);
+        return StartRemoteForwardAsync(bindAddress, remotePort,
+            port => new SshRemotePortForwarder(bindAddress, port, localHost, localPort, _logger, CancelRemoteForwardAsync, _connection.Closed),
+            cancellationToken);
+    }
+
+    /// <summary>
+    /// Remote dynamic port forwarding (<c>ssh -R [bind_address:]port</c> with no destination, OpenSSH 7.6 and later): asks the server to
+    /// listen on <paramref name="bindAddress"/>:<paramref name="remotePort"/>, and answers each connection made to it as a SOCKS proxy (4,
+    /// 4a and 5, CONNECT, no authentication), connecting to the destination it names from this machine. It gives the server's side
+    /// outbound access through this machine's network, for example to reach an internal package mirror from a build host.
+    /// </summary>
+    /// <param name="bindAddress">Where the server listens: <c>localhost</c> for its loopback only (what ssh uses by default), an address, or
+    /// empty for every address (subject to sshd's <c>GatewayPorts</c>).</param>
+    /// <param name="remotePort">The port the server listens on; 0 lets it pick one (see <see cref="SshRemotePortForwarder.Port"/>).</param>
+    /// <param name="allowDestination">
+    /// Decides whether to connect to a requested host and port. The destinations are chosen on the server's side, so whoever can reach
+    /// the forwarded port there can use this machine's network: like ssh, everything is allowed when this is null. Host names are
+    /// resolved on this machine, after this check.
+    /// </param>
+    /// <param name="cancellationToken">Cancels the request to the server.</param>
+    /// <exception cref="SshException">The server refused (sshd's <c>AllowTcpForwarding</c>, or the port is in use).</exception>
+    public Task<SshRemotePortForwarder> ForwardRemoteDynamicPortAsync(string bindAddress, int remotePort, Func<string, int, bool>? allowDestination = null, CancellationToken cancellationToken = default)
+    {
+        ValidateRemoteListen(bindAddress, remotePort);
+        return StartRemoteForwardAsync(bindAddress, remotePort,
+            port => new SshRemotePortForwarder(bindAddress, port, allowDestination, _logger, CancelRemoteForwardAsync, _connection.Closed),
+            cancellationToken);
+    }
+
+    private static void ValidateRemoteListen(string bindAddress, int remotePort)
     {
         ArgumentNullException.ThrowIfNull(bindAddress);
         if (bindAddress.Any(char.IsControl))
@@ -157,7 +192,11 @@ public sealed partial class SshClient
 
         ArgumentOutOfRangeException.ThrowIfNegative(remotePort);
         ArgumentOutOfRangeException.ThrowIfGreaterThan(remotePort, 65535);
-        ValidateDestination(localHost, localPort);
+    }
+
+    /// <summary>Asks the server to listen (<c>tcpip-forward</c>), then routes the port's channels to the forwarder <paramref name="create"/> makes.</summary>
+    private async Task<SshRemotePortForwarder> StartRemoteForwardAsync(string bindAddress, int remotePort, Func<int, SshRemotePortForwarder> create, CancellationToken cancellationToken)
+    {
         ObjectDisposedException.ThrowIf(_disposed != 0, this);
         EnsureChannelDispatch();
 
@@ -182,7 +221,7 @@ public sealed partial class SshClient
             }
         }
 
-        var forwarder = new SshRemotePortForwarder(bindAddress, port, localHost, localPort, _logger, CancelRemoteForwardAsync, _connection.Closed);
+        var forwarder = create(port);
         if (!_remoteForwards.TryAdd(port, forwarder))
         {
             // The server accepted it (another bind address for the same port), but this connection routes channels by port: withdraw the
@@ -191,7 +230,15 @@ public sealed partial class SshClient
             throw new SshException(SshFailureReason.ChannelClosed, $"Port {port} is already forwarded on this connection.");
         }
 
-        SshLog.RemoteForwardingStarted(_logger, port, localPort);
+        if (forwarder.IsDynamic)
+        {
+            SshLog.RemoteDynamicForwardingStarted(_logger, port);
+        }
+        else
+        {
+            SshLog.RemoteForwardingStarted(_logger, port, forwarder.LocalPort);
+        }
+
         return forwarder;
     }
 
@@ -292,11 +339,16 @@ public sealed partial class SshClient
         {
             await TryForwardAsync("RemoteForward", spec, async () =>
             {
-                var (listen, target) = ForwardSpec.ParseForward(spec) ?? throw new FormatException("only [bind:]port host:hostport is supported");
+                // [bind:]port host:hostport, or [bind:]port alone for remote dynamic forwarding (a SOCKS proxy on this side).
+                var forward = ForwardSpec.ParseForward(spec);
+                var listen = forward?.Listen ?? ForwardSpec.ParseListen(spec)
+                    ?? throw new FormatException("only [bind:]port host:hostport and [bind:]port are supported");
 
                 // ssh asks for the server's loopback when no address is given; "*" means every address.
                 var bind = listen.Bind switch { null => "localhost", "*" => "", var given => given };
-                _remoteForwardings.Add(await ForwardRemotePortAsync(bind, listen.Port, target.Host, target.Port, cancellationToken).ConfigureAwait(false));
+                _remoteForwardings.Add(forward is { Target: var target }
+                    ? await ForwardRemotePortAsync(bind, listen.Port, target.Host, target.Port, cancellationToken).ConfigureAwait(false)
+                    : await ForwardRemoteDynamicPortAsync(bind, listen.Port, cancellationToken: cancellationToken).ConfigureAwait(false));
             }).ConfigureAwait(false);
         }
 
