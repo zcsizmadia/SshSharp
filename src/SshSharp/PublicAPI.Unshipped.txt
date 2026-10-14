@@ -1,13 +1,1 @@
 #nullable enable
-SshSharp.SshClient.StartSubsystemAsync(string! name, SshSharp.SshSessionOptions? options = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SshSharp.SshSession!>!
-SshSharp.SshClient.Algorithms.get -> SshSharp.SshNegotiatedAlgorithms!
-SshSharp.SshNegotiatedAlgorithms
-SshSharp.SshNegotiatedAlgorithms.EncryptionClientToServer.get -> string!
-SshSharp.SshNegotiatedAlgorithms.EncryptionServerToClient.get -> string!
-SshSharp.SshNegotiatedAlgorithms.HostKeyAlgorithm.get -> string!
-SshSharp.SshNegotiatedAlgorithms.IsPostQuantum.get -> bool
-SshSharp.SshNegotiatedAlgorithms.KeyExchange.get -> string!
-SshSharp.SshNegotiatedAlgorithms.MacClientToServer.get -> string!
-SshSharp.SshNegotiatedAlgorithms.MacServerToClient.get -> string!
-SshSharp.SshNegotiatedAlgorithms.StrictKeyExchange.get -> bool
-SshSharp.SshAgent.QueryExtensionsAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<string!>!>!

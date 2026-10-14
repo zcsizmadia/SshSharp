@@ -50,6 +50,9 @@ internal sealed class FakeAgent : IAsyncDisposable
 
     public bool QueryRepliesWithSuccess { get; set; }
 
+    /// <summary>The key blob of the last signing request answered for a raw identity.</summary>
+    public byte[]? LastSignedBlob { get; private set; }
+
     /// <summary>The flags of every signing request.</summary>
     public List<uint> SignFlags { get; } = [];
 
@@ -149,6 +152,18 @@ internal sealed class FakeAgent : IAsyncDisposable
                 }
 
                 var key = Keys.Select(k => k.Key).FirstOrDefault(k => k.PublicKey.Span.SequenceEqual(blob));
+                if (key is null && ClaimAlgorithm is { } rawClaim && RawIdentities.Any(raw => raw.AsSpan().SequenceEqual(blob)))
+                {
+                    // A raw identity the agent cannot really sign for (a security key, say): answer as such an agent would, with a
+                    // signature of the claimed algorithm, so the client's handling of the reply can be checked.
+                    LastSignedBlob = blob;
+                    return Build(w =>
+                    {
+                        w.WriteByte(14);
+                        w.WriteString(Build(s => { s.WriteString(rawClaim); s.WriteString(new byte[64]); }));
+                    });
+                }
+
                 if (key is null || RefuseToSign.Contains(key.Fingerprint))
                 {
                     return [5];
