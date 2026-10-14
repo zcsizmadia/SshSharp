@@ -10,11 +10,14 @@ namespace SshSharp.Sftp;
 internal static class LocalFileType
 {
     private const int TypeMask = 0xF000; // S_IFMT
-    private const int RegularFile = 0x8000; // S_IFREG
+    private const int Fifo = 0x1000; // S_IFIFO
+    private const int CharacterDevice = 0x2000; // S_IFCHR
+    private const int BlockDevice = 0x6000; // S_IFBLK
+    private const int Socket = 0xC000; // S_IFSOCK
 
     private static int s_unavailable;
 
-    /// <summary>True for a regular file, and whenever the type cannot be told (Windows has no FIFOs or device files in a directory tree).</summary>
+    /// <summary>False only for a FIFO, socket or device file; true otherwise, and whenever the type cannot be told (Windows has no FIFOs or device files in a directory tree).</summary>
     public static bool IsRegularFile(string path)
     {
         if (OperatingSystem.IsWindows() || Volatile.Read(ref s_unavailable) != 0)
@@ -31,7 +34,9 @@ internal static class LocalFileType
                 return true; // gone or unreadable: the upload reports the real error when it opens the file
             }
 
-            return (MemoryMarshal.Read<int>(status.AsSpan(4)) & TypeMask) == RegularFile;
+            // Only the four special types are skipped; anything else counts as a regular file. Should the runtime's layout ever
+            // change, a misread mode then uploads a file it might have skipped, rather than silently skipping ordinary files.
+            return (MemoryMarshal.Read<int>(status.AsSpan(4)) & TypeMask) is not (Fifo or CharacterDevice or BlockDevice or Socket);
         }
         catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException)
         {
