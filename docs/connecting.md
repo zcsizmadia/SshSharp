@@ -191,12 +191,32 @@ The destinations come from the server's side, so anyone who can reach the forwar
 Like ssh, every destination is allowed when `allowDestination` is null; pass a filter unless you trust everyone on the server.
 Host names are resolved on this machine, after the filter. `remote.IsDynamic` tells the two kinds of remote forwarding apart.
 
+Remote Unix-socket forwarding (`ssh -R /remote/socket:target`, `streamlocal-forward@openssh.com`, OpenSSH 6.7 and later) has
+the server listen on a Unix socket instead of a port, and relays each connection to a host and port, or to a Unix socket on this
+machine. It lets a program on the server use a local agent, for example gpg-agent, or a service that only this machine reaches.
+
+```csharp
+// Programs on the server connect to /run/user/1000/app.sock and reach port 3000 here.
+await using var app = await client.ForwardRemoteUnixSocketAsync("/run/user/1000/app.sock", "127.0.0.1", 3000);
+
+// gpg-agent forwarding: the server's agent socket goes to this machine's extra socket.
+await using var gpg = await client.ForwardRemoteUnixSocketAsync(
+    "/run/user/1000/gnupg/S.gpg-agent", "/run/user/1000/gnupg/S.gpg-agent.extra");
+```
+
+sshd creates the socket readable only by the user, and does not replace a file that is already there unless
+`StreamLocalBindUnlink yes` is set on the server. Disposing the forwarder cancels it (`cancel-streamlocal-forward@openssh.com`);
+`client.RemoteSocketForwardings` lists the ones started from `ssh_config`. A server with `AllowStreamLocalForwarding no`
+refuses the request, and the call throws an `SshException`.
+
 ### Forwardings from `ssh_config`
 
 `LocalForward`, `RemoteForward` and `DynamicForward` are started when connecting by alias with
 `SshConfigConnectOptions.StartForwardings = true` (off by default: they open listening ports). They are disposed with the
 client, and `client.LocalForwardings`, `RemoteForwardings` and `DynamicForwardings` list them. `RemoteForward` with just a
-port (`RemoteForward 1080`) is remote dynamic forwarding, with every destination allowed, as in ssh.
+port (`RemoteForward 1080`) is remote dynamic forwarding, with every destination allowed, as in ssh. `RemoteForward` with a
+socket path (`RemoteForward /run/app.sock 127.0.0.1:3000` or `RemoteForward /remote.sock /local.sock`) is remote Unix-socket
+forwarding, listed in `client.RemoteSocketForwardings`; as in ssh, a target with a `/` in it is a socket path.
 
 ```
 Host db-tunnel
@@ -207,8 +227,8 @@ Host db-tunnel
 ```
 
 Bind addresses follow ssh: none means loopback (every address with `GatewayPorts yes`), `localhost` loopback, `*` every
-address. A forwarding that cannot be set up (a port in use, refused by the server, a Unix-socket form, which is not supported
-yet) is logged and skipped, or fails the connection with `ExitOnForwardFailure yes`. `ClearAllForwardings yes` starts none.
+address. A forwarding that cannot be set up (a port in use, refused by the server, or a Unix-socket form of `LocalForward`,
+which is not supported yet) is logged and skipped, or fails the connection with `ExitOnForwardFailure yes`. `ClearAllForwardings yes` starts none.
 
 ## Keep-alive and connection state
 

@@ -41,8 +41,10 @@ A man in the middle can read, change, drop and inject bytes. The server itself m
 
 ### Channels the server opens
 
-- Only two kinds of server-opened channel are accepted: `forwarded-tcpip` for a port the client asked to forward, and
-  `auth-agent@openssh.com` when agent forwarding is on. Everything else (X11, Unix-socket forwards, unknown types) is refused.
+- Only three kinds of server-opened channel are accepted: `forwarded-tcpip` for a port the client asked to forward,
+  `forwarded-streamlocal@openssh.com` for a socket path the client asked to forward (matched exactly), and
+  `auth-agent@openssh.com` when agent forwarding is on. Everything else (X11, unknown types) is refused. Either way, the
+  connection goes only to the target the client named for that forwarding, never to one the server picks.
 - The client does not check the address a `forwarded-tcpip` channel names, only the port. The server picks which forwarding
   to use anyway.
 - **Agent forwarding** relays the agent protocol unchanged, as `ssh -A` does: while the connection is up, the server can ask the

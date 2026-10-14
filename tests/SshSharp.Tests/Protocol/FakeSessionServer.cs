@@ -225,6 +225,20 @@ internal sealed class FakeSessionServer : IAsyncDisposable
             w.WriteUInt32((uint)originatorPort);
         });
 
+    /// <summary>Socket paths the client asked the server to listen on (streamlocal-forward@openssh.com).</summary>
+    public HashSet<string> RemoteSocketForwards { get; } = [];
+
+    /// <summary>Socket paths the client cancelled (cancel-streamlocal-forward@openssh.com).</summary>
+    public List<string> CancelledRemoteSocketForwards { get; } = [];
+
+    /// <summary>Plays a connection arriving at a remotely forwarded Unix socket: a forwarded-streamlocal@openssh.com channel to the client.</summary>
+    public Task<Stream?> ConnectForwardedSocketAsync(string socketPath) =>
+        OpenChannelToClientAsync("forwarded-streamlocal@openssh.com", w =>
+        {
+            w.WriteString(socketPath);
+            w.WriteString(string.Empty); // reserved
+        });
+
     /// <summary>
     /// Plays a program on the server using the forwarded agent: opens an agent channel (OpenSSH's <c>auth-agent@openssh.com</c>, or RFC
     /// 9987's <c>agent-connect</c>), or null when refused.
@@ -581,6 +595,31 @@ internal sealed class FakeSessionServer : IAsyncDisposable
                             w.WriteString(proof);
                         }
                     }));
+                    break;
+                }
+
+                if (name is "streamlocal-forward@openssh.com" or "cancel-streamlocal-forward@openssh.com")
+                {
+                    var socketPath = reader.ReadUtf8String();
+                    bool accepted;
+                    lock (RemoteSocketForwards)
+                    {
+                        if (name == "streamlocal-forward@openssh.com")
+                        {
+                            accepted = !RefuseRemoteForwarding && RemoteSocketForwards.Add(socketPath);
+                        }
+                        else
+                        {
+                            accepted = RemoteSocketForwards.Remove(socketPath);
+                            CancelledRemoteSocketForwards.Add(socketPath);
+                        }
+                    }
+
+                    if (wantReply)
+                    {
+                        await _server.SendAsync(new[] { accepted ? SshMessage.RequestSuccess : SshMessage.RequestFailure });
+                    }
+
                     break;
                 }
 

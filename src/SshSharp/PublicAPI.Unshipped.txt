@@ -169,6 +169,9 @@ SshSharp.Config.SshHostConfig.BindInterface.get -> string?
 SshSharp.Config.SshHostConfig.BindInterface.init -> void
 SshSharp.SshClient.CreateHttpConnectCallback() -> System.Func<System.Net.Http.SocketsHttpConnectionContext!, System.Threading.CancellationToken, System.Threading.Tasks.ValueTask<System.IO.Stream!>>!
 SshSharp.SshClient.ForwardRemoteDynamicPortAsync(string! bindAddress, int remotePort, System.Func<string!, int, bool>? allowDestination = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SshSharp.SshRemotePortForwarder!>!
+SshSharp.SshClient.ForwardRemoteUnixSocketAsync(string! remoteSocketPath, string! localHost, int localPort, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SshSharp.SshRemoteSocketForwarder!>!
+SshSharp.SshClient.ForwardRemoteUnixSocketAsync(string! remoteSocketPath, string! localSocketPath, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SshSharp.SshRemoteSocketForwarder!>!
+SshSharp.SshClient.RemoteSocketForwardings.get -> System.Collections.Generic.IReadOnlyList<SshSharp.SshRemoteSocketForwarder!>!
 SshSharp.SshClientOptions.LocalEndPoint.get -> System.Net.IPEndPoint?
 SshSharp.SshClientOptions.LocalEndPoint.init -> void
 SshSharp.SshClientOptions.Proxy.get -> SshSharp.SshProxy?
@@ -222,6 +225,13 @@ SshSharp.SshProxyType.Http = 0 -> SshSharp.SshProxyType
 SshSharp.SshProxyType.Socks4 = 1 -> SshSharp.SshProxyType
 SshSharp.SshProxyType.Socks5 = 2 -> SshSharp.SshProxyType
 SshSharp.SshRemotePortForwarder.IsDynamic.get -> bool
+SshSharp.SshRemoteSocketForwarder
+SshSharp.SshRemoteSocketForwarder.ActiveConnections.get -> int
+SshSharp.SshRemoteSocketForwarder.DisposeAsync() -> System.Threading.Tasks.ValueTask
+SshSharp.SshRemoteSocketForwarder.LocalHost.get -> string?
+SshSharp.SshRemoteSocketForwarder.LocalPort.get -> int
+SshSharp.SshRemoteSocketForwarder.LocalSocketPath.get -> string?
+SshSharp.SshRemoteSocketForwarder.SocketPath.get -> string!
 static SshSharp.SshClient.ScanHostKeysAsync(string! host, int port = 22, SshSharp.SshHostKeyScanOptions? options = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<SshSharp.SshHostKey!>!>!
 static SshSharp.SshClient.ScanHostKeysAsync(System.Func<System.Threading.CancellationToken, System.Threading.Tasks.ValueTask<System.IO.Stream!>>! connect, SshSharp.SshHostKeyScanOptions? options = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<SshSharp.SshHostKey!>!>!
 static SshSharp.SshPrivateKey.Generate(SshSharp.SshKeyType type, string? comment = null, int rsaBits = 3072) -> SshSharp.SshPrivateKey!

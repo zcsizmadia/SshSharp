@@ -98,6 +98,9 @@ internal static partial class SshLog
     [LoggerMessage(EventId = 31, Level = LogLevel.Information, Message = "The server forwards its port {RemotePort} to a SOCKS proxy on this machine (remote dynamic forwarding)")]
     public static partial void RemoteDynamicForwardingStarted(ILogger logger, int remotePort);
 
+    [LoggerMessage(EventId = 33, Level = LogLevel.Information, Message = "The server forwards a Unix socket to this machine (streamlocal-forward)")]
+    public static partial void RemoteSocketForwardingStarted(ILogger logger);
+
     [LoggerMessage(EventId = 32, Level = LogLevel.Warning, Message = "A connection through remote dynamic forwarding on port {RemotePort} was not made: {Reason}")]
     public static partial void RemoteDynamicConnectFailed(ILogger logger, int remotePort, string reason);
 }

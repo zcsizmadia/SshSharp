@@ -199,6 +199,74 @@ public sealed partial class SshClient
             cancellationToken);
     }
 
+    /// <summary>
+    /// Remote Unix-socket forwarding (<c>ssh -R /remote/socket:host:port</c>, <c>streamlocal-forward@openssh.com</c>): asks the server
+    /// to listen on the Unix socket <paramref name="remoteSocketPath"/> and relays every connection made to it to
+    /// <paramref name="localHost"/>:<paramref name="localPort"/>, as reached from this machine. For example, a database here becomes a socket
+    /// that programs on the server can open. sshd's <c>StreamLocalBindUnlink</c> decides whether a stale socket file is replaced.
+    /// </summary>
+    /// <exception cref="SshException">The server refused (sshd's <c>AllowStreamLocalForwarding</c>, or the socket exists).</exception>
+    public Task<SshRemoteSocketForwarder> ForwardRemoteUnixSocketAsync(string remoteSocketPath, string localHost, int localPort, CancellationToken cancellationToken = default)
+    {
+        ValidateSocketPath(remoteSocketPath, nameof(remoteSocketPath));
+        ValidateDestination(localHost, localPort);
+        return StartRemoteSocketForwardAsync(remoteSocketPath,
+            path => new SshRemoteSocketForwarder(path, localHost, localPort, null, _logger, CancelRemoteSocketForwardAsync, _connection.Closed), cancellationToken);
+    }
+
+    /// <summary>
+    /// Remote Unix-socket forwarding to a Unix socket here (<c>ssh -R /remote/socket:/local/socket</c>): for example, a local
+    /// <c>gpg-agent</c> or Docker socket that programs on the server can use.
+    /// </summary>
+    /// <exception cref="SshException">The server refused (sshd's <c>AllowStreamLocalForwarding</c>, or the socket exists).</exception>
+    public Task<SshRemoteSocketForwarder> ForwardRemoteUnixSocketAsync(string remoteSocketPath, string localSocketPath, CancellationToken cancellationToken = default)
+    {
+        ValidateSocketPath(remoteSocketPath, nameof(remoteSocketPath));
+        ValidateSocketPath(localSocketPath, nameof(localSocketPath));
+        return StartRemoteSocketForwardAsync(remoteSocketPath,
+            path => new SshRemoteSocketForwarder(path, null, 0, localSocketPath, _logger, CancelRemoteSocketForwardAsync, _connection.Closed), cancellationToken);
+    }
+
+    private static void ValidateSocketPath(string path, string name)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(path, name);
+        if (path.Any(char.IsControl))
+        {
+            throw new ArgumentException("A socket path must not contain control characters.", name);
+        }
+    }
+
+    private async Task<SshRemoteSocketForwarder> StartRemoteSocketForwardAsync(string remoteSocketPath, Func<string, SshRemoteSocketForwarder> create, CancellationToken cancellationToken)
+    {
+        ObjectDisposedException.ThrowIf(_disposed != 0, this);
+        EnsureChannelDispatch();
+        var forwarder = create(remoteSocketPath);
+        if (!_remoteSocketForwards.TryAdd(remoteSocketPath, forwarder))
+        {
+            throw new SshException(SshFailureReason.ChannelClosed, $"The socket '{remoteSocketPath}' is already forwarded on this connection.");
+        }
+
+        var reply = await _connection.SendGlobalRequestAsync("streamlocal-forward@openssh.com", true, w => w.WriteString(remoteSocketPath), cancellationToken).ConfigureAwait(false);
+        if (!reply.Success)
+        {
+            _remoteSocketForwards.TryRemove(remoteSocketPath, out _);
+            throw new SshException(SshFailureReason.ChannelClosed, "The server refused to listen on the Unix socket (stream-local forwarding not allowed, or the socket exists).");
+        }
+
+        SshLog.RemoteSocketForwardingStarted(_logger);
+        return forwarder;
+    }
+
+    private async Task CancelRemoteSocketForwardAsync(SshRemoteSocketForwarder forwarder, CancellationToken cancellationToken)
+    {
+        _remoteSocketForwards.TryRemove(new KeyValuePair<string, SshRemoteSocketForwarder>(forwarder.SocketPath, forwarder));
+        if (_disposed == 0)
+        {
+            await _connection.SendGlobalRequestAsync("cancel-streamlocal-forward@openssh.com", true, w => w.WriteString(forwarder.SocketPath), cancellationToken)
+                .ConfigureAwait(false);
+        }
+    }
+
     private static void ValidateRemoteListen(string bindAddress, int remotePort)
     {
         ArgumentNullException.ThrowIfNull(bindAddress);
@@ -283,6 +351,20 @@ public sealed partial class SshClient
             return _options.ForwardAgent is { } agent ? channel => _ = RelayAgentAsync(channel, agent) : null;
         }
 
+        if (type == "forwarded-streamlocal@openssh.com")
+        {
+            // The socket path that was connected, then a reserved string; only sockets this client asked for are served.
+            try
+            {
+                var reader = new SshReader(data);
+                return _remoteSocketForwards.TryGetValue(reader.ReadUtf8String(), out var socketForwarder) ? socketForwarder.Accept : null;
+            }
+            catch (SshProtocolException)
+            {
+                return null;
+            }
+        }
+
         if (type != "forwarded-tcpip")
         {
             return null;
@@ -351,6 +433,13 @@ public sealed partial class SshClient
     /// <summary>The <c>RemoteForward</c> forwardings started from ssh_config; disposed with the client.</summary>
     public IReadOnlyList<SshRemotePortForwarder> RemoteForwardings => _remoteForwardings.AsReadOnly();
 
+    private readonly List<SshRemoteSocketForwarder> _remoteSocketForwardings = [];
+
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, SshRemoteSocketForwarder> _remoteSocketForwards = new(StringComparer.Ordinal);
+
+    /// <summary>The <c>RemoteForward</c> forwardings of a Unix socket on the server (<c>RemoteForward /path target</c>) started from ssh_config.</summary>
+    public IReadOnlyList<SshRemoteSocketForwarder> RemoteSocketForwardings => _remoteSocketForwardings.AsReadOnly();
+
     /// <summary>The <c>DynamicForward</c> SOCKS proxies started from ssh_config; disposed with the client.</summary>
     public IReadOnlyList<SshSocksProxy> DynamicForwardings => _dynamicForwardings.AsReadOnly();
 
@@ -373,6 +462,19 @@ public sealed partial class SshClient
         {
             await TryForwardAsync("RemoteForward", spec, async () =>
             {
+                // /remote/socket host:hostport or /remote/socket /local/socket: a Unix socket on the server. As in ssh, a field
+                // with a '/' in it is a socket path (so C:/run/agent.sock is one on Windows).
+                var parts = spec.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length == 2 && parts[0].StartsWith('/'))
+                {
+                    _remoteSocketForwardings.Add(parts[1].Contains('/')
+                        ? await ForwardRemoteUnixSocketAsync(parts[0], parts[1], cancellationToken).ConfigureAwait(false)
+                        : ForwardSpec.ParseTarget(parts[1]) is { } socketTarget
+                            ? await ForwardRemoteUnixSocketAsync(parts[0], socketTarget.Host, socketTarget.Port, cancellationToken).ConfigureAwait(false)
+                            : throw new FormatException("the target must be host:hostport or a socket path"));
+                    return;
+                }
+
                 // [bind:]port host:hostport, or [bind:]port alone for remote dynamic forwarding (a SOCKS proxy on this side).
                 var forward = ForwardSpec.ParseForward(spec);
                 var listen = forward?.Listen ?? ForwardSpec.ParseListen(spec)
@@ -439,6 +541,11 @@ public sealed partial class SshClient
         }
 
         foreach (var forwarding in _remoteForwardings)
+        {
+            await forwarding.DisposeAsync().ConfigureAwait(false);
+        }
+
+        foreach (var forwarding in _remoteSocketForwardings)
         {
             await forwarding.DisposeAsync().ConfigureAwait(false);
         }
