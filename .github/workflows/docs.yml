@@ -37,7 +37,7 @@ jobs:
           global-json-file: global.json
           dotnet-version: 8.0.x
       - run: dotnet tool restore
-      - run: dotnet build src/SshSharp.FileProviders -c Release # builds SshSharp too
+      - run: dotnet build src/SshSharp.FileProviders -c Release && dotnet build src/SshSharp.IO.Abstractions -c Release
       - run: dotnet docfx docs/docfx.json
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

@@ -616,9 +616,11 @@ public sealed partial class SftpClient : IAsyncDisposable
 
     private async Task<long> DownloadHandleAsync(byte[] handle, string path, Stream destination, long start, SftpTransferOptions options, CancellationToken cancellationToken)
     {
-        // A window of reads in flight; replies are written in offset order. A short read (allowed by the draft, but not at the end of
-        // the file) gets a follow-up read for the rest, at the front of the queue, so the output stays in order.
+        // A window of reads in flight; replies are written in offset order. The window starts at 2 and doubles with each reply, up to
+        // MaxRequestsInFlight, so a small file costs a few requests rather than a full window past its end. A short read (allowed by the
+        // draft, but not at the end of the file) gets a follow-up read for the rest, at the front of the queue, so the output stays in order.
         var chunk = Limits.MaxReadLength;
+        var window = Math.Min(2, options.MaxRequestsInFlight);
         var inFlight = new LinkedList<(long Offset, int Length, Task<SftpResponse> Reply)>();
         var next = start;
         var end = false;
@@ -627,7 +629,7 @@ public sealed partial class SftpClient : IAsyncDisposable
         {
             while (true)
             {
-                while (!end && inFlight.Count < options.MaxRequestsInFlight)
+                while (!end && inFlight.Count < window)
                 {
                     inFlight.AddLast((next, chunk, SendReadAsync(handle, next, chunk, cancellationToken)));
                     next += chunk;
@@ -649,6 +651,11 @@ public sealed partial class SftpClient : IAsyncDisposable
 
                 if (!end)
                 {
+                    if (data.Length == length)
+                    {
+                        window = Math.Min(window * 2, options.MaxRequestsInFlight); // a full reply: more is likely to follow
+                    }
+
                     await destination.WriteAsync(data, cancellationToken).ConfigureAwait(false);
                     total += data.Length;
                     options.Progress?.Report(total);

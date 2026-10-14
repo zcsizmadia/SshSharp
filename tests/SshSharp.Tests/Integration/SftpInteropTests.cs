@@ -99,6 +99,58 @@ public class SftpInteropTests
         }
     }
 
+    [Test]
+    public async Task TheFileSystemAbstraction_WorksAgainstARealServer()
+    {
+        if (RealServer.Endpoint is not var (host, port) || await RealServer.OptionsAsync() is not { } options)
+        {
+            Skip.Test("SSHSHARP_TEST_SSHD and SSHSHARP_TEST_USER with a password or key are needed.");
+            return;
+        }
+
+        if (!RealServer.IsOpenSsh)
+        {
+            Skip.Test("The Dropbear test image has no sftp-server.");
+            return;
+        }
+
+        await using var client = await SshClient.ConnectAsync(host, port, options, Timeout());
+        await using var sftp = await client.OpenSftpAsync(Timeout());
+        var fs = new SshSharp.IO.Abstractions.SftpFileSystem(sftp);
+        var root = ".sshsharp-iofs-" + Guid.NewGuid().ToString("N")[..12];
+        try
+        {
+            fs.Directory.CreateDirectory(fs.Path.Combine(root, "a", "b"));
+            fs.File.WriteAllText(fs.Path.Combine(root, "a", "note.txt"), "über");
+            using (var writer = fs.File.CreateText(fs.Path.Combine(root, "a", "b", "log.txt")))
+            {
+                for (var i = 0; i < 500; i++)
+                {
+                    writer.WriteLine($"entry {i}");
+                }
+            }
+
+            await Assert.That(fs.File.ReadAllText(fs.Path.Combine(root, "a", "note.txt"))).IsEqualTo("über");
+            await Assert.That(fs.File.ReadAllLines(fs.Path.Combine(root, "a", "b", "log.txt")).Length).IsEqualTo(500);
+            await Assert.That(fs.Directory.GetFiles(root, "*.txt", SearchOption.AllDirectories).Length).IsEqualTo(2);
+            await Assert.That(fs.FileInfo.New(fs.Path.Combine(root, "a", "note.txt")).Length).IsEqualTo(5L);
+
+            fs.File.Copy(fs.Path.Combine(root, "a", "note.txt"), fs.Path.Combine(root, "copy.txt"));
+            fs.File.Move(fs.Path.Combine(root, "copy.txt"), fs.Path.Combine(root, "moved.txt"));
+            await Assert.That(fs.File.Exists(fs.Path.Combine(root, "moved.txt"))).IsTrue();
+            await Assert.That(() => fs.File.ReadAllText(fs.Path.Combine(root, "missing.txt"))).Throws<FileNotFoundException>();
+        }
+        finally
+        {
+            if (fs.Directory.Exists(root))
+            {
+                fs.Directory.Delete(root, recursive: true);
+            }
+        }
+
+        await Assert.That(fs.Directory.Exists(root)).IsFalse();
+    }
+
     private static async Task DeleteTreeAsync(SftpClient sftp, string path)
     {
         if (!await sftp.ExistsAsync(path, Timeout()))

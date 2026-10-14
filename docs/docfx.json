@@ -5,7 +5,7 @@
       "src": [
         {
           "src": "../src",
-          "files": [ "SshSharp/SshSharp.csproj", "SshSharp.FileProviders/SshSharp.FileProviders.csproj" ]
+          "files": [ "SshSharp/SshSharp.csproj", "SshSharp.FileProviders/SshSharp.FileProviders.csproj", "SshSharp.IO.Abstractions/SshSharp.IO.Abstractions.csproj" ]
         }
       ],
       "output": "api",
