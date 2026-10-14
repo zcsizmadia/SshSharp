@@ -30,7 +30,8 @@ Console.WriteLine(result.StandardOutputText);
   keyboard-interactive (one-time codes, PAM), and multi-factor chains. Key generation, saved as `ssh-keygen` does.
 - **Host verification:** `StrictHostKeyChecking` policies, host certificates, `UpdateHostKeys`, key pinning, or your own
   verifier. There is no "accept anything" default. Host key scanning, as `ssh-keyscan` does it.
-- **Connections:** ProxyJump chains, ProxyCommand, HTTP and SOCKS proxies, connect over any `Stream`, keep-alive and
+- **Connections:** ProxyJump chains, ProxyCommand, HTTP and SOCKS proxies, connect over any `Stream` or from a chosen local
+  address (`BindAddress`, `BindInterface`), keep-alive and
   dead-connection detection; `HttpClient` through the SSH connection;
   TCP and Unix-socket tunnels; local, remote and dynamic (SOCKS) port forwarding (`ssh -L`, `-R`, `-D`) and remote dynamic forwarding (`-R port`), also
   started from `ssh_config`.
@@ -62,6 +63,7 @@ Coming next: SFTP, as a separate package.
 | ProxyJump chains, ProxyCommand | ✅ | ❌ |
 | HTTP and SOCKS 4/5 proxies | ✅ | ✅ |
 | Connect over any `Stream` (WebSocket, named pipe, your own tunnel) | ✅ | ❌ |
+| Connect from a chosen local address or interface (`BindAddress`, `BindInterface`) | ✅ | ❌ |
 | Keep-alive that detects a dead server (`ServerAliveCountMax`) | ✅ | ❌ (keep-alives get no reply) |
 | SSH agent (`ssh-agent`, Windows OpenSSH agent), including destination-constrained keys (`ssh-add -h`) | ✅ | ❌ |
 | Agent forwarding | ✅ | ❌ |

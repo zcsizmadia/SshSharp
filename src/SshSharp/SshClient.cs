@@ -68,32 +68,16 @@ public sealed partial class SshClient : IAsyncDisposable
         ArgumentOutOfRangeException.ThrowIfLessThan(port, 1);
         ArgumentOutOfRangeException.ThrowIfGreaterThan(port, 65535);
         ArgumentNullException.ThrowIfNull(options);
+        IReadOnlyList<System.Net.IPEndPoint>? local = options.LocalEndPoint is { } bind ? [bind] : null;
         if (options.Proxy is { } proxy)
         {
-            var proxied = await proxy.ConnectAsync(host, port, cancellationToken).ConfigureAwait(false);
+            var proxied = await proxy.ConnectAsync(host, port, local, cancellationToken).ConfigureAwait(false);
             return await ConnectCoreAsync(proxied, options, leaveOpen: false, owner: null, host, port, cancellationToken).ConfigureAwait(false);
         }
 
-        var tcp = new TcpClient { NoDelay = true };
-        try
-        {
-            try
-            {
-                await tcp.ConnectAsync(host, port, cancellationToken).ConfigureAwait(false);
-            }
-            catch (SocketException ex)
-            {
-                // The host name stays out of the message (exception text often ends up in logs); it is in the caller's hands already.
-                throw new SshException(SshFailureReason.ConnectFailed, $"Could not connect to the server: {ex.SocketErrorCode}.", ex);
-            }
-
-            return await ConnectCoreAsync(tcp.GetStream(), options, leaveOpen: false, owner: new Owned(tcp), host, port, cancellationToken).ConfigureAwait(false);
-        }
-        catch
-        {
-            tcp.Dispose();
-            throw;
-        }
+        // The host name stays out of error messages (exception text often ends up in logs); it is in the caller's hands already.
+        var stream = await TcpConnector.ConnectAsync(host, port, local, Config.SshAddressFamily.Any, "the server", cancellationToken).ConfigureAwait(false);
+        return await ConnectCoreAsync(stream, options, leaveOpen: false, owner: null, host, port, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Runs the SSH protocol over an existing stream (a socket, a WebSocket wrapper, a tunnel from another connection, ...).</summary>

@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Net;
 using System.Net.Sockets;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -103,7 +104,8 @@ public sealed partial class SshClient
             }
             else
             {
-                var connector = options.TcpConnector ?? (options.Proxy is { } proxy ? ProxyConnector(proxy) : ConnectTcpAsync);
+                var local = TcpConnector.FromConfig(hostConfig.BindAddress, hostConfig.BindInterface);
+                var connector = options.TcpConnector ?? (options.Proxy is { } proxy ? ProxyConnector(proxy, local) : DirectConnector(local));
                 var (tcpStream, tcpOwner) = await connector(hostConfig.HostName, hostConfig.Port, hostConfig.AddressFamily, token).ConfigureAwait(false);
                 if (tcpOwner is not null)
                 {
@@ -190,34 +192,12 @@ public sealed partial class SshClient
     }
 
     /// <summary>Opens the first hop through a proxy; the address family is the proxy's business, since it makes the connection.</summary>
-    private static Func<string, int, SshAddressFamily, CancellationToken, ValueTask<(Stream Stream, IAsyncDisposable? Owner)>> ProxyConnector(SshProxy proxy) =>
-        async (host, port, _, cancellationToken) => (await proxy.ConnectAsync(host, port, cancellationToken).ConfigureAwait(false), null);
+    private static Func<string, int, SshAddressFamily, CancellationToken, ValueTask<(Stream Stream, IAsyncDisposable? Owner)>> ProxyConnector(SshProxy proxy, IReadOnlyList<IPEndPoint>? local) =>
+        async (host, port, _, cancellationToken) => (await proxy.ConnectAsync(host, port, local, cancellationToken).ConfigureAwait(false), null);
 
-    private static async ValueTask<(Stream Stream, IAsyncDisposable? Owner)> ConnectTcpAsync(string host, int port, SshAddressFamily family, CancellationToken cancellationToken)
-    {
-        var tcp = family switch
-        {
-            SshAddressFamily.Inet => new TcpClient(AddressFamily.InterNetwork),
-            SshAddressFamily.Inet6 => new TcpClient(AddressFamily.InterNetworkV6),
-            _ => new TcpClient(),
-        };
-        tcp.NoDelay = true;
-        try
-        {
-            await tcp.ConnectAsync(host, port, cancellationToken).ConfigureAwait(false);
-            return (tcp.GetStream(), new Owned(tcp));
-        }
-        catch (SocketException ex)
-        {
-            tcp.Dispose();
-            throw new SshException(SshFailureReason.ConnectFailed, $"Could not connect to the server: {ex.SocketErrorCode}.", ex);
-        }
-        catch
-        {
-            tcp.Dispose();
-            throw;
-        }
-    }
+    /// <summary>Opens the first hop over TCP, from the configured BindAddress or BindInterface when there is one; the stream owns the socket.</summary>
+    private static Func<string, int, SshAddressFamily, CancellationToken, ValueTask<(Stream Stream, IAsyncDisposable? Owner)>> DirectConnector(IReadOnlyList<IPEndPoint>? local) =>
+        async (host, port, family, cancellationToken) => (await TcpConnector.ConnectAsync(host, port, local, family, "the server", cancellationToken).ConfigureAwait(false), null);
 
     /// <summary>
     /// The keys to offer, in ssh's order: identity files the agent holds (signed by the agent, so an encrypted file needs no passphrase),
