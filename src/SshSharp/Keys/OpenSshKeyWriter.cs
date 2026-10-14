@@ -29,8 +29,9 @@ internal static class OpenSshKeyWriter
         var encrypted = !string.IsNullOrEmpty(passphrase);
         var blockSize = encrypted ? 16 : 8;
 
-        // The private section: two equal check values, the key, its comment, then padding 1, 2, 3, ... to the block size.
-        var section = new ArrayBufferWriter<byte>(1024);
+        // The private section: two equal check values, the key, its comment, then padding 1, 2, 3, ... to the block size. The buffers
+        // zero any array they outgrow, so no partial copy of the private fields is left behind (ArrayBufferWriter would abandon it).
+        using var section = new ZeroingBufferWriter(EstimatePrivateSectionSize(key));
         byte[]? plain = null;
         byte[]? file = null;
         try
@@ -60,9 +61,9 @@ internal static class OpenSshKeyWriter
                 Encrypt(plain, passphrase!, salt, rounds);
             }
 
-            var body = new ArrayBufferWriter<byte>(plain.Length + key.PublicKey.Length + 128);
-            body.Write("openssh-key-v1\0"u8);
+            using var body = new ZeroingBufferWriter(plain.Length + key.PublicKey.Length + 128);
             var outer = new SshWriter(body);
+            outer.WriteBytes("openssh-key-v1\0"u8);
             outer.WriteString(encrypted ? "aes256-ctr" : "none");
             outer.WriteString(encrypted ? "bcrypt" : "none");
             outer.WriteString(kdfOptions);
@@ -70,12 +71,10 @@ internal static class OpenSshKeyWriter
             outer.WriteString(key.PublicKey.Span);
             outer.WriteString(plain);
             file = body.WrittenSpan.ToArray();
-            body.Clear();
             return Armor(file);
         }
         finally
         {
-            section.Clear(); // ArrayBufferWriter.Clear zeroes what was written
             if (plain is not null)
             {
                 CryptographicOperations.ZeroMemory(plain);
@@ -87,6 +86,13 @@ internal static class OpenSshKeyWriter
             }
         }
     }
+
+    /// <summary>
+    /// An upper bound for the private section, so the buffer normally never grows: the public key blob bounds every public field, and
+    /// the private ones are at most the modulus (RSA: d, iqmp, p, q) or 64 bytes (Ed25519 seed and public key; an ECDSA scalar).
+    /// </summary>
+    internal static int EstimatePrivateSectionSize(SshPrivateKey key) =>
+        8 + 4 + key.KeyType.Length + (5 * (key.PublicKey.Length + 8)) + 4 + Encoding.UTF8.GetMaxByteCount((key.Comment ?? string.Empty).Length) + 16;
 
     /// <summary>The PEM-style text as UTF-8 bytes, base64 in 70-character lines as ssh-keygen writes it; built without an intermediate string.</summary>
     private static byte[] Armor(ReadOnlySpan<byte> data)

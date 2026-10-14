@@ -149,6 +149,8 @@ internal static class Sntrup761
         }
         finally
         {
+            // cnew is the re-encryption of the decrypted r: for a tampered ciphertext, exactly what implicit rejection hides.
+            CryptographicOperations.ZeroMemory(cnew);
             CryptographicOperations.ZeroMemory(rEnc);
             CryptographicOperations.ZeroMemory(MemoryMarshalBytes(f));
             CryptographicOperations.ZeroMemory(MemoryMarshalBytes(v));
@@ -652,7 +654,9 @@ internal static class Sntrup761
             moduli[i] = Q;
         }
 
+        // Only the public key is encoded this way, but the buffer is cleared like every other polynomial.
         var written = Encode(s, values, moduli);
+        Array.Clear(values);
         if (written != PublicKeySize)
         {
             throw new InvalidOperationException("Rq encoding size mismatch.");
@@ -681,7 +685,17 @@ internal static class Sntrup761
             moduli[i] = (Q + 2) / 3;
         }
 
-        var written = Encode(s, values, moduli);
+        // The rounded h*r of a re-encryption is derived from the decrypted r: cleared after encoding.
+        int written;
+        try
+        {
+            written = Encode(s, values, moduli);
+        }
+        finally
+        {
+            Array.Clear(values);
+        }
+
         if (written != RoundedBytes)
         {
             throw new InvalidOperationException("Rounded encoding size mismatch.");
