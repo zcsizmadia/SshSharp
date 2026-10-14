@@ -50,6 +50,8 @@ internal abstract class ClientKeyExchange : IDisposable
     {
 #if NET10_0_OR_GREATER
         SshAlgorithms.MlKem768X25519Sha256 when MLKem.IsSupported => new MlKem768X25519KeyExchange(),
+        SshAlgorithms.MlKem768Nistp256Sha256 when MLKem.IsSupported => new MlKemNistKeyExchange(MLKemAlgorithm.MLKem768, NistCurve.P256),
+        SshAlgorithms.MlKem1024Nistp384Sha384 when MLKem.IsSupported => new MlKemNistKeyExchange(MLKemAlgorithm.MLKem1024, NistCurve.P384),
 #endif
         SshAlgorithms.Curve25519Sha256 or SshAlgorithms.Curve25519Sha256Libssh => new Curve25519KeyExchange(),
         SshAlgorithms.EcdhNistp256 => new EcdhKeyExchange(NistCurve.P256),
@@ -373,6 +375,120 @@ internal sealed class MlKem768X25519KeyExchange : ClientKeyExchange
     {
         _mlkem.Dispose();
         CryptographicOperations.ZeroMemory(_privateKey);
+    }
+}
+
+/// <summary>
+/// <c>mlkem768nistp256-sha256</c> and <c>mlkem1024nistp384-sha384</c> (RFC 10042): ML-KEM (FIPS 203) combined with ECDH on a NIST curve,
+/// so both halves are FIPS-approved. The same construction as <see cref="MlKem768X25519KeyExchange"/>: the client sends its ML-KEM
+/// encapsulation key followed by its uncompressed ECDH point; the server answers with the ML-KEM ciphertext followed by its point;
+/// K = HASH(ML-KEM secret || ECDH secret), the ECDH secret as a fixed-length x coordinate, K encoded as a string. HASH is the curve's:
+/// SHA-256 for P-256, SHA-384 for P-384.
+/// </summary>
+internal sealed class MlKemNistKeyExchange : ClientKeyExchange
+{
+    private readonly MLKemAlgorithm _algorithm;
+    private readonly NistCurve _curve;
+    private readonly MLKem _mlkem;
+    private readonly ECDiffieHellman _ecdh;
+    private readonly byte[] _clientInit;
+
+    public MlKemNistKeyExchange(MLKemAlgorithm algorithm, NistCurve curve)
+    {
+        _algorithm = algorithm;
+        _curve = curve;
+        _mlkem = MLKem.GenerateKey(algorithm);
+        _ecdh = ECDiffieHellman.Create(curve.Curve);
+
+        var keySize = algorithm.EncapsulationKeySizeInBytes;
+        var q = _ecdh.ExportParameters(false).Q;
+        _clientInit = new byte[keySize + 1 + (2 * curve.FieldSize)];
+        _mlkem.ExportEncapsulationKey(_clientInit.AsSpan(0, keySize));
+        _clientInit[keySize] = 4; // uncompressed point (SEC 1 section 2.3.3)
+        q.X!.CopyTo(_clientInit, keySize + 1 + curve.FieldSize - q.X.Length);
+        q.Y!.CopyTo(_clientInit, keySize + 1 + (2 * curve.FieldSize) - q.Y.Length);
+    }
+
+    public override HashAlgorithmName Hash => _curve.Hash;
+
+    public override byte[] CreateInit() => BuildInit(SshMessage.KexEcdhInit, w => w.WriteString(_clientInit));
+
+    public override KexResult ProcessReply(ReadOnlySpan<byte> reply, KexContext context)
+    {
+        var reader = new SshReader(reply);
+        var hostKey = ExpectReply(ref reader);
+        var serverReply = reader.ReadString().ToArray();
+        var signature = reader.ReadString().ToArray();
+        if (!reader.IsEmpty)
+        {
+            throw new SshProtocolException("Trailing data in the key exchange reply.");
+        }
+
+        // The ciphertext, then the server's point. RFC 10042 allows compressed points; servers send uncompressed ones, and that is the
+        // only form accepted here (as for plain ECDH, RFC 5656).
+        var ciphertextSize = _algorithm.CiphertextSizeInBytes;
+        var size = _curve.FieldSize;
+        if (serverReply.Length != ciphertextSize + 1 + (2 * size) || serverReply[ciphertextSize] != 4)
+        {
+            throw new SshProtocolException($"The ML-KEM/ECDH reply must be {ciphertextSize} bytes of ciphertext and an uncompressed point.");
+        }
+
+        var x = serverReply.AsSpan(ciphertextSize + 1, size);
+        var y = serverReply.AsSpan(ciphertextSize + 1 + size, size);
+        if (!_curve.IsOnCurve(x, y))
+        {
+            throw new SshException(SshFailureReason.KeyExchangeFailed, "The server's ECDH point is not on the curve.");
+        }
+
+        var pqSize = _algorithm.SharedSecretSizeInBytes;
+        var secrets = new byte[pqSize + size];
+        byte[]? classic = null;
+        var shared = new byte[_curve.Hash == HashAlgorithmName.SHA384 ? 48 : 32];
+        try
+        {
+            try
+            {
+                _mlkem.Decapsulate(serverReply.AsSpan(0, ciphertextSize), secrets.AsSpan(0, pqSize));
+                using var peer = ECDiffieHellman.Create(new ECParameters { Curve = _curve.Curve, Q = new ECPoint { X = x.ToArray(), Y = y.ToArray() } });
+                classic = _ecdh.DeriveRawSecretAgreement(peer.PublicKey);
+            }
+            catch (CryptographicException ex)
+            {
+                throw new SshException(SshFailureReason.KeyExchangeFailed, $"The ML-KEM/ECDH exchange failed: {ex.Message}", ex);
+            }
+
+            // The ECDH secret as a fixed-length byte array (the x coordinate, FieldSize bytes), not an mpint.
+            classic.CopyTo(secrets.AsSpan(pqSize + size - classic.Length));
+            if (_curve.Hash == HashAlgorithmName.SHA384)
+            {
+                SHA384.HashData(secrets, shared);
+            }
+            else
+            {
+                SHA256.HashData(secrets, shared);
+            }
+
+            return Finish(Hash, context, hostKey, signature, w =>
+            {
+                w.WriteString(_clientInit);
+                w.WriteString(serverReply);
+            }, shared, sharedSecretIsString: true);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(secrets);
+            CryptographicOperations.ZeroMemory(shared);
+            if (classic is not null)
+            {
+                CryptographicOperations.ZeroMemory(classic);
+            }
+        }
+    }
+
+    public override void Dispose()
+    {
+        _mlkem.Dispose();
+        _ecdh.Dispose();
     }
 }
 #endif

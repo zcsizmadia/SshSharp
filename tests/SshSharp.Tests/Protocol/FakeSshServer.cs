@@ -498,7 +498,7 @@ internal sealed class FakeSshServer : IAsyncDisposable
         SshAlgorithms.TryGetMac(negotiated.MacClientToServer, out var macC2S);
         SshAlgorithms.TryGetMac(negotiated.MacServerToClient, out var macS2C);
         using var keys = KeyDerivation.DeriveAll(kexHash, secret, hash, SessionId!, cipherC2S, cipherS2C, macC2S, macS2C,
-            sharedSecretIsString: negotiated.Kex == SshAlgorithms.MlKem768X25519Sha256);
+            sharedSecretIsString: SshAlgorithms.IsPostQuantum(negotiated.Kex));
         var newSend = PacketProtectorFactory.Create(cipherS2C, macS2C, keys.EncryptionKeyServerToClient, keys.IvServerToClient, keys.IntegrityKeyServerToClient);
         var newReceive = PacketProtectorFactory.Create(cipherC2S, macC2S, keys.EncryptionKeyClientToServer, keys.IvClientToServer, keys.IntegrityKeyClientToServer);
 
@@ -677,6 +677,38 @@ internal sealed class FakeSshServer : IAsyncDisposable
                 var h = ExchangeHash.Compute(HashAlgorithmName.SHA256, clientVersion, serverVersion, clientInit, serverInit, hostKey.Blob,
                     w => { w.WriteString(clientInitValue); w.WriteString(serverReply); }, k, sharedSecretIsString: true);
                 return (Reply(w => w.WriteString(serverReply), h), k, h, HashAlgorithmName.SHA256);
+            }
+
+            case SshAlgorithms.MlKem768Nistp256Sha256 or SshAlgorithms.MlKem1024Nistp384Sha384:
+            {
+                // RFC 10042, the server side: C_INIT = ML-KEM encapsulation key || uncompressed point; S_REPLY = ciphertext || point;
+                // K = HASH(ML-KEM secret || ECDH x coordinate), as a string.
+                var (algorithm, curve) = method == SshAlgorithms.MlKem768Nistp256Sha256
+                    ? (MLKemAlgorithm.MLKem768, NistCurve.P256)
+                    : (MLKemAlgorithm.MLKem1024, NistCurve.P384);
+                var clientInitValue = reader.ReadString().ToArray();
+                var keySize = algorithm.EncapsulationKeySizeInBytes;
+                using var encapsulationKey = MLKem.ImportEncapsulationKey(algorithm, clientInitValue.AsSpan(0, keySize));
+                encapsulationKey.Encapsulate(out var ciphertext, out var pqSecret);
+                var qc = clientInitValue.AsSpan(keySize);
+                using var server = ECDiffieHellman.Create(curve.Curve);
+                var q = server.ExportParameters(false).Q;
+                var qs = new byte[1 + (2 * curve.FieldSize)];
+                qs[0] = 4;
+                q.X!.CopyTo(qs, 1 + curve.FieldSize - q.X.Length);
+                q.Y!.CopyTo(qs, 1 + (2 * curve.FieldSize) - q.Y.Length);
+                using var peer = ECDiffieHellman.Create(new ECParameters
+                {
+                    Curve = curve.Curve,
+                    Q = new ECPoint { X = qc.Slice(1, curve.FieldSize).ToArray(), Y = qc.Slice(1 + curve.FieldSize).ToArray() },
+                });
+                var classic = server.DeriveRawSecretAgreement(peer.PublicKey);
+                byte[] both = [.. pqSecret, .. classic];
+                var k = curve.Hash == HashAlgorithmName.SHA384 ? SHA384.HashData(both) : SHA256.HashData(both);
+                byte[] serverReply = [.. ciphertext, .. qs];
+                var h = ExchangeHash.Compute(curve.Hash, clientVersion, serverVersion, clientInit, serverInit, hostKey.Blob,
+                    w => { w.WriteString(clientInitValue); w.WriteString(serverReply); }, k, sharedSecretIsString: true);
+                return (Reply(w => w.WriteString(serverReply), h), k, h, curve.Hash);
             }
 #endif
 
