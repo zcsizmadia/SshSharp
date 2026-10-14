@@ -163,6 +163,27 @@ public sealed partial class SshClient : IAsyncDisposable
         return StartSessionAsync("exec", command, options, cancellationToken);
     }
 
+    /// <summary>
+    /// Starts a subsystem, as <c>ssh -s</c> does: a protocol the server runs by name (<c>sftp</c>, <c>netconf</c>, or one the server
+    /// configures with sshd's <c>Subsystem</c>), with no shell in between. The session's <see cref="SshSession.StandardInput"/> and
+    /// <see cref="SshSession.StandardOutput"/> carry the subsystem's protocol, byte for byte.
+    /// </summary>
+    /// <param name="name">The subsystem's name, for example <c>sftp</c>.</param>
+    /// <param name="options">Environment variables (and, rarely, a terminal) for the session.</param>
+    /// <param name="cancellationToken">Cancels starting the subsystem.</param>
+    /// <exception cref="SshException">The server does not offer the subsystem (<see cref="SshFailureReason.ChannelClosed"/>), or the
+    /// connection failed.</exception>
+    public Task<SshSession> StartSubsystemAsync(string name, SshSessionOptions? options = null, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(name);
+        if (name.Any(char.IsControl))
+        {
+            throw new ArgumentException("A subsystem name must not contain control characters.", nameof(name));
+        }
+
+        return StartSessionAsync("subsystem", name, options, cancellationToken);
+    }
+
     private async Task<SshSession> StartSessionAsync(string kind, string? command, SshSessionOptions? options, CancellationToken cancellationToken)
     {
         ObjectDisposedException.ThrowIf(_disposed != 0, this);
@@ -215,7 +236,12 @@ public sealed partial class SshClient : IAsyncDisposable
 
             if (!await channel.RequestAsync(kind, true, command is null ? null : w => w.WriteString(command), cancellationToken).ConfigureAwait(false))
             {
-                throw new SshException(SshFailureReason.ChannelClosed, kind == "shell" ? "The server refused to start a shell." : "The server refused to execute the command.");
+                throw new SshException(SshFailureReason.ChannelClosed, kind switch
+                {
+                    "shell" => "The server refused to start a shell.",
+                    "subsystem" => $"The server does not offer the '{command}' subsystem, or refused it.",
+                    _ => "The server refused to execute the command.",
+                });
             }
 
             SshLog.SessionStarted(_logger, kind, channel.LocalId, terminal is not null);

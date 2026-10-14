@@ -65,6 +65,51 @@ public class SessionInteropTests
     }
 
     [Test]
+    public async Task TheSftpSubsystem_AnswersTheVersionHandshake()
+    {
+        await using var client = await ConnectAsync();
+        if (client is null)
+        {
+            Skip.Test("SSHSHARP_TEST_SSHD, SSHSHARP_TEST_USER and SSHSHARP_TEST_PASSWORD are needed.");
+            return;
+        }
+
+        if (!RealServer.IsOpenSsh)
+        {
+            Skip.Test("Dropbear needs a separate sftp-server, which the test image does not install.");
+            return;
+        }
+
+        // SFTP's first exchange (draft-ietf-secsh-filexfer-02): SSH_FXP_INIT with version 3, answered by SSH_FXP_VERSION. Enough to show
+        // that a subsystem carries a binary protocol both ways with a real server; SFTP itself is SshSharp.Sftp's job (#7).
+        await using var sftp = await client.StartSubsystemAsync("sftp", cancellationToken: Timeout());
+        await sftp.StandardInput.WriteAsync(new byte[] { 0, 0, 0, 5, 1, 0, 0, 0, 3 }, Timeout());
+        var header = new byte[4];
+        await sftp.StandardOutput.ReadExactlyAsync(header, Timeout());
+        var length = System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(header);
+        await Assert.That(length).IsGreaterThanOrEqualTo(5u).And.IsLessThan(64u * 1024);
+        var reply = new byte[length];
+        await sftp.StandardOutput.ReadExactlyAsync(reply, Timeout());
+        await Assert.That(reply[0]).IsEqualTo((byte)2); // SSH_FXP_VERSION
+        await Assert.That(System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(reply.AsSpan(1))).IsEqualTo(3u);
+    }
+
+    [Test]
+    public async Task ASubsystemTheServerDoesNotOffer_IsRefused()
+    {
+        await using var client = await ConnectAsync();
+        if (client is null)
+        {
+            Skip.Test("SSHSHARP_TEST_SSHD, SSHSHARP_TEST_USER and SSHSHARP_TEST_PASSWORD are needed.");
+            return;
+        }
+
+        var error = await Assert.ThrowsAsync<SshException>(async () => await client.StartSubsystemAsync("sshsharp-no-such-subsystem", cancellationToken: Timeout()));
+        await Assert.That(error!.Reason).IsEqualTo(SshFailureReason.ChannelClosed);
+        await Assert.That((await client.RunCommandAsync("true", Timeout())).ExitStatus).IsEqualTo(0);
+    }
+
+    [Test]
     public async Task ACommandWithoutATerminal_KeepsStdoutAndStderrApart_AndReadsStdin()
     {
         await using var client = await ConnectAsync();

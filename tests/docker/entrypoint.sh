@@ -7,14 +7,16 @@ if command -v dropbear > /dev/null 2>&1; then
   exec dropbear -F -E -R -p 22
 fi
 ssh-keygen -A
-# sshd takes the first value of each keyword, and Alpine's default file turns forwarding off: drop those lines before appending.
-sed -i '/^AllowTcpForwarding/d;/^AllowStreamLocalForwarding/d' /etc/ssh/sshd_config
+# sshd takes the first value of each keyword, and Alpine's default file turns forwarding off: drop those lines before appending. Its
+# Subsystem line names an sftp-server binary that may not be installed, and a second definition would be fatal: use internal-sftp.
+sed -i '/^AllowTcpForwarding/d;/^AllowStreamLocalForwarding/d;/^Subsystem/d' /etc/ssh/sshd_config
 cat >> /etc/ssh/sshd_config <<CONFIG
 PasswordAuthentication yes
 MaxStartups 200:30:300
 MaxSessions 64
 AllowTcpForwarding yes
 AllowStreamLocalForwarding yes
+Subsystem sftp internal-sftp
 RekeyLimit ${REKEY_LIMIT:-32K}
 KexAlgorithms +diffie-hellman-group14-sha256,diffie-hellman-group16-sha512
 LogLevel DEBUG1

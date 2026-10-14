@@ -117,6 +117,7 @@ jobs:
           MaxSessions 64
           AllowTcpForwarding yes
           AllowStreamLocalForwarding yes
+          Subsystem sftp internal-sftp
           RekeyLimit 32K
           KexAlgorithms +diffie-hellman-group14-sha256,diffie-hellman-group16-sha512
           LogLevel DEBUG1

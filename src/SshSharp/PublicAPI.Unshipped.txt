@@ -1,1 +1,2 @@
 #nullable enable
+SshSharp.SshClient.StartSubsystemAsync(string! name, SshSharp.SshSessionOptions? options = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SshSharp.SshSession!>!
