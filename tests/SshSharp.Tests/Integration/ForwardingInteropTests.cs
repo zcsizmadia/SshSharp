@@ -194,6 +194,10 @@ public class ForwardingInteropTests
             ? SshProxy.Socks5("127.0.0.1", socks.LocalEndPoint.Port)
             : SshProxy.Socks4("127.0.0.1", socks.LocalEndPoint.Port, "tester");
 
+        // The proxy's reply waits for the server to connect to its own sshd. On the Windows runner, with the other interop tests
+        // connecting in parallel, that connection can wait in sshd's backlog past the 30 s default; the test has 60 s in all.
+        proxy.HandshakeTimeout = TimeSpan.FromSeconds(60);
+
         await using var second = await SshClient.ConnectAsync("localhost", ServerSidePort, new SshClientOptions
         {
             UserName = options.UserName,
