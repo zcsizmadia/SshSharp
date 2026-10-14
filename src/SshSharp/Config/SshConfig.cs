@@ -138,11 +138,11 @@ public sealed class SshConfig
     public static SshConfig LoadDefault(string? homeDirectory = null)
     {
         var home = homeDirectory ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        var userDirectory = Path.Combine(home, ".ssh");
+        var userDirectory = Path.Join(home, ".ssh");
         var systemDirectory = OperatingSystem.IsWindows()
-            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "ssh")
+            ? Path.Join(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "ssh")
             : "/etc/ssh";
-        return Combine(Load(Path.Combine(userDirectory, "config"), userDirectory), Load(Path.Combine(systemDirectory, "ssh_config"), systemDirectory));
+        return Combine(Load(Path.Join(userDirectory, "config"), userDirectory), Load(Path.Join(systemDirectory, "ssh_config"), systemDirectory));
     }
 
     /// <summary>Combines several configs; earlier ones take precedence (first obtained value wins).</summary>
@@ -274,9 +274,9 @@ public sealed class SshConfig
     private static string[] DefaultGlobalKnownHosts()
     {
         var dir = OperatingSystem.IsWindows()
-            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "ssh")
+            ? Path.Join(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "ssh")
             : "/etc/ssh";
-        return [Path.Combine(dir, "ssh_known_hosts"), Path.Combine(dir, "ssh_known_hosts2")];
+        return [Path.Join(dir, "ssh_known_hosts"), Path.Join(dir, "ssh_known_hosts2")];
     }
 
     private static string ExpandAgent(string value, SshTokenContext ctx)

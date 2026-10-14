@@ -313,14 +313,14 @@ public static class SshScpExtensions
         private string? _lastFile;
 
         public override string Describe(string name) =>
-            _directories.Count == 0 ? CheckName(name) : Path.GetRelativePath(target, Path.Combine(_directories.Peek(), CheckName(name)));
+            _directories.Count == 0 ? CheckName(name) : Path.GetRelativePath(target, Path.Join(_directories.Peek(), CheckName(name)));
 
         private string FilePath(string name)
         {
             CheckName(name);
             if (_directories.Count > 0)
             {
-                return Path.Combine(_directories.Peek(), name);
+                return Path.Join(_directories.Peek(), name);
             }
 
             if (recursive)
@@ -333,7 +333,7 @@ public static class SshScpExtensions
                 throw new SshException(SshFailureReason.TransferFailed, "The remote scp sent more than one file.");
             }
 
-            return directoryTarget ? Path.Combine(target, name) : target;
+            return directoryTarget ? Path.Join(target, name) : target;
         }
 
         public override (Stream Stream, bool Owned) OpenFile(string name)
@@ -356,7 +356,7 @@ public static class SshScpExtensions
             }
 
             // The top directory becomes the target, or goes inside it when it exists, as with scp -r.
-            var path = _directories.Count > 0 ? Path.Combine(_directories.Peek(), name) : directoryTarget ? Path.Combine(target, name) : target;
+            var path = _directories.Count > 0 ? Path.Join(_directories.Peek(), name) : directoryTarget ? Path.Join(target, name) : target;
             Directory.CreateDirectory(path);
             _directories.Push(path);
             _pendingDirectories.Push((path, mode, times));

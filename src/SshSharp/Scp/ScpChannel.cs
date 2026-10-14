@@ -195,7 +195,7 @@ internal sealed class ScpChannel : IAsyncDisposable
     private static async Task<string> ReadErrorsAsync(Stream errors)
     {
         // Drained to the end whatever it holds (unread stderr would hold the channel window), keeping the first 64 KiB.
-        var kept = new MemoryStream();
+        using var kept = new MemoryStream();
         var buffer = new byte[4096];
         try
         {
