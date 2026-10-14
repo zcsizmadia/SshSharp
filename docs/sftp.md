@@ -5,8 +5,8 @@ as your commands. SshSharp speaks SFTP version 3, the version OpenSSH's `sftp-se
 OpenSSH's extensions.
 
 > **Experimental.** The SFTP API is new and may still change between minor releases. Its types are marked
-> `[Experimental("SSHSHARP001")]`, so the compiler warns where you use them; suppress the warning
-> (`<NoWarn>$(NoWarn);SSHSHARP001</NoWarn>`) once you accept that.
+> `[Experimental("SSHSHARP001")]`, so the compiler reports error SSHSHARP001 where you use them until you opt in, in the project
+> file (`<NoWarn>$(NoWarn);SSHSHARP001</NoWarn>`) or around the code (`#pragma warning disable SSHSHARP001`).
 
 ```csharp
 using SshSharp.Sftp;
@@ -39,7 +39,6 @@ latency. Each request is as large as the server allows (`limits@openssh.com`; 32
 | `PreserveTimes` | Copy the modification and access times. |
 | `Progress` | An `IProgress<long>` with the bytes transferred so far. |
 | `MaxRequestsInFlight` | The window of outstanding requests (1 to 1024). |
-
 | `Resume` | Continue an interrupted transfer, as `reget` and `reput` do: only the part the destination lacks is sent. |
 
 A failed download leaves no partial local file behind, unless `Resume` is set, in which case what arrived is kept for the
@@ -57,11 +56,11 @@ var summary = await sftp.DownloadDirectoryAsync("releases/1.4", "out", new SftpT
 Console.WriteLine($"{summary.Files} files, {summary.Bytes} bytes");
 ```
 
-Symbolic links and special files are skipped in both directions, so a link cannot lead a transfer outside the tree. A download
-treats the server as untrusted: every name it lists must be a plain file name (no separators, `.` or `..`, and on Windows no
-device names such as `CON` or `NUL` and no trailing dot or space), the resulting path must stay inside the target directory, and
-trees deeper than 64 levels are refused. A server that breaks these rules stops the download with an `SshException`
-(`TransferFailed`).
+Symbolic links and special files (FIFOs, sockets, devices) are skipped in both directions, so a link cannot lead a transfer
+outside the tree and an upload never waits on a FIFO. A download treats the server as untrusted: a name that cannot be a file
+name here (a separator, `.` or `..`, control characters, a name that was not valid UTF-8; on Windows also `\`, `:`, device names
+such as `CON` or `NUL`, and a trailing dot or space) is skipped and counted in `summary.Skipped`. A path that would still end up
+outside the target directory, or a tree deeper than 64 levels, stops the download with an `SshException` (`TransferFailed`).
 
 ## Files as streams
 
@@ -74,7 +73,8 @@ await log.WriteAsync(Encoding.UTF8.GetBytes("deployed\n"));
 ```
 
 The stream is asynchronous only. `SetLength` truncates or extends the remote file. Each `ReadAsync` is one request; for whole
-files, `DownloadAsync` is much faster.
+files, `DownloadAsync` is much faster. `Length` is the size when the stream opened plus this stream's own writes and
+`SetLength`, so it needs no round trip; to see another writer's changes, ask the server (`GetAttributesAsync`).
 
 ## Files, directories and links
 
@@ -83,14 +83,14 @@ files, `DownloadAsync` is much faster.
 | `GetAttributesAsync(path, followSymbolicLinks)` | Size, owner, permissions, times, file type (`IsDirectory`, `IsRegularFile`, `IsSymbolicLink`). |
 | `SetAttributesAsync(path, attributes)` | Changes the attributes that are set: `Size`, `Permissions`, `LastWriteTime`, ... |
 | `ExistsAsync(path)` | Whether the path exists. |
-| `ListDirectoryAsync(path)` | The entries, as `IAsyncEnumerable<SftpFileInfo>`, without `.` and `..`. |
+| `ListDirectoryAsync(path)` | The entries, as `IAsyncEnumerable<SftpFileInfo>`, without `.` and `..`. A name that is not valid UTF-8 is listed with replacement characters (and cannot be opened by that name); a listing stops with an error after 1,000,000 entries. |
 | `CreateDirectoryAsync`, `DeleteDirectoryAsync` | One directory (deleting needs it empty). |
 | `DeleteFileAsync` | A file, or a link itself. |
 | `RenameAsync(old, new, overwrite)` | Rename or move; `overwrite` replaces the target atomically (`posix-rename@openssh.com`). |
 | `CreateSymbolicLinkAsync`, `ReadSymbolicLinkAsync` | Symbolic links. |
 | `CreateHardLinkAsync` | Hard links (`hardlink@openssh.com`). |
 | `GetFullPathAsync`, `GetHomeDirectoryAsync` | Resolve a path; the login directory. |
-| `CopyFileAsync(source, destination, overwrite)` | Copy on the server, without the data passing through this machine (`copy-data`). |
+| `CopyFileAsync(source, destination, overwrite)` | Copy on the server, without the data passing through this machine (`copy-data`). Copying a file onto itself is refused. |
 | `GetFileSystemInfoAsync(path)` | Size and free space of the file system, as `df` shows them (`statvfs@openssh.com`). |
 
 On a writable stream, `FlushAsync` asks the server to write the file to disk (`fsync@openssh.com`) when it can; every write is
@@ -117,8 +117,9 @@ builder.Configuration.AddJsonFile(provider, "appsettings.json", optional: false,
 - **Read-only.** Paths are relative to the root; `/` and `\` both separate, and a path with `..` does not exist, so nothing
   outside the root can be reached. Symbolic links are followed on the server; links that lead nowhere are left out of listings.
 - **Synchronous by contract.** `IFileProvider` lookups are synchronous, so each waits for an SFTP round trip, bounded by
-  `SftpFileProviderOptions.OperationTimeout` (30 s). Attributes and listings are cached for `CacheDuration` (5 s; zero turns it
-  off), and `ClearCache()` forgets them. Streams read ahead, and are fastest read asynchronously, as the static files middleware
+  `SftpFileProviderOptions.OperationTimeout` (30 s), and holds a thread-pool thread meanwhile. Attributes and listings are
+  cached for `CacheDuration` (5 s; zero turns it off), at most `MaxCacheEntries` of them (10,000), and `ClearCache()` forgets
+  them. Streams read ahead, and are fastest read asynchronously, as the static files middleware
   does.
 - **No change notifications.** SFTP has none, so `Watch` returns a token that never fires (`reloadOnChange` has no effect).
 - A missing file, or one the server will not let you read, has `Exists` false. A broken session or connection throws
@@ -149,7 +150,8 @@ var reports = fs.Directory.GetFiles("reports", "*.txt", SearchOption.AllDirector
 | `Directory` | `CreateDirectory` with parents, `Delete` (recursive removes links, never follows them), enumeration with `*` and `?` patterns, `SearchOption` and `EnumerationOptions` (recursion, case, hidden entries, special directories), `Move`, times. |
 | `FileInfo`, `DirectoryInfo` | Attributes are read on first use and kept until `Refresh()`, as in `System.IO`; enumerations carry each entry's attributes, so no request per entry. |
 | Streams | Buffered (64 KiB), sync and async, seekable; read-only streams read ahead. |
-| Errors | The `System.IO` exceptions: `FileNotFoundException`, `DirectoryNotFoundException`, `UnauthorizedAccessException`, `IOException` (also a failed session or a timeout, `SftpFileSystemOptions.OperationTimeout`, 60 s). |
+| Errors | The `System.IO` exceptions, from sync and async methods alike: `FileNotFoundException`, `DirectoryNotFoundException`, `UnauthorizedAccessException`, `IOException` (also a failed session or a timeout). `Exists` never throws: it is false when the answer cannot be had. `Copy` onto the same file is an `IOException`. |
+| Timeouts | `SftpFileSystemOptions.OperationTimeout` (60 s; `Timeout.InfiniteTimeSpan` for none) bounds each request, and for whole-file reads, writes and copies the time without progress, so large files are not cut off. |
 | Not supported | `FileSystemWatcher`, `DriveInfo`, `FileVersionInfo`, `RandomAccess`, `SafeFileHandle` overloads, encryption, `Replace`: they throw `NotSupportedException`. SFTP has no creation times: they read as the last write time, and setting one does nothing. |
 
 The synchronous methods wait for SFTP round trips; the `...Async` ones do not block. `IFile`'s Unix-mode methods are marked

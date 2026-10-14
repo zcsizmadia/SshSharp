@@ -8,7 +8,8 @@ verify with `ssh-keygen`, and the reverse is also true.
 
 ```csharp
 using var key = await SshPrivateKey.LoadFileAsync("/home/me/.ssh/id_ed25519", passphrase);
-var signature = await SshSignature.SignAsync(key, File.OpenRead("release.tar.gz"), "file");
+await using var release = File.OpenRead("release.tar.gz");
+var signature = await SshSignature.SignAsync(key, release, "file");
 await File.WriteAllTextAsync("release.tar.gz.sig", signature.ToString());   // -----BEGIN SSH SIGNATURE----- ...
 ```
 
@@ -43,8 +44,8 @@ if (!await signers.VerifyAsync(signature, "release@example.com", file, "file"))
 }
 ```
 
-`signers.FindPrincipals(signature)` returns who the signing key may sign as (`ssh-keygen -Y find-principals`). For example,
-it finds the principal to check before verifying. `signature.Verify(message, namespace)` checks only the signature itself.
+`signers.FindPrincipals(signature)` returns who the signing key may sign as (`ssh-keygen -Y find-principals`), from the first
+line that matches it, as `ssh-keygen` does. For example, it finds the principal to check before verifying. `signature.Verify(message, namespace)` checks only the signature itself.
 Use it when you compare `signature.PublicKey` with the key you expect.
 
 ### The allowed-signers file
@@ -66,7 +67,7 @@ release@example.com     valid-after="20260101",valid-before="20271231Z" ecdsa-sh
 - **`valid-after`** and **`valid-before`** bound when the key is accepted: `YYYYMMDD`, `YYYYMMDDHHMM` or `YYYYMMDDHHMMSS`,
   in local time, or UTC with a trailing `Z`. Checks use the current time unless `time:` is given.
 
-A malformed line, or an option this library does not know, rejects the whole file with the line number, as `ssh-keygen`
+A malformed line, an option this library does not know, or an option given twice rejects the whole file with the line number, as `ssh-keygen`
 does, rather than skipping a line that may have been meant to restrict a key.
 
 ## Git

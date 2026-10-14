@@ -95,7 +95,8 @@ Each key is one the server proved it holds, but a scan cannot tell whether you r
 with ones you got another way (the server's console or its provisioning output) before you trust them, or use host certificates.
 
 `SshHostKeyScanOptions` limits the scan to some algorithms (`HostKeyAlgorithms`), adds host certificates (`IncludeCertificates`),
-or keeps to FIPS-approved algorithms (`FipsMode`). For a host behind a jump host, pass a callback that opens each connection:
+or keeps to FIPS-approved algorithms (`FipsMode`); `Timeout` bounds each connection (5 seconds, as `ssh-keyscan -T`;
+`Timeout.InfiniteTimeSpan` for none). For a host behind a jump host, pass a callback that opens each connection:
 `SshClient.ScanHostKeysAsync(ct => new ValueTask<Stream>(jump.OpenTcpTunnelAsync("internal-host", 22, ct)))`.
 
 ## After connecting

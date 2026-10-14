@@ -19,7 +19,7 @@ password answers a round that asks for exactly one hidden input. It is never sen
 
 ```csharp
 using var ed25519 = await SshPrivateKey.LoadFileAsync("id_ed25519");
-using var rsa = await SshPrivateKey.LoadFileAsync("legacy.pem", passphrase: "correct horse");
+using var rsa = await SshPrivateKey.LoadFileAsync("legacy.pem", passphrase: Environment.GetEnvironmentVariable("KEY_PASSPHRASE"));
 var options = new SshClientOptions { UserName = "deploy", PrivateKeys = [ed25519, rsa], HostKeyVerifier = verifier };
 ```
 

@@ -1,7 +1,6 @@
 # Design notes
 
-The decisions behind SshSharp and the rules the code follows. Work items live in the GitHub issues (one per milestone:
-M4 #5, M5 #6, M6 #7, plus individual issues).
+The decisions behind SshSharp and the rules the code follows. Work items live in the GitHub issues.
 
 ## Decisions
 
@@ -38,9 +37,11 @@ code generation.
 ## Scope
 
 In: transport, modern algorithms, password/publickey/keyboard-interactive authentication, certificates, agents,
-exec/shell/PTY sessions, port forwarding (local, remote, SOCKS5), agent forwarding, SCP, ProxyJump and ProxyCommand,
-`known_hosts`, `ssh_config`, config-driven connect, connect over any `Stream`, typed exceptions, keep-alive, FIPS mode,
-logging/tracing/metrics. After the first release: SFTP as the separate `SshSharp.Sftp` package.
+exec/shell/PTY sessions and `expect`-style scripting, port forwarding (local, remote, dynamic SOCKS 4/4a/5, remote dynamic,
+remote Unix socket), agent forwarding and destination-constrained agent keys, SCP, SFTP (experimental API), ProxyJump,
+ProxyCommand and HTTP/SOCKS proxies, `known_hosts`, host key scanning, `ssh_config`, config-driven connect, connect over any
+`Stream`, key generation, SSH signatures (SSHSIG), typed exceptions, keep-alive, FIPS mode, logging/tracing/metrics; adapters
+that expose SFTP as `IFileSystem` and `IFileProvider`.
 
 Out: server-side SSH, `ControlMaster` multiplexing, GSSAPI, X11 forwarding.
 
@@ -48,12 +49,14 @@ Out: server-side SSH, `ControlMaster` multiplexing, GSSAPI, X11 forwarding.
 
 | Package | Contents |
 |---|---|
-| `SshSharp` | Transport, crypto, auth, channels, agent, forwarding, `known_hosts`, `ssh_config`, ProxyJump, SCP |
-| `SshSharp.Sftp` | SFTP client (planned); depends on `SshSharp`, exposed as extension methods on `SshClient` |
+| `SshSharp` | Transport, crypto, auth, channels, agent, forwarding, proxies, `known_hosts`, `ssh_config`, ProxyJump, SCP, SFTP (`SshSharp.Sftp` namespace), keys and signatures |
+| `SshSharp.FileProviders` | `SftpFileProvider`: a remote directory as a `Microsoft.Extensions.FileProviders.IFileProvider` |
+| `SshSharp.IO.Abstractions` | `SftpFileSystem`: SFTP as a System.IO.Abstractions `IFileSystem` |
 
 - SCP is small (a text protocol over one exec channel), so it stays in the core; trimming removes it when unused.
-- SFTP is a large API, so it ships separately and may use only the core's public API (no `InternalsVisibleTo`), which keeps
-  the core's channel API honest.
+- SFTP lives in the core too (namespace `SshSharp.Sftp`, opened with `client.OpenSftpAsync()`), so it can share the channel
+  internals; its API is marked `[Experimental("SSHSHARP001")]` until it settles. The adapters are separate packages because they
+  bring their own dependencies, and they use only the core's public API.
 - Lockstep versions until 1.0.
 
 ## Repository layout
@@ -62,10 +65,14 @@ Out: server-side SSH, `ControlMaster` multiplexing, GSSAPI, X11 forwarding.
 Directory.Build.props      # nullable, analyzers, warnings as errors, deterministic builds, NuGet audit
 Directory.Packages.props   # central package versions
 src/SshSharp/              # the library
+src/SshSharp.FileProviders/   # IFileProvider over SFTP
+src/SshSharp.IO.Abstractions/ # IFileSystem over SFTP
 tests/SshSharp.Tests/      # TUnit: in-memory unit tests, Fuzz/ (mutation fuzzing of every parser),
                            #   Integration/ (env-gated tests against real servers)
+tests/docker/              # the OpenSSH and Dropbear containers of the interop matrix
+tests/sftp-servers/        # other SFTP servers for interop (a Go pkg/sftp server)
 tests/SshSharp.Fuzz/       # coverage-guided SharpFuzz harness, run nightly
-tests/SshSharp.Benchmarks/ # BenchmarkDotNet, the SSH.NET comparison, the Ed25519/X25519 timing test (--timing)
+tests/SshSharp.Benchmarks/ # BenchmarkDotNet, the SSH.NET comparison, the constant-time check (--timing)
 tests/SshSharp.AotSmoke/   # Native AOT smoke test against a real server
 samples/                   # an ssh-like sample tool, built with the solution
 docs/                      # guides, design notes, the API reference site (DocFX)
@@ -79,7 +86,7 @@ docs/                      # guides, design notes, the API reference site (DocFX
 - **Unit tests:** RFC and crypto known-answer vectors, parser corpora from OpenSSH, protocol tests against the fake servers,
   and mutation fuzzing of every parser that reads untrusted input.
 - **Coverage-guided fuzzing:** `tests/SshSharp.Fuzz` with SharpFuzz and libFuzzer, nightly (`fuzz.yml`).
-- **Mutation testing:** Stryker.NET over `Crypto/`, `PacketCodec` and `Config/` (`mutation.yml`). Weekly runs are
+- **Mutation testing:** Stryker.NET over `Crypto/` (sntrup761 included), `PacketCodec` and `Config/` (`mutation.yml`). Weekly runs are
   incremental: only code changed in the last eight days is mutated. Manual runs are full, in parallel jobs, with the large
   files on their own. A surviving mutant is a change no test notices. The score is reported, not a gate.
 - **Real-server interop** (`Integration/`, enabled by `SSHSHARP_TEST_*` environment variables): CI starts sshd on the Linux
@@ -104,14 +111,10 @@ docs/                      # guides, design notes, the API reference site (DocFX
 
 ## Risks
 
-- **Managed X25519/Ed25519** is the riskiest code: it signs with users' long-term keys. It is checked against RFC vectors,
-  reviewed for constant time with a dudect-style timing test (`docs/crypto-review.md`), and awaits an outside review
-  before 1.0. The BCL is used wherever it provides the primitive on both target frameworks.
+- **Managed X25519/Ed25519** is the riskiest code: it signs with users' long-term keys. The managed sntrup761 handles the
+  post-quantum half of a key exchange. Both are checked against official vectors, reviewed for constant time with a
+  dudect-style timing test (`docs/crypto-review.md`), and await an outside review before 1.0. The BCL is used wherever it
+  provides the primitive on both target frameworks.
 - **`ssh_config` runs commands** (`Match exec`, `ProxyCommand`). Caller inputs are validated, `Match exec` is opt-in, and
   the threat model (`docs/threat-model.md`) records what is trusted.
-- **Name overlap:** an unrelated toy repository, `rzikm/SshSharp`, exists; the NuGet ID is reserved by the first publish.
-
-## Working rules
-
-- Commits on this repository use `zcsizmadia@gmail.com`; check `git log --format='%ae %ce'` before pushing.
-- Nothing is published (packages, a public repository) without the owner's confirmation.
+- **Name overlap:** an unrelated toy repository, `rzikm/SshSharp`, exists; the NuGet ID `SshSharp` belongs to this project.

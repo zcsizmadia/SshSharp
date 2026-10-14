@@ -99,6 +99,10 @@ Each match returns the output before it (`Before`), the matched text (`Value`) a
 with `Encoding` (UTF-8 by default), and a character split between two packets is decoded whole. The buffer keeps the newest
 `MaxBufferLength` characters (1 Mi) while nothing matches.
 
+A text pattern is searched only in the new output (plus the overlap it could span), so many small packets stay cheap. A regular
+expression runs over everything pending after each read; against output you do not control, give it a `matchTimeout` (for
+example `new Regex(pattern, RegexOptions.None, TimeSpan.FromSeconds(1))`) so a pathological pattern cannot spin.
+
 Patterns are tried against the output received so far, so anchor them to what follows: `\d+` could match the first digits of a
 number still arriving. With a terminal the program's input is echoed, so the text you send can match too: wait for something
 the echo does not contain, such as the prompt that follows. `SshExpect` reads the output stream itself; do not read it
@@ -117,7 +121,7 @@ await netconf.StandardInput.WriteAsync(helloMessage);
 ```
 
 A server that does not offer the subsystem refuses it with `SshException` (`ChannelClosed`), and the connection stays
-usable. SFTP itself will come as the separate `SshSharp.Sftp` package, built on this.
+usable. For SFTP, use `client.OpenSftpAsync()` (see [File transfer (SFTP)](sftp.md)) rather than the raw subsystem.
 
 ## Ending a session
 

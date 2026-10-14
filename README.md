@@ -162,6 +162,8 @@ latest release.
 - [Commands and shells](https://github.com/zcsizmadia/SshSharp/blob/main/docs/sessions.md)
 - [File transfer (SFTP)](https://github.com/zcsizmadia/SshSharp/blob/main/docs/sftp.md)
 - [File transfer (SCP)](https://github.com/zcsizmadia/SshSharp/blob/main/docs/scp.md)
+- [Signing files and commits](https://github.com/zcsizmadia/SshSharp/blob/main/docs/signing.md): SSH signatures
+  (`ssh-keygen -Y`) and allowed-signers files
 - [Configuration files](https://github.com/zcsizmadia/SshSharp/blob/main/docs/config-files.md)
 - [Errors and diagnostics](https://github.com/zcsizmadia/SshSharp/blob/main/docs/diagnostics.md): exceptions, logging,
   tracing, metrics
@@ -174,7 +176,8 @@ latest release.
   and IntelliSense shows the same text.
 - [Design notes](https://github.com/zcsizmadia/SshSharp/blob/main/docs/design.md),
   [threat model](https://github.com/zcsizmadia/SshSharp/blob/main/docs/threat-model.md),
-  [cryptography review](https://github.com/zcsizmadia/SshSharp/blob/main/docs/crypto-review.md)
+  [cryptography review](https://github.com/zcsizmadia/SshSharp/blob/main/docs/crypto-review.md),
+  [benchmarks](https://github.com/zcsizmadia/SshSharp/blob/main/docs/benchmarks.md)
 
 ## Building
 

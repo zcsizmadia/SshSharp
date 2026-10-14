@@ -91,6 +91,12 @@ exchange. The secrets are ephemeral, but a leak in decapsulation would expose th
 
 Measured on Windows 11, .NET 10, x64. Decapsulation takes about 0.9 ms.
 
+## Private keys written to files
+
+`SaveAsync` and `ToOpenSshPrivateKey` build the private section in a buffer sized from the key up front, which zeroes any
+array it outgrows and the final one when done, so no copy of the private fields is left in the heap. The bytes of the file
+are cleared after writing; the string `ToOpenSshPrivateKey` returns cannot be.
+
 ## Accepted risks
 
 - **DH group 14/16** uses `BigInteger.ModPow` on its ephemeral exponent, which is not constant-time. The exponent is used once and the
