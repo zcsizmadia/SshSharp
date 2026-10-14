@@ -50,15 +50,7 @@ public sealed partial class SftpClient : IAsyncDisposable
                 var reply = await channel.RequestAsync(SftpProtocol.Extended, w => w.WriteString(SftpProtocol.LimitsExtension), cancellationToken).ConfigureAwait(false);
                 if (reply.Type == SftpProtocol.ExtendedReply)
                 {
-                    var reader = reply.Body;
-                    reader.ReadUInt64(); // max packet length: the read and write lengths below already fit it
-                    var maxRead = reader.ReadUInt64();
-                    var maxWrite = reader.ReadUInt64();
-                    var maxHandles = reader.ReadUInt64();
-                    limits = new SftpLimits(
-                        Chunk(maxRead),
-                        Chunk(maxWrite),
-                        maxHandles is 0 or > int.MaxValue ? null : (int)maxHandles);
+                    limits = ParseLimits(reply);
                 }
             }
 
@@ -69,8 +61,57 @@ public sealed partial class SftpClient : IAsyncDisposable
             await channel.DisposeAsync().ConfigureAwait(false);
             throw;
         }
+    }
+
+    /// <summary>The reply to <c>limits@openssh.com</c>: max packet, read and write lengths, and open handles (each 0 when unlimited).</summary>
+    private static SftpLimits ParseLimits(SftpResponse reply)
+    {
+        var (maxRead, maxWrite, maxHandles) = Parse(reply, static (ref SshReader r) =>
+        {
+            r.ReadUInt64(); // max packet length: the read and write lengths already fit it
+            return (r.ReadUInt64(), r.ReadUInt64(), r.ReadUInt64());
+        });
+        return new SftpLimits(Chunk(maxRead), Chunk(maxWrite), maxHandles is 0 or > int.MaxValue ? null : (int)maxHandles);
 
         static int Chunk(ulong announced) => announced == 0 ? SftpProtocol.DefaultChunk : (int)Math.Min(announced, SftpProtocol.MaxChunk);
+    }
+
+    /// <summary>
+    /// Parses any reply packet (type, request id, body) the way the client would, for fuzzing: everything the server can send passes
+    /// through one of these parsers. Rejects malformed input only with <see cref="SshException"/> (including <see cref="SftpException"/>).
+    /// </summary>
+    internal static void ParseAnyReply(byte[] packet)
+    {
+        if (packet.Length < 5)
+        {
+            return; // the packet reader rejects these before any parser sees them
+        }
+
+        var reply = new SftpResponse(packet[0], packet);
+        switch (packet[0])
+        {
+            case SftpProtocol.VersionReply:
+                SftpChannel.ParseVersion(packet);
+                break;
+            case SftpProtocol.ExtendedReply:
+                ParseLimits(reply);
+                break;
+            case SftpProtocol.Attrs:
+                ExpectAttributes(reply, "Fuzzing", "path");
+                break;
+            case SftpProtocol.Name:
+                ExpectNames(reply, "Fuzzing", "path");
+                break;
+            case SftpProtocol.Handle:
+                ExpectHandle(reply, "Fuzzing", "path");
+                break;
+            case SftpProtocol.Data:
+                ExpectData(reply, SftpProtocol.MaxChunk, "path");
+                break;
+            default:
+                ExpectOk(reply, "Fuzzing", "path"); // a status, or an unexpected type
+                break;
+        }
     }
 
     // ---- attributes ----
@@ -542,6 +583,11 @@ public sealed partial class SftpClient : IAsyncDisposable
         }
 
         // DATA: type, id, then string data; sliced out of the packet without a copy.
+        if (reply.Packet.Length < 9)
+        {
+            throw new SshException(SshFailureReason.ProtocolError, "The SFTP server sent a truncated data reply.");
+        }
+
         var length = BinaryPrimitives.ReadUInt32BigEndian(reply.Packet.AsSpan(5));
         if (length > reply.Packet.Length - 9 || length > (uint)requested || length == 0)
         {

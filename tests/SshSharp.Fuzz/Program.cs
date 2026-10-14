@@ -34,7 +34,21 @@ internal static class Targets
         ["sshconfig"] = data => Format(() => SshConfig.Parse(Encoding.UTF8.GetString(data), "/nonexistent")
             .Resolve("host", new SshConfigResolveOptions { LocalUser = "u", HomeDirectory = "/nonexistent", LocalHostName = "l", GetEnvironmentVariable = _ => "v" })),
         ["identification"] = data => _ = SshIdentification.TryParse(Encoding.Latin1.GetString(data), out _),
+        ["sftp"] = Sftp,
     };
+
+    /// <summary>Every reply an SFTP server can send; SftpException is an SshException, which is the documented rejection.</summary>
+    private static void Sftp(byte[] data)
+    {
+        try
+        {
+            SshSharp.Sftp.SftpClient.ParseAnyReply(data);
+        }
+        catch (SshException)
+        {
+            // A clean rejection.
+        }
+    }
 
     private static void Packet(byte[] data)
     {

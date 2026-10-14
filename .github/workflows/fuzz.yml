@@ -25,7 +25,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [packet, kexinit, publickey, certificate, privatekey, privatekey-binary, knownhosts, sshconfig, identification]
+        target: [packet, kexinit, publickey, certificate, privatekey, privatekey-binary, knownhosts, sshconfig, identification, sftp]
     env:
       LIBFUZZER_DOTNET_VERSION: v2025.05.02.0904
       LIBFUZZER_DOTNET_SHA256: c2c2a90d94c409a4af339a0d4f244e0442c5a5d249be0f1252ba07871f285958

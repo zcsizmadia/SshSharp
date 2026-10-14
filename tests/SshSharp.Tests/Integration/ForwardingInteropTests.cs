@@ -88,7 +88,8 @@ public class ForwardingInteropTests
         await using var forwarder = await client.ForwardRemotePortAsync("localhost", port, "127.0.0.1", ((IPEndPoint)service.LocalEndPoint!).Port, Timeout());
 
         // Reach the forwarded port from the server's side through a tunnel: here -> server -> its forwarded port -> back here.
-        await using var tunnel = await client.OpenTcpTunnelAsync("127.0.0.1", forwarder.Port, Timeout());
+        // "localhost", not 127.0.0.1: when another process holds that port on 127.0.0.1, sshd may have bound only ::1 for "localhost".
+        await using var tunnel = await client.OpenTcpTunnelAsync("localhost", forwarder.Port, Timeout());
         var line = await ReadLineAsync(buffer => tunnel.ReadAsync(buffer, Timeout()));
         await Assert.That(line).IsEqualTo("hello from here");
         await serviceTask;
@@ -120,7 +121,8 @@ public class ForwardingInteropTests
         await using var forwarder = await client.ForwardRemoteDynamicPortAsync("localhost", port, cancellationToken: Timeout());
 
         // Play the server-side application through a tunnel: here -> server -> its forwarded port -> back here, as SOCKS.
-        await using var tunnel = await client.OpenTcpTunnelAsync("127.0.0.1", forwarder.Port, Timeout());
+        // "localhost", not 127.0.0.1: when another process holds that port on 127.0.0.1, sshd may have bound only ::1 for "localhost".
+        await using var tunnel = await client.OpenTcpTunnelAsync("localhost", forwarder.Port, Timeout());
         await tunnel.WriteAsync(new byte[] { 5, 1, 0 }, Timeout());
         var choice = new byte[2];
         await tunnel.ReadExactlyAsync(choice, Timeout());
