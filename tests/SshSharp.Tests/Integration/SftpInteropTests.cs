@@ -9,6 +9,80 @@ public class SftpInteropTests
     private static CancellationToken Timeout() => new CancellationTokenSource(TimeSpan.FromSeconds(120)).Token;
 
     [Test]
+    public async Task ADirectoryTree_RoundTrips_AndAResumedDownloadCompletes()
+    {
+        if (RealServer.Endpoint is not var (host, port) || await RealServer.OptionsAsync() is not { } options)
+        {
+            Skip.Test("SSHSHARP_TEST_SSHD and SSHSHARP_TEST_USER with a password or key are needed.");
+            return;
+        }
+
+        if (!RealServer.IsOpenSsh)
+        {
+            Skip.Test("The Dropbear test image has no sftp-server.");
+            return;
+        }
+
+        var local = Directory.CreateTempSubdirectory("sshsharp-sftptree-");
+        await using var client = await SshClient.ConnectAsync(host, port, options, Timeout());
+        await using var sftp = await client.OpenSftpAsync(Timeout());
+        var remote = ".sshsharp-sftptree-" + Guid.NewGuid().ToString("N")[..12];
+        try
+        {
+            var source = Path.Combine(local.FullName, "source");
+            Directory.CreateDirectory(Path.Combine(source, "a", "b"));
+            var big = RandomNumberGenerator.GetBytes(700_000);
+            await File.WriteAllBytesAsync(Path.Combine(source, "top.bin"), big);
+            await File.WriteAllTextAsync(Path.Combine(source, "a", "middle.txt"), "middle");
+            await File.WriteAllTextAsync(Path.Combine(source, "a", "b", "leaf.txt"), "leaf");
+
+            var up = await sftp.UploadDirectoryAsync(source, remote, cancellationToken: Timeout());
+            await Assert.That(up.Files).IsEqualTo(3);
+
+            var copy = Path.Combine(local.FullName, "copy");
+            var down = await sftp.DownloadDirectoryAsync(remote, copy, cancellationToken: Timeout());
+            await Assert.That(down.Files).IsEqualTo(3);
+            await Assert.That(down.Directories).IsEqualTo(2);
+            await Assert.That((await File.ReadAllBytesAsync(Path.Combine(copy, "top.bin"))).AsSpan().SequenceEqual(big)).IsTrue();
+            await Assert.That(await File.ReadAllTextAsync(Path.Combine(copy, "a", "b", "leaf.txt"))).IsEqualTo("leaf");
+
+            // Cut the copy short, then resume it.
+            var partial = Path.Combine(local.FullName, "partial.bin");
+            await File.WriteAllBytesAsync(partial, big[..300_000]);
+            var rest = await sftp.DownloadFileAsync(remote + "/top.bin", partial, new SftpTransferOptions { Resume = true }, Timeout());
+            await Assert.That(rest).IsEqualTo(400_000L);
+            await Assert.That((await File.ReadAllBytesAsync(partial)).AsSpan().SequenceEqual(big)).IsTrue();
+        }
+        finally
+        {
+            local.Delete(recursive: true);
+            await DeleteTreeAsync(sftp, remote);
+        }
+    }
+
+    private static async Task DeleteTreeAsync(SftpClient sftp, string path)
+    {
+        if (!await sftp.ExistsAsync(path, Timeout()))
+        {
+            return;
+        }
+
+        await foreach (var entry in sftp.ListDirectoryAsync(path, Timeout()))
+        {
+            if (entry.Attributes.IsDirectory)
+            {
+                await DeleteTreeAsync(sftp, entry.FullPath);
+            }
+            else
+            {
+                await sftp.DeleteFileAsync(entry.FullPath, Timeout());
+            }
+        }
+
+        await sftp.DeleteDirectoryAsync(path, Timeout());
+    }
+
+    [Test]
     public async Task FilesDirectoriesAndLinks_RoundTripOnARealServer()
     {
         if (RealServer.Endpoint is not var (host, port) || await RealServer.OptionsAsync() is not { } options)

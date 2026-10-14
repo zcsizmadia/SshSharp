@@ -40,7 +40,28 @@ latency. Each request is as large as the server allows (`limits@openssh.com`; 32
 | `Progress` | An `IProgress<long>` with the bytes transferred so far. |
 | `MaxRequestsInFlight` | The window of outstanding requests (1 to 1024). |
 
-A failed download leaves no partial local file behind.
+| `Resume` | Continue an interrupted transfer, as `reget` and `reput` do: only the part the destination lacks is sent. |
+
+A failed download leaves no partial local file behind, unless `Resume` is set, in which case what arrived is kept for the
+next attempt. A resume trusts that the destination's bytes are the start of the same file (nothing compares them), and a
+destination larger than the source is an error.
+
+### Directories
+
+`UploadDirectoryAsync(localDirectory, remoteDirectory)` and `DownloadDirectoryAsync(remoteDirectory, localDirectory)` copy a
+whole tree, creating directories as needed (an existing one is fine), with the same options for every file. They return an
+`SftpTransferSummary` with the files, directories and bytes transferred and the entries skipped.
+
+```csharp
+var summary = await sftp.DownloadDirectoryAsync("releases/1.4", "out", new SftpTransferOptions { PreserveTimes = true });
+Console.WriteLine($"{summary.Files} files, {summary.Bytes} bytes");
+```
+
+Symbolic links and special files are skipped in both directions, so a link cannot lead a transfer outside the tree. A download
+treats the server as untrusted: every name it lists must be a plain file name (no separators, `.` or `..`, and on Windows no
+device names such as `CON` or `NUL` and no trailing dot or space), the resulting path must stay inside the target directory, and
+trees deeper than 64 levels are refused. A server that breaks these rules stops the download with an `SshException`
+(`TransferFailed`).
 
 ## Files as streams
 

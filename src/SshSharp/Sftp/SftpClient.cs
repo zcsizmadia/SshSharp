@@ -17,7 +17,7 @@ namespace SshSharp.Sftp;
 /// change between minor releases.
 /// </remarks>
 [Experimental(ExperimentalId)]
-public sealed class SftpClient : IAsyncDisposable
+public sealed partial class SftpClient : IAsyncDisposable
 {
     /// <summary>The diagnostic id of the experimental SFTP API.</summary>
     public const string ExperimentalId = "SSHSHARP001";
@@ -354,19 +354,27 @@ public sealed class SftpClient : IAsyncDisposable
         var (handle, _) = await OpenHandleAsync(remotePath, FileMode.Open, FileAccess.Read, cancellationToken).ConfigureAwait(false);
         try
         {
-            var attributes = options.PreserveTimes ? await GetHandleAttributesAsync(handle, remotePath, cancellationToken).ConfigureAwait(false) : null;
+            var resumeFrom = options.Resume && File.Exists(localPath) ? new FileInfo(localPath).Length : 0;
+            var attributes = options.PreserveTimes || resumeFrom > 0 ? await GetHandleAttributesAsync(handle, remotePath, cancellationToken).ConfigureAwait(false) : null;
+            if (resumeFrom > 0 && attributes!.Size is { } remoteSize && resumeFrom > remoteSize)
+            {
+                throw new IOException($"The local file is larger than '{remotePath}' ({resumeFrom} > {remoteSize} bytes): it is not a partial download of it.");
+            }
+
             long total;
             var created = false;
             try
             {
-                await using (var file = new FileStream(localPath, options.Overwrite ? FileMode.Create : FileMode.CreateNew, FileAccess.Write, FileShare.None, 64 * 1024, useAsync: true))
+                var mode = resumeFrom > 0 ? FileMode.Append : options.Overwrite || options.Resume ? FileMode.Create : FileMode.CreateNew;
+                await using (var file = new FileStream(localPath, mode, FileAccess.Write, FileShare.None, 64 * 1024, useAsync: true))
                 {
-                    created = true;
-                    total = await DownloadHandleAsync(handle, remotePath, file, 0, options, cancellationToken).ConfigureAwait(false);
+                    created = resumeFrom == 0;
+                    total = await DownloadHandleAsync(handle, remotePath, file, resumeFrom, options, cancellationToken).ConfigureAwait(false);
                 }
             }
-            catch when (created)
+            catch when (created && !options.Resume)
             {
+                // A fresh download that failed leaves nothing; with Resume, what arrived is kept for the next attempt.
                 File.Delete(localPath);
                 throw;
             }
@@ -401,10 +409,19 @@ public sealed class SftpClient : IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(source);
         options ??= new SftpTransferOptions();
-        var (handle, _) = await OpenHandleAsync(remotePath, options.Overwrite ? FileMode.Create : FileMode.CreateNew, FileAccess.Write, cancellationToken).ConfigureAwait(false);
+        var mode = options.Resume ? FileMode.OpenOrCreate : options.Overwrite ? FileMode.Create : FileMode.CreateNew;
+        var (handle, _) = await OpenHandleAsync(remotePath, mode, FileAccess.Write, cancellationToken).ConfigureAwait(false);
         try
         {
-            return await UploadHandleAsync(handle, remotePath, source, options, cancellationToken).ConfigureAwait(false);
+            long start = 0;
+            if (options.Resume)
+            {
+                // What the remote file already holds is taken as the source's first bytes, as sftp's reput does: those are skipped.
+                start = (await GetHandleAttributesAsync(handle, remotePath, cancellationToken).ConfigureAwait(false)).Size ?? 0;
+                await SkipAsync(source, start, remotePath, cancellationToken).ConfigureAwait(false);
+            }
+
+            return await UploadHandleAsync(handle, remotePath, source, start, options, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -613,12 +630,45 @@ public sealed class SftpClient : IAsyncDisposable
         }
     }
 
-    private async Task<long> UploadHandleAsync(byte[] handle, string path, Stream source, SftpTransferOptions options, CancellationToken cancellationToken)
+    /// <summary>Skips the first <paramref name="count"/> bytes of <paramref name="source"/>, which must have that many.</summary>
+    private static async Task SkipAsync(Stream source, long count, string remotePath, CancellationToken cancellationToken)
+    {
+        if (count == 0)
+        {
+            return;
+        }
+
+        if (source.CanSeek)
+        {
+            if (source.Length - source.Position < count)
+            {
+                throw new IOException($"'{remotePath}' is larger than the source ({count} bytes): it is not a partial upload of it.");
+            }
+
+            source.Seek(count, SeekOrigin.Current);
+            return;
+        }
+
+        var buffer = new byte[64 * 1024];
+        while (count > 0)
+        {
+            var read = await source.ReadAsync(buffer.AsMemory(0, (int)Math.Min(buffer.Length, count)), cancellationToken).ConfigureAwait(false);
+            if (read == 0)
+            {
+                throw new IOException($"'{remotePath}' is larger than the source: it is not a partial upload of it.");
+            }
+
+            count -= read;
+        }
+    }
+
+    /// <summary>Writes <paramref name="source"/> from its position to the remote file from <paramref name="start"/>; returns the bytes written.</summary>
+    private async Task<long> UploadHandleAsync(byte[] handle, string path, Stream source, long start, SftpTransferOptions options, CancellationToken cancellationToken)
     {
         // A window of writes in flight; progress counts what the server has acknowledged.
         var chunk = Limits.MaxWriteLength;
         var inFlight = new Queue<(Task<SftpResponse> Reply, int Length)>();
-        long offset = 0, acknowledged = 0;
+        long offset = start, acknowledged = 0;
         try
         {
             while (true)
@@ -648,7 +698,7 @@ public sealed class SftpClient : IAsyncDisposable
                 await AcknowledgeAsync().ConfigureAwait(false);
             }
 
-            return offset;
+            return offset - start;
         }
         finally
         {
@@ -829,6 +879,14 @@ public sealed class SftpTransferOptions
 
     /// <summary>Copy the source's modification and access times to the destination.</summary>
     public bool PreserveTimes { get; init; }
+
+    /// <summary>
+    /// Continue an interrupted transfer, as sftp's <c>reget</c> and <c>reput</c> do: the destination's existing bytes are taken as the
+    /// source's first ones, and only the rest is sent; a destination larger than the source is an error. Nothing checks that the
+    /// existing bytes match, so use it for the same file only. A failed download with this set keeps what arrived. Overrides
+    /// <see cref="Overwrite"/> for an existing destination.
+    /// </summary>
+    public bool Resume { get; init; }
 
     /// <summary>Reports the bytes transferred so far.</summary>
     public IProgress<long>? Progress { get; init; }
