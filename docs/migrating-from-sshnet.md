@@ -117,6 +117,7 @@ prompt, so you need no handler for it.
 | `new PrivateKeyFile(stream)` | `SshPrivateKey.Parse(text, passphrase)` |
 | OpenSSH, PKCS#1, PKCS#8, PuTTY `.ppk` | the same, plus SEC1; ssh.com keys are not read (convert them with `ssh-keygen -i`) |
 | `ssh-rsa` (SHA-1) signatures | RSA keys sign with `rsa-sha2-256` or `rsa-sha2-512` only |
+| (no key generation) | `SshPrivateKey.Generate(SshKeyType.Ed25519)`, then `SaveAsync(path, passphrase)` (see [Authentication](authentication.md#generating-keys)) |
 
 `SshPrivateKey` is `IDisposable`: disposing it clears the key material.
 

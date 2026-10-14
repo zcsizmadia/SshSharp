@@ -1,6 +1,7 @@
 using System.Buffers;
 using System.Numerics;
 using System.Security.Cryptography;
+using System.Text;
 using SshSharp.Crypto;
 using SshSharp.Keys;
 using SshSharp.Protocol;
@@ -66,6 +67,138 @@ public abstract class SshPrivateKey : IDisposable
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
         return Parse(await File.ReadAllTextAsync(path, cancellationToken).ConfigureAwait(false), passphrase);
     }
+
+    /// <summary>
+    /// Generates a new key pair, as <c>ssh-keygen -t</c> does. Write it with <see cref="SaveAsync"/> or <see cref="ToOpenSshPrivateKey"/>,
+    /// and give the server <see cref="ToAuthorizedKeysLine"/>.
+    /// </summary>
+    /// <param name="type">The key type. Ed25519 is the usual choice; ECDSA or RSA where FIPS-approved algorithms are required.</param>
+    /// <param name="comment">The comment stored with the key, often <c>user@host</c>.</param>
+    /// <param name="rsaBits">The RSA key size: 3072 by default (as ssh-keygen), from 2048 to 16384. Ignored for other types.</param>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="rsaBits"/> is not a supported RSA key size.</exception>
+    public static SshPrivateKey Generate(SshKeyType type, string? comment = null, int rsaBits = 3072)
+    {
+        switch (type)
+        {
+            case SshKeyType.Ed25519:
+                return new Ed25519Key(RandomNumberGenerator.GetBytes(Ed25519.SeedSize), comment);
+
+            case SshKeyType.EcdsaNistp256 or SshKeyType.EcdsaNistp384 or SshKeyType.EcdsaNistp521:
+                var curve = type switch
+                {
+                    SshKeyType.EcdsaNistp256 => NistCurve.P256,
+                    SshKeyType.EcdsaNistp384 => NistCurve.P384,
+                    _ => NistCurve.P521,
+                };
+                return new EcdsaKey(curve, ECDsa.Create(curve.Curve), comment);
+
+            case SshKeyType.Rsa:
+                if (rsaBits is < 2048 or > 16384 || rsaBits % 8 != 0)
+                {
+                    throw new ArgumentOutOfRangeException(nameof(rsaBits), rsaBits, "RSA keys are 2048 to 16384 bits, in whole bytes.");
+                }
+
+                RSA rsa;
+                try
+                {
+                    rsa = RSA.Create(rsaBits);
+                }
+                catch (CryptographicException ex)
+                {
+                    throw new ArgumentOutOfRangeException($"This platform cannot generate {rsaBits}-bit RSA keys: {ex.Message}", ex);
+                }
+
+                return new RsaKey(rsa, comment);
+
+            default:
+                throw new ArgumentOutOfRangeException(nameof(type), type, "Unknown key type.");
+        }
+    }
+
+    /// <summary>
+    /// The key in the OpenSSH private key format (<c>BEGIN OPENSSH PRIVATE KEY</c>), as <c>ssh-keygen</c> writes it: encrypted with
+    /// <c>aes256-ctr</c> and <c>bcrypt_pbkdf</c> when <paramref name="passphrase"/> is given, otherwise unencrypted. The text holds the
+    /// private key: do not log it, and write it only to files other users cannot read (<see cref="SaveAsync"/> does).
+    /// </summary>
+    /// <param name="passphrase">The passphrase to encrypt with; null or empty for an unencrypted key.</param>
+    /// <param name="kdfRounds">bcrypt_pbkdf rounds (<c>ssh-keygen -a</c>): 16 by default; more make guessing the passphrase slower, and
+    /// loading the key too.</param>
+    /// <exception cref="NotSupportedException">The private key is not available: a key held by an agent, or one paired with a
+    /// certificate (export the key it was made from).</exception>
+    public string ToOpenSshPrivateKey(string? passphrase = null, int kdfRounds = 16)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(kdfRounds, 1);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(kdfRounds, OpenSshKeyWriter.MaxRounds);
+        var bytes = OpenSshKeyWriter.Write(this, passphrase, kdfRounds);
+        try
+        {
+            return Encoding.UTF8.GetString(bytes);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(bytes);
+        }
+    }
+
+    /// <summary>
+    /// Writes the key as <c>ssh-keygen</c> does: the private key to <paramref name="path"/> (<see cref="ToOpenSshPrivateKey"/>), readable
+    /// only by the current user (mode 0600 on Unix, an owner-only ACL on Windows), and the public key to <paramref name="path"/><c>.pub</c>.
+    /// Neither file may exist yet: an existing key is never overwritten.
+    /// </summary>
+    /// <param name="path">The private key file, for example <c>~/.ssh/id_ed25519</c>.</param>
+    /// <param name="passphrase">The passphrase to encrypt with; null or empty for an unencrypted key.</param>
+    /// <param name="cancellationToken">Cancels writing.</param>
+    /// <exception cref="IOException">One of the files exists already, or could not be written.</exception>
+    /// <inheritdoc cref="ToOpenSshPrivateKey" path="/exception"/>
+    public async Task SaveAsync(string path, string? passphrase = null, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        var publicPath = path + ".pub";
+        if (File.Exists(path) || File.Exists(publicPath))
+        {
+            throw new IOException($"'{(File.Exists(path) ? path : publicPath)}' exists already; a key file is never overwritten.");
+        }
+
+        var bytes = OpenSshKeyWriter.Write(this, passphrase, 16); // bytes, not a string, so they can be cleared afterwards
+        bool createdPrivate = false, createdPublic = false;
+        try
+        {
+            await using (var stream = OpenSshKeyWriter.CreateOwnerOnly(path))
+            {
+                createdPrivate = true;
+                await stream.WriteAsync(bytes, cancellationToken).ConfigureAwait(false);
+            }
+
+            await using (var stream = new FileStream(publicPath, FileMode.CreateNew, FileAccess.Write, FileShare.None, 4096, FileOptions.Asynchronous))
+            {
+                createdPublic = true;
+                await stream.WriteAsync(Encoding.UTF8.GetBytes(ToAuthorizedKeysLine() + "\n"), cancellationToken).ConfigureAwait(false);
+            }
+        }
+        catch
+        {
+            // All or nothing, and only the files this call created (another process may have made one in between).
+            if (createdPublic)
+            {
+                File.Delete(publicPath);
+            }
+
+            if (createdPrivate)
+            {
+                File.Delete(path);
+            }
+
+            throw;
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(bytes);
+        }
+    }
+
+    /// <summary>Writes the type-specific private fields of the OpenSSH private key format (PROTOCOL.key), after the key type.</summary>
+    internal virtual void WritePrivateFields(SshWriter writer) =>
+        throw new NotSupportedException("This key's private material cannot be exported: it is held by an agent, or paired with a certificate (export the key it was made from).");
 
     /// <summary>The user certificate this key authenticates with, if it was paired with one (<see cref="WithCertificate"/>).</summary>
     public SshCertificate? Certificate { get; private protected init; }
@@ -162,6 +295,23 @@ public abstract class SshPrivateKey : IDisposable
 
         private protected override void DisposeCore() => CryptographicOperations.ZeroMemory(_seed);
 
+        // string public key, string (seed || public key).
+        internal override void WritePrivateFields(SshWriter writer)
+        {
+            Span<byte> secret = stackalloc byte[Ed25519.SeedSize + Ed25519.PublicKeySize];
+            try
+            {
+                _seed.CopyTo(secret);
+                Ed25519.GetPublicKey(_seed, secret[Ed25519.SeedSize..]);
+                writer.WriteString(secret[Ed25519.SeedSize..]);
+                writer.WriteString(secret);
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(secret);
+            }
+        }
+
         internal static byte[] PublicBlob(ReadOnlySpan<byte> seed)
         {
             Span<byte> publicKey = stackalloc byte[Ed25519.PublicKeySize];
@@ -178,6 +328,7 @@ public abstract class SshPrivateKey : IDisposable
     internal sealed class EcdsaKey : SshPrivateKey
     {
         private readonly ECDsa _ecdsa;
+        private readonly NistCurve _curve;
         private readonly int _fieldSize;
         private readonly HashAlgorithmName _hash;
 
@@ -185,8 +336,28 @@ public abstract class SshPrivateKey : IDisposable
             : base("ecdsa-sha2-" + curve.Name, PublicBlob(curve, ecdsa), comment)
         {
             _ecdsa = ecdsa;
+            _curve = curve;
             _fieldSize = curve.FieldSize;
             _hash = curve.Hash;
+        }
+
+        // string curve, string public point, mpint private scalar.
+        internal override void WritePrivateFields(SshWriter writer)
+        {
+            var parameters = _ecdsa.ExportParameters(true);
+            try
+            {
+                var reader = new SshReader(PublicKey.Span);
+                reader.ReadString(); // key type
+                reader.ReadString(); // curve
+                writer.WriteString(_curve.Name);
+                writer.WriteString(reader.ReadString());
+                writer.WriteMpint(parameters.D);
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(parameters.D);
+            }
         }
 
         internal override IReadOnlyList<string> SignatureAlgorithms => [KeyType];
@@ -286,6 +457,30 @@ public abstract class SshPrivateKey : IDisposable
         }
 
         private protected override void DisposeCore() => _rsa.Dispose();
+
+        // mpint n, e, d, iqmp, p, q. The framework's InverseQ is q^-1 mod p, which is OpenSSH's iqmp.
+        internal override void WritePrivateFields(SshWriter writer)
+        {
+            var p = _rsa.ExportParameters(true);
+            try
+            {
+                writer.WriteMpint(p.Modulus);
+                writer.WriteMpint(p.Exponent);
+                writer.WriteMpint(p.D);
+                writer.WriteMpint(p.InverseQ);
+                writer.WriteMpint(p.P);
+                writer.WriteMpint(p.Q);
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(p.D);
+                CryptographicOperations.ZeroMemory(p.P);
+                CryptographicOperations.ZeroMemory(p.Q);
+                CryptographicOperations.ZeroMemory(p.DP);
+                CryptographicOperations.ZeroMemory(p.DQ);
+                CryptographicOperations.ZeroMemory(p.InverseQ);
+            }
+        }
 
         private static BigInteger ToInteger(ReadOnlySpan<byte> unsignedBigEndian) => new(unsignedBigEndian, isUnsigned: true, isBigEndian: true);
 
