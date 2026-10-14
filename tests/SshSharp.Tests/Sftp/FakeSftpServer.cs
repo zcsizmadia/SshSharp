@@ -50,6 +50,9 @@ internal sealed class FakeSftpServer
         ["copy-data"] = "1",
     };
 
+    /// <summary>Answer home-directory for the empty user name with Failure, as OpenSSH 9.x does.</summary>
+    public bool HomeDirectoryFailsForEmptyUser { get; set; }
+
     /// <summary>How many fsync@openssh.com requests arrived.</summary>
     public int Fsyncs { get; private set; }
 
@@ -617,6 +620,8 @@ internal sealed class FakeSftpServer
                         return Status(id, 0);
                     }
 
+                    case "home-directory" when HomeDirectoryFailsForEmptyUser && r.ReadUtf8String().Length == 0:
+                        return Status(id, 4, "Failure"); // OpenSSH before 10.x looks the empty name up as a user
                     case "home-directory":
                         return Build(w => { w.WriteByte(104); w.WriteUInt32(id); w.WriteUInt32(1); w.WriteString(Home); w.WriteString(Home); w.WriteUInt32(0); });
                     default:

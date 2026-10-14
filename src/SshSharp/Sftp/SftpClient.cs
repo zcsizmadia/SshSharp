@@ -280,6 +280,13 @@ public sealed partial class SftpClient : IAsyncDisposable
             w.WriteString(SftpProtocol.HomeDirectoryExtension);
             w.WriteString(string.Empty); // the session's own user
         }, cancellationToken).ConfigureAwait(false);
+        if (reply.Type == SftpProtocol.Status)
+        {
+            // PROTOCOL says an empty name means the session's user, but OpenSSH before 10.x answers Failure (it looks the empty name
+            // up as a user); the login directory is where "." resolves, which every server answers.
+            return await GetFullPathAsync(".", cancellationToken).ConfigureAwait(false);
+        }
+
         return SingleName(reply, "Finding the home directory", null);
     }
 

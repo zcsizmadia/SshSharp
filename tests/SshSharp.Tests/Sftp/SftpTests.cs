@@ -251,6 +251,15 @@ public sealed class SftpTests : IDisposable
     }
 
     [Test]
+    public async Task AHomeDirectoryExtensionThatFails_FallsBackToTheLoginDirectory()
+    {
+        // OpenSSH 9.x announces home-directory but answers Failure for the empty name PROTOCOL defines as the session's user.
+        await using var rig = await Rig.StartAsync(f => f.HomeDirectoryFailsForEmptyUser = true);
+
+        await Assert.That(await rig.Sftp.GetHomeDirectoryAsync(Timeout())).IsEqualTo(Home);
+    }
+
+    [Test]
     public async Task Paths_Links_AndTheHomeDirectory()
     {
         await using var rig = await Rig.StartAsync(f => f.AddFile(Home + "/target", "t"u8.ToArray()));
