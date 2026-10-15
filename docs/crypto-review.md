@@ -82,6 +82,14 @@ exchange. The secrets are ephemeral, but a leak in decapsulation would expose th
 - The rejection loop in key generation, which retries until g is invertible in R3, runs a data-dependent number of times, as in the
   reference. The discarded g values are independent of the key that is kept.
 - Buffers that hold secrets are cleared. Intermediate polynomials are heap arrays, cleared in `finally` blocks.
+- **JIT output inspected** (.NET 10, x64, `DOTNET_JitDisasm` on the Tier1 and OSR code, which is what runs after warm-up):
+  - The leaf functions (`DivMod`, `ModSigned`, `F3Freeze`, `FqFreeze`, `MinMax`) and the mask helpers, which are inlined, are
+    straight-line code: the masks compile to `shr`, `neg`, `and` and `sar`, with no conditional jumps.
+  - The reductions by the constant moduli 3 and 4591 compile to multiply-and-shift sequences. The generic reduction's only
+    `div` divides the constant 2^31 by a public modulus.
+  - In the loops (`R3Recip`, `RqRecip3`, `RqMultSmall`, `R3Mult`, `Decrypt`, `CiphertextsDiffMask`, the sorting network), every
+    conditional jump compares a loop counter with a public bound (761, 762, 1039), checks an array index against its length,
+    or tests an object or type flag inside `Array.Clear`. None depends on a secret value.
 - The platform caveat above applies to the 64-bit multiplication in the reduction: the constant-time claim covers x64 and Arm64.
 
 | Check (2,000 samples per class) | t | Verdict |
@@ -107,6 +115,4 @@ are cleared after writing; the string `ToOpenSshPrivateKey` returns cannot be.
 ## Open
 
 - A vectorised ChaCha20 would need the same review again.
-- The JIT output of sntrup761's inner loops has not been inspected yet (the mask arithmetic could, in principle, be compiled into
-  branches).
 - An independent review before 1.0.
