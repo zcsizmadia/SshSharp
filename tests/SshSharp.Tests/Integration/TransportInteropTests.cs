@@ -60,19 +60,39 @@ public class TransportInteropTests
         }
 
         var seen = new List<HostKeyInfo>();
-        await using var stream = await RealServer.ConnectAsync();
-        await using var transport = new SshTransport(stream, Options(kex, cipher, hostKey, seen));
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
-        try
+        SshTransport transport;
+        Stream stream;
+        for (var attempt = 1; ; attempt++)
         {
-            await transport.ConnectAsync(timeout.Token);
+            seen.Clear();
+            stream = await RealServer.ConnectAsync();
+            transport = new SshTransport(stream, Options(kex, cipher, hostKey, seen));
+            try
+            {
+                await transport.ConnectAsync(timeout.Token);
+                break;
+            }
+            catch (SshException ex) when (ex.Reason == SshFailureReason.KeyExchangeFailed && ex.Message.StartsWith("No matching", StringComparison.Ordinal))
+            {
+                // Older OpenSSH and Dropbear lack some algorithms; only "the server does not offer it" is a skip, anything else fails.
+                await transport.DisposeAsync();
+                await stream.DisposeAsync();
+                Skip.Test($"{RealServer.Software} does not offer this combination: {ex.Message}");
+                return;
+            }
+            catch (Exception ex) when (attempt == 1 && ex is IOException or SshException { Reason: SshFailureReason.ConnectionClosed })
+            {
+                // A server that finds nothing in common disconnects at once, and OpenSSH for Windows resets the connection; Windows may then
+                // drop its KEXINIT before the client reads it, so the client sees the reset instead of "no matching". Once more decides:
+                // that race is rare, and a real failure fails again.
+                await transport.DisposeAsync();
+                await stream.DisposeAsync();
+            }
         }
-        catch (SshException ex) when (ex.Reason == SshFailureReason.KeyExchangeFailed && ex.Message.StartsWith("No matching", StringComparison.Ordinal))
-        {
-            // Older OpenSSH and Dropbear lack some algorithms; only "the server does not offer it" is a skip, anything else fails.
-            Skip.Test($"{RealServer.Software} does not offer this combination: {ex.Message}");
-            return;
-        }
+
+        await using var connectedStream = stream;
+        await using var connected = transport;
 
         await Assert.That(transport.Algorithms!.Kex).IsEqualTo(kex);
         await Assert.That(transport.Algorithms.CipherClientToServer).IsEqualTo(cipher);
