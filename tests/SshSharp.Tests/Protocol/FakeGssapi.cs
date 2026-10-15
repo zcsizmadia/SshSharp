@@ -78,6 +78,9 @@ internal sealed class FakeGssapiServer
 
     public bool FailWithErrorToken { get; init; }
 
+    /// <summary>Rejects only the client's last token (the one that completes its context), with an error token, as OpenSSH does.</summary>
+    public bool FailLastTokenWithErrorToken { get; init; }
+
     public bool SendStatusMessage { get; init; }
 
     public bool RejectMic { get; init; }

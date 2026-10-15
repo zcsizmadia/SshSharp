@@ -286,6 +286,13 @@ internal sealed class SshUserAuth(SshTransport transport, string userName, Func<
         }));
         await SendGssapiAsync(GssapiMic, mic, cancellationToken).ConfigureAwait(false);
         var final = await ReceiveGssapiAsync(cancellationToken).ConfigureAwait(false);
+        if (final.Type == GssapiErrorToken)
+        {
+            // Our last token completed our side, so the MIC went out at once; the server rejected that token, though, and answers it
+            // with an error token and FAILURE (OpenSSH's input_gssapi_token), the late MIC with UNIMPLEMENTED, which is skipped.
+            final = await ReceiveGssapiAsync(cancellationToken).ConfigureAwait(false);
+        }
+
         return final.Outcome ?? throw new SshProtocolException($"Unexpected message {final.Type} after the GSS-API MIC.");
     }
 

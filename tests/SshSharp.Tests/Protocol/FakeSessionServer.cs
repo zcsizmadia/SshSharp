@@ -614,7 +614,7 @@ internal sealed class FakeSessionServer : IAsyncDisposable
                     await _server.SendAsync(Build(w => { w.WriteByte(SshUserAuth.GssapiError); w.WriteUInt32(0); w.WriteUInt32(0); w.WriteString("note"); w.WriteString(""); }));
                 }
 
-                if (gss.FailWithErrorToken)
+                if (gss.FailWithErrorToken || (gss.FailLastTokenWithErrorToken && token == $"C{gss.Rounds}"))
                 {
                     await _server.SendAsync(Build(w => { w.WriteByte(SshUserAuth.GssapiErrorToken); w.WriteString("server-error"u8); }));
                     _gssapiUser = null;
@@ -630,6 +630,11 @@ internal sealed class FakeSessionServer : IAsyncDisposable
 
                 break;
             }
+
+            case SshUserAuth.GssapiMic when _gssapiUser is null && Gssapi is not null:
+                // A MIC after the exchange failed: OpenSSH has no handler for it any more.
+                await _server.SendAsync(Build(w => { w.WriteByte(SshMessage.Unimplemented); w.WriteUInt32(0); }));
+                break;
 
             case SshUserAuth.GssapiMic when _gssapiUser is { } gssUser && Gssapi is { } gss:
             {
