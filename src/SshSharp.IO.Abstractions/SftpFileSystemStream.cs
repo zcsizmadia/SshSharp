@@ -1,4 +1,5 @@
 using System.IO.Abstractions;
+using SshSharp.Sftp;
 
 namespace SshSharp.IO.Abstractions;
 
@@ -24,22 +25,27 @@ internal sealed class SftpFileSystemStream : FileSystemStream
 
     /// <summary>An open SFTP stream as a file system stream: errors, synchronous or asynchronous, are <c>System.IO</c> exceptions.</summary>
     public static SftpFileSystemStream Wrap(SftpFileSystem fileSystem, Stream remote, string full, int bufferSize) =>
-        new(new BufferedStream(new IOStream(remote, full, fileSystem.Options.OperationTimeout), Math.Max(bufferSize, 64 * 1024)), full);
+        new(new BufferedStream(new IOStream(remote, full, fileSystem.Sftp, fileSystem.Options.OperationTimeout), Math.Max(bufferSize, 64 * 1024)), full);
 
     /// <summary>
     /// The SFTP stream with synchronous calls added (each bounded by the timeout) and every failure, synchronous or asynchronous,
     /// turned into the <c>System.IO</c> exception <see cref="SftpFileSystem.Translate"/> gives.
     /// </summary>
-    private sealed class IOStream(Stream remote, string path, TimeSpan timeout) : Stream
+    private sealed class IOStream(Stream remote, string path, SftpClient sftp, TimeSpan timeout) : Stream
     {
         public override bool CanRead => remote.CanRead;
 
-        public override bool CanSeek => remote.CanSeek;
+        // Seekable while open, as a file stream is, even when the server did not report the size at open (the SFTP stream then says
+        // it is not, so that its own copy does not ask for the length): the buffer in front needs it to seek at all.
+        public override bool CanSeek => remote.CanRead || remote.CanWrite;
 
         public override bool CanWrite => remote.CanWrite;
 
-        // The SFTP stream answers from what it knows; the wait is still bounded, should it have to ask the server.
-        public override long Length => Wait(ct => Task.Run(() => remote.Length, CancellationToken.None).WaitAsync(ct));
+        // The SFTP stream answers from what it knows; otherwise the server is asked, the wait bounded either way.
+        public override long Length => remote.CanSeek
+            ? remote.Length
+            : Wait(async ct => (await sftp.GetAttributesAsync(path, cancellationToken: ct).ConfigureAwait(false)).Size
+                ?? throw new NotSupportedException("The SFTP server did not report the file's size."));
 
         public override long Position
         {

@@ -448,7 +448,7 @@ public sealed partial class SftpClient : IAsyncDisposable
             var segments = segmented && attributes!.Size is { } size ? (int)Math.Min(options.Segments, size / MinSegmentBytes) : 1;
             if (segments > 1)
             {
-                total = await DownloadSegmentedAsync(handle, remotePath, localPath, attributes!.Size!.Value, segments, options, cancellationToken)
+                total = await DownloadSegmentedAsync(handle, remotePath, localPath, attributes!, segments, options, cancellationToken)
                     .ConfigureAwait(false);
             }
             else
@@ -501,11 +501,14 @@ public sealed partial class SftpClient : IAsyncDisposable
     /// <see cref="SftpTransferOptions.Segments"/>: the file is split into <paramref name="segments"/> ranges, the first fetched over
     /// <paramref name="handle"/> and each other one over a sibling session of its own, all written into the local file at their
     /// offsets. The last range reads on to the end of the file (it may have grown); a range that ends early means the file shrank
-    /// meanwhile, which fails the download rather than leave a gap. The first failure cancels the rest, and the local file is removed.
+    /// meanwhile, which fails the download rather than leave a gap. Each other session opens the file by path again, so it must find
+    /// the same size and modification time as <paramref name="attributes"/>: a file replaced or written to in between fails the download
+    /// rather than mix two files. The first failure cancels the rest and is the one reported, and the local file is removed.
     /// </summary>
-    private async Task<long> DownloadSegmentedAsync(byte[] handle, string remotePath, string localPath, long size, int segments,
+    private async Task<long> DownloadSegmentedAsync(byte[] handle, string remotePath, string localPath, SftpFileAttributes attributes, int segments,
         SftpTransferOptions options, CancellationToken cancellationToken)
     {
+        var size = attributes.Size!.Value;
         // The sessions first: the server may allow fewer than asked (sshd's MaxSessions), and the ranges are split among those it opens.
         var siblings = new List<SftpClient>();
         try
@@ -532,6 +535,7 @@ public sealed partial class SftpClient : IAsyncDisposable
                 RandomAccess.SetLength(file, size);
 
                 using var failed = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                Exception? firstFailure = null;
                 var progressLock = new object();
                 long transferred = 0;
                 var part = size / clients.Length;
@@ -547,10 +551,10 @@ public sealed partial class SftpClient : IAsyncDisposable
                 {
                     await Task.WhenAll(tasks).ConfigureAwait(false);
                 }
-                catch when (tasks.FirstOrDefault(t => t.IsFaulted && t.Exception!.InnerException is not OperationCanceledException) is { } first)
+                catch when (Volatile.Read(ref firstFailure) is { } first)
                 {
-                    // Report the failure that stopped the others, not the cancellations it caused.
-                    System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(first.Exception!.InnerException!).Throw();
+                    // Report the failure that stopped the others, not what it caused in them (cancellations, or a session closing).
+                    System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(first).Throw();
                 }
 
                 // The last range may have read past the size seen at the start (the file grew), or stopped short of it (it shrank).
@@ -574,6 +578,13 @@ public sealed partial class SftpClient : IAsyncDisposable
                             ?? (await client.OpenHandleAsync(remotePath, FileMode.Open, FileAccess.Read, failed.Token).ConfigureAwait(false)).Handle;
                         try
                         {
+                            if (openHandle is null &&
+                                await client.GetHandleAttributesAsync(segmentHandle, remotePath, failed.Token).ConfigureAwait(false) is var seen &&
+                                (seen.Size != attributes.Size || seen.LastWriteTime != attributes.LastWriteTime))
+                            {
+                                throw new IOException($"'{remotePath}' changed during the download (replaced or written to): download it again, or without Segments.");
+                            }
+
                             return await client.DownloadRangeAsync(segmentHandle, remotePath, start, stop, async (offset, data, ct) =>
                             {
                                 await RandomAccess.WriteAsync(file, data, offset, ct).ConfigureAwait(false);
@@ -595,8 +606,13 @@ public sealed partial class SftpClient : IAsyncDisposable
                             }
                         }
                     }
-                    catch
+                    catch (Exception ex)
                     {
+                        if (!failed.IsCancellationRequested)
+                        {
+                            Interlocked.CompareExchange(ref firstFailure, ex, null);
+                        }
+
                         await failed.CancelAsync().ConfigureAwait(false); // one part failed: stop the others
                         throw;
                     }
@@ -1188,7 +1204,8 @@ public sealed class SftpTransferOptions
     /// most its 2 MiB window per round trip. It does not help where the bandwidth, or the server's single connection, is the limit.
     /// Files smaller than 1 MiB per segment use fewer segments; the server may allow fewer sessions (sshd's <c>MaxSessions</c>, 10 by
     /// default), and then fewer are used. Ignored with <see cref="Resume"/> (only a sequential download leaves a prefix to resume from)
-    /// and by <see cref="SftpClient.DownloadAsync"/>, which writes a stream in order.
+    /// and by <see cref="SftpClient.DownloadAsync"/>, which writes a stream in order. Each extra session opens the file by path, so a
+    /// file whose size or modification time has changed by then (replaced, or still being written) fails the download.
     /// </summary>
     public int Segments
     {

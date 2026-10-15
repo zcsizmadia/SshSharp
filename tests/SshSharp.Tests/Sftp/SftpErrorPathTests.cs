@@ -355,6 +355,51 @@ public sealed class SftpErrorPathTests : IDisposable
     }
 
     [Test]
+    public async Task ASegmentedDownload_OfAFileReplacedMeanwhile_Fails()
+    {
+        // The first FSTAT (on the first handle) sees the file as it was; the later ones, on the handles the other sessions open by
+        // path, see another file there.
+        var data = new byte[4 * 1024 * 1024];
+        var fstats = 0;
+        await using var rig = await Rig.StartAsync(f =>
+        {
+            f.AddFile(Home + "/big.bin", data);
+            f.RawFrame = request => request[0] == FStat && Interlocked.Increment(ref fstats) > 1
+                ? Reply(request, 105, w => { w.WriteUInt32(1); w.WriteUInt64((ulong)data.Length + 1); })
+                : null;
+        });
+        var local = Path.Combine(_dir, "big.bin");
+
+        var error = await Assert.ThrowsAsync<IOException>(async () =>
+            await rig.Sftp.DownloadFileAsync("big.bin", local, new SftpTransferOptions { Segments = 2 }, Timeout()));
+
+        await Assert.That(error!.Message).Contains("changed during the download");
+        await Assert.That(File.Exists(local)).IsFalse();
+    }
+
+    [Test]
+    public async Task TheFileSystemStreamOverAFileWithoutASize_StillSeeks()
+    {
+        // The open handle's FSTAT has no size; the path's STAT has it.
+        await using var rig = await Rig.StartAsync(f => f.RawFrame = request =>
+            request[0] == FStat ? Reply(request, 105, w => w.WriteUInt32(0)) : null);
+        var fs = new SshSharp.IO.Abstractions.SftpFileSystem(rig.Sftp);
+
+        await using var stream = fs.FileStream.New("f", FileMode.Open, FileAccess.Read);
+
+        await Assert.That(stream.CanSeek).IsTrue();
+        stream.Position = 1;
+        await Assert.That(stream.ReadByte()).IsEqualTo(2);
+        await Assert.That(stream.Seek(-1, SeekOrigin.End)).IsEqualTo(2);
+        await Assert.That(stream.ReadByte()).IsEqualTo(3);
+        await Assert.That(stream.Length).IsEqualTo(3);
+        stream.Position = 0;
+        var copy = new MemoryStream();
+        await stream.CopyToAsync(copy);
+        await Assert.That(copy.ToArray()).IsEquivalentTo(new byte[] { 1, 2, 3 });
+    }
+
+    [Test]
     public async Task GetLengthAsync_SeesAnotherWritersChange()
     {
         await using var rig = await Rig.StartAsync();
