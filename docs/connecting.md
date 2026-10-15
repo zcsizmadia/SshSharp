@@ -270,9 +270,10 @@ var roundTrip = await client.PingAsync();
 Console.WriteLine($"{roundTrip.TotalMilliseconds:F1} ms");
 ```
 
-> **OpenSSH for Windows:** the server built into Windows (OpenSSH for Windows 9.5) often fails to answer `keepalive@openssh.com`
-> requests, which is why OpenSSH's own `ssh -o ServerAliveInterval` drops connections to it. It announces `ping@openssh.com`,
-> though, so SshSharp's keep-alive probes (pings) are answered and keep-alives work against it (checked in CI).
+> **OpenSSH for Windows:** the server built into Windows (OpenSSH for Windows 9.5) often fails to answer keep-alives, and the
+> connection then ends after `KeepAliveCountMax` intervals, as it does with OpenSSH's own `ssh -o ServerAliveInterval`. It announces
+> `ping@openssh.com`, so SshSharp probes it with pings, but those go unanswered at times too: the server stops sending on the
+> connection. Against it, leave `KeepAliveInterval` unset or use a long interval with a generous `KeepAliveCountMax`.
 
 ## Algorithms
 
