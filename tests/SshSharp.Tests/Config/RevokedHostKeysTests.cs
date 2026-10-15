@@ -218,6 +218,58 @@ public sealed class RevokedHostKeysTests : IDisposable
     }
 
     [Test]
+    public async Task ManySerials_AreLookedUpWithoutExpandingThem()
+    {
+        var key = FakeHostKey.Ed25519();
+        var authority = _authority.PublicKey.ToArray();
+
+        // A full 1 MiB bitmap (8 million serials) and overlapping, adjacent and out-of-order lists and ranges.
+        var bitmap = new byte[1024 * 1024];
+        Array.Fill(bitmap, (byte)0xff);
+        bitmap[0] = 0x7f; // a positive mpint; the highest bit is 8 * 2^20 - 2
+        var started = System.Diagnostics.Stopwatch.StartNew();
+        var list = RevokedKeyList.Parse(new Krl()
+            .Certificates(authority,
+                (0x22, w => { w.WriteUInt64(1_000_000); w.WriteMpint(bitmap); }),
+                (0x21, w => { w.WriteUInt64(50); w.WriteUInt64(60); }),
+                (0x20, w => { w.WriteUInt64(61); w.WriteUInt64(10); w.WriteUInt64(55); }), // 61 joins 50..60; 55 is inside it
+                (0x21, w => { w.WriteUInt64(5); w.WriteUInt64(9); }),                    // 5..9 then 10: adjacent
+                (0x21, w => { w.WriteUInt64(ulong.MaxValue - 1); w.WriteUInt64(ulong.MaxValue); }))
+            .Build());
+        await Assert.That(started.Elapsed).IsLessThan(TimeSpan.FromSeconds(5));
+
+        bool Revoked(ulong serial) => list.IsRevoked(key.Blob, Certificate(key, serial));
+        foreach (var serial in new ulong[] { 5, 9, 10, 50, 55, 60, 61, 1_000_000, 1_000_000 + (8UL * 1024 * 1024) - 2, ulong.MaxValue - 1, ulong.MaxValue })
+        {
+            await Assert.That(Revoked(serial)).IsTrue().Because($"serial {serial}");
+        }
+
+        foreach (var serial in new ulong[] { 4, 11, 49, 62, 999_999, 1_000_000 + (8UL * 1024 * 1024) - 1, ulong.MaxValue - 2 })
+        {
+            await Assert.That(Revoked(serial)).IsFalse().Because($"serial {serial}");
+        }
+    }
+
+    [Test]
+    public async Task TheFile_IsParsedAgainOnlyWhenItChanges()
+    {
+        var first = FakeHostKey.Ed25519();
+        var second = FakeHostKey.Ed25519();
+        File.WriteAllText(RevokedFile, $"ssh-ed25519 {Convert.ToBase64String(first.Blob)}\n");
+
+        var loaded = await RevokedKeyList.LoadAsync(RevokedFile, CancellationToken.None);
+        await Assert.That(await RevokedKeyList.LoadAsync(RevokedFile, CancellationToken.None)).IsSameReferenceAs(loaded);
+
+        // Same size, same timestamps: an edit still takes effect, since the cache compares the contents, not the file times.
+        var times = File.GetLastWriteTimeUtc(RevokedFile);
+        File.WriteAllText(RevokedFile, $"ssh-ed25519 {Convert.ToBase64String(second.Blob)}\n");
+        File.SetLastWriteTimeUtc(RevokedFile, times);
+        var reloaded = await RevokedKeyList.LoadAsync(RevokedFile, CancellationToken.None);
+        await Assert.That(reloaded.IsRevoked(second.Blob, null)).IsTrue();
+        await Assert.That(reloaded.IsRevoked(first.Blob, null)).IsFalse();
+    }
+
+    [Test]
     public async Task AKrlThatCannotBeChecked_RefusesEveryHostKey_AsSshDoes()
     {
         var key = FakeHostKey.Ed25519();
@@ -230,6 +282,8 @@ public sealed class RevokedHostKeysTests : IDisposable
             new Krl().Certificates(authority, (0x40, _ => { })).Build(),                          // an unknown certificate section
             new Krl().Certificates(authority, (0x20, w => w.WriteUInt64(0))).Build(),              // serial 0
             new Krl().Certificates(authority, (0x21, w => { w.WriteUInt64(9); w.WriteUInt64(3); })).Build(), // an empty range
+            new Krl().Certificates(authority, (0x22, w => { w.WriteUInt64(0); w.WriteMpint(new byte[] { 0x01 }); })).Build(), // bitmap: serial 0
+            new Krl().Certificates(authority, (0x22, w => { w.WriteUInt64(ulong.MaxValue); w.WriteMpint(new byte[] { 0x02 }); })).Build(), // bitmap past 2^64 - 1
             new Krl().Section(3, w => w.WriteString(new byte[19])).Build(),                       // a SHA-1 of the wrong length
             new Krl().Signature(authority, new byte[64]).Section(2, w => w.WriteString(key.Blob)).Build(), // after a signature
             new Krl().Section(2, w => w.WriteString(key.Blob)).Build().Concat(new byte[] { 4, 0, 0, 0, 1, 0 }).ToArray(), // a signature without one

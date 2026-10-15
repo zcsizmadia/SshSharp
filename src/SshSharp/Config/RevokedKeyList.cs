@@ -43,6 +43,12 @@ internal sealed class RevokedKeyList
     private readonly HashSet<string> _sha256 = new(StringComparer.Ordinal);
     private readonly List<CertificateRevocations> _certificates = [];
 
+    /// <summary>
+    /// Parsed files by full path, with the SHA-256 of the bytes they were parsed from. The file is still read on every check (it is
+    /// security configuration: an edit must take effect at once, whatever the file times say), but parsed again only when it changed.
+    /// </summary>
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (byte[] Hash, RevokedKeyList List)> Parsed = new();
+
     private RevokedKeyList(bool isKrl) => IsKrl = isKrl;
 
     /// <summary>Whether the file was a KRL (otherwise a list of public keys).</summary>
@@ -53,25 +59,98 @@ internal sealed class RevokedKeyList
     {
         public byte[]? Authority { get; } = authority;
 
-        public List<(ulong Low, ulong High)> Serials { get; } = [];
+        /// <summary>Serial lists and ranges while parsing; sorted and merged by <see cref="Seal"/>, then searched by binary search.</summary>
+        public List<(ulong Low, ulong High)> Serials { get; private set; } = [];
+
+        /// <summary>Serial bitmaps as written: bit i, from the least significant end of <c>Bits</c>, revokes <c>Offset + i</c>.</summary>
+        public List<(ulong Offset, byte[] Bits)> Bitmaps { get; } = [];
 
         public HashSet<string> KeyIds { get; } = new(StringComparer.Ordinal); // raw bytes, hex
+
+        public void Seal()
+        {
+            Serials.Sort((a, b) => a.Low.CompareTo(b.Low));
+            var merged = new List<(ulong Low, ulong High)>(Serials.Count);
+            foreach (var (low, high) in Serials)
+            {
+                if (merged.Count > 0 && merged[^1].High != ulong.MaxValue && low <= merged[^1].High + 1)
+                {
+                    merged[^1] = (merged[^1].Low, Math.Max(merged[^1].High, high));
+                }
+                else
+                {
+                    merged.Add((low, high));
+                }
+            }
+
+            Serials = merged;
+        }
+
+        public bool IsSerialRevoked(ulong serial)
+        {
+            // The last range starting at or below the serial is the only one that can hold it (the ranges are merged).
+            int lo = 0, hi = Serials.Count - 1;
+            while (lo <= hi)
+            {
+                var mid = lo + ((hi - lo) / 2);
+                if (Serials[mid].Low <= serial)
+                {
+                    lo = mid + 1;
+                }
+                else
+                {
+                    hi = mid - 1;
+                }
+            }
+
+            if (hi >= 0 && serial <= Serials[hi].High)
+            {
+                return true;
+            }
+
+            foreach (var (offset, bits) in Bitmaps)
+            {
+                if (serial >= offset && serial - offset < (ulong)bits.Length * 8)
+                {
+                    var i = serial - offset;
+                    if ((bits[bits.Length - 1 - (int)(i / 8)] & (1 << (int)(i % 8))) != 0)
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        }
     }
 
-    /// <summary>Reads and parses a revoked keys file.</summary>
+    /// <summary>Reads a revoked keys file, parsing it again only when its contents changed since the last read of the same path.</summary>
     /// <exception cref="FormatException">The file is a malformed KRL, or uses a KRL feature this library does not know.</exception>
     /// <exception cref="IOException">The file cannot be read, or is too large.</exception>
     public static async Task<RevokedKeyList> LoadAsync(string path, CancellationToken cancellationToken)
     {
-        await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, FileOptions.Asynchronous);
-        if (stream.Length > MaxFileSize)
+        byte[] data;
+        await using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, FileOptions.Asynchronous))
         {
-            throw new IOException($"The revoked keys file is larger than {MaxFileSize / (1024 * 1024)} MiB.");
+            if (stream.Length > MaxFileSize)
+            {
+                throw new IOException($"The revoked keys file is larger than {MaxFileSize / (1024 * 1024)} MiB.");
+            }
+
+            data = new byte[stream.Length];
+            await stream.ReadExactlyAsync(data, cancellationToken).ConfigureAwait(false);
         }
 
-        var data = new byte[stream.Length];
-        await stream.ReadExactlyAsync(data, cancellationToken).ConfigureAwait(false);
-        return Parse(data);
+        var key = Path.GetFullPath(path);
+        var hash = SHA256.HashData(data);
+        if (Parsed.TryGetValue(key, out var cached) && cached.Hash.AsSpan().SequenceEqual(hash))
+        {
+            return cached.List;
+        }
+
+        var list = Parse(data);
+        Parsed[key] = (hash, list);
+        return list;
     }
 
     /// <summary>Parses a KRL, or a list of public keys when the data does not start with the KRL magic.</summary>
@@ -116,7 +195,7 @@ internal sealed class RevokedKeyList
             }
 
             var serial = certificate.Serial;
-            if (serial != 0 && revocations.Serials.Exists(r => serial >= r.Low && serial <= r.High))
+            if (serial != 0 && revocations.IsSerialRevoked(serial))
             {
                 return true;
             }
@@ -301,14 +380,14 @@ internal sealed class RevokedKeyList
                         throw new FormatException("A KRL serial bitmap is too large.");
                     }
 
-                    for (var i = 0; i < bitmap.Length * 8; i++)
+                    // Kept as written and tested bit by bit, rather than expanded into one entry per set bit (8 million for a full
+                    // 1 MiB bitmap). The same checks as before: no serial 0 (offset 0 with bit 0 set) and no overflow past 2^64 - 1.
+                    if (!bitmap.IsEmpty)
                     {
-                        if ((bitmap[bitmap.Length - 1 - (i / 8)] & (1 << (i % 8))) != 0)
-                        {
-                            var serial = offset + (ulong)i;
-                            Expect(serial >= offset, "A KRL serial bitmap overflows.");
-                            AddSerials(revocations, serial, serial);
-                        }
+                        Expect(offset != 0 || (bitmap[^1] & 1) == 0, "A KRL revokes serial 0 or has an empty serial range.");
+                        var highestBit = ((ulong)bitmap.Length * 8) - 1 - (ulong)System.Numerics.BitOperations.LeadingZeroCount((uint)bitmap[0] << 24);
+                        Expect(offset + highestBit >= offset, "A KRL serial bitmap overflows.");
+                        revocations.Bitmaps.Add((offset, bitmap.ToArray()));
                     }
 
                     break;
@@ -330,6 +409,8 @@ internal sealed class RevokedKeyList
                     throw new FormatException($"KRL certificate section type {type} is not supported.");
             }
         }
+
+        revocations.Seal();
     }
 
     /// <summary>As krl.c: a range is lo &lt;= hi, and serial 0 cannot be revoked.</summary>

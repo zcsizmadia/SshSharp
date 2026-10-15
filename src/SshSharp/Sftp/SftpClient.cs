@@ -443,18 +443,11 @@ public sealed partial class SftpClient : IAsyncDisposable
                 throw new IOException($"The local file is larger than '{remotePath}' ({resumeFrom} > {remoteSize} bytes): it is not a partial download of it.");
             }
 
-            long total;
             var created = false;
             var segments = segmented && attributes!.Size is { } size ? (int)Math.Min(options.Segments, size / MinSegmentBytes) : 1;
-            if (segments > 1)
-            {
-                total = await DownloadSegmentedAsync(handle, remotePath, localPath, attributes!, segments, options, cancellationToken)
-                    .ConfigureAwait(false);
-            }
-            else
-            {
-                total = await DownloadSequentialAsync().ConfigureAwait(false);
-            }
+            var total = segments > 1
+                ? await DownloadSegmentedAsync(handle, remotePath, localPath, attributes!, segments, options, cancellationToken).ConfigureAwait(false)
+                : await DownloadSequentialAsync().ConfigureAwait(false);
 
             if (attributes is not null && options.PreserveTimes)
             {

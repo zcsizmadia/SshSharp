@@ -1,5 +1,6 @@
 using System.Net;
 using SshSharp.Config;
+using SshSharp.Tests.Keys;
 using SshSharp.Tests.Protocol;
 
 namespace SshSharp.Tests.Config;
@@ -180,6 +181,29 @@ public sealed class ConfigGapsTests : IDisposable
             await using var client = await ConnectWithCommandAsync(server, Exit(3), allow: false,
                 SshHostKeyVerifier.FromDelegate((_, _) => ValueTask.FromResult(true)));
             await Assert.That(client.IsConnected).IsTrue();
+        }
+    }
+
+    [Test]
+    public async Task KnownHostsCommand_GetsTheCertificate_WhileTheCertificateIsChecked()
+    {
+        // As ssh: %K and %t are the certificate while it is checked, and the plain key when ssh falls back to that; %f is the plain key's.
+        using var hostKey = SshPrivateKey.Generate(SshKeyType.Ed25519);
+        using var authority = SshPrivateKey.Generate(SshKeyType.Ed25519);
+        var certificate = SshCertificate.FromBlob(TestKeys.Certificate(authority, hostKey.PublicKey.ToArray(), SshCertificateType.Host, ["h"]));
+        var presented = new SshHostKey(certificate.CertificateType, hostKey.KeyType, hostKey.Fingerprint, hostKey.PublicKey, 256) { Certificate = certificate };
+        var tokens = new SshTokenContext("h", "h", 22, "user", "local", _dir, "localhost", _ => null);
+
+        foreach (var (asCertificate, type, blob) in new[]
+        {
+            (true, certificate.CertificateType, certificate.Blob.ToArray()),
+            (false, hostKey.KeyType, hostKey.PublicKey.ToArray()),
+        })
+        {
+            var file = await KnownHostsCommandRunner.RunAsync(Echo("h %t %K"), tokens, "h", 22, "HOSTNAME", presented, asCertificate, Timeout());
+            var entry = file.Find("h", 22).Single();
+            await Assert.That(entry.KeyType).IsEqualTo(type).Because($"asCertificate {asCertificate}");
+            await Assert.That(entry.PublicKey.ToArray()).IsEquivalentTo(blob);
         }
     }
 
