@@ -34,3 +34,7 @@ SshSharp.Config.SshHostConfig.RefuseConnection.get -> bool
 SshSharp.Config.SshHostConfig.RefuseConnection.init -> void
 SshSharp.SshConfigConnectOptions.AllowKnownHostsCommand.get -> bool
 SshSharp.SshConfigConnectOptions.AllowKnownHostsCommand.init -> void
+SshSharp.Config.SshHostConfig.RevokedHostKeys.get -> string?
+SshSharp.Config.SshHostConfig.RevokedHostKeys.init -> void
+SshSharp.KnownHostsVerifier.RevokedHostKeys.get -> string?
+SshSharp.KnownHostsVerifier.RevokedHostKeys.init -> void

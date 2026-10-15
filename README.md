@@ -62,6 +62,7 @@ Console.WriteLine(result.StandardOutputText);
 | API | Async-only network API; `CancellationToken` on every network operation | Mostly synchronous; async connect, commands and SFTP |
 | `ssh_config` (`Host`, `Match`, `Include`; connect by alias) | ✅ | ❌ |
 | `known_hosts` verification (hashed hosts, `@cert-authority`, `@revoked`, `StrictHostKeyChecking`) | ✅ | ❌ (verify in a `HostKeyReceived` handler) |
+| Revoked host keys (`RevokedHostKeys`: OpenSSH KRLs from `ssh-keygen -k`, or key lists) | ✅ | ❌ |
 | `UpdateHostKeys` (key rotation) | ✅ | ❌ |
 | Host key scanning (`ssh-keyscan`) | ✅ | ❌ |
 | ProxyJump chains, ProxyCommand | ✅ | ❌ |

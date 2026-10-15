@@ -35,6 +35,7 @@ internal static class Targets
             .Resolve("host", new SshConfigResolveOptions { LocalUser = "u", HomeDirectory = "/nonexistent", LocalHostName = "l", GetEnvironmentVariable = _ => "v" })),
         ["identification"] = data => _ = SshIdentification.TryParse(Encoding.Latin1.GetString(data), out _),
         ["sftp"] = Sftp,
+        ["krl"] = data => Format(() => RevokedKeyList.Parse(data).IsRevoked(data, null)),
     };
 
     /// <summary>Every reply an SFTP server can send; SftpException is an SshException, which is the documented rejection.</summary>

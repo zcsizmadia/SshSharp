@@ -61,6 +61,29 @@ var verifier = new KnownHostsVerifier([knownHostsPath])
 };
 ```
 
+### Revoked host keys
+
+`RevokedHostKeys` (ssh_config's `RevokedHostKeys`) names a file of host keys never to accept, checked before anything else
+and in every mode, even for a key `known_hosts` trusts:
+
+```csharp
+var verifier = new KnownHostsVerifier([knownHostsPath]) { RevokedHostKeys = "/etc/ssh/revoked_host_keys" };
+```
+
+The file is an OpenSSH Key Revocation List, the binary file `ssh-keygen -k` writes, or a list of public keys, one per line as
+in `authorized_keys` (as with ssh, lines that do not parse are skipped). A KRL can revoke:
+
+- plain keys, by the key itself or by its SHA-1 or SHA-256 fingerprint;
+- host certificates, by serial number (single, range or bitmap) or key id, for one certificate authority or for any.
+
+A host certificate is also refused when its certified key or its authority's key is revoked. The refusal reads as ssh's:
+`Host key ssh-ed25519 SHA256:... revoked by file ...`.
+
+As with ssh, a file that cannot be read, or a KRL that is malformed or uses a section or critical extension this library does
+not know, refuses every host key ("Error checking host key ... in revoked keys file ..."): a revocation list that cannot be
+checked must not let a revoked key through. A KRL's signature sections are read but not verified; the file is trusted as local
+configuration. `UpdateHostKeys` never learns a revoked key.
+
 ## Pinning
 
 ```csharp

@@ -100,6 +100,12 @@ public sealed class SshHostConfig
     /// <summary>System-wide known_hosts files.</summary>
     public IReadOnlyList<string> GlobalKnownHostsFiles { get; init; } = [];
 
+    /// <summary>
+    /// <c>RevokedHostKeys</c>: a file of host keys never to accept (an OpenSSH KRL, as <c>ssh-keygen -k</c> writes, or a list of public
+    /// keys), with <c>~</c> and tokens expanded; null when not set (or <c>none</c>).
+    /// </summary>
+    public string? RevokedHostKeys { get; init; }
+
     /// <summary>The host key checking policy.</summary>
     public StrictHostKeyChecking StrictHostKeyChecking { get; init; } = StrictHostKeyChecking.Ask;
 

@@ -230,6 +230,9 @@ public sealed class SshConfig
             Tokens = ctx,
             UserKnownHostsFiles = [.. userKnownHosts.Select(v => ctx.ExpandPath(ctx.ExpandTokens(v)))],
             GlobalKnownHostsFiles = [.. globalKnownHosts.Select(v => ctx.ExpandPath(ctx.ExpandTokens(v)))],
+            RevokedHostKeys = First("revokedhostkeys") is { Length: > 0 } revoked && !revoked.Equals("none", StringComparison.OrdinalIgnoreCase)
+                ? ctx.ExpandPath(ctx.ExpandTokens(revoked))
+                : null,
             StrictHostKeyChecking = ParseStrict(First("stricthostkeychecking")),
             HostKeyAlias = hostKeyAlias, // not token-expanded (ssh_config(5) does not list it)
             HostKeyAlgorithms = First("hostkeyalgorithms"),

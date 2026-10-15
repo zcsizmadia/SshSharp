@@ -40,6 +40,11 @@ A man in the middle can read, change, drop and inject bytes. The server itself m
 - **Recording host keys:** the host name is written into `known_hosts` only if it is a literal name. White space, control
   characters, commas, `*`, `?` and `!` are refused, since they would add lines or hosts, or turn the entry into a pattern that
   trusts the key for other hosts.
+- **Revoked host keys (`RevokedHostKeys`):** checked before anything else, in every `StrictHostKeyChecking` mode, for the plain key
+  and a certificate's authority, serial and key id. A file that cannot be read, or a KRL that is malformed or has a section or
+  critical extension this library does not know, refuses every host key, as ssh does, rather than let a revoked key through. The
+  KRL parser is bounded (16 MiB files, 1 MiB per serial bitmap) and fuzzed. KRL signatures are not verified: the file is local
+  configuration, trusted like `known_hosts`.
 
 ### Channels the server opens
 
