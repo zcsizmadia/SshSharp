@@ -69,7 +69,7 @@ public sealed partial class SshClient
         try
         {
             // Resolved once per host: finding the environment's agent on Windows lists the named pipes.
-            var agent = ResolveAgent(hostConfig, options);
+            var agent = await ResolveAgentAsync(hostConfig, options).ConfigureAwait(false);
             var keys = await LoadIdentitiesAsync(hostConfig, options, agent, logger, token).ConfigureAwait(false);
             owner.Add(keys);
 
@@ -424,7 +424,7 @@ public sealed partial class SshClient
     }
 
     /// <summary>The agent ssh would use: <see cref="SshConfigConnectOptions.Agent"/>, else <c>IdentityAgent</c> (a path, <c>none</c>, or <c>SSH_AUTH_SOCK</c>), else the environment's.</summary>
-    internal static SshAgent? ResolveAgent(SshHostConfig hostConfig, SshConfigConnectOptions options, Func<SshAgent?>? fromEnvironment = null)
+    internal static async ValueTask<SshAgent?> ResolveAgentAsync(SshHostConfig hostConfig, SshConfigConnectOptions options, Func<ValueTask<SshAgent?>>? fromEnvironment = null)
     {
         if (!options.UseAgent)
         {
@@ -438,7 +438,7 @@ public sealed partial class SshClient
 
         return hostConfig.IdentityAgent switch
         {
-            null or "SSH_AUTH_SOCK" => (fromEnvironment ?? SshAgent.FromEnvironment)(),
+            null or "SSH_AUTH_SOCK" => await (fromEnvironment ?? SshAgent.FromEnvironmentAsync)().ConfigureAwait(false),
             var none when none.Equals("none", StringComparison.OrdinalIgnoreCase) => null,
             var path => new SshAgent(path),
         };

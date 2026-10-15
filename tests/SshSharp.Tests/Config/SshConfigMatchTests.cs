@@ -87,6 +87,26 @@ public class SshConfigMatchTests
     }
 
     [Test]
+    public async Task LocalNetwork_ReadsTheInterfacesOncePerResolution()
+    {
+        var reads = 0;
+        var options = new SshConfigResolveOptions
+        {
+            LocalUser = "local",
+            HomeDirectory = "/home/local",
+            LocalAddresses = () =>
+            {
+                reads++;
+                return [System.Net.IPAddress.Parse("10.9.8.7")];
+            },
+        };
+
+        const string config = "Match localnetwork 192.168.0.0/16\n Port 1\nMatch localnetwork 172.16.0.0/12\n Port 2\nMatch localnetwork 10.0.0.0/8\n Port 3\n";
+        await Assert.That(Resolve(config, "a", options).Port).IsEqualTo(3);
+        await Assert.That(reads).IsEqualTo(1);
+    }
+
+    [Test]
     public async Task Exec_IsOffByDefault_AndRunsThroughTheMatcherWithExpandedTokens()
     {
         const string config = "Match exec \"check %h %r\"\n Port 51\n";

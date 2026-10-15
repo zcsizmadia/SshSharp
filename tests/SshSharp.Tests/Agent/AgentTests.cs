@@ -287,9 +287,9 @@ public sealed class AgentTests : IDisposable
     {
         var hostConfig = SshConfig.Parse(config ?? "").Resolve("h", new SshConfigResolveOptions { LocalUser = "l", HomeDirectory = _dir });
         var fromEnvironment = new SshAgent("env");
-        await Assert.That(SshClient.ResolveAgent(hostConfig, new SshConfigConnectOptions(), () => fromEnvironment)?.Path).IsEqualTo(expected);
-        await Assert.That(SshClient.ResolveAgent(hostConfig, new SshConfigConnectOptions { UseAgent = false }, () => fromEnvironment)).IsNull();
-        await Assert.That(SshClient.ResolveAgent(hostConfig, new SshConfigConnectOptions { Agent = new SshAgent("given") }, () => fromEnvironment)!.Path).IsEqualTo("given");
+        await Assert.That((await SshClient.ResolveAgentAsync(hostConfig, new SshConfigConnectOptions(), () => ValueTask.FromResult<SshAgent?>(fromEnvironment)))?.Path).IsEqualTo(expected);
+        await Assert.That(await SshClient.ResolveAgentAsync(hostConfig, new SshConfigConnectOptions { UseAgent = false }, () => ValueTask.FromResult<SshAgent?>(fromEnvironment))).IsNull();
+        await Assert.That((await SshClient.ResolveAgentAsync(hostConfig, new SshConfigConnectOptions { Agent = new SshAgent("given") }, () => ValueTask.FromResult<SshAgent?>(fromEnvironment)))!.Path).IsEqualTo("given");
     }
 
     [Test]

@@ -246,9 +246,14 @@ internal sealed class SshConfigResolver(IReadOnlyList<SshConfigDocument> documen
         "localuser" => Glob.IsMatchList(argument, options.LocalUser),
         "tagged" => CurrentTag() is { } tag && Glob.IsMatchList(argument, tag),
         "exec" => options.ExecMatcher is { } run && run(Context().ExpandTokens(argument)),
-        "localnetwork" => LocalNetwork.AnyInside((options.LocalAddresses ?? LocalNetwork.InterfaceAddresses)(), argument),
+        "localnetwork" => LocalNetwork.AnyInside(LocalAddresses(), argument),
         _ => false,
     };
+
+    // The interfaces are read once per resolution, not for every Match localnetwork line (each read enumerates every adapter).
+    private IReadOnlyList<System.Net.IPAddress>? _localAddresses;
+
+    private IReadOnlyList<System.Net.IPAddress> LocalAddresses() => _localAddresses ??= (options.LocalAddresses ?? LocalNetwork.InterfaceAddresses)();
 
     private string? TryCanonicalize()
     {
