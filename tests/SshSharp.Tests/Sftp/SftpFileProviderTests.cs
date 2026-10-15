@@ -292,10 +292,11 @@ public class SftpFileProviderTests
     public async Task ASynchronousReadThatTimesOut_IsTheSameTimeoutError_AsALookup()
     {
         await using var rig = await Rig.StartAsync();
-        var provider = new SftpFileProvider(rig.Sftp, "site", new SftpFileProviderOptions { OperationTimeout = TimeSpan.FromMilliseconds(300) });
+        // The limit must leave the lookup and the open, which run before the reads are slowed, time to finish on a loaded CI runner.
+        var provider = new SftpFileProvider(rig.Sftp, "site", new SftpFileProviderOptions { OperationTimeout = TimeSpan.FromSeconds(1.5) });
         var file = provider.GetFileInfo("index.html");
         using var stream = file.CreateReadStream();
-        rig.Files.ReplyDelay = (request, _) => request == 5 ? TimeSpan.FromSeconds(2) : TimeSpan.Zero;
+        rig.Files.ReplyDelay = (request, _) => request == 5 ? TimeSpan.FromSeconds(10) : TimeSpan.Zero;
 
         var error = Assert.Throws<SshException>(() => stream.ReadExactly(new byte[4]));
         await Assert.That(error!.Reason).IsEqualTo(SshFailureReason.Timeout);

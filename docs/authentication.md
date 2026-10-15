@@ -68,10 +68,10 @@ Connecting by `ssh_config` alias finds certificates as `ssh` does: `CertificateF
 
 ## SSH agent
 
-Keys held by `ssh-agent` (or the Windows OpenSSH agent service) never enter your process: the agent signs.
+Keys held by `ssh-agent` (or the Windows OpenSSH agent service, or PuTTY's Pageant) never enter your process: the agent signs.
 
 ```csharp
-var agent = SshAgent.FromEnvironment(); // SSH_AUTH_SOCK, or the Windows OpenSSH pipe
+var agent = SshAgent.FromEnvironment(); // SSH_AUTH_SOCK, or on Windows the OpenSSH agent, else Pageant
 var keys = agent is null ? [] : await agent.GetKeysAsync();
 var options = new SshClientOptions { UserName = "deploy", PrivateKeys = keys, HostKeyVerifier = verifier };
 ```
@@ -114,7 +114,9 @@ announces RFC 9987's `agent-forward` (OpenSSH 10.3+) is asked with the standard 
 servers you trust: while you are connected, anyone with enough rights on the server can make your agent sign (they cannot read
 the keys). Connecting by `ssh_config` alias follows `ForwardAgent yes`.
 
-Pageant is not discovered automatically yet; it works through `IdentityAgent` when it exposes an OpenSSH-compatible pipe.
+On Windows, when `SSH_AUTH_SOCK` is not set and the OpenSSH agent service is not running, `FromEnvironment()` finds PuTTY's Pageant
+(0.75 and later) on the pipe it creates for the current user; `SshAgent.Pageant()` asks for Pageant specifically. Pageant's keys work like
+any agent's, including for signing (`SshSignature`) and agent forwarding.
 
 ## Keyboard-interactive
 

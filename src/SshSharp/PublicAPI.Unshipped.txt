@@ -1,1 +1,2 @@
 #nullable enable
+static SshSharp.SshAgent.Pageant() -> SshSharp.SshAgent?
