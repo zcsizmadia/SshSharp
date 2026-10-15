@@ -36,6 +36,14 @@ public sealed class SshAgent
     private const byte SignRequest = 13;
     private const byte SignResponse = 14;
     private const byte Success = 6;
+    private const byte AddIdentity = 17;
+    private const byte RemoveIdentity = 18;
+    private const byte RemoveAllIdentities = 19;
+    private const byte Lock = 22;
+    private const byte Unlock = 23;
+    private const byte AddIdConstrained = 25;
+    private const byte ConstrainLifetime = 1;
+    private const byte ConstrainConfirm = 2;
     private const byte Extension = 27;
     private const byte ExtensionFailure = 28;
     private const byte ExtensionResponse = 29;
@@ -244,6 +252,111 @@ public sealed class SshAgent
         }
     }
 
+    /// <summary>
+    /// Adds <paramref name="key"/> to the agent, as <c>ssh-add</c> does, optionally with <paramref name="constraints"/> (a lifetime, or a
+    /// confirmation for each use). A key paired with a certificate is added with it. Adding a key the agent already holds replaces its
+    /// constraints.
+    /// </summary>
+    /// <exception cref="NotSupportedException">The key's private material is not here: it is held by an agent already.</exception>
+    /// <exception cref="SshException">The agent is not running or refused the key (<see cref="SshFailureReason.AgentFailed"/>), for example
+    /// a key type or constraint it does not support, or a locked agent.</exception>
+    public async Task AddKeyAsync(SshPrivateKey key, SshAgentKeyConstraints? constraints = null, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(key);
+        if (key is AgentKey)
+        {
+            throw new NotSupportedException("This key is held by an agent; only a key loaded from a file or generated here can be added.");
+        }
+
+        var constrained = constraints is { Lifetime: not null } or { Confirm: true };
+        using var message = new ZeroingBufferWriter(4096);
+        var writer = new SshWriter(message);
+        writer.WriteByte(constrained ? AddIdConstrained : AddIdentity);
+        key.WriteAgentIdentity(writer);
+        writer.WriteString(key.Comment ?? string.Empty);
+        if (constraints is { Lifetime: { } lifetime })
+        {
+            writer.WriteByte(ConstrainLifetime);
+            writer.WriteUInt32((uint)Math.Clamp(Math.Ceiling(lifetime.TotalSeconds), 1, uint.MaxValue));
+        }
+
+        if (constraints is { Confirm: true })
+        {
+            writer.WriteByte(ConstrainConfirm);
+        }
+
+        await ExpectSuccessAsync(message.WrittenSpan.ToArray(), "add the key", clear: true, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Removes one key from the agent (<c>ssh-add -d</c>): one from <see cref="GetKeysAsync"/>, or the key a file holds.</summary>
+    /// <exception cref="SshException">The agent is not running or does not hold the key (<see cref="SshFailureReason.AgentFailed"/>).</exception>
+    public Task RemoveKeyAsync(SshPrivateKey key, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(key);
+        var publicKey = key.PublicKey;
+        return ExpectSuccessAsync(SshPrivateKey.Encode(w =>
+        {
+            w.WriteByte(RemoveIdentity);
+            w.WriteString(publicKey.Span);
+        }), "remove the key", clear: false, cancellationToken);
+    }
+
+    /// <summary>Removes every key from the agent (<c>ssh-add -D</c>).</summary>
+    /// <exception cref="SshException">The agent is not running or refused (<see cref="SshFailureReason.AgentFailed"/>).</exception>
+    public Task RemoveAllKeysAsync(CancellationToken cancellationToken = default) =>
+        ExpectSuccessAsync([RemoveAllIdentities], "remove all keys", clear: false, cancellationToken);
+
+    /// <summary>
+    /// Locks the agent with <paramref name="passphrase"/> (<c>ssh-add -x</c>): until <see cref="UnlockAsync"/>, it lists no keys and signs
+    /// nothing.
+    /// </summary>
+    /// <exception cref="SshException">The agent is not running or is locked already (<see cref="SshFailureReason.AgentFailed"/>).</exception>
+    public Task LockAsync(string passphrase, CancellationToken cancellationToken = default) => LockOrUnlockAsync(Lock, passphrase, "lock", cancellationToken);
+
+    /// <summary>Unlocks an agent locked with <see cref="LockAsync"/> (<c>ssh-add -X</c>).</summary>
+    /// <exception cref="SshException">The agent is not running, or the passphrase is wrong (<see cref="SshFailureReason.AgentFailed"/>).</exception>
+    public Task UnlockAsync(string passphrase, CancellationToken cancellationToken = default) => LockOrUnlockAsync(Unlock, passphrase, "unlock", cancellationToken);
+
+    private Task LockOrUnlockAsync(byte type, string passphrase, string what, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(passphrase);
+        var secret = System.Text.Encoding.UTF8.GetBytes(passphrase);
+        try
+        {
+            return ExpectSuccessAsync(SshPrivateKey.Encode(w =>
+            {
+                w.WriteByte(type);
+                w.WriteString(secret);
+            }), what + " the agent", clear: true, cancellationToken);
+        }
+        finally
+        {
+            System.Security.Cryptography.CryptographicOperations.ZeroMemory(secret);
+        }
+    }
+
+    /// <summary>Sends a request whose answer is SUCCESS or FAILURE; <paramref name="clear"/> wipes the request afterwards (it holds a secret).</summary>
+    private async Task ExpectSuccessAsync(byte[] request, string what, bool clear, CancellationToken cancellationToken)
+    {
+        byte[] reply;
+        try
+        {
+            reply = await RequestAsync(request, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            if (clear)
+            {
+                System.Security.Cryptography.CryptographicOperations.ZeroMemory(request);
+            }
+        }
+
+        if (reply[0] != Success)
+        {
+            throw new SshException(SshFailureReason.AgentFailed, $"The agent refused to {what}.");
+        }
+    }
+
     /// <summary>A raw connection to the agent, for agent forwarding (the server speaks the agent protocol itself).</summary>
     internal async ValueTask<Stream> OpenStreamAsync(CancellationToken cancellationToken)
     {
@@ -320,8 +433,15 @@ public sealed class SshAgent
         var frame = new byte[4 + message.Length];
         BinaryPrimitives.WriteUInt32BigEndian(frame, (uint)message.Length);
         message.CopyTo(frame.AsMemory(4));
-        await stream.WriteAsync(frame, cancellationToken).ConfigureAwait(false);
-        await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await stream.WriteAsync(frame, cancellationToken).ConfigureAwait(false);
+            await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            System.Security.Cryptography.CryptographicOperations.ZeroMemory(frame); // it may carry a private key (ADD_IDENTITY) or passphrase
+        }
 
         var header = new byte[4];
         await stream.ReadExactlyAsync(header, cancellationToken).ConfigureAwait(false);

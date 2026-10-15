@@ -199,6 +199,16 @@ public abstract class SshPrivateKey : IDisposable
         }
     }
 
+    /// <summary>
+    /// Writes the key as an SSH agent's ADD_IDENTITY carries it (draft-miller-ssh-agent section 3.2): the key type, then the type's
+    /// private fields, which are those of the OpenSSH private key format.
+    /// </summary>
+    internal virtual void WriteAgentIdentity(SshWriter writer)
+    {
+        writer.WriteString(KeyType);
+        WritePrivateFields(writer);
+    }
+
     /// <summary>Writes the type-specific private fields of the OpenSSH private key format (PROTOCOL.key), after the key type.</summary>
     internal virtual void WritePrivateFields(SshWriter writer) =>
         throw new NotSupportedException("This key's private material cannot be exported: it is held by an agent, or paired with a certificate (export the key it was made from).");
@@ -272,6 +282,34 @@ public abstract class SshPrivateKey : IDisposable
 
         internal override ValueTask<byte[]> SignAsync(string algorithm, ReadOnlyMemory<byte> data, AgentBinding? binding, CancellationToken cancellationToken) =>
             _key.SignAsync(SshCertificate.BaseAlgorithm(algorithm), data, binding, cancellationToken);
+
+        /// <summary>
+        /// A certified key as an agent takes it (PROTOCOL.certkeys): the certificate type and the certificate, then the private fields
+        /// that are not in the certificate: Ed25519 the public key and seed as for a plain key, ECDSA only d, RSA d, iqmp, p and q.
+        /// </summary>
+        internal override void WriteAgentIdentity(SshWriter writer)
+        {
+            writer.WriteString(KeyType);
+            writer.WriteString(Certificate!.Blob.Span);
+            using var fields = new ZeroingBufferWriter(4096);
+            _key.WritePrivateFields(new SshWriter(fields));
+            var reader = new SshReader(fields.WrittenSpan);
+            switch (_key.KeyType)
+            {
+                case "ssh-rsa":
+                    reader.ReadMpint(); // n
+                    reader.ReadMpint(); // e
+                    break;
+                case SshAlgorithms.SshEd25519:
+                    break;
+                default: // ECDSA
+                    reader.ReadString(); // curve
+                    reader.ReadString(); // Q
+                    break;
+            }
+
+            writer.WriteBytes(reader.Remaining);
+        }
 
         private protected override void DisposeCore()
         {

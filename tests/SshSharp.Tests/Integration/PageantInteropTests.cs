@@ -47,6 +47,13 @@ public class PageantInteropTests
             var message = "signed by pageant"u8.ToArray();
             var signature = await SshSignature.SignAsync(held, message, "file");
             await Assert.That(signature.Verify(message, "file")).IsTrue();
+
+            // And one added by SshSharp itself, then removed again.
+            using var second = SshPrivateKey.Generate(SshKeyType.EcdsaNistp256, "added-by-sshsharp");
+            await pageant.AddKeyAsync(second);
+            await Assert.That((await pageant.GetKeysAsync()).Any(k => k.PublicKey.Span.SequenceEqual(second.PublicKey.Span))).IsTrue();
+            await pageant.RemoveKeyAsync(second);
+            await Assert.That((await pageant.GetKeysAsync()).Any(k => k.PublicKey.Span.SequenceEqual(second.PublicKey.Span))).IsFalse();
         }
         finally
         {

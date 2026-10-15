@@ -101,6 +101,9 @@ internal static partial class SshLog
     [LoggerMessage(EventId = 33, Level = LogLevel.Information, Message = "The server forwards a Unix socket to this machine (streamlocal-forward)")]
     public static partial void RemoteSocketForwardingStarted(ILogger logger);
 
+    [LoggerMessage(EventId = 34, Level = LogLevel.Information, Message = "Key {Fingerprint} was added to the agent (AddKeysToAgent)")]
+    public static partial void KeyAddedToAgent(ILogger logger, string fingerprint);
+
     [LoggerMessage(EventId = 32, Level = LogLevel.Warning, Message = "A connection through remote dynamic forwarding on port {RemotePort} was not made: {Reason}")]
     public static partial void RemoteDynamicConnectFailed(ILogger logger, int remotePort, string reason);
 }

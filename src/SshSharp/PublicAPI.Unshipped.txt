@@ -1,3 +1,23 @@
 #nullable enable
 static SshSharp.SshAgent.Pageant() -> SshSharp.SshAgent?
 SshSharp.SshClient.PingAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.TimeSpan>!
+override SshSharp.SshAgentKeyConstraints.Equals(object? obj) -> bool
+override SshSharp.SshAgentKeyConstraints.GetHashCode() -> int
+override SshSharp.SshAgentKeyConstraints.ToString() -> string!
+SshSharp.Config.SshHostConfig.AddKeysToAgent.get -> SshSharp.SshAgentKeyConstraints?
+SshSharp.Config.SshHostConfig.AddKeysToAgent.init -> void
+SshSharp.SshAgent.AddKeyAsync(SshSharp.SshPrivateKey! key, SshSharp.SshAgentKeyConstraints? constraints = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+SshSharp.SshAgent.LockAsync(string! passphrase, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+SshSharp.SshAgent.RemoveAllKeysAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+SshSharp.SshAgent.RemoveKeyAsync(SshSharp.SshPrivateKey! key, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+SshSharp.SshAgent.UnlockAsync(string! passphrase, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+SshSharp.SshAgentKeyConstraints
+SshSharp.SshAgentKeyConstraints.<Clone>$() -> SshSharp.SshAgentKeyConstraints!
+SshSharp.SshAgentKeyConstraints.Confirm.get -> bool
+SshSharp.SshAgentKeyConstraints.Confirm.init -> void
+SshSharp.SshAgentKeyConstraints.Equals(SshSharp.SshAgentKeyConstraints? other) -> bool
+SshSharp.SshAgentKeyConstraints.Lifetime.get -> System.TimeSpan?
+SshSharp.SshAgentKeyConstraints.Lifetime.init -> void
+SshSharp.SshAgentKeyConstraints.SshAgentKeyConstraints() -> void
+static SshSharp.SshAgentKeyConstraints.operator !=(SshSharp.SshAgentKeyConstraints? left, SshSharp.SshAgentKeyConstraints? right) -> bool
+static SshSharp.SshAgentKeyConstraints.operator ==(SshSharp.SshAgentKeyConstraints? left, SshSharp.SshAgentKeyConstraints? right) -> bool

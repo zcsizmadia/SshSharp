@@ -52,7 +52,7 @@ What is taken from the configuration: `HostName`, `Port`, `User`, `IdentityFile`
 `UpdateHostKeys`, `HostKeyAlias`, `KexAlgorithms`, `HostKeyAlgorithms`, `Ciphers`, `MACs`, `PubkeyAcceptedAlgorithms`,
 `PreferredAuthentications`, `PubkeyAuthentication`, `PasswordAuthentication`, `KbdInteractiveAuthentication`, `BatchMode`,
 `ProxyJump`, `ProxyCommand`, `ServerAliveInterval`, `ServerAliveCountMax`, `ConnectTimeout`, `AddressFamily`,
-`BindAddress`, `BindInterface` and `ForwardAgent`; with `StartForwardings`, also `LocalForward`, `RemoteForward`,
+`BindAddress`, `BindInterface`, `ForwardAgent` and `AddKeysToAgent`; with `StartForwardings`, also `LocalForward`, `RemoteForward`,
 `DynamicForward`, `GatewayPorts`, `ExitOnForwardFailure` and `ClearAllForwardings`.
 `Match` (including `Match exec`, which needs an opt-in) and `Include` work as in OpenSSH.
 
@@ -270,10 +270,10 @@ var roundTrip = await client.PingAsync();
 Console.WriteLine($"{roundTrip.TotalMilliseconds:F1} ms");
 ```
 
-> **OpenSSH for Windows:** the server built into Windows (OpenSSH for Windows 9.5) often fails to answer `keepalive@openssh.com`
-> requests, and without pings the connection then ends after `KeepAliveCountMax` intervals, as it does with OpenSSH's own
-> `ssh -o ServerAliveInterval`. Against such a server, when it does not announce pings, leave `KeepAliveInterval` unset or use a
-> long interval with a generous `KeepAliveCountMax`.
+> **OpenSSH for Windows:** the server built into Windows (OpenSSH for Windows 9.5) often fails to answer keep-alives, and the
+> connection then ends after `KeepAliveCountMax` intervals, as it does with OpenSSH's own `ssh -o ServerAliveInterval`. It announces
+> `ping@openssh.com`, so SshSharp probes it with pings, but those go unanswered at times too: the server stops sending on the
+> connection. Against it, leave `KeepAliveInterval` unset or use a long interval with a generous `KeepAliveCountMax`.
 
 ## Algorithms
 

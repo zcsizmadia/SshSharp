@@ -148,6 +148,9 @@ internal sealed class FakeAgent : IAsyncDisposable
         var reader = new SshReader(request);
         switch (reader.ReadByte())
         {
+            case 11 when LockPassphrase is not null:
+                return [12, 0, 0, 0, 0]; // a locked agent lists nothing
+
             case 11:
                 return Build(w =>
                 {
@@ -257,9 +260,120 @@ internal sealed class FakeAgent : IAsyncDisposable
                 return [5];
             }
 
+            case 17 or 25:
+                return AddIdentity(request);
+
+            case 18:
+            {
+                var blob = reader.ReadString().ToArray();
+                var removed = Keys.RemoveAll(k => k.Key.PublicKey.Span.SequenceEqual(blob));
+                return [removed > 0 ? (byte)6 : (byte)5];
+            }
+
+            case 19:
+                Keys.Clear();
+                return [6];
+
+            case 22 or 23:
+            {
+                var passphrase = reader.ReadUtf8String();
+                if (request[0] == 22 && LockPassphrase is null)
+                {
+                    LockPassphrase = passphrase;
+                    return [6];
+                }
+
+                if (request[0] == 23 && LockPassphrase == passphrase)
+                {
+                    LockPassphrase = null;
+                    return [6];
+                }
+
+                return [5];
+            }
+
             default:
                 return [5];
         }
+    }
+
+    /// <summary>The passphrase the agent is locked with, or null.</summary>
+    public string? LockPassphrase { get; private set; }
+
+    /// <summary>One ADD_IDENTITY or ADD_ID_CONSTRAINED: the key type, the bytes after it (certificate and private fields), and the constraints.</summary>
+    public sealed record Added(string KeyType, byte[] Fields, string Comment, uint? LifetimeSeconds, bool Confirm);
+
+    public List<Added> AddRequests { get; } = [];
+
+    /// <summary>
+    /// ADD_IDENTITY (17) or ADD_ID_CONSTRAINED (25). A plain key is parsed (its fields are the OpenSSH private key format's) and held, so it
+    /// can sign; a certificate's request is only recorded.
+    /// </summary>
+    private byte[] AddIdentity(byte[] request)
+    {
+        if (LockPassphrase is not null)
+        {
+            return [5];
+        }
+
+        var reader = new SshReader(request);
+        reader.ReadByte();
+        var start = request.Length - reader.Remaining.Length;
+        var type = reader.ReadUtf8String();
+        var fieldsStart = request.Length - reader.Remaining.Length;
+        var certificate = type.EndsWith("-cert-v01@openssh.com", StringComparison.Ordinal);
+        if (certificate)
+        {
+            reader.ReadString(); // the certificate
+        }
+
+        var baseType = certificate ? type[..^"-cert-v01@openssh.com".Length] : type;
+        var fieldCount = (baseType, certificate) switch
+        {
+            ("ssh-ed25519", _) => 2,
+            ("ssh-rsa", false) => 6,
+            ("ssh-rsa", true) => 4,
+            (_, false) => 3, // ECDSA: curve, Q, d
+            _ => 1, // ECDSA certificate: d
+        };
+        for (var i = 0; i < fieldCount; i++)
+        {
+            reader.ReadString(); // strings and mpints are framed alike
+        }
+
+        var fieldsEnd = request.Length - reader.Remaining.Length;
+        var comment = reader.ReadUtf8String();
+        var commentEnd = request.Length - reader.Remaining.Length;
+        uint? lifetime = null;
+        var confirm = false;
+        while (!reader.IsEmpty)
+        {
+            switch (reader.ReadByte())
+            {
+                case 1:
+                    lifetime = reader.ReadUInt32();
+                    break;
+                case 2:
+                    confirm = true;
+                    break;
+                default:
+                    return [5];
+            }
+        }
+
+        AddRequests.Add(new Added(type, request[fieldsStart..fieldsEnd], comment, lifetime, confirm));
+        if (!certificate)
+        {
+            // As a decrypted OpenSSH key file's private section: two check values, the key and comment, padding to 8 bytes.
+            var body = request[start..commentEnd];
+            var padding = (8 - ((8 + body.Length) % 8)) % 8;
+            byte[] section = [1, 2, 3, 4, 1, 2, 3, 4, .. body, .. Enumerable.Range(1, padding).Select(i => (byte)i)];
+            var key = global::SshSharp.Keys.PrivateKeyParser.ParseOpenSshPrivate(section);
+            Keys.RemoveAll(k => k.Key.PublicKey.Span.SequenceEqual(key.PublicKey.Span));
+            Keys.Add((key, comment));
+        }
+
+        return [6];
     }
 
     private static byte[] Build(Action<SshWriter> body)
