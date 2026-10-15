@@ -22,12 +22,34 @@ internal sealed class ChannelData : IDisposable
         _offset = offset;
         _length = length;
         IsExtended = isExtended;
+#if SSHSHARP_INSTRUMENT
+        _checksum = Instrumentation.Checksum(packet.Payload.Span.Slice(offset, length));
+#endif
     }
+
+#if SSHSHARP_INSTRUMENT
+    private readonly ulong _checksum;
+    private int _checkedOnRead;
+#endif
 
     /// <summary>True for stderr (<c>SSH_MSG_CHANNEL_EXTENDED_DATA</c> type 1).</summary>
     public bool IsExtended { get; }
 
-    public ReadOnlyMemory<byte> Data => Volatile.Read(ref _disposed) != 0 ? throw new ObjectDisposedException(nameof(ChannelData)) : _packet.Payload.Slice(_offset, _length);
+    public ReadOnlyMemory<byte> Data
+    {
+        get
+        {
+            ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, typeof(ChannelData));
+            var data = _packet.Payload.Slice(_offset, _length);
+#if SSHSHARP_INSTRUMENT
+            if (Interlocked.Exchange(ref _checkedOnRead, 1) == 0)
+            {
+                Instrumentation.CheckData(data.Span, _checksum, _channel.LocalId, "before it was read");
+            }
+#endif
+            return data;
+        }
+    }
 
     /// <summary>
     /// Releases the buffer and gives the window back, once: a stream disposed while a read is in progress releases its current chunk from
@@ -40,6 +62,9 @@ internal sealed class ChannelData : IDisposable
             return;
         }
 
+#if SSHSHARP_INSTRUMENT
+        Instrumentation.CheckData(_packet.Payload.Span.Slice(_offset, _length), _checksum, _channel.LocalId, "while it was being read");
+#endif
         _packet.Dispose();
         _channel.Consumed(_length);
     }
@@ -221,6 +246,7 @@ internal sealed class SshChannel
         {
             var count = await _sendWindow.AcquireAsync((int)Math.Min(data.Length, _remoteMaxPacket), cancellationToken).ConfigureAwait(false);
             var buffer = ArrayPool<byte>.Shared.Rent(9 + count);
+            Instrumentation.Rented(buffer, nameof(SendDataAsync));
             try
             {
                 buffer[0] = SshMessage.ChannelData;
@@ -250,6 +276,7 @@ internal sealed class SshChannel
             }
             finally
             {
+                Instrumentation.Returning(buffer, nameof(SendDataAsync));
                 ArrayPool<byte>.Shared.Return(buffer);
             }
 

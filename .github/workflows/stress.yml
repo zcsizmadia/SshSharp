@@ -1,0 +1,204 @@
+name: Stress
+
+# Runs the tests again and again, with the instrumented build (src/SshSharp/Protocol/Instrumentation.cs: double returns of pooled
+# buffers, received data overwritten while queued), to catch and diagnose intermittent failures. Started by hand: each job's
+# summary lists the failed tests and how often each failed, and every failing iteration's full output (plus the instrumentation
+# log and, for the interop jobs, the server's log) is kept as an artifact.
+on:
+  workflow_dispatch:
+    inputs:
+      iterations:
+        description: Runs per job
+        default: '20'
+      unit-filter:
+        description: TUnit tree filter for the unit test jobs (empty for all)
+        default: ''
+
+permissions:
+  contents: read
+
+# The inputs reach the scripts as environment variables, never pasted into them.
+env:
+  ITERATIONS: ${{ inputs.iterations }}
+  UNIT_FILTER: ${{ inputs.unit-filter }}
+
+concurrency:
+  group: stress-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  unit:
+    name: unit (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm, windows-latest, windows-11-arm, macos-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+          dotnet-version: 8.0.x
+          cache: true
+          cache-dependency-path: '**/Directory.Packages.props'
+      - run: dotnet restore
+      - run: dotnet build -c Release --no-restore -p:SshSharpInstrument=true
+      - name: Loop
+        shell: bash
+        run: tests/stress/loop.sh "$ITERATIONS" "$RUNNER_TEMP/stress" net8.0,net10.0 "$UNIT_FILTER"
+      - name: Summary
+        if: always()
+        shell: bash
+        run: cat "$RUNNER_TEMP/stress/summary.md" >> "$GITHUB_STEP_SUMMARY" || true
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: stress-unit-${{ matrix.os }}
+          path: ${{ runner.temp }}/stress/
+          if-no-files-found: ignore
+
+  # The interop tests against OpenSSH and Dropbear in containers, as in CI (the fault-injection and forwarding tests among them).
+  interop-container:
+    name: interop (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: OpenSSH, Alpine 3.22
+            image: alpine@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8
+            server: openssh
+            software: OpenSSH
+            strict: '1'
+          - name: Dropbear, Alpine 3.22
+            image: alpine@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8
+            server: dropbear
+            software: dropbear
+            strict: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+          dotnet-version: 8.0.x
+          cache: true
+          cache-dependency-path: '**/Directory.Packages.props'
+      - name: Start the server container
+        run: |
+          set -euo pipefail
+          PASSWORD="$(openssl rand -hex 16)"
+          echo "::add-mask::$PASSWORD"
+          docker build -q -t sshsharp-interop --build-arg BASE="${{ matrix.image }}" --build-arg SERVER="${{ matrix.server }}" tests/docker
+          docker run -d --name server -p 127.0.0.1:2200:22 -e TEST_PASSWORD="$PASSWORD" sshsharp-interop
+          for i in $(seq 1 30); do
+            if timeout 2 bash -c 'exec 3<>/dev/tcp/127.0.0.1/2200 && head -n 1 <&3' 2>/dev/null | grep -q '^SSH-'; then break; fi
+            sleep 1
+          done
+          timeout 2 bash -c 'exec 3<>/dev/tcp/127.0.0.1/2200 && head -n 1 <&3' 2>/dev/null | grep -q '^SSH-' \
+            || { echo "::error::the server does not answer"; exit 1; }
+          {
+            echo "SSHSHARP_TEST_SSHD=127.0.0.1:2200"
+            echo "SSHSHARP_TEST_SSHD_INNER_PORT=22"
+            echo "SSHSHARP_TEST_USER=sshsharp"
+            echo "SSHSHARP_TEST_PASSWORD=$PASSWORD"
+            echo "SSHSHARP_TEST_SERVER=${{ matrix.software }}"
+            echo "SSHSHARP_TEST_SERVER_STRICTKEX=${{ matrix.strict }}"
+          } >> "$GITHUB_ENV"
+          if [ "${{ matrix.server }}" = "openssh" ]; then echo "SSHSHARP_TEST_SSHD_REKEY=1" >> "$GITHUB_ENV"; fi
+          if [ "${{ matrix.server }}" = "dropbear" ]; then echo "SSHSHARP_TEST_DROPBEAR_SFTP=1" >> "$GITHUB_ENV"; fi
+      - run: dotnet restore
+      - run: dotnet build -c Release --no-restore -p:SshSharpInstrument=true
+      - name: Loop
+        # Few tests at a time, as in CI: Dropbear limits unauthenticated connections per address.
+        run: tests/stress/loop.sh "$ITERATIONS" "$RUNNER_TEMP/stress" net10.0,net8.0 "/*/*/*InteropTests/*" --maximum-parallel-tests 4
+      - name: Summary and server log
+        if: always()
+        run: |
+          cat "$RUNNER_TEMP/stress/summary.md" >> "$GITHUB_STEP_SUMMARY" || true
+          docker logs server > "$RUNNER_TEMP/stress/server.log" 2>&1 || true
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: stress-interop-${{ matrix.server }}
+          path: ${{ runner.temp }}/stress/
+          if-no-files-found: ignore
+
+  # OpenSSH for Windows as in CI (password only, Git Bash as the shell, sshd at DEBUG2 for channel events).
+  interop-windows:
+    name: interop (OpenSSH for Windows)
+    runs-on: windows-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+          dotnet-version: 8.0.x
+          cache: true
+          cache-dependency-path: '**/Directory.Packages.props'
+      - name: Start OpenSSH Server for Windows
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (-not (Get-Service sshd -ErrorAction SilentlyContinue)) {
+            Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0 | Out-Null
+          }
+
+          $password = -join ((1..24) | ForEach-Object { '{0:x}' -f (Get-Random -Maximum 16) }) + 'Aa1!'
+          Write-Output "::add-mask::$password"
+          New-LocalUser -Name sshsharp -Password (ConvertTo-SecureString $password -AsPlainText -Force) -PasswordNeverExpires | Out-Null
+          Add-LocalGroupMember -Group Users -Member sshsharp
+
+          New-ItemProperty -Path HKLM:\SOFTWARE\OpenSSH -Name DefaultShell -Value 'C:\Program Files\Git\bin\bash.exe' -PropertyType String -Force | Out-Null
+          Start-Service sshd
+          Stop-Service sshd
+          $config = "$env:ProgramData\ssh\sshd_config"
+          @(
+            'Port 2222'
+            'ListenAddress 127.0.0.1'
+            'ListenAddress ::1'
+            'PasswordAuthentication yes'
+            'MaxStartups 200:30:300'
+            'MaxSessions 64'
+            'AllowTcpForwarding yes'
+            'SyslogFacility LOCAL0'
+            'LogLevel DEBUG2'
+            'KexAlgorithms +diffie-hellman-group14-sha256,diffie-hellman-group16-sha512'
+          ) + (Get-Content $config | Where-Object { $_ -notmatch '^\s*(Port|ListenAddress|PasswordAuthentication|Match|AuthorizedKeysFile|AllowGroups|AllowUsers|DenyGroups|DenyUsers)\b' -and $_ -notmatch '^\s+' }) |
+            Set-Content $config -Encoding ascii
+          & "$env:WINDIR\System32\OpenSSH\sshd.exe" -t
+          if ($LASTEXITCODE -ne 0) { throw "sshd_config is invalid" }
+          Start-Service sshd
+          @(
+            'SSHSHARP_TEST_SSHD=127.0.0.1:2222'
+            'SSHSHARP_TEST_USER=sshsharp'
+            "SSHSHARP_TEST_PASSWORD=$password"
+            'SSHSHARP_TEST_SERVER=OpenSSH'
+            'SSHSHARP_TEST_SERVER_OS=windows'
+          ) >> $env:GITHUB_ENV
+      - run: dotnet restore
+      - run: dotnet build -c Release --no-restore -p:SshSharpInstrument=true
+      - name: Loop
+        shell: bash
+        run: tests/stress/loop.sh "$ITERATIONS" "$RUNNER_TEMP/stress" net10.0,net8.0 "/*/*/*InteropTests/*"
+      - name: Summary and server log
+        if: always()
+        shell: pwsh
+        run: |
+          Get-Content "$env:RUNNER_TEMP\stress\summary.md" -ErrorAction SilentlyContinue >> $env:GITHUB_STEP_SUMMARY
+          Copy-Item "$env:ProgramData\ssh\logs\sshd.log" "$env:RUNNER_TEMP\stress\sshd.log" -ErrorAction SilentlyContinue
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: stress-interop-windows
+          path: ${{ runner.temp }}/stress/
+          if-no-files-found: ignore

@@ -30,6 +30,7 @@ internal sealed class DecodedPacket : IDisposable
     {
         if (Interlocked.Exchange(ref _buffer, null) is { } buffer)
         {
+            Instrumentation.Returning(buffer, nameof(DecodedPacket));
             ArrayPool<byte>.Shared.Return(buffer, clearArray: true);
         }
     }
@@ -100,6 +101,7 @@ internal static class PacketCodec
 
         var packetSize = 4 + (int)length;
         var buffer = ArrayPool<byte>.Shared.Rent(packetSize + protector.TagSize);
+        Instrumentation.Rented(buffer, nameof(TryDecode));
         try
         {
             input.Slice(0, total).CopyTo(buffer);
@@ -124,6 +126,7 @@ internal static class PacketCodec
         {
             if (buffer is not null)
             {
+                Instrumentation.Returning(buffer, nameof(TryDecode));
                 ArrayPool<byte>.Shared.Return(buffer, clearArray: true);
             }
         }

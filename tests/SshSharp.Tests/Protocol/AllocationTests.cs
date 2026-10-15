@@ -85,6 +85,12 @@ public class AllocationTests
     [MethodDataSource(nameof(Suites))]
     public async Task Decoding_AllocatesOnlyTheSmallPacketWrapper(string suite)
     {
+        if (Instrumentation.Enabled)
+        {
+            Skip.Test("The instrumented build tracks each pooled buffer, which allocates.");
+            return;
+        }
+
         var allocated = AllocatedPerPacket(suite, 1000, decode: true);
         await Assert.That(allocated).IsLessThanOrEqualTo(128.0);
     }
@@ -93,6 +99,12 @@ public class AllocationTests
     [MethodDataSource(nameof(Suites))]
     public async Task AllocationDoesNotGrowWithThePacketSize(string suite)
     {
+        if (Instrumentation.Enabled)
+        {
+            Skip.Test("The instrumented build tracks each pooled buffer, which allocates.");
+            return;
+        }
+
         // The signature of zero copy: a 16 KiB packet costs the same garbage as a 100 byte one.
         var small = AllocatedPerPacket(suite, 100, decode: true);
         var large = AllocatedPerPacket(suite, 16_000, decode: true);

@@ -29,6 +29,10 @@
     <MinVerDefaultPreReleaseIdentifiers>preview.0</MinVerDefaultPreReleaseIdentifiers>
     <MinVerMinimumMajorMinor>0.1</MinVerMinimumMajorMinor>
   </PropertyGroup>
+  <!-- Troubleshooting checks (Protocol/Instrumentation.cs), for the stress workflow only: dotnet build -p:SshSharpInstrument=true. -->
+  <PropertyGroup Condition="'$(SshSharpInstrument)' == 'true'">
+    <DefineConstants>$(DefineConstants);SSHSHARP_INSTRUMENT</DefineConstants>
+  </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.SourceLink.GitHub" PrivateAssets="All" />
     <PackageReference Include="Microsoft.CodeAnalysis.PublicApiAnalyzers" PrivateAssets="All" />
