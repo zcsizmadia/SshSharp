@@ -165,20 +165,59 @@ public class SessionInteropTests
 
         await using var session = await client.StartCommandAsync("echo to-err 1>&2; tr a-z A-Z; exit 4", cancellationToken: Timeout());
         await Assert.That(session.HasTerminal).IsFalse();
-        var output = ReadAllAsync(session.StandardOutput);
-        var error = ReadAllAsync(session.StandardError);
+
+        // Where it stands, for the failure message: this has hung intermittently against OpenSSH for Windows, and the step matters.
+        var stage = "writing";
+        long written = 0, outRead = 0, errRead = 0;
+        async Task<string> CountAsync(Stream stream, Action<int> counted)
+        {
+            using var buffer = new MemoryStream();
+            var chunk = new byte[16 * 1024];
+            int read;
+            while ((read = await stream.ReadAsync(chunk, Timeout())) > 0)
+            {
+                buffer.Write(chunk, 0, read);
+                counted(read);
+            }
+
+            return Encoding.UTF8.GetString(buffer.ToArray());
+        }
+
+        var output = CountAsync(session.StandardOutput, n => Interlocked.Add(ref outRead, n));
+        var error = CountAsync(session.StandardError, n => Interlocked.Add(ref errRead, n));
 
         // More than the server's initial window, so the input only gets through as the server adjusts it.
         var line = new string('x', 1023) + "\n";
         var input = Encoding.ASCII.GetBytes(string.Concat(Enumerable.Repeat(line, 4096)));
-        await session.StandardInput.WriteAsync(input, Timeout());
-        await session.CloseInputAsync(Timeout());
+        try
+        {
+            for (var offset = 0; offset < input.Length; offset += line.Length * 64)
+            {
+                var part = input.AsMemory(offset, Math.Min(line.Length * 64, input.Length - offset));
+                await session.StandardInput.WriteAsync(part, Timeout());
+                written += part.Length;
+            }
 
-        await Assert.That((await output).Length).IsEqualTo(input.Length);
-        await Assert.That((await output).All(c => c is 'X' or '\n')).IsTrue();
-        await Assert.That((await error).Trim()).IsEqualTo("to-err");
-        await session.WaitForExitAsync(Timeout());
-        await Assert.That(session.ExitStatus).IsEqualTo(4);
+            stage = "sending EOF";
+            await session.CloseInputAsync(Timeout());
+            stage = "reading stdout";
+            var stdout = await output;
+            stage = "reading stderr";
+            var stderr = await error;
+            stage = "waiting for the exit status";
+            await session.WaitForExitAsync(Timeout());
+
+            await Assert.That(stdout.Length).IsEqualTo(input.Length);
+            await Assert.That(stdout.All(c => c is 'X' or '\n')).IsTrue();
+            await Assert.That(stderr.Trim()).IsEqualTo("to-err");
+            await Assert.That(session.ExitStatus).IsEqualTo(4);
+        }
+        catch (OperationCanceledException ex)
+        {
+            throw new TimeoutException($"Stuck {stage}: {written} of {input.Length} bytes written, {Interlocked.Read(ref outRead)} read from stdout, " +
+                $"{Interlocked.Read(ref errRead)} from stderr; stdout {(output.IsCompleted ? "ended" : "open")}, stderr {(error.IsCompleted ? "ended" : "open")}, " +
+                $"exit status {session.ExitStatus?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "none"}, connected {client.IsConnected}.", ex);
+        }
     }
 
     [Test]
