@@ -11,6 +11,10 @@ internal sealed class SshChannelReadStream(Func<CancellationToken, ValueTask<Cha
     private bool _eof;
     private int _disposed;
 
+    // 1 while a read is in progress. That read owns _current: disposing the stream meanwhile leaves the chunk to it, since releasing it
+    // would zero the buffer it is copying from (or null the field under it). Whichever of the two finishes last releases it.
+    private int _reading;
+
     public override bool CanRead => _disposed == 0;
 
     public override bool CanWrite => false;
@@ -31,33 +35,47 @@ internal sealed class SshChannelReadStream(Func<CancellationToken, ValueTask<Cha
             return 0;
         }
 
-        while (_current is null || _offset == _current.Data.Length)
+        if (Interlocked.Exchange(ref _reading, 1) != 0)
         {
-            Release();
-            if (_eof)
-            {
-                return 0;
-            }
-
-            _current = await source(cancellationToken).ConfigureAwait(false);
-            if (_current is null)
-            {
-                _eof = true;
-                return 0;
-            }
-
-            if (Volatile.Read(ref _disposed) != 0)
-            {
-                Release(); // disposed while this read waited: the chunk would otherwise never be released
-                throw new ObjectDisposedException(nameof(SshChannelReadStream));
-            }
+            throw new InvalidOperationException("Another read is already in progress on this stream.");
         }
 
-        var available = _current.Data.Span[_offset..];
-        var count = Math.Min(available.Length, buffer.Length);
-        available[..count].CopyTo(buffer.Span);
-        _offset += count;
-        return count;
+        try
+        {
+            // Checked again now that the read is marked: a disposal from here on sees it and leaves the chunk to this read.
+            ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
+            while (_current is null || _offset == _current.Data.Length)
+            {
+                Release();
+                if (_eof)
+                {
+                    return 0;
+                }
+
+                _current = await source(cancellationToken).ConfigureAwait(false);
+                if (_current is null)
+                {
+                    _eof = true;
+                    return 0;
+                }
+
+                ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this); // disposed while this read waited
+            }
+
+            var available = _current.Data.Span[_offset..];
+            var count = Math.Min(available.Length, buffer.Length);
+            available[..count].CopyTo(buffer.Span);
+            _offset += count;
+            return count;
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _reading, 0);
+            if (Volatile.Read(ref _disposed) != 0)
+            {
+                Release(); // disposed during this read, which owned the chunk until now
+            }
+        }
     }
 
     public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) =>
@@ -81,7 +99,13 @@ internal sealed class SshChannelReadStream(Func<CancellationToken, ValueTask<Cha
     {
         if (disposing && Interlocked.Exchange(ref _disposed, 1) == 0)
         {
-            Release();
+            // Both sides write their flag before reading the other's (interlocked, so in that order): a read that is in progress is
+            // seen here, or it sees the disposal when it ends, and releases the chunk itself. Both may release; Release is once-only.
+            if (Volatile.Read(ref _reading) == 0)
+            {
+                Release();
+            }
+
             disposed?.Invoke();
         }
 
@@ -90,7 +114,7 @@ internal sealed class SshChannelReadStream(Func<CancellationToken, ValueTask<Cha
 
     private void Release()
     {
-        // Taken atomically: disposal can race a read in progress, and each chunk must be released exactly once.
+        // Taken atomically: disposal and a read that is ending can both release, and each chunk must be released exactly once.
         Interlocked.Exchange(ref _current, null)?.Dispose();
         _offset = 0;
     }

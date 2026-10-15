@@ -12,6 +12,9 @@ internal sealed class SshChannelStream(SshChannel channel) : Stream
     private bool _eof;
     private int _disposed;
 
+    // 1 while a read is in progress, which owns _current then: as in SshChannelReadStream, disposal leaves the chunk to that read.
+    private int _reading;
+
     public SshChannel Channel { get; } = channel;
 
     public override bool CanRead => true;
@@ -34,41 +37,64 @@ internal sealed class SshChannelStream(SshChannel channel) : Stream
             return 0;
         }
 
-        while (_current is null || _offset == _current.Data.Length)
+        if (Interlocked.Exchange(ref _reading, 1) != 0)
         {
-            ReleaseCurrent();
-            if (_eof)
-            {
-                return 0;
-            }
-
-            var next = await Channel.ReadAsync(cancellationToken).ConfigureAwait(false);
-            if (next is null)
-            {
-                _eof = true;
-                return 0;
-            }
-
-            if (next.IsExtended)
-            {
-                next.Dispose(); // stderr has no place in a byte stream
-                continue;
-            }
-
-            _current = next;
-            _offset = 0;
-            if (Volatile.Read(ref _disposed) != 0)
-            {
-                ReleaseCurrent(); // disposed while this read waited: the chunk would otherwise never be released
-                throw new ObjectDisposedException(nameof(SshChannelStream));
-            }
+            throw new InvalidOperationException("Another read is already in progress on this stream.");
         }
 
-        var available = _current.Data.Span[_offset..];
-        var count = Math.Min(available.Length, buffer.Length);
-        available[..count].CopyTo(buffer.Span);
-        _offset += count;
-        return count;
+        try
+        {
+            // Checked again now that the read is marked: a disposal from here on sees it and leaves the chunk to this read.
+            ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
+            while (_current is null || _offset == _current.Data.Length)
+            {
+                ReleaseCurrent();
+                if (_eof)
+                {
+                    return 0;
+                }
+
+                var next = await Channel.ReadAsync(cancellationToken).ConfigureAwait(false);
+                if (next is null)
+                {
+                    _eof = true;
+                    return 0;
+                }
+
+                if (next.IsExtended)
+                {
+                    next.Dispose(); // stderr has no place in a byte stream
+                    continue;
+                }
+
+                _current = next;
+                _offset = 0;
+                ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this); // disposed while this read waited
+            }
+
+            var available = _current.Data.Span[_offset..];
+            var count = Math.Min(available.Length, buffer.Length);
+            available[..count].CopyTo(buffer.Span);
+            _offset += count;
+            return count;
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _reading, 0);
+            if (Volatile.Read(ref _disposed) != 0)
+            {
+                ReleaseCurrent(); // disposed during this read, which owned the chunk until now
+            }
+        }
+    }
+
+    /// <summary>Releases the current chunk on disposal, unless a read in progress owns it (that read releases it when it ends).</summary>
+    private void ReleaseUnlessReading()
+    {
+        if (Volatile.Read(ref _reading) == 0)
+        {
+            ReleaseCurrent();
+        }
     }
 
     public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) =>
@@ -107,7 +133,7 @@ internal sealed class SshChannelStream(SshChannel channel) : Stream
             return;
         }
 
-        ReleaseCurrent();
+        ReleaseUnlessReading();
         try
         {
             await Channel.SendEofAsync(CancellationToken.None).ConfigureAwait(false);
@@ -127,7 +153,7 @@ internal sealed class SshChannelStream(SshChannel channel) : Stream
         if (disposing && Interlocked.Exchange(ref _disposed, 1) == 0)
         {
             // Synchronous disposal cannot wait for the network; queue the CLOSE.
-            ReleaseCurrent();
+            ReleaseUnlessReading();
             _ = Channel.CloseAsync(CancellationToken.None).AsTask();
             Channel.DiscardUnread();
         }
@@ -148,7 +174,7 @@ internal sealed class SshChannelStream(SshChannel channel) : Stream
 
     private void ReleaseCurrent()
     {
-        // Taken atomically: disposal can race a read in progress, and each chunk must be released exactly once.
+        // Taken atomically: disposal and a read that is ending can both release, and each chunk must be released exactly once.
         Interlocked.Exchange(ref _current, null)?.Dispose();
         _offset = 0;
     }

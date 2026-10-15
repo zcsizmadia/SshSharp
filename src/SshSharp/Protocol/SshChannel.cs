@@ -80,8 +80,10 @@ internal sealed class SshChannel
     public const uint LocalMaxPacketSize = 32 * 1024;
 
     private readonly SshConnection _connection;
-    private readonly Channel<ChannelData> _incoming = Channel.CreateUnbounded<ChannelData>(new UnboundedChannelOptions { SingleReader = true, SingleWriter = true });
-    private readonly Channel<ChannelData> _extended = Channel.CreateUnbounded<ChannelData>(new UnboundedChannelOptions { SingleReader = true, SingleWriter = true });
+    // Not single-reader: besides the reader, DiscardUnread and StopReceiving take what is queued, and can do so while a read is in
+    // progress (a session disposed under a read). The single-reader queue is unsafe for that and can hand one item to both.
+    private readonly Channel<ChannelData> _incoming = Channel.CreateUnbounded<ChannelData>(new UnboundedChannelOptions { SingleWriter = true });
+    private readonly Channel<ChannelData> _extended = Channel.CreateUnbounded<ChannelData>(new UnboundedChannelOptions { SingleWriter = true });
     private readonly TaskCompletionSource _confirmed = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly TaskCompletionSource _closed = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly Queue<TaskCompletionSource<bool>> _pendingReplies = new();
