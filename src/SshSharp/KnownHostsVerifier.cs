@@ -95,7 +95,7 @@ public sealed class KnownHostsVerifier : SshHostKeyVerifier
     public static KnownHostsVerifier FromConfig(SshHostConfig config) => FromConfig(config, ask: null, confirmUpdate: null);
 
     internal static KnownHostsVerifier FromConfig(SshHostConfig config, Func<SshHostKeyPrompt, CancellationToken, ValueTask<bool>>? ask,
-        Func<SshHostKeyUpdate, CancellationToken, ValueTask<bool>>? confirmUpdate)
+        Func<SshHostKeyUpdate, CancellationToken, ValueTask<bool>>? confirmUpdate, bool allowKnownHostsCommand = false)
     {
         ArgumentNullException.ThrowIfNull(config);
         var hash = config.Options.TryGetValue("hashknownhosts", out var value) && value.Count > 0
@@ -111,7 +111,31 @@ public sealed class KnownHostsVerifier : SshHostKeyVerifier
             Ask = ask,
             UpdateHostKeys = update,
             ConfirmHostKeyUpdate = setting == "ask" ? confirmUpdate : null,
+            Command = allowKnownHostsCommand && config.KnownHostsCommand is { } command && config.Tokens is { } tokens
+                ? (name, port, reason, key, ct) => KnownHostsCommandRunner.RunAsync(command, tokens, name, port, reason, key, ct)
+                : null,
         };
+    }
+
+    /// <summary>
+    /// <c>KnownHostsCommand</c> (only through <see cref="SshConfigConnectOptions.AllowKnownHostsCommand"/>): host keys from a command,
+    /// read after the files, for the name and port looked up, the reason (<c>HOSTNAME</c> or <c>ORDER</c>) and the presented key.
+    /// </summary>
+    internal Func<string, int, string, SshHostKey?, CancellationToken, Task<KnownHostsFile>>? Command { get; init; }
+
+    /// <summary>The known_hosts sources in order: the user's files, the global files, then the command's output.</summary>
+    private async IAsyncEnumerable<KnownHostsFile> SourcesAsync(string name, int port, string reason, SshHostKey? key,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        foreach (var path in _userFiles.Concat(_globalFiles))
+        {
+            yield return await KnownHostsFile.LoadAsync(path, cancellationToken).ConfigureAwait(false);
+        }
+
+        if (Command is { } command)
+        {
+            yield return await command(name, port, reason, key, cancellationToken).ConfigureAwait(false);
+        }
     }
 
     /// <summary>
@@ -201,9 +225,8 @@ public sealed class KnownHostsVerifier : SshHostKeyVerifier
             return false;
         }
 
-        foreach (var path in _userFiles.Concat(_globalFiles))
+        await foreach (var file in SourcesAsync(name, lookupPort, "ORDER", null, cancellationToken).ConfigureAwait(false))
         {
-            var file = await KnownHostsFile.LoadAsync(path, cancellationToken).ConfigureAwait(false);
             if (file.FindCertificateAuthorities(name, lookupPort).Any())
             {
                 return true;
@@ -223,7 +246,7 @@ public sealed class KnownHostsVerifier : SshHostKeyVerifier
         }
 
         if (context.HostKey.Certificate is { } certificate
-            && await VerifyCertificateAsync(certificate, name, port, cancellationToken).ConfigureAwait(false) is { } certificateVerdict)
+            && await VerifyCertificateAsync(certificate, context.HostKey, name, port, cancellationToken).ConfigureAwait(false) is { } certificateVerdict)
         {
             return certificateVerdict;
         }
@@ -234,9 +257,8 @@ public sealed class KnownHostsVerifier : SshHostKeyVerifier
         var matched = false;
         var changed = false;
         var knownTypes = new List<string>();
-        foreach (var path in _userFiles.Concat(_globalFiles))
+        await foreach (var file in SourcesAsync(name, port, "HOSTNAME", key, cancellationToken).ConfigureAwait(false))
         {
-            var file = await KnownHostsFile.LoadAsync(path, cancellationToken).ConfigureAwait(false);
             switch (file.Check(name, port, key.KeyType, key.PublicKey.Span))
             {
                 case KnownHostsCheckResult.Revoked:
@@ -299,12 +321,12 @@ public sealed class KnownHostsVerifier : SshHostKeyVerifier
     /// Checks a host certificate against the <c>@cert-authority</c> lines for the host. Returns null when no listed authority signed it
     /// (the caller then falls back to the plain key), or the verdict: trusted, or refused with the reason.
     /// </summary>
-    private async ValueTask<SshHostKeyVerdict?> VerifyCertificateAsync(SshCertificate certificate, string name, int port, CancellationToken cancellationToken)
+    private async ValueTask<SshHostKeyVerdict?> VerifyCertificateAsync(SshCertificate certificate, SshHostKey presented, string name, int port,
+        CancellationToken cancellationToken)
     {
         var trusted = false;
-        foreach (var path in _userFiles.Concat(_globalFiles))
+        await foreach (var file in SourcesAsync(name, port, "HOSTNAME", presented, cancellationToken).ConfigureAwait(false))
         {
-            var file = await KnownHostsFile.LoadAsync(path, cancellationToken).ConfigureAwait(false);
             foreach (var entry in file.Find(name, port))
             {
                 var isAuthority = entry.PublicKey.Span.SequenceEqual(certificate.AuthorityKey.Span);

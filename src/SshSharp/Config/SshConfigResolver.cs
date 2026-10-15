@@ -134,7 +134,7 @@ internal sealed class SshConfigResolver(IReadOnlyList<SshConfigDocument> documen
         }
         else if (!_values.ContainsKey(key))
         {
-            _values[key] = key.Equals("proxycommand", StringComparison.OrdinalIgnoreCase)
+            _values[key] = key.Equals("proxycommand", StringComparison.OrdinalIgnoreCase) || key.Equals("knownhostscommand", StringComparison.OrdinalIgnoreCase)
                 ? [directive.RawValue]
                 : [.. directive.Arguments];
         }
@@ -192,7 +192,7 @@ internal sealed class SshConfigResolver(IReadOnlyList<SshConfigDocument> documen
                     _sawFinalOrCanonical = true;
                     value = _canonical;
                     break;
-                case "host" or "originalhost" or "user" or "localuser" or "tagged" or "exec":
+                case "host" or "originalhost" or "user" or "localuser" or "tagged" or "exec" or "localnetwork":
                     if (++i >= criteria.Count)
                     {
                         throw new FormatException($"Match criterion '{name}' needs an argument.");
@@ -200,9 +200,21 @@ internal sealed class SshConfigResolver(IReadOnlyList<SshConfigDocument> documen
 
                     value = result && EvaluateWithArgument(name, criteria[i]);
                     break;
-                case "localnetwork" or "version" or "sessiontype" or "command":
-                    // Criteria this library cannot evaluate (newer OpenSSH, or about the local network or session). The block never
-                    // applies, negated or not: guessing either way could apply settings meant for another situation.
+                case "sessiontype" or "command" when options.SessionType is not null:
+                    if (++i >= criteria.Count)
+                    {
+                        throw new FormatException($"Match criterion '{name}' needs an argument.");
+                    }
+
+                    // The session the caller will start (SshConfigResolveOptions.SessionType and Command), as ssh matches its own.
+                    var subject = name == "sessiontype" ? options.SessionType : options.Command ?? string.Empty;
+
+                    // An empty pattern (Match command "") matches exactly when there is no command, as in OpenSSH.
+                    value = criteria[i].Length == 0 ? subject.Length == 0 : Glob.IsMatchList(criteria[i], subject, ignoreCase: false);
+                    break;
+                case "version" or "sessiontype" or "command":
+                    // Criteria this library cannot evaluate (a newer OpenSSH's version, or a session the caller has not described). The
+                    // block never applies, negated or not: guessing either way could apply settings meant for another situation.
                     if (++i >= criteria.Count)
                     {
                         throw new FormatException($"Match criterion '{name}' needs an argument.");
@@ -229,6 +241,7 @@ internal sealed class SshConfigResolver(IReadOnlyList<SshConfigDocument> documen
         "localuser" => Glob.IsMatchList(argument, options.LocalUser),
         "tagged" => CurrentTag() is { } tag && Glob.IsMatchList(argument, tag),
         "exec" => options.ExecMatcher is { } run && run(Context().ExpandTokens(argument)),
+        "localnetwork" => LocalNetwork.AnyInside((options.LocalAddresses ?? LocalNetwork.InterfaceAddresses)(), argument),
         _ => false,
     };
 

@@ -78,9 +78,12 @@ public class SshConfigMatchTests
     }
 
     [Test]
-    public async Task LocalNetwork_NeverMatches()
+    public async Task LocalNetwork_MatchesTheLocalAddresses()
     {
-        await Assert.That(Resolve("Match localnetwork 10.0.0.0/8\n Port 5\n", "a").Port).IsEqualTo(22);
+        var inside = new SshConfigResolveOptions { LocalUser = "local", HomeDirectory = "/home/local", LocalAddresses = () => [System.Net.IPAddress.Parse("10.9.8.7")] };
+        var outside = new SshConfigResolveOptions { LocalUser = "local", HomeDirectory = "/home/local", LocalAddresses = () => [System.Net.IPAddress.Parse("192.0.2.1")] };
+        await Assert.That(Resolve("Match localnetwork 10.0.0.0/8\n Port 5\n", "a", inside).Port).IsEqualTo(5);
+        await Assert.That(Resolve("Match localnetwork 10.0.0.0/8\n Port 5\n", "a", outside).Port).IsEqualTo(22);
     }
 
     [Test]

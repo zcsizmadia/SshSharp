@@ -71,6 +71,14 @@ public sealed class SshConfigConnectOptions
     /// <summary>Whether a configured <c>ProxyCommand</c> may be run (it is a local shell command, as in OpenSSH). Default true.</summary>
     public bool AllowProxyCommand { get; init; } = true;
 
+    /// <summary>
+    /// Whether a configured <c>KnownHostsCommand</c> may be run (a local shell command whose output is trusted as known_hosts lines).
+    /// Default false: unlike <c>ProxyCommand</c>, which only carries the connection, this one decides which host keys are trusted, so a
+    /// configuration the application does not control must not be able to supply them. Off, a configuration that names one fails the
+    /// connection rather than silently checking fewer keys than it says.
+    /// </summary>
+    public bool AllowKnownHostsCommand { get; init; }
+
     /// <summary>Receives diagnostics for this connection and every jump host.</summary>
     public ILogger? Logger { get; init; }
 

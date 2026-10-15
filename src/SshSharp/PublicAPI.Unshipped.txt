@@ -22,3 +22,15 @@ SshSharp.SshAgentKeyConstraints.SshAgentKeyConstraints() -> void
 static SshSharp.SshAgentKeyConstraints.operator !=(SshSharp.SshAgentKeyConstraints? left, SshSharp.SshAgentKeyConstraints? right) -> bool
 static SshSharp.SshAgentKeyConstraints.operator ==(SshSharp.SshAgentKeyConstraints? left, SshSharp.SshAgentKeyConstraints? right) -> bool
 SshSharp.SshSession.SendBreakAsync(System.TimeSpan? length = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
+SshSharp.Config.SshConfigResolveOptions.Command.get -> string?
+SshSharp.Config.SshConfigResolveOptions.Command.init -> void
+SshSharp.Config.SshConfigResolveOptions.LocalAddresses.get -> System.Func<System.Collections.Generic.IReadOnlyList<System.Net.IPAddress!>!>?
+SshSharp.Config.SshConfigResolveOptions.LocalAddresses.init -> void
+SshSharp.Config.SshConfigResolveOptions.SessionType.get -> string?
+SshSharp.Config.SshConfigResolveOptions.SessionType.init -> void
+SshSharp.Config.SshHostConfig.KnownHostsCommand.get -> string?
+SshSharp.Config.SshHostConfig.KnownHostsCommand.init -> void
+SshSharp.Config.SshHostConfig.RefuseConnection.get -> bool
+SshSharp.Config.SshHostConfig.RefuseConnection.init -> void
+SshSharp.SshConfigConnectOptions.AllowKnownHostsCommand.get -> bool
+SshSharp.SshConfigConnectOptions.AllowKnownHostsCommand.init -> void

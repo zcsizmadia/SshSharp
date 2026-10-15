@@ -38,6 +38,41 @@ public sealed class SshConfigResolveOptions
     /// <summary>A tag given by the caller (<c>ssh -P</c>), matched by <c>Match tagged</c>; overrides <c>Tag</c> in the file.</summary>
     public string? Tag { get; init; }
 
+    /// <summary>
+    /// The kind of session the caller will start, for <c>Match sessiontype</c>: <c>shell</c> (an interactive shell), <c>exec</c> (a
+    /// command), <c>subsystem</c> (for example SFTP) or <c>none</c> (forwarding only, <c>ssh -N</c>). Null (the default) when unknown: a
+    /// <c>Match</c> block with <c>sessiontype</c> or <c>command</c> then never applies, negated or not, since either answer could be
+    /// wrong. ssh itself always knows, because the command line says.
+    /// </summary>
+    /// <exception cref="ArgumentException">Not one of the four.</exception>
+    public string? SessionType
+    {
+        get;
+        init
+        {
+            if (value is not (null or "shell" or "exec" or "subsystem" or "none"))
+            {
+                throw new ArgumentException("The session type is shell, exec, subsystem or none.", nameof(value));
+            }
+
+            field = value;
+        }
+    }
+
+    /// <summary>
+    /// The command (with <see cref="SessionType"/> <c>exec</c>) or subsystem name (with <c>subsystem</c>, for example <c>sftp</c>) the
+    /// caller will start, for <c>Match command</c>; null or empty for none, which <c>Match command ""</c> matches. Used only when
+    /// <see cref="SessionType"/> is set.
+    /// </summary>
+    public string? Command { get; init; }
+
+    /// <summary>
+    /// The local addresses for <c>Match localnetwork</c>. Null (the default) reads the addresses of the network interfaces that are up,
+    /// as ssh does; set it to decide yourself (or in tests). Note that a network address is not a trustworthy criterion in many
+    /// situations, as ssh_config(5) warns.
+    /// </summary>
+    public Func<IReadOnlyList<System.Net.IPAddress>>? LocalAddresses { get; init; }
+
     /// <summary>A copy with the user and port overridden where given (from a destination like <c>user@host:port</c>).</summary>
     internal SshConfigResolveOptions With(string? user, int? port) => new()
     {
@@ -50,5 +85,8 @@ public sealed class SshConfigResolveOptions
         ExecMatcher = ExecMatcher,
         HostCanonicalizer = HostCanonicalizer,
         Tag = Tag,
+        SessionType = SessionType,
+        Command = Command,
+        LocalAddresses = LocalAddresses,
     };
 }

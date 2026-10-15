@@ -52,14 +52,15 @@ What is taken from the configuration: `HostName`, `Port`, `User`, `IdentityFile`
 `UpdateHostKeys`, `HostKeyAlias`, `KexAlgorithms`, `HostKeyAlgorithms`, `Ciphers`, `MACs`, `PubkeyAcceptedAlgorithms`,
 `PreferredAuthentications`, `PubkeyAuthentication`, `PasswordAuthentication`, `KbdInteractiveAuthentication`, `BatchMode`,
 `ProxyJump`, `ProxyCommand`, `ServerAliveInterval`, `ServerAliveCountMax`, `ConnectTimeout`, `AddressFamily`,
-`BindAddress`, `BindInterface`, `ForwardAgent` and `AddKeysToAgent`; with `StartForwardings`, also `LocalForward`, `RemoteForward`,
+`BindAddress`, `BindInterface`, `ForwardAgent`, `AddKeysToAgent`, `RefuseConnection` and `KnownHostsCommand` (with
+`AllowKnownHostsCommand`); with `StartForwardings`, also `LocalForward`, `RemoteForward`,
 `DynamicForward`, `GatewayPorts`, `ExitOnForwardFailure` and `ClearAllForwardings`.
 `Match` (including `Match exec`, which needs an opt-in) and `Include` work as in OpenSSH.
 
 `SshConfigConnectOptions` also takes a `Config` (default: the user's and the system's files), `ResolveOptions` (home
 directory, environment, local user), a `Password`, extra `PrivateKeys`, a `PassphraseProvider` for encrypted identity files,
 `KeyboardInteractive`, a `HostKeyVerifier` that replaces the configured one, `AskHostKey` and `ConfirmHostKeyUpdate`,
-`UseAgent`/`Agent`, `AllowProxyCommand`, a `Proxy` (HTTP or SOCKS), `StartForwardings`, `AuthenticationBanner` and a
+`UseAgent`/`Agent`, `AllowProxyCommand`, `AllowKnownHostsCommand`, a `Proxy` (HTTP or SOCKS), `StartForwardings`, `AuthenticationBanner` and a
 `Logger`.
 
 ### Jump hosts and proxy commands
