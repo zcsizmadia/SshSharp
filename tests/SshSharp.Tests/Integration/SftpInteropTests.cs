@@ -250,7 +250,9 @@ public class SftpInteropTests
                 // MSYS2 and Cygwin servers on Windows make a copy instead of a link unless told otherwise (winsymlinks); a real one is checked.
                 if (!await sftp.ExistsAsync(root + "/link", Timeout()))
                 {
-                    // Not created (above).
+                    // Not created (above), which only a server on this machine's Windows may do. Anywhere else the link must be there: a
+                    // server that took the arguments in the other order would have created it at the target's path instead.
+                    await Assert.That(OperatingSystem.IsWindows()).IsTrue();
                 }
                 else if ((await sftp.GetAttributesAsync(root + "/link", followSymbolicLinks: false, Timeout())).IsSymbolicLink)
                 {
