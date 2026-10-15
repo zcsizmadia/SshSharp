@@ -547,15 +547,14 @@ public sealed partial class SftpClient : IAsyncDisposable
                     tasks[i] = DownloadSegmentAsync(clients[i], i == 0 ? handle : null, start, stop);
                 }
 
-                try
-                {
-                    await Task.WhenAll(tasks).ConfigureAwait(false);
-                }
-                catch when (Volatile.Read(ref firstFailure) is { } first)
+                await ((Task)Task.WhenAll(tasks)).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+                if (Volatile.Read(ref firstFailure) is { } first)
                 {
                     // Report the failure that stopped the others, not what it caused in them (cancellations, or a session closing).
-                    System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(first).Throw();
+                    System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(first);
                 }
+
+                await Task.WhenAll(tasks).ConfigureAwait(false); // any other outcome (the caller's cancellation) as it is
 
                 // The last range may have read past the size seen at the start (the file grew), or stopped short of it (it shrank).
                 var length = (clients.Length - 1) * part + tasks[^1].Result;
