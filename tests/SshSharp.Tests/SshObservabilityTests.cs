@@ -198,6 +198,7 @@ public class SshObservabilityTests
     }
 
     [Test]
+    [NotInParallel] // alone: a test running meanwhile can start its spans under this test's root, and the counts would be off
     public async Task RecordsTraces()
     {
         var stopped = new List<Activity>();
@@ -244,6 +245,7 @@ public class SshObservabilityTests
     }
 
     [Test]
+    [NotInParallel] // alone: a test running meanwhile can start its spans under this test's root, and the counts would be off
     public async Task AFailedConnectIsMarkedAsAnErrorInTheTrace()
     {
         var stopped = new List<Activity>();
@@ -272,6 +274,7 @@ public class SshObservabilityTests
     }
 
     [Test]
+    [NotInParallel] // alone: a test running meanwhile can start its spans under this test's root, and the counts would be off
     public async Task ARefusedTcpConnection_IsInTheTrace()
     {
         var stopped = new List<Activity>();
