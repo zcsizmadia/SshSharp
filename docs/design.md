@@ -99,6 +99,11 @@ docs/                      # guides, design notes, the API reference site (DocFX
   keyboard-interactive; a container matrix of older and newer OpenSSH releases and Dropbear; and OpenSSH for Windows on a
   Windows runner (Git Bash as its shell; signals, the exit status through ConPTY and keep-alives are not tested there).
 - **Platform matrix:** Linux (amd64, arm64), Windows (amd64, arm64) and macOS (arm64), each on net8.0 and net10.0.
+- **Stress runs** (`stress.yml`, started by hand): the unit tests on the platform matrix and the interop tests (OpenSSH and
+  Dropbear containers, OpenSSH for Windows) run in a loop, `tests/stress/loop.sh`, with an instrumented build
+  (`-p:SshSharpInstrument=true`): pooled buffers are tracked and a double return is reported with both stacks, and received
+  data is checksummed on arrival and checked when read. Each job lists the tests that failed and how often, and keeps every
+  failing iteration's output with the server logs. Hung interop tests report the step they were stuck in.
 - **Rules:** no code merges without tests. Timing-dependent tests use the fake clock or wait on a signal, not real sleeps.
   Flaky tests are fixed or tracked, not hidden.
 
@@ -107,6 +112,7 @@ docs/                      # guides, design notes, the API reference site (DocFX
 - `ci.yml`: on every PR and push to main, the unit tests on the platform matrix, interop on Linux, and `dotnet pack`.
 - `fuzz.yml`: nightly coverage-guided fuzzing; a short run on PRs that touch the fuzzing setup.
 - `mutation.yml`: Stryker.NET mutation testing, incremental weekly and full on demand; HTML and JSON reports as artifacts.
+- `stress.yml`: on demand, the tests in a loop with the instrumented build, to catch intermittent failures (see Testing).
 - `publish.yml`: on a `v*` tag on main (`v0.3.0`, `v1.0.0-preview.1`, ...), tests, packs and pushes to nuget.org with
   trusted publishing (GitHub OIDC exchanged for a short-lived key; no API key is stored).
 - `docs.yml`: builds the documentation site (guides and API reference) on every change; release tags publish it to GitHub Pages

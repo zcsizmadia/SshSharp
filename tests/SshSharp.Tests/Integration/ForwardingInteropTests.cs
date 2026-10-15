@@ -76,23 +76,32 @@ public class ForwardingInteropTests
         using var service = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
         service.Bind(new IPEndPoint(IPAddress.Loopback, 0));
         service.Listen();
+        var accepted = false;
         var serviceTask = Task.Run(async () =>
         {
-            using var accepted = await service.AcceptAsync(Timeout());
-            await accepted.SendAsync("hello from here\n"u8.ToArray(), SocketFlags.None, Timeout());
-            accepted.Shutdown(SocketShutdown.Send);
+            using var connection = await service.AcceptAsync(Timeout());
+            accepted = true;
+            await connection.SendAsync("hello from here\n"u8.ToArray(), SocketFlags.None, Timeout());
+            connection.Shutdown(SocketShutdown.Send);
         });
 
-        // A fixed high port rather than 0: not every server reports the port it picked.
-        var port = 41000 + Random.Shared.Next(2000);
-        await using var forwarder = await client.ForwardRemotePortAsync("localhost", port, "127.0.0.1", ((IPEndPoint)service.LocalEndPoint!).Port, Timeout());
+        await Stages.RunAsync(async stages =>
+        {
+            // A fixed high port rather than 0: not every server reports the port it picked.
+            var port = 41000 + Random.Shared.Next(2000);
+            stages.Step($"asking the server to listen on localhost:{port}");
+            await using var forwarder = await client.ForwardRemotePortAsync("localhost", port, "127.0.0.1", ((IPEndPoint)service.LocalEndPoint!).Port, Timeout());
 
-        // Reach the forwarded port from the server's side through a tunnel: here -> server -> its forwarded port -> back here.
-        // "localhost", not 127.0.0.1: when another process holds that port on 127.0.0.1, sshd may have bound only ::1 for "localhost".
-        await using var tunnel = await client.OpenTcpTunnelAsync("localhost", forwarder.Port, Timeout());
-        var line = await ReadLineAsync(buffer => tunnel.ReadAsync(buffer, Timeout()));
-        await Assert.That(line).IsEqualTo("hello from here");
-        await serviceTask;
+            // Reach the forwarded port from the server's side through a tunnel: here -> server -> its forwarded port -> back here.
+            // "localhost", not 127.0.0.1: when another process holds that port on 127.0.0.1, sshd may have bound only ::1 for "localhost".
+            stages.Step($"opening a tunnel to the server's localhost:{forwarder.Port}");
+            await using var tunnel = await client.OpenTcpTunnelAsync("localhost", forwarder.Port, Timeout());
+            stages.Step("reading the line the local service sends back through the forwarding");
+            var line = await ReadLineAsync(buffer => tunnel.ReadAsync(buffer, Timeout()));
+            await Assert.That(line).IsEqualTo("hello from here");
+            stages.Step("waiting for the local service");
+            await serviceTask;
+        }, () => $"The local service {(accepted ? "accepted a forwarded connection" : "saw no forwarded connection")}; connected {client.IsConnected}.");
     }
 
     [Test]
@@ -110,32 +119,43 @@ public class ForwardingInteropTests
         service.Bind(new IPEndPoint(IPAddress.Loopback, 0));
         service.Listen();
         var servicePort = ((IPEndPoint)service.LocalEndPoint!).Port;
+        var accepted = false;
         var serviceTask = Task.Run(async () =>
         {
-            using var accepted = await service.AcceptAsync(Timeout());
-            await accepted.SendAsync("hello via socks\n"u8.ToArray(), SocketFlags.None, Timeout());
-            accepted.Shutdown(SocketShutdown.Send);
+            using var connection = await service.AcceptAsync(Timeout());
+            accepted = true;
+            await connection.SendAsync("hello via socks\n"u8.ToArray(), SocketFlags.None, Timeout());
+            connection.Shutdown(SocketShutdown.Send);
         });
 
-        var port = 43000 + Random.Shared.Next(2000);
-        await using var forwarder = await client.ForwardRemoteDynamicPortAsync("localhost", port, cancellationToken: Timeout());
+        await Stages.RunAsync(async stages =>
+        {
+            var port = 43000 + Random.Shared.Next(2000);
+            stages.Step($"asking the server to listen on localhost:{port} (dynamic)");
+            await using var forwarder = await client.ForwardRemoteDynamicPortAsync("localhost", port, cancellationToken: Timeout());
 
-        // Play the server-side application through a tunnel: here -> server -> its forwarded port -> back here, as SOCKS.
-        // "localhost", not 127.0.0.1: when another process holds that port on 127.0.0.1, sshd may have bound only ::1 for "localhost".
-        await using var tunnel = await client.OpenTcpTunnelAsync("localhost", forwarder.Port, Timeout());
-        await tunnel.WriteAsync(new byte[] { 5, 1, 0 }, Timeout());
-        var choice = new byte[2];
-        await tunnel.ReadExactlyAsync(choice, Timeout());
-        await Assert.That(choice).IsEquivalentTo(new byte[] { 5, 0 });
-        var request = new byte[] { 5, 1, 0, 1, 127, 0, 0, 1, (byte)(servicePort >> 8), (byte)servicePort };
-        await tunnel.WriteAsync(request, Timeout());
-        var reply = new byte[10];
-        await tunnel.ReadExactlyAsync(reply, Timeout());
-        await Assert.That(reply[1]).IsEqualTo((byte)0);
+            // Play the server-side application through a tunnel: here -> server -> its forwarded port -> back here, as SOCKS.
+            // "localhost", not 127.0.0.1: when another process holds that port on 127.0.0.1, sshd may have bound only ::1 for "localhost".
+            stages.Step($"opening a tunnel to the server's localhost:{forwarder.Port}");
+            await using var tunnel = await client.OpenTcpTunnelAsync("localhost", forwarder.Port, Timeout());
+            stages.Step("SOCKS greeting");
+            await tunnel.WriteAsync(new byte[] { 5, 1, 0 }, Timeout());
+            var choice = new byte[2];
+            await tunnel.ReadExactlyAsync(choice, Timeout());
+            await Assert.That(choice).IsEquivalentTo(new byte[] { 5, 0 });
+            stages.Step("SOCKS CONNECT");
+            var request = new byte[] { 5, 1, 0, 1, 127, 0, 0, 1, (byte)(servicePort >> 8), (byte)servicePort };
+            await tunnel.WriteAsync(request, Timeout());
+            var reply = new byte[10];
+            await tunnel.ReadExactlyAsync(reply, Timeout());
+            await Assert.That(reply[1]).IsEqualTo((byte)0);
 
-        var line = await ReadLineAsync(buffer => tunnel.ReadAsync(buffer, Timeout()));
-        await Assert.That(line).IsEqualTo("hello via socks");
-        await serviceTask;
+            stages.Step("reading the line the local service sends back");
+            var line = await ReadLineAsync(buffer => tunnel.ReadAsync(buffer, Timeout()));
+            await Assert.That(line).IsEqualTo("hello via socks");
+            stages.Step("waiting for the local service");
+            await serviceTask;
+        }, () => $"The local service {(accepted ? "accepted a connection" : "saw no connection")}; connected {client.IsConnected}.");
     }
 
     [Test]
@@ -255,10 +275,22 @@ public class ForwardingInteropTests
             return;
         }
 
-        await using var forwarder = await client.ForwardLocalPortAsync(new IPEndPoint(IPAddress.Loopback, 0), "127.0.0.1", ServerSidePort, Timeout());
-        using var socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-        await socket.ConnectAsync(forwarder.LocalEndPoint, Timeout());
-        var identification = await ReadLineAsync(buffer => socket.ReceiveAsync(buffer, SocketFlags.None, Timeout()));
-        await Assert.That(identification).StartsWith("SSH-2.0-");
+        var received = 0;
+        await Stages.RunAsync(async stages =>
+        {
+            stages.Step("listening locally");
+            await using var forwarder = await client.ForwardLocalPortAsync(new IPEndPoint(IPAddress.Loopback, 0), "127.0.0.1", ServerSidePort, Timeout());
+            using var socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+            stages.Step($"connecting to the forwarding at {forwarder.LocalEndPoint}");
+            await socket.ConnectAsync(forwarder.LocalEndPoint, Timeout());
+            stages.Step($"reading the identification line of the server's sshd (127.0.0.1:{ServerSidePort}, as the server sees it)");
+            var identification = await ReadLineAsync(async buffer =>
+            {
+                var read = await socket.ReceiveAsync(buffer, SocketFlags.None, Timeout());
+                Interlocked.Add(ref received, read);
+                return read;
+            });
+            await Assert.That(identification).StartsWith("SSH-2.0-");
+        }, () => $"{Volatile.Read(ref received)} bytes came through; connected {client.IsConnected}.");
     }
 }

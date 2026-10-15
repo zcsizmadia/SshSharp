@@ -7,6 +7,10 @@
     <IsPackable>false</IsPackable>
     <TestingPlatformDotnetTestSupport>true</TestingPlatformDotnetTestSupport>
   </PropertyGroup>
+  <!-- As in the library: the stress workflow's instrumented build (src/SshSharp/Protocol/Instrumentation.cs). -->
+  <PropertyGroup Condition="'$(SshSharpInstrument)' == 'true'">
+    <DefineConstants>$(DefineConstants);SSHSHARP_INSTRUMENT</DefineConstants>
+  </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="TUnit" />
     <PackageReference Include="Microsoft.Testing.Extensions.CodeCoverage" />

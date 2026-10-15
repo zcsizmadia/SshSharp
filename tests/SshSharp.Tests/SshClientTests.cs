@@ -253,6 +253,12 @@ public class SshClientTests
         var ex = await Assert.ThrowsAsync<SshException>(async () => await running);
         await Assert.That(ex!.Reason).IsEqualTo(SshFailureReason.ConnectionClosed);
 
+        // By the time the command has failed, the client says so everywhere, ConnectionClosed included (it was signalled after the
+        // channels failed, so a caller resuming on another thread could still find it uncancelled).
+        await Assert.That(client.IsConnected).IsFalse();
+        await Assert.That(client.ConnectionClosed.IsCancellationRequested).IsTrue();
+        await Assert.That(client.ConnectionError).IsNotNull();
+
         // Later calls fail fast with the same reason instead of hanging.
         var later = await Assert.ThrowsAsync<SshException>(async () => await client.RunCommandAsync("again", Timeout()));
         await Assert.That(later!.Reason).IsEqualTo(SshFailureReason.ConnectionClosed);

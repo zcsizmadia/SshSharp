@@ -52,6 +52,7 @@ internal static class SocketChannelRelay
     private static async Task SocketToChannelAsync(Socket socket, SshChannel channel, CancellationToken cancellationToken)
     {
         var buffer = ArrayPool<byte>.Shared.Rent(BufferSize);
+        Instrumentation.Rented(buffer, nameof(SocketToChannelAsync));
         try
         {
             while (await socket.ReceiveAsync(buffer, SocketFlags.None, cancellationToken).ConfigureAwait(false) is var read and > 0)
@@ -63,6 +64,7 @@ internal static class SocketChannelRelay
         }
         finally
         {
+            Instrumentation.Returning(buffer, nameof(SocketToChannelAsync));
             ArrayPool<byte>.Shared.Return(buffer);
         }
     }

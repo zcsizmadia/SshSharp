@@ -550,6 +550,18 @@ internal sealed class SshConnection : IAsyncDisposable
     {
         Interlocked.CompareExchange(ref _failure, exception, null);
 
+        // Closed is signalled before any waiting operation fails: a caller resuming from a failed command or read can rely on
+        // ConnectionClosed being cancelled already, as IsConnected is already false.
+        try
+        {
+            _closed.Cancel();
+        }
+        catch (AggregateException ex)
+        {
+            // A callback registered by the application threw; the connection is closed regardless.
+            SshLog.ConnectionFailed(_logger, ex);
+        }
+
         // Senders waiting for a key re-exchange that can no longer finish are released, and later sends refused.
         _transport.Fail(exception);
         foreach (var channel in _channels.Values)
@@ -571,16 +583,6 @@ internal sealed class SshConnection : IAsyncDisposable
         foreach (var ping in _pings.Values)
         {
             ping.TrySetException(exception);
-        }
-
-        try
-        {
-            _closed.Cancel();
-        }
-        catch (AggregateException ex)
-        {
-            // A callback registered by the application threw; the connection is closed regardless.
-            SshLog.ConnectionFailed(_logger, ex);
         }
     }
 

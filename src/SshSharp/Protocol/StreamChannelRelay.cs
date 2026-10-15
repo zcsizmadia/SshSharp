@@ -27,6 +27,7 @@ internal static class StreamChannelRelay
         var toChannel = PumpAsync(async ct =>
         {
             var buffer = ArrayPool<byte>.Shared.Rent(BufferSize);
+            Instrumentation.Rented(buffer, nameof(StreamChannelRelay));
             try
             {
                 while (await stream.ReadAsync(buffer, ct).ConfigureAwait(false) is var read and > 0)
@@ -36,6 +37,7 @@ internal static class StreamChannelRelay
             }
             finally
             {
+                Instrumentation.Returning(buffer, nameof(StreamChannelRelay));
                 ArrayPool<byte>.Shared.Return(buffer);
             }
         }, teardown);
