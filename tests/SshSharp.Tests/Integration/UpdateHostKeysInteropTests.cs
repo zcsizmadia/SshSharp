@@ -32,12 +32,6 @@ public sealed class UpdateHostKeysInteropTests : IDisposable
             return;
         }
 
-        if (RealServer.IsWindows)
-        {
-            Skip.Test("No host key update is observed against OpenSSH for Windows yet (#84).");
-            return;
-        }
-
         using var key = keyFile is not null && File.Exists(keyFile) ? await SshPrivateKey.LoadFileAsync(keyFile) : null;
         var knownHosts = Path.Combine(_dir, "known_hosts");
         var options = new SshClientOptions
