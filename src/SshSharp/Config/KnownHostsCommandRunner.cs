@@ -19,21 +19,25 @@ internal static class KnownHostsCommandRunner
 
     /// <summary>
     /// Runs the command for <paramref name="name"/>:<paramref name="port"/> (<c>%H</c>), for <paramref name="reason"/> (<c>%I</c>:
-    /// <c>HOSTNAME</c> or <c>ORDER</c>), with the presented <paramref name="key"/> (<c>%K %f %t</c>; <c>NONE</c> before one is known).
+    /// <c>HOSTNAME</c> or <c>ORDER</c>), with the presented <paramref name="key"/> (<c>%K %f %t</c>; <c>NONE</c> before one is known). With
+    /// <paramref name="asCertificate"/>, <c>%K</c> and <c>%t</c> are the key's certificate and its type, as ssh passes while it checks the
+    /// certificate; <c>%f</c> is the plain key's fingerprint either way, as ssh's is.
     /// </summary>
     /// <exception cref="SshException">The command could not run, failed, ran too long or wrote too much (<see cref="SshFailureReason.ConnectFailed"/>).</exception>
     public static async Task<KnownHostsFile> RunAsync(string command, SshTokenContext tokens, string name, int port, string reason, SshHostKey? key,
-        CancellationToken cancellationToken)
+        bool asCertificate, CancellationToken cancellationToken)
     {
+        var certificate = asCertificate ? key?.Certificate : null;
         var context = tokens with
         {
             Extra = new Dictionary<char, string>
             {
                 ['H'] = port == 22 ? name : $"[{name}]:{port}",
                 ['I'] = reason,
-                ['K'] = key is null ? "NONE" : Convert.ToBase64String(key.PublicKey.Span),
+                ['K'] = certificate is not null ? Convert.ToBase64String(certificate.Blob.Span)
+                    : key is null ? "NONE" : Convert.ToBase64String(key.PublicKey.Span),
                 ['f'] = key?.Fingerprint ?? "NONE",
-                ['t'] = key?.KeyType ?? "NONE",
+                ['t'] = certificate?.CertificateType ?? key?.KeyType ?? "NONE",
             },
         };
 

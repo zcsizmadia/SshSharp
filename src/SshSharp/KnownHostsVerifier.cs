@@ -121,19 +121,21 @@ public sealed class KnownHostsVerifier : SshHostKeyVerifier
             UpdateHostKeys = update,
             ConfirmHostKeyUpdate = setting == "ask" ? confirmUpdate : null,
             Command = allowKnownHostsCommand && config.KnownHostsCommand is { } command && config.Tokens is { } tokens
-                ? (name, port, reason, key, ct) => KnownHostsCommandRunner.RunAsync(command, tokens, name, port, reason, key, ct)
+                ? (name, port, reason, key, asCertificate, ct) => KnownHostsCommandRunner.RunAsync(command, tokens, name, port, reason, key, asCertificate, ct)
                 : null,
         };
     }
 
     /// <summary>
     /// <c>KnownHostsCommand</c> (only through <see cref="SshConfigConnectOptions.AllowKnownHostsCommand"/>): host keys from a command,
-    /// read after the files, for the name and port looked up, the reason (<c>HOSTNAME</c> or <c>ORDER</c>) and the presented key.
+    /// read after the files, for the name and port looked up, the reason (<c>HOSTNAME</c> or <c>ORDER</c>) and the presented key: as its
+    /// certificate when the lookup is for the certificate (<c>asCertificate</c>), as ssh passes the certificate while checking it and the
+    /// plain key when it falls back to that.
     /// </summary>
-    internal Func<string, int, string, SshHostKey?, CancellationToken, Task<KnownHostsFile>>? Command { get; init; }
+    internal Func<string, int, string, SshHostKey?, bool, CancellationToken, Task<KnownHostsFile>>? Command { get; init; }
 
     /// <summary>The known_hosts sources in order: the user's files, the global files, then the command's output.</summary>
-    private async IAsyncEnumerable<KnownHostsFile> SourcesAsync(string name, int port, string reason, SshHostKey? key,
+    private async IAsyncEnumerable<KnownHostsFile> SourcesAsync(string name, int port, string reason, SshHostKey? key, bool asCertificate,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
     {
         foreach (var path in _userFiles.Concat(_globalFiles))
@@ -143,7 +145,7 @@ public sealed class KnownHostsVerifier : SshHostKeyVerifier
 
         if (Command is { } command)
         {
-            yield return await command(name, port, reason, key, cancellationToken).ConfigureAwait(false);
+            yield return await command(name, port, reason, key, asCertificate, cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -249,7 +251,7 @@ public sealed class KnownHostsVerifier : SshHostKeyVerifier
             return false;
         }
 
-        await foreach (var file in SourcesAsync(name, lookupPort, "ORDER", null, cancellationToken).ConfigureAwait(false))
+        await foreach (var file in SourcesAsync(name, lookupPort, "ORDER", null, asCertificate: false, cancellationToken).ConfigureAwait(false))
         {
             if (file.FindCertificateAuthorities(name, lookupPort).Any())
             {
@@ -287,7 +289,7 @@ public sealed class KnownHostsVerifier : SshHostKeyVerifier
         var matched = false;
         var changed = false;
         var knownTypes = new List<string>();
-        await foreach (var file in SourcesAsync(name, port, "HOSTNAME", key, cancellationToken).ConfigureAwait(false))
+        await foreach (var file in SourcesAsync(name, port, "HOSTNAME", key, asCertificate: false, cancellationToken).ConfigureAwait(false))
         {
             switch (file.Check(name, port, key.KeyType, key.PublicKey.Span))
             {
@@ -355,7 +357,7 @@ public sealed class KnownHostsVerifier : SshHostKeyVerifier
         CancellationToken cancellationToken)
     {
         var trusted = false;
-        await foreach (var file in SourcesAsync(name, port, "HOSTNAME", presented, cancellationToken).ConfigureAwait(false))
+        await foreach (var file in SourcesAsync(name, port, "HOSTNAME", presented, asCertificate: true, cancellationToken).ConfigureAwait(false))
         {
             foreach (var entry in file.Find(name, port))
             {
