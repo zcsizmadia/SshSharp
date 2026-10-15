@@ -288,7 +288,14 @@ public class SessionInteropTests
         var outbox = typeof(SshSharp.Protocol.SshConnection).GetField("_outbox", Private)!.GetValue(connection)!;
         var reader = outbox.GetType().GetProperty("Reader")!.GetValue(outbox)!;
         var queued = reader.GetType().GetProperty("CanCount")?.GetValue(reader) is true ? reader.GetType().GetProperty("Count")!.GetValue(reader) : "?";
-        return $"Last packet received {connection.Time.GetElapsedTime(lastReceived).TotalSeconds:0.0} s ago; rekeying {rekeying}; {queued} messages waiting in the outbox.";
+        object? Field(object target, string name) => target.GetType().GetField(name, Private)?.GetValue(target);
+        var sendLock = (SemaphoreSlim)Field(transport, "_sendLock")!;
+        var receiveLoop = Field(connection, "_loop") as Task;
+        var outboxLoop = Field(connection, "_outboxLoop") as Task;
+        var pings = Field(connection, "_pings") as System.Collections.ICollection;
+        return $"Last packet received {connection.Time.GetElapsedTime(lastReceived).TotalSeconds:0.0} s ago; rekeying {rekeying}; {queued} messages waiting "
+            + $"in the outbox; transport send lock {(sendLock.CurrentCount == 0 ? "HELD" : "free")}; receive loop {receiveLoop?.Status}; outbox loop "
+            + $"{outboxLoop?.Status}; {pings?.Count} pings awaiting a pong; packets received since the key exchange {Field(transport, "_packetsReceivedSinceKex")}.";
     }
 
     [Test]
