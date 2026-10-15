@@ -185,13 +185,6 @@ public sealed class SftpFileSystem : IFileSystem
     internal Task<T> RunAsync<T>(string? path, bool directory, Func<CancellationToken, Task<T>> operation, CancellationToken cancellationToken) =>
         RunTransferAsync(path, directory, (ct, _) => operation(ct), cancellationToken);
 
-    internal Task RunAsync(string? path, bool directory, Func<CancellationToken, Task> operation, CancellationToken cancellationToken) =>
-        RunAsync<bool>(path, directory, async ct =>
-        {
-            await operation(ct).ConfigureAwait(false);
-            return true;
-        }, cancellationToken);
-
     /// <summary>The asynchronous <see cref="RunTransfer{T}"/>: the timeout limits time without progress.</summary>
     internal async Task<T> RunTransferAsync<T>(string? path, bool directory, Func<CancellationToken, IProgress<long>, Task<T>> operation, CancellationToken cancellationToken)
     {

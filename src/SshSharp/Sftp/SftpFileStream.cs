@@ -25,7 +25,11 @@ internal sealed class SftpFileStream(SftpClient client, byte[] handle, string pa
 
     public override bool CanWrite => canWrite && _disposed == 0;
 
-    public override bool CanSeek => _disposed == 0;
+    /// <summary>
+    /// Whether <see cref="Length"/> is known: callers that see a seekable stream read its length (<see cref="Stream.CopyToAsync(Stream)"/>
+    /// does), so a file whose size the server did not report is not one. <see cref="Seek"/> from the start or the current position still works.
+    /// </summary>
+    public override bool CanSeek => _disposed == 0 && _length is not null;
 
     /// <summary>The file's size as this stream knows it, without a round trip (see the class remarks).</summary>
     /// <exception cref="NotSupportedException">The server did not report the file's size when it was opened.</exception>
