@@ -580,6 +580,130 @@ public sealed class SftpErrorPathTests : IDisposable
         await Assert.That(rig.Files.Exists(Home + "/up/loop")).IsFalse();
     }
 
+    [Test]
+    public async Task FileSystemSpace_ClampsWhatALongCannotHold_AndCountsInBlocksWithoutAFragmentSize()
+    {
+        // statvfs counts in fragments, or in blocks when the fragment size is 0; a count times its unit past long.MaxValue is clamped,
+        // not wrapped negative.
+        await using var rig = await Rig.StartAsync(f => f.RawFrame = request =>
+            request[0] == Extended && PathOf(request) == "statvfs@openssh.com"
+                ? Reply(request, 201, w =>
+                {
+                    foreach (var value in new ulong[] { 512, 0, ulong.MaxValue / 2, 10, 0, ulong.MaxValue, 7, 7, 1, 0, ulong.MaxValue })
+                    {
+                        w.WriteUInt64(value);
+                    }
+                })
+                : null);
+
+        var info = await rig.Sftp.GetFileSystemInfoAsync(".", Timeout());
+
+        await Assert.That(info.TotalBytes).IsEqualTo(long.MaxValue);
+        await Assert.That(info.FreeBytes).IsEqualTo(5120L);
+        await Assert.That(info.AvailableBytes).IsEqualTo(0L);
+        await Assert.That(info.TotalFiles).IsEqualTo(long.MaxValue);
+        await Assert.That(info.FreeFiles).IsEqualTo(7L);
+        await Assert.That(info.MaxNameLength).IsEqualTo(int.MaxValue);
+        await Assert.That(info.IsReadOnly).IsFalse();
+    }
+
+    [Test]
+    public async Task ARealPathAnsweredWithTwoNames_IsAProtocolError()
+    {
+        await using var rig = await Rig.StartAsync(f => f.RawFrame = request =>
+            request[0] == RealPath ? Reply(request, 104, w =>
+            {
+                w.WriteUInt32(2);
+                for (var i = 0; i < 2; i++)
+                {
+                    w.WriteString("/x");
+                    w.WriteString("/x");
+                    w.WriteUInt32(0);
+                }
+            }) : null);
+
+        var error = await Assert.ThrowsAsync<SshException>(async () => await rig.Sftp.GetFullPathAsync(".", Timeout()));
+
+        await Assert.That(error!.Reason).IsEqualTo(SshFailureReason.ProtocolError);
+        await Assert.That(error.Message).Contains("2 names");
+    }
+
+    [Test]
+    public async Task PathsWithATrailingSeparator_JoinTheirNamesWithOne()
+    {
+        await using var rig = await Rig.StartAsync(f =>
+        {
+            f.AddDirectory(Home + "/dir");
+            f.AddFile(Home + "/dir/a", [1]);
+        });
+        var local = Directory.CreateDirectory(Path.Combine(_dir, "tree"));
+        await File.WriteAllBytesAsync(Path.Combine(local.FullName, "b"), [2]);
+
+        var listed = new List<string>();
+        await foreach (var entry in rig.Sftp.ListDirectoryAsync("dir/", Timeout()))
+        {
+            listed.Add(entry.FullPath);
+        }
+
+        await rig.Sftp.UploadDirectoryAsync(local.FullName, "up/", cancellationToken: Timeout());
+
+        await Assert.That(listed).Contains("dir/a");
+        await Assert.That(rig.Files.FileData(Home + "/up/b")).IsEquivalentTo(new byte[] { 2 });
+    }
+
+    [Test]
+    public async Task ASegmentedDownloadWithoutOverwrite_LeavesAnExistingLocalFileAlone()
+    {
+        // CreateNew fails on the existing file: the download stops, and the file it did not create is not the one it removes.
+        await using var rig = await Rig.StartAsync(f => f.AddFile(Home + "/big.bin", new byte[4 * 1024 * 1024]));
+        var local = Path.Combine(_dir, "big.bin");
+        await File.WriteAllBytesAsync(local, [7, 7, 7]);
+
+        await Assert.That(async () => await rig.Sftp.DownloadFileAsync("big.bin", local, new SftpTransferOptions { Segments = 2, Overwrite = false }, Timeout()))
+            .Throws<IOException>();
+
+        await Assert.That(await File.ReadAllBytesAsync(local)).IsEquivalentTo(new byte[] { 7, 7, 7 });
+        await WaitUntilAsync(() => rig.Files.OpenHandles == 0);
+    }
+
+    [Test]
+    public async Task SettingOnlyTheAccessTime_SendsItForBoth()
+    {
+        // SFTP v3 sets the two times together: with only one given, the other gets the same value rather than garbage.
+        var when = new DateTimeOffset(2022, 3, 4, 5, 6, 7, TimeSpan.Zero);
+        var attributes = new SftpFileAttributes { LastAccessTime = when };
+        var buffer = new ArrayBufferWriter<byte>();
+        attributes.Write(new SshWriter(buffer));
+        var reader = new SshReader(buffer.WrittenSpan);
+
+        var read = SftpFileAttributes.Read(ref reader);
+
+        await Assert.That(read.LastAccessTime).IsEqualTo(when);
+        await Assert.That(read.LastWriteTime).IsEqualTo(when);
+    }
+
+    [Test]
+    public async Task ALocalRootWithATrailingSeparator_StillContainsItsFiles()
+    {
+        var root = _dir + Path.DirectorySeparatorChar;
+
+        await Assert.That(SftpClient.LocalPathFor(_dir, "a.txt", root)).IsEqualTo(Path.Combine(_dir, "a.txt"));
+        await Assert.That(SftpClient.LocalPathFor(_dir, "..", root)).IsNull();
+    }
+
+    [Test]
+    public async Task ADisposedStream_CannotSeek()
+    {
+        await using var rig = await Rig.StartAsync();
+        var stream = await rig.Sftp.OpenReadAsync("f", Timeout());
+        await Assert.That(stream.CanSeek).IsTrue();
+
+        await stream.DisposeAsync();
+
+        await Assert.That(stream.CanSeek).IsFalse();
+        await Assert.That(stream.CanRead).IsFalse();
+    }
+
     /// <summary>The first string of a request's body: the path, or an extended request's name.</summary>
     private static string PathOf(byte[] request)
     {

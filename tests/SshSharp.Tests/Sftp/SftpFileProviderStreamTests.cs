@@ -111,6 +111,21 @@ public class SftpFileProviderStreamTests
         await Assert.That(stream.ReadByte()).IsEqualTo(9);
     }
 
+    [Test]
+    public async Task AProviderAtTheServersRoot_MapsPathsFromThere()
+    {
+        await using var rig = await Rig.StartAsync();
+        var provider = new SftpFileProvider(rig.Sftp, "/");
+
+        await Assert.That(provider.Root).IsEqualTo("/");
+        await Assert.That(provider.GetFileInfo("home/tester/site/f.bin").Length).IsEqualTo(10L);
+        await Assert.That(provider.GetFileInfo(null!).Exists).IsFalse();
+        var top = provider.GetDirectoryContents("");
+        await Assert.That(top.Exists).IsTrue();
+        await Assert.That(top.Select(e => e.Name)).Contains("home");
+        await Assert.That(new SftpFileProvider(rig.Sftp, "site/").Root).IsEqualTo("site");
+    }
+
     private static string PathOf(byte[] request)
     {
         var reader = new SshReader(request.AsSpan(5));

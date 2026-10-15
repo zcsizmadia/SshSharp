@@ -673,6 +673,63 @@ public sealed class SftpFileSystemSurfaceTests : IDisposable
         await Assert.That(() => rig.Fs.File.ReadAllBytes("bad\0path")).Throws<ArgumentException>();
     }
 
+    [Test]
+    public async Task MissingDeniedAndRootPaths_ReadAsSystemIOReadsThem()
+    {
+        await using var rig = await Rig.StartAsync(f =>
+        {
+            f.AddDirectory(Home + "/locked");
+            f.AddFile(Home + "/locked/x", [1]);
+            f.AddFile(Home + "/target", [1]);
+            f.AddLink(Home + "/absolute", Home + "/target");
+            f.DenyStat = path => path.StartsWith(Home + "/locked", StringComparison.Ordinal);
+        });
+        var fs = rig.Fs;
+        var never = DateTime.FromFileTimeUtc(0);
+
+        // A missing path, as FileInfo and File report one: times of 1601, a mode of -1, no link; changing it is FileNotFound.
+        var missing = fs.FileInfo.New("nope");
+        await Assert.That(missing.LastWriteTimeUtc).IsEqualTo(never);
+        await Assert.That(missing.LastAccessTimeUtc).IsEqualTo(never);
+        await Assert.That(missing.UnixFileMode).IsEqualTo((UnixFileMode)(-1));
+        await Assert.That(missing.LinkTarget).IsNull();
+        await Assert.That(fs.File.GetLastAccessTimeUtc("nope")).IsEqualTo(never);
+        await Assert.That(() => fs.File.SetAttributes("nope", FileAttributes.ReadOnly)).Throws<FileNotFoundException>();
+        await Assert.That(() => fs.File.SetLastWriteTimeUtc("nope", DateTime.UtcNow)).Throws<FileNotFoundException>();
+
+        // A path the server will not describe: Exists is false, the other members report the denial.
+        var denied = fs.FileInfo.New("locked/x");
+        await Assert.That(denied.Exists).IsFalse();
+        await Assert.That(() => denied.Attributes).Throws<UnauthorizedAccessException>();
+        await Assert.That(() => denied.LinkTarget).Throws<UnauthorizedAccessException>();
+
+        // The root.
+        await Assert.That(fs.DirectoryInfo.New("/").Name).IsEqualTo("/");
+        await Assert.That(fs.FileInfo.New("/").Directory).IsNull();
+        await Assert.That(fs.DirectoryInfo.New("/").CreateSubdirectory("top").FullName).IsEqualTo("/top");
+        await Assert.That(fs.Path.GetRelativePath("/a", "/a")).IsEqualTo(".");
+        await Assert.That(fs.Path.IsPathRooted(string.Empty)).IsFalse();
+
+        // A link stored with an absolute target resolves to it as it is.
+        await Assert.That(fs.File.ResolveLinkTarget("absolute", returnFinalTarget: false)!.FullName).IsEqualTo(Home + "/target");
+    }
+
+    [Test]
+    public async Task SearchPatterns_EmptyMatchesAll_AndStarDotStarNeedsADotUnlessWin32()
+    {
+        await using var rig = await Rig.StartAsync(f =>
+        {
+            f.AddDirectory(Home + "/d");
+            f.AddFile(Home + "/d/plain", [1]);
+            f.AddFile(Home + "/d/dotted.txt", [1]);
+        });
+        var directory = rig.Fs.Directory;
+
+        await Assert.That(directory.GetFiles("d", string.Empty).Order(StringComparer.Ordinal)).IsEquivalentTo(["d/dotted.txt", "d/plain"]);
+        await Assert.That(directory.GetFiles("d", "*.*").Order(StringComparer.Ordinal)).IsEquivalentTo(["d/dotted.txt", "d/plain"]); // Win32 matching, as Directory.GetFiles
+        await Assert.That(directory.GetFiles("d", "*.*", new EnumerationOptions { MatchType = MatchType.Simple })).IsEquivalentTo(["d/dotted.txt"]);
+    }
+
     private static string PathOf(byte[] request)
     {
         var reader = new SshSharp.Protocol.SshReader(request.AsSpan(5));
