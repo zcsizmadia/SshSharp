@@ -140,6 +140,67 @@ public sealed class BindAddressTests : IDisposable
     }
 
     [Test]
+    [Arguments(SshAddressFamily.Inet)]
+    [Arguments(SshAddressFamily.Inet6)]
+    public async Task AnAddressFamily_ConnectsOverThatFamily(SshAddressFamily family)
+    {
+        var ipv6 = family == SshAddressFamily.Inet6;
+        if (ipv6 && !Socket.OSSupportsIPv6)
+        {
+            Skip.Test("This machine has no IPv6.");
+            return;
+        }
+
+        using var listener = new Socket(ipv6 ? AddressFamily.InterNetworkV6 : AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+        listener.Bind(new IPEndPoint(ipv6 ? IPAddress.IPv6Loopback : IPAddress.Loopback, 0));
+        listener.Listen();
+        var accepted = listener.AcceptAsync(Timeout()).AsTask();
+
+        // Without a bind: the socket itself is of the family (AddressFamily inet or inet6 in ssh_config).
+        await using var stream = await TcpConnector.ConnectAsync(ipv6 ? "::1" : "127.0.0.1", ((IPEndPoint)listener.LocalEndPoint!).Port, null, family, "the server", Timeout());
+        using var server = await accepted.WaitAsync(Timeout());
+        await Assert.That(server.RemoteEndPoint!.AddressFamily).IsEqualTo(ipv6 ? AddressFamily.InterNetworkV6 : AddressFamily.InterNetwork);
+    }
+
+    [Test]
+    public async Task AHostThatDoesNotResolve_WithABind_IsAConnectFailure()
+    {
+        // .invalid never resolves (RFC 6761). With a bind, the connector resolves the name itself to match families.
+        var ex = await Assert.That(async () => await TcpConnector.ConnectAsync("sshsharp-test.invalid", 22, [new IPEndPoint(IPAddress.Loopback, 0)], SshAddressFamily.Any, "the server", Timeout()))
+            .Throws<SshException>();
+
+        await Assert.That(ex!.Reason).IsEqualTo(SshFailureReason.ConnectFailed);
+        await Assert.That(ex.Message).Contains("resolve the address of the server");
+    }
+
+    [Test]
+    public async Task AnAddressFamily_ThatExcludesEveryDestination_WithABind_SaysSo()
+    {
+        var ex = await Assert.That(async () => await TcpConnector.ConnectAsync("127.0.0.1", 22, [new IPEndPoint(IPAddress.Loopback, 0)], SshAddressFamily.Inet6, "the server", Timeout()))
+            .Throws<SshException>();
+
+        await Assert.That(ex!.Message).Contains("family");
+    }
+
+    [Test]
+    public async Task ARefusedConnection_WithABind_IsAConnectFailure()
+    {
+        // A port that was just free: nothing listens there.
+        int port;
+        using (var probe = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp))
+        {
+            probe.Bind(new IPEndPoint(IPAddress.Loopback, 0));
+            port = ((IPEndPoint)probe.LocalEndPoint!).Port;
+        }
+
+        var ex = await Assert.That(async () => await TcpConnector.ConnectAsync("127.0.0.1", port, [new IPEndPoint(IPAddress.Loopback, 0)], SshAddressFamily.Inet, "the server", Timeout()))
+            .Throws<SshException>();
+
+        await Assert.That(ex!.Reason).IsEqualTo(SshFailureReason.ConnectFailed);
+        await Assert.That(ex.Message).Contains("Could not connect to the server");
+    }
+
+    [Test]
     public async Task TheConfigKeywords_AreRead_AndResolved()
     {
         var config = SshConfig.Parse("Host a\n BindAddress 10.1.2.3\nHost b\n BindInterface eth9\n").Resolve("a", new SshConfigResolveOptions { LocalUser = "u", HomeDirectory = _dir });
