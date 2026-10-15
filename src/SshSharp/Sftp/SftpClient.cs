@@ -45,6 +45,9 @@ public sealed partial class SftpClient : IAsyncDisposable
     /// <summary>The server's limits (<c>limits@openssh.com</c>), or the defaults every server accepts when it announces none.</summary>
     public SftpLimits Limits { get; }
 
+    /// <summary>Opens another SFTP session on the same connection (for <see cref="SftpTransferOptions.Segments"/>); null when unknown.</summary>
+    internal Func<CancellationToken, Task<SftpClient>>? OpenSibling { get; set; }
+
     internal static async Task<SftpClient> StartAsync(SshSession session, CancellationToken cancellationToken)
     {
         var channel = await SftpChannel.OpenAsync(session, cancellationToken).ConfigureAwait(false);
@@ -431,7 +434,10 @@ public sealed partial class SftpClient : IAsyncDisposable
         try
         {
             var resumeFrom = options.Resume && File.Exists(localPath) ? new FileInfo(localPath).Length : 0;
-            var attributes = options.PreserveTimes || resumeFrom > 0 ? await GetHandleAttributesAsync(handle, remotePath, cancellationToken).ConfigureAwait(false) : null;
+            var segmented = options.Segments > 1 && !options.Resume && OpenSibling is not null;
+            var attributes = options.PreserveTimes || resumeFrom > 0 || segmented
+                ? await GetHandleAttributesAsync(handle, remotePath, cancellationToken).ConfigureAwait(false)
+                : null;
             if (resumeFrom > 0 && attributes!.Size is { } remoteSize && resumeFrom > remoteSize)
             {
                 throw new IOException($"The local file is larger than '{remotePath}' ({resumeFrom} > {remoteSize} bytes): it is not a partial download of it.");
@@ -439,23 +445,18 @@ public sealed partial class SftpClient : IAsyncDisposable
 
             long total;
             var created = false;
-            try
+            var segments = segmented && attributes!.Size is { } size ? (int)Math.Min(options.Segments, size / MinSegmentBytes) : 1;
+            if (segments > 1)
             {
-                var mode = resumeFrom > 0 ? FileMode.Append : options.Overwrite || options.Resume ? FileMode.Create : FileMode.CreateNew;
-                await using (var file = new FileStream(localPath, mode, FileAccess.Write, FileShare.None, 64 * 1024, useAsync: true))
-                {
-                    created = resumeFrom == 0;
-                    total = await DownloadHandleAsync(handle, remotePath, file, resumeFrom, options, cancellationToken).ConfigureAwait(false);
-                }
+                total = await DownloadSegmentedAsync(handle, remotePath, localPath, attributes!.Size!.Value, segments, options, cancellationToken)
+                    .ConfigureAwait(false);
             }
-            catch when (created && !options.Resume)
+            else
             {
-                // A fresh download that failed leaves nothing; with Resume, what arrived is kept for the next attempt.
-                File.Delete(localPath);
-                throw;
+                total = await DownloadSequentialAsync().ConfigureAwait(false);
             }
 
-            if (attributes is not null)
+            if (attributes is not null && options.PreserveTimes)
             {
                 if (attributes.LastWriteTime is { } modified)
                 {
@@ -469,10 +470,150 @@ public sealed partial class SftpClient : IAsyncDisposable
             }
 
             return total;
+
+            async Task<long> DownloadSequentialAsync()
+            {
+                try
+                {
+                    var mode = resumeFrom > 0 ? FileMode.Append : options.Overwrite || options.Resume ? FileMode.Create : FileMode.CreateNew;
+                    await using var file = new FileStream(localPath, mode, FileAccess.Write, FileShare.None, 64 * 1024, useAsync: true);
+                    created = resumeFrom == 0;
+                    return await DownloadHandleAsync(handle, remotePath, file, resumeFrom, options, cancellationToken).ConfigureAwait(false);
+                }
+                catch when (created && !options.Resume)
+                {
+                    // A fresh download that failed leaves nothing; with Resume, what arrived is kept for the next attempt.
+                    File.Delete(localPath);
+                    throw;
+                }
+            }
         }
         finally
         {
             await CloseHandleAsync(handle).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>The least a segment of a segmented download is given: smaller files use fewer segments.</summary>
+    internal const long MinSegmentBytes = 1024 * 1024;
+
+    /// <summary>
+    /// <see cref="SftpTransferOptions.Segments"/>: the file is split into <paramref name="segments"/> ranges, the first fetched over
+    /// <paramref name="handle"/> and each other one over a sibling session of its own, all written into the local file at their
+    /// offsets. The last range reads on to the end of the file (it may have grown); a range that ends early means the file shrank
+    /// meanwhile, which fails the download rather than leave a gap. The first failure cancels the rest, and the local file is removed.
+    /// </summary>
+    private async Task<long> DownloadSegmentedAsync(byte[] handle, string remotePath, string localPath, long size, int segments,
+        SftpTransferOptions options, CancellationToken cancellationToken)
+    {
+        // The sessions first: the server may allow fewer than asked (sshd's MaxSessions), and the ranges are split among those it opens.
+        var siblings = new List<SftpClient>();
+        try
+        {
+            for (var i = 1; i < segments; i++)
+            {
+                try
+                {
+                    siblings.Add(await OpenSibling!(cancellationToken).ConfigureAwait(false));
+                }
+                catch (SshException ex) when (ex.Reason is SshFailureReason.ChannelClosed or SshFailureReason.ProtocolError)
+                {
+                    break; // no more sessions: the ones open share the file
+                }
+            }
+
+            var clients = (SftpClient[])[this, .. siblings];
+            var mode = options.Overwrite ? FileMode.Create : FileMode.CreateNew;
+            var created = false;
+            try
+            {
+                using var file = File.OpenHandle(localPath, mode, FileAccess.Write, FileShare.None, FileOptions.Asynchronous);
+                created = true;
+                RandomAccess.SetLength(file, size);
+
+                using var failed = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                var progressLock = new object();
+                long transferred = 0;
+                var part = size / clients.Length;
+                var tasks = new Task<long>[clients.Length];
+                for (var i = 0; i < clients.Length; i++)
+                {
+                    var start = i * part;
+                    long? stop = i == clients.Length - 1 ? null : start + part; // the last one reads to the end, wherever that now is
+                    tasks[i] = DownloadSegmentAsync(clients[i], i == 0 ? handle : null, start, stop);
+                }
+
+                try
+                {
+                    await Task.WhenAll(tasks).ConfigureAwait(false);
+                }
+                catch when (tasks.FirstOrDefault(t => t.IsFaulted && t.Exception!.InnerException is not OperationCanceledException) is { } first)
+                {
+                    // Report the failure that stopped the others, not the cancellations it caused.
+                    System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(first.Exception!.InnerException!).Throw();
+                }
+
+                // The last range may have read past the size seen at the start (the file grew), or stopped short of it (it shrank).
+                var length = (clients.Length - 1) * part + tasks[^1].Result;
+                for (var i = 0; i < clients.Length - 1; i++)
+                {
+                    if (tasks[i].Result != part)
+                    {
+                        throw new IOException($"'{remotePath}' became shorter during the download: its part from {i * part} ended early.");
+                    }
+                }
+
+                RandomAccess.SetLength(file, length);
+                return length;
+
+                async Task<long> DownloadSegmentAsync(SftpClient client, byte[]? openHandle, long start, long? stop)
+                {
+                    try
+                    {
+                        var segmentHandle = openHandle
+                            ?? (await client.OpenHandleAsync(remotePath, FileMode.Open, FileAccess.Read, failed.Token).ConfigureAwait(false)).Handle;
+                        try
+                        {
+                            return await client.DownloadRangeAsync(segmentHandle, remotePath, start, stop, async (offset, data, ct) =>
+                            {
+                                await RandomAccess.WriteAsync(file, data, offset, ct).ConfigureAwait(false);
+                                if (options.Progress is { } progress)
+                                {
+                                    lock (progressLock)
+                                    {
+                                        transferred += data.Length;
+                                        progress.Report(transferred);
+                                    }
+                                }
+                            }, options, failed.Token).ConfigureAwait(false);
+                        }
+                        finally
+                        {
+                            if (openHandle is null)
+                            {
+                                await client.CloseHandleAsync(segmentHandle).ConfigureAwait(false);
+                            }
+                        }
+                    }
+                    catch
+                    {
+                        await failed.CancelAsync().ConfigureAwait(false); // one part failed: stop the others
+                        throw;
+                    }
+                }
+            }
+            catch when (created)
+            {
+                File.Delete(localPath);
+                throw;
+            }
+        }
+        finally
+        {
+            foreach (var sibling in siblings)
+            {
+                await sibling.DisposeAsync().ConfigureAwait(false);
+            }
         }
     }
 
@@ -674,6 +815,22 @@ public sealed partial class SftpClient : IAsyncDisposable
 
     private async Task<long> DownloadHandleAsync(byte[] handle, string path, Stream destination, long start, SftpTransferOptions options, CancellationToken cancellationToken)
     {
+        long total = 0;
+        return await DownloadRangeAsync(handle, path, start, stop: null, async (_, data, ct) =>
+        {
+            await destination.WriteAsync(data, ct).ConfigureAwait(false);
+            total += data.Length;
+            options.Progress?.Report(total);
+        }, options, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Reads <paramref name="handle"/> from <paramref name="start"/> up to <paramref name="stop"/> (or the end of the file), handing each
+    /// piece with its file offset to <paramref name="write"/>, in offset order; returns the bytes read.
+    /// </summary>
+    private async Task<long> DownloadRangeAsync(byte[] handle, string path, long start, long? stop,
+        Func<long, ReadOnlyMemory<byte>, CancellationToken, ValueTask> write, SftpTransferOptions options, CancellationToken cancellationToken)
+    {
         // A window of reads in flight; replies are written in offset order. The window starts at 2 and doubles with each reply, up to
         // MaxRequestsInFlight, so a small file costs a few requests rather than a full window past its end. A short read (allowed by the
         // draft, but not at the end of the file) gets a follow-up read for the rest, at the front of the queue, so the output stays in order.
@@ -687,10 +844,11 @@ public sealed partial class SftpClient : IAsyncDisposable
         {
             while (true)
             {
-                while (!end && inFlight.Count < window)
+                while (!end && inFlight.Count < window && (stop is not { } limit || next < limit))
                 {
-                    inFlight.AddLast((next, chunk, SendReadAsync(handle, next, chunk, cancellationToken)));
-                    next += chunk;
+                    var requested = stop is { } last ? (int)Math.Min(chunk, last - next) : chunk;
+                    inFlight.AddLast((next, requested, SendReadAsync(handle, next, requested, cancellationToken)));
+                    next += requested;
                 }
 
                 if (inFlight.Count == 0)
@@ -714,9 +872,8 @@ public sealed partial class SftpClient : IAsyncDisposable
                         window = Math.Min(window * 2, options.MaxRequestsInFlight); // a full reply: more is likely to follow
                     }
 
-                    await destination.WriteAsync(data, cancellationToken).ConfigureAwait(false);
+                    await write(offset, data, cancellationToken).ConfigureAwait(false);
                     total += data.Length;
-                    options.Progress?.Report(total);
                     if (data.Length < length)
                     {
                         var rest = offset + data.Length;
@@ -1023,4 +1180,24 @@ public sealed class SftpTransferOptions
             field = value;
         }
     } = 64;
+
+    /// <summary>
+    /// How many parts of one file <see cref="SftpClient.DownloadFileAsync"/> fetches at once, each over its own SFTP session on the same
+    /// connection (default 1: one session). Each session is an SSH channel with its own flow-control window, and on OpenSSH its own
+    /// <c>sftp-server</c> process, so on a link with high latency several segments move more than one session can: one session carries at
+    /// most its 2 MiB window per round trip. It does not help where the bandwidth, or the server's single connection, is the limit.
+    /// Files smaller than 1 MiB per segment use fewer segments; the server may allow fewer sessions (sshd's <c>MaxSessions</c>, 10 by
+    /// default), and then fewer are used. Ignored with <see cref="Resume"/> (only a sequential download leaves a prefix to resume from)
+    /// and by <see cref="SftpClient.DownloadAsync"/>, which writes a stream in order.
+    /// </summary>
+    public int Segments
+    {
+        get;
+        init
+        {
+            ArgumentOutOfRangeException.ThrowIfLessThan(value, 1);
+            ArgumentOutOfRangeException.ThrowIfGreaterThan(value, 16);
+            field = value;
+        }
+    } = 1;
 }

@@ -64,8 +64,12 @@ internal static class RealServer
 
     public static bool IsOpenSsh => Software == "OpenSSH";
 
-    /// <summary>Whether the server has an sftp subsystem: every one tested but the Dropbear image (which has no sftp-server).</summary>
-    public static bool HasSftp => !Software.Equals("dropbear", StringComparison.OrdinalIgnoreCase);
+    /// <summary>
+    /// Whether the server has an sftp subsystem: every one tested, and Dropbear when its image has OpenSSH's sftp-server where Dropbear
+    /// runs it (SSHSHARP_TEST_DROPBEAR_SFTP=1, set by CI after checking).
+    /// </summary>
+    public static bool HasSftp => !Software.Equals("dropbear", StringComparison.OrdinalIgnoreCase)
+        || Environment.GetEnvironmentVariable("SSHSHARP_TEST_DROPBEAR_SFTP") == "1";
 
     /// <summary>Whether the server offers only SFTP (no shell or commands), as atmoz/sftp and the pkg/sftp test server do.</summary>
     public static bool SftpOnly => Environment.GetEnvironmentVariable("SSHSHARP_TEST_SFTP_ONLY") == "1";

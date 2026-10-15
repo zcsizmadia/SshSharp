@@ -38,3 +38,5 @@ SshSharp.Config.SshHostConfig.RevokedHostKeys.get -> string?
 SshSharp.Config.SshHostConfig.RevokedHostKeys.init -> void
 SshSharp.KnownHostsVerifier.RevokedHostKeys.get -> string?
 SshSharp.KnownHostsVerifier.RevokedHostKeys.init -> void
+[SSHSHARP001]SshSharp.Sftp.SftpTransferOptions.Segments.get -> int
+[SSHSHARP001]SshSharp.Sftp.SftpTransferOptions.Segments.init -> void

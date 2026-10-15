@@ -305,4 +305,61 @@ public class SftpInteropTests
             await sftp.DeleteDirectoryAsync(root, Timeout());
         }
     }
+
+    [Test]
+    public async Task ASegmentedDownload_FetchesTheFileOverSeveralSessions()
+    {
+        if (RealServer.Endpoint is not var (host, port) || await RealServer.OptionsAsync() is not { } options)
+        {
+            Skip.Test("SSHSHARP_TEST_SSHD and SSHSHARP_TEST_USER with a password or key are needed.");
+            return;
+        }
+
+        if (!RealServer.HasSftp)
+        {
+            Skip.Test("This server has no sftp-server.");
+            return;
+        }
+
+        var local = Directory.CreateTempSubdirectory("sshsharp-segments-");
+        await using var client = await SshClient.ConnectAsync(host, port, options, Timeout());
+        await using var sftp = await client.OpenSftpAsync(Timeout());
+        var remote = RealServer.SftpPath(".sshsharp-segments-" + Guid.NewGuid().ToString("N")[..12]);
+        try
+        {
+            // Six MiB in four ranges, each fetched over its own session (sshd allows ten per connection by default).
+            var data = RandomNumberGenerator.GetBytes((6 * 1024 * 1024) + 4321);
+            await using (var source = new MemoryStream(data))
+            {
+                await sftp.UploadAsync(source, remote, cancellationToken: Timeout());
+            }
+
+            var copy = Path.Combine(local.FullName, "copy.bin");
+            long reported = 0;
+            var progress = new SynchronousProgress(value => reported = value);
+            var total = await sftp.DownloadFileAsync(remote, copy, new SftpTransferOptions { Segments = 4, Progress = progress }, Timeout());
+
+            await Assert.That(total).IsEqualTo(data.Length);
+            await Assert.That(reported).IsEqualTo(data.Length);
+            await Assert.That((await File.ReadAllBytesAsync(copy)).AsSpan().SequenceEqual(data)).IsTrue();
+        }
+        finally
+        {
+            try
+            {
+                await sftp.DeleteFileAsync(remote, Timeout());
+            }
+            catch (SftpException)
+            {
+                // Not created.
+            }
+
+            local.Delete(recursive: true);
+        }
+    }
+
+    private sealed class SynchronousProgress(Action<long> report) : IProgress<long>
+    {
+        public void Report(long value) => report(value);
+    }
 }

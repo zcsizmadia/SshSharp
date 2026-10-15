@@ -267,6 +267,10 @@ jobs:
             echo "SSHSHARP_TEST_SERVER_STRICTKEX=${{ matrix.strict }}"
           } >> "$GITHUB_ENV"
           if [ "${{ matrix.server }}" = "openssh" ]; then echo "SSHSHARP_TEST_SSHD_REKEY=1" >> "$GITHUB_ENV"; fi
+          # Dropbear serves the sftp subsystem by running OpenSSH's sftp-server from /usr/libexec (the image links it there).
+          if [ "${{ matrix.server }}" = "dropbear" ] && docker exec server test -x /usr/libexec/sftp-server; then
+            echo "SSHSHARP_TEST_DROPBEAR_SFTP=1" >> "$GITHUB_ENV"
+          fi
       - run: dotnet restore
       - run: dotnet build -c Release --no-restore
       - name: Interop tests against the container
