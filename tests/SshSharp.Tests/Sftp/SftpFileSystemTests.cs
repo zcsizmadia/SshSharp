@@ -579,19 +579,20 @@ public class SftpFileSystemTests
     [Test]
     public async Task WholeFileTransfers_AreTimedOnlyWithoutProgress_ButASilentServerStillTimesOut()
     {
-        // Every answer with data (and to every WRITE) takes 100 ms and they come one after another, so a whole-file transfer takes far
-        // longer than the 600 ms timeout: it must still succeed, as each answer comes well within it.
-        var data = RandomNumberGenerator.GetBytes(1024 * 1024);
+        // Every answer with data (and to every WRITE) takes 150 ms and they come one after another, so a whole-file transfer takes far
+        // longer than the 1.5 s timeout: it must still succeed, as each answer comes well within it (a tenth of it, so a loaded runner
+        // stalling the test for a moment does not look like a silent server).
+        var data = RandomNumberGenerator.GetBytes(1024 * 1024); // 16 READs of 64 KiB, so about 2.4 s in all
         await using var rig = await Rig.StartAsync(f =>
         {
             f.AddFile(Home + "/big.bin", data);
-            f.ReplyDelay = (request, reply) => (request, reply) is (5, 103) or (6, _) ? TimeSpan.FromMilliseconds(100) : TimeSpan.Zero;
-        }, new SftpFileSystemOptions { OperationTimeout = TimeSpan.FromMilliseconds(600) });
+            f.ReplyDelay = (request, reply) => (request, reply) is (5, 103) or (6, _) ? TimeSpan.FromMilliseconds(150) : TimeSpan.Zero;
+        }, new SftpFileSystemOptions { OperationTimeout = TimeSpan.FromSeconds(1.5) });
         var fs = rig.Fs;
 
         var started = System.Diagnostics.Stopwatch.StartNew();
         await Assert.That(fs.File.ReadAllBytes("big.bin").SequenceEqual(data)).IsTrue();
-        await Assert.That(started.Elapsed).IsGreaterThan(TimeSpan.FromMilliseconds(600));
+        await Assert.That(started.Elapsed).IsGreaterThan(TimeSpan.FromSeconds(1.5));
         await Assert.That((await fs.File.ReadAllBytesAsync("big.bin", Timeout())).SequenceEqual(data)).IsTrue();
         fs.File.WriteAllBytes("copy.bin", data);
         await Assert.That(rig.Files.FileData(Home + "/copy.bin")!.SequenceEqual(data)).IsTrue();
@@ -599,7 +600,7 @@ public class SftpFileSystemTests
         await Assert.That(rig.Files.FileData(Home + "/copy.bin")!.Length).IsEqualTo(data.Length + 4);
 
         // A request the server sits on is still a timeout.
-        rig.Files.ReplyDelay = (request, _) => request is 7 or 17 ? TimeSpan.FromSeconds(3) : TimeSpan.Zero;
+        rig.Files.ReplyDelay = (request, _) => request is 7 or 17 ? TimeSpan.FromSeconds(10) : TimeSpan.Zero;
         await Assert.That(() => fs.File.GetAttributes("big.bin")).Throws<IOException>().WithMessageContaining("did not answer in time");
     }
 
