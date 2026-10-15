@@ -75,6 +75,7 @@ Console.WriteLine(result.StandardOutputText);
 | Agent forwarding | ✅ | ❌ |
 | Agent key management (`ssh-add`: add with lifetime, confirmation or destination constraints (`-h`), remove, lock; `AddKeysToAgent`) | ✅ | ❌ |
 | Password, public key, keyboard-interactive, multi-factor | ✅ | ✅ |
+| Kerberos (GSSAPI, `gssapi-with-mic`; .NET 10) | ✅ | ❌ |
 | OpenSSH certificates | User and host | User (authentication) |
 | Private key formats | OpenSSH, PKCS#1/#8, SEC1, PuTTY `.ppk` | OpenSSH, PKCS#1/#8, PuTTY `.ppk`, ssh.com |
 | Key generation (Ed25519, ECDSA, RSA; saved in the OpenSSH format) | ✅ | ❌ |

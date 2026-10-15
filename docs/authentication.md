@@ -191,6 +191,37 @@ var options = new SshClientOptions
 Prompts and instructions come from the server: strip control characters before showing them in a terminal. A round with
 no prompts is answered with an empty list.
 
+## Kerberos (GSSAPI)
+
+With a Kerberos ticket, the server lets you in without a password or key (`gssapi-with-mic`, RFC 4462; ssh's
+`GSSAPIAuthentication yes`). The ticket comes from the platform: the Windows logon session (SSPI, in an Active Directory
+domain), or elsewhere the credential cache that `kinit` fills (MIT or Heimdal GSS-API).
+
+```csharp
+var options = new SshClientOptions
+{
+    UserName = "deploy",
+    HostKeyVerifier = verifier,
+    Gssapi = new SshGssapiOptions(), // TargetHost defaults to the host connected to
+};
+await using var client = await SshClient.ConnectAsync("build.corp.example", 22, options);
+```
+
+- Kerberos is tried first when it is on (as in ssh's default order), and only when the server offers it; when it fails (no ticket,
+  an unknown service principal), the other methods follow.
+- The server's service principal is `host/<TargetHost>@REALM`. Kerberos names services by DNS name, so connecting by address or
+  over a stream needs `TargetHost` set to the server's name.
+- `DelegateCredentials` forwards the ticket to the server (`GSSAPIDelegateCredentials yes`), so programs there can authenticate
+  onward as you; leave it off unless you trust the server. `Credential` takes a user, password and realm instead of the current
+  ticket.
+- The client asks for mutual authentication, and the MIC binds the Kerberos exchange to this SSH session. The host key is
+  verified as always: `gssapi-keyex` (Kerberos instead of host keys) is not supported.
+- Needs .NET 10 (`SshGssapiOptions.IsSupported`): it relies on `NegotiateAuthentication.ComputeIntegrityCheck`, which .NET 8
+  lacks. On .NET 8 the method is not offered and the other methods are used.
+
+With `ssh_config`, `GSSAPIAuthentication yes` and `GSSAPIDelegateCredentials yes` turn it on, with `HostName` as the target, and
+`PreferredAuthentications` can place `gssapi-with-mic` anywhere in the order.
+
 ## Banner
 
 ```csharp

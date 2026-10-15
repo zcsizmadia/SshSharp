@@ -176,6 +176,46 @@ jobs:
           ssh-add -l
           echo "SSH_AUTH_SOCK=$SSH_AUTH_SOCK" >> "$GITHUB_ENV"
           echo "SSHSHARP_TEST_AGENT=1" >> "$GITHUB_ENV"
+      - name: A throwaway Kerberos realm, and sshd with GSSAPIAuthentication on port 2224
+        run: |
+          set -euo pipefail
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq krb5-kdc krb5-admin-server krb5-user > /dev/null
+          cat <<EOF | sudo tee /etc/krb5.conf > /dev/null
+          [libdefaults]
+            default_realm = SSHSHARP.TEST
+            dns_lookup_realm = false
+            dns_lookup_kdc = false
+            rdns = false
+          [realms]
+            SSHSHARP.TEST = {
+              kdc = 127.0.0.1
+              admin_server = 127.0.0.1
+            }
+          [domain_realm]
+            localhost = SSHSHARP.TEST
+          EOF
+          MASTER="$(openssl rand -hex 16)"
+          echo "::add-mask::$MASTER"
+          sudo kdb5_util create -s -r SSHSHARP.TEST -P "$MASTER" > /dev/null
+          # The service principal sshd accepts (host/localhost, in its keytab), and the test user's principal, whose ticket comes from a
+          # keytab so no password is ever typed or echoed.
+          sudo kadmin.local -q "addprinc -randkey host/localhost" > /dev/null
+          sudo kadmin.local -q "ktadd -k /etc/krb5.keytab host/localhost" > /dev/null
+          sudo kadmin.local -q "addprinc -randkey sshsharp" > /dev/null
+          sudo kadmin.local -q "ktadd -k $RUNNER_TEMP/sshsharp.keytab sshsharp" > /dev/null
+          sudo chown "$(id -u)" "$RUNNER_TEMP/sshsharp.keytab"
+          sudo krb5kdc
+          export KRB5CCNAME="FILE:$RUNNER_TEMP/krb5cc"
+          kinit -k -t "$RUNNER_TEMP/sshsharp.keytab" sshsharp
+          klist
+          echo "KRB5CCNAME=$KRB5CCNAME" >> "$GITHUB_ENV"
+          # A second sshd on the same keys with Kerberos on; the principal sshsharp@SSHSHARP.TEST maps to the local user sshsharp.
+          sed -e 's/^Port 2222$/Port 2224/' /tmp/sshd_config_test | sudo tee /tmp/sshd_config_gssapi > /dev/null
+          printf 'GSSAPIAuthentication yes\nGSSAPIStrictAcceptorCheck no\n' | sudo tee -a /tmp/sshd_config_gssapi > /dev/null
+          sudo /usr/sbin/sshd -t -f /tmp/sshd_config_gssapi
+          sudo /usr/sbin/sshd -f /tmp/sshd_config_gssapi -E /tmp/sshd_gssapi.log
+          echo "SSHSHARP_TEST_GSSAPI=1" >> "$GITHUB_ENV"
+          echo "SSHSHARP_TEST_GSSAPI_SSHD=127.0.0.1:2224" >> "$GITHUB_ENV"
       - run: dotnet restore
       - run: dotnet build -c Release --no-restore
       - name: Interop tests against the real server (net8.0)
@@ -193,6 +233,8 @@ jobs:
         run: |
           sudo grep -E "rtype|global_request|Disconnect|fatal" /tmp/sshd.log | tail -n 40 || true
           sudo tail -n 80 /tmp/sshd.log
+          echo "--- the Kerberos sshd ---"
+          sudo grep -iE "gss|krb|kerberos|userauth|fatal" /tmp/sshd_gssapi.log | tail -n 60 || true
 
   # Older and other servers, each in a throwaway container: OpenSSH before strict KEX and from several eras, and Dropbear.
   # Password-only: the tests that need keys, certificates or ProxyJump skip themselves here.

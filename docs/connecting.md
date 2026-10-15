@@ -52,8 +52,8 @@ What is taken from the configuration: `HostName`, `Port`, `User`, `IdentityFile`
 `UpdateHostKeys`, `HostKeyAlias`, `KexAlgorithms`, `HostKeyAlgorithms`, `Ciphers`, `MACs`, `PubkeyAcceptedAlgorithms`,
 `PreferredAuthentications`, `PubkeyAuthentication`, `PasswordAuthentication`, `KbdInteractiveAuthentication`, `BatchMode`,
 `ProxyJump`, `ProxyCommand`, `ServerAliveInterval`, `ServerAliveCountMax`, `ConnectTimeout`, `AddressFamily`,
-`BindAddress`, `BindInterface`, `ForwardAgent`, `AddKeysToAgent`, `RefuseConnection` and `KnownHostsCommand` (with
-`AllowKnownHostsCommand`); with `StartForwardings`, also `LocalForward`, `RemoteForward`,
+`BindAddress`, `BindInterface`, `ForwardAgent`, `AddKeysToAgent`, `GSSAPIAuthentication`, `GSSAPIDelegateCredentials`,
+`RefuseConnection` and `KnownHostsCommand` (with `AllowKnownHostsCommand`); with `StartForwardings`, also `LocalForward`, `RemoteForward`,
 `DynamicForward`, `GatewayPorts`, `ExitOnForwardFailure` and `ClearAllForwardings`.
 `Match` (including `Match exec`, which needs an opt-in) and `Include` work as in OpenSSH.
 

@@ -247,6 +247,8 @@ public sealed class SshConfig
             BindAddress = First("bindaddress") is { Length: > 0 } bindAddress ? bindAddress : null,
             BindInterface = First("bindinterface") is { Length: > 0 } bindInterface ? bindInterface : null,
             ForwardAgent = First("forwardagent") is { } fa && !IsNo(fa),
+            GssapiAuthentication = Bool(First("gssapiauthentication"), false),
+            GssapiDelegateCredentials = Bool(First("gssapidelegatecredentials"), false),
             AddKeysToAgent = ParseAddKeysToAgent(All("addkeystoagent") is { Count: > 0 } addKeys ? string.Join(' ', addKeys) : null),
             RequestTty = ParseTty(First("requesttty")),
             PreferredAuthentications = [.. All("preferredauthentications").SelectMany(v => v.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))],
