@@ -224,6 +224,16 @@ public class SshObservabilityTests
         {
             mine = stopped.Where(a => a.TraceId == root.TraceId).ToList();
         }
+
+        // Every span in this trace, when there is not exactly one connect: where the extra one came from.
+        if (mine.Count(a => a.OperationName == "SshSharp.Connect") != 1)
+        {
+            var spans = string.Join("\n", mine.Select(a =>
+                $"  {a.OperationName} span={a.SpanId} parent={a.ParentSpanId} start={a.StartTimeUtc:HH:mm:ss.fffffff} duration={a.Duration.TotalMilliseconds}ms status={a.Status} " +
+                string.Join(",", a.TagObjects.Select(t => $"{t.Key}={t.Value}"))));
+            Assert.Fail($"root span={root.SpanId} parent={root.ParentSpanId} ({Activity.Current?.Parent?.OperationName})\n{spans}");
+        }
+
         var connect = mine.Single(a => a.OperationName == "SshSharp.Connect");
         await Assert.That(connect.GetTagItem("ssh.kex")).IsEqualTo("curve25519-sha256");
         await Assert.That(connect.GetTagItem("ssh.cipher")).IsEqualTo("chacha20-poly1305@openssh.com");

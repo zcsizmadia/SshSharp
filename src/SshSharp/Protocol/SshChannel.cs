@@ -13,7 +13,7 @@ internal sealed class ChannelData : IDisposable
     private readonly int _offset;
     private readonly int _length;
     private readonly SshChannel _channel;
-    private bool _disposed;
+    private int _disposed;
 
     public ChannelData(SshChannel channel, DecodedPacket packet, int offset, int length, bool isExtended)
     {
@@ -27,16 +27,19 @@ internal sealed class ChannelData : IDisposable
     /// <summary>True for stderr (<c>SSH_MSG_CHANNEL_EXTENDED_DATA</c> type 1).</summary>
     public bool IsExtended { get; }
 
-    public ReadOnlyMemory<byte> Data => _disposed ? throw new ObjectDisposedException(nameof(ChannelData)) : _packet.Payload.Slice(_offset, _length);
+    public ReadOnlyMemory<byte> Data => Volatile.Read(ref _disposed) != 0 ? throw new ObjectDisposedException(nameof(ChannelData)) : _packet.Payload.Slice(_offset, _length);
 
+    /// <summary>
+    /// Releases the buffer and gives the window back, once: a stream disposed while a read is in progress releases its current chunk from
+    /// both threads, and a second release would return the buffer to the pool twice and grant the peer the window twice.
+    /// </summary>
     public void Dispose()
     {
-        if (_disposed)
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
         {
             return;
         }
 
-        _disposed = true;
         _packet.Dispose();
         _channel.Consumed(_length);
     }

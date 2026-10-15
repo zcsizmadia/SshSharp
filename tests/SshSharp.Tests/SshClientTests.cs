@@ -124,8 +124,7 @@ public class SshClientTests
         await using var client = await ConnectAsync(server);
 
         var result = await client.RunCommandAsync("big", Timeout());
-        await Assert.That(result.StandardOutput.Length).IsEqualTo(data.Length);
-        await Assert.That(result.StandardOutput.Span.SequenceEqual(data)).IsTrue();
+        await Assert.That(TestBytes.Compare(result.StandardOutput.Span, data)).IsEqualTo("equal");
     }
 
     [Test]

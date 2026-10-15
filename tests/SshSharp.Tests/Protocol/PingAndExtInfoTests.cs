@@ -109,6 +109,14 @@ public class PingAndExtInfoTests
         }, leaveOpen: true, Timeout());
         server.AnswerPings = false;
 
+        // One silent interval, and the probe it sends must reach the server before time runs on: under load the client could otherwise
+        // give up while its pings still sit in the outbox, and the server would count none.
+        time.Advance(TimeSpan.FromSeconds(30));
+        for (var waited = 0; server.PingsReceived == 0 && waited < 200; waited++)
+        {
+            await Task.Delay(50);
+        }
+
         for (var i = 0; i < 100 && client.IsConnected; i++)
         {
             time.Advance(TimeSpan.FromSeconds(30));

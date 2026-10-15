@@ -22,11 +22,14 @@ internal sealed class DecodedPacket : IDisposable
         ? throw new ObjectDisposedException(nameof(DecodedPacket))
         : _buffer.AsMemory(_offset, _length);
 
+    /// <summary>
+    /// Returns the buffer to the pool, once, even when two threads dispose at the same moment: a buffer returned twice would be handed to
+    /// two renters, and one's data would silently overwrite the other's.
+    /// </summary>
     public void Dispose()
     {
-        if (_buffer is { } buffer)
+        if (Interlocked.Exchange(ref _buffer, null) is { } buffer)
         {
-            _buffer = null;
             ArrayPool<byte>.Shared.Return(buffer, clearArray: true);
         }
     }
