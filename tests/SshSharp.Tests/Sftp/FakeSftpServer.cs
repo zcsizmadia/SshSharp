@@ -140,7 +140,16 @@ internal sealed class FakeSftpServer
 
     public int MaxConcurrentSessions { get; private set; }
 
+    /// <summary>How many SFTP sessions are open now (the client has not closed them).</summary>
+    public int OpenSessions => Volatile.Read(ref _openSessions);
+
     private int _openSessions;
+
+    /// <summary>For a request, raw bytes to send instead of its framed reply (a broken or hostile server); null answers normally.</summary>
+    public Func<byte[], byte[]?>? RawFrame { get; set; }
+
+    /// <summary>End the session (stdout closed) right after a <see cref="RawFrame"/> was sent.</summary>
+    public bool EndSessionAfterRawFrame { get; set; }
 
     /// <summary>Fails a READ at this offset with a Failure status (a disk error on the server, say).</summary>
     public Func<long, bool>? FailReadAt { get; set; }
@@ -184,6 +193,7 @@ internal sealed class FakeSftpServer
         // in the queue (MaxOutstanding), and two queued ones can be answered in reverse order.
         var queue = System.Threading.Channels.Channel.CreateUnbounded<byte[]>();
         var unanswered = 0;
+        var endedEarly = false;
         var reader = Task.Run(async () =>
         {
             var buffer = new List<byte>();
@@ -238,6 +248,20 @@ internal sealed class FakeSftpServer
                 await Task.Delay(delay);
             }
 
+            if (RawFrame?.Invoke(packet) is { } raw)
+            {
+                // A hostile or broken server: these bytes instead of the framed reply, and optionally the end of the session after them.
+                await script.StdoutAsync(raw);
+                Interlocked.Decrement(ref unanswered);
+                if (EndSessionAfterRawFrame)
+                {
+                    endedEarly = true;
+                    break;
+                }
+
+                continue;
+            }
+
             if (ReorderReplies && packet[0] != 1 && queue.Reader.TryRead(out var next))
             {
                 var nextReply = HandleLocked(next);
@@ -252,7 +276,11 @@ internal sealed class FakeSftpServer
             Interlocked.Decrement(ref unanswered);
         }
 
-        await reader;
+        if (!endedEarly)
+        {
+            await reader; // otherwise the client still has the session open: end it from this side
+        }
+
         await script.FinishAsync(0);
     }
 

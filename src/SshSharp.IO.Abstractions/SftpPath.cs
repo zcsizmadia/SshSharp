@@ -18,17 +18,18 @@ internal sealed class SftpPath(SftpFileSystem fileSystem) : IPath
 
     public char VolumeSeparatorChar => RemotePath.Separator;
 
+    /// <summary>As <c>Path.ChangeExtension</c>: an empty path stays empty, and an empty extension leaves the dot (<c>a.txt</c> becomes <c>a.</c>).</summary>
     public string? ChangeExtension(string? path, string? extension)
     {
-        if (path is null)
+        if (string.IsNullOrEmpty(path))
         {
-            return null;
+            return path;
         }
 
         var name = RemotePath.FileName(path);
         var dot = name.LastIndexOf('.');
         var stem = dot < 0 ? path : path[..(path.Length - name.Length + dot)];
-        return extension is null ? stem : extension.Length == 0 || extension[0] == '.' ? stem + extension : stem + "." + extension;
+        return extension is null ? stem : extension.StartsWith('.') ? stem + extension : stem + "." + extension;
     }
 
     public string Combine(string path1, string path2) => RemotePath.Combine([path1, path2]);
