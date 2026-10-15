@@ -251,6 +251,7 @@ public sealed class SshConfig
             GssapiDelegateCredentials = Bool(First("gssapidelegatecredentials"), false),
             AddKeysToAgent = ParseAddKeysToAgent(All("addkeystoagent") is { Count: > 0 } addKeys ? string.Join(' ', addKeys) : null),
             ChannelTimeouts = ParseChannelTimeouts(All("channeltimeout")),
+            ObscureKeystrokeTiming = ParseObscureKeystrokeTiming(First("obscurekeystroketiming")),
             RequestTty = ParseTty(First("requesttty")),
             PreferredAuthentications = [.. All("preferredauthentications").SelectMany(v => v.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))],
             PubkeyAuthentication = Bool(First("pubkeyauthentication"), true),
@@ -339,6 +340,31 @@ public sealed class SshConfig
         }
 
         return timeouts;
+    }
+
+    /// <summary>ssh's keystroke interval for <c>ObscureKeystrokeTiming yes</c>, its default.</summary>
+    internal static readonly TimeSpan DefaultKeystrokeInterval = TimeSpan.FromMilliseconds(20);
+
+    /// <summary>
+    /// <c>ObscureKeystrokeTiming yes|no|interval:milliseconds</c> (OpenSSH 9.5+): the interval, or null for <c>no</c>. Unset, <c>yes</c>,
+    /// and anything ssh would reject (an unknown word, an interval outside 1 to 1000 ms) give ssh's default of 20 ms.
+    /// </summary>
+    internal static TimeSpan? ParseObscureKeystrokeTiming(string? value)
+    {
+        if (value is null)
+        {
+            return DefaultKeystrokeInterval;
+        }
+
+        if (value.Equals("no", StringComparison.OrdinalIgnoreCase) || value.Equals("false", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        return value.StartsWith("interval:", StringComparison.OrdinalIgnoreCase)
+            && int.TryParse(value.AsSpan(9), NumberStyles.None, CultureInfo.InvariantCulture, out var milliseconds) && milliseconds is >= 1 and <= 1000
+            ? TimeSpan.FromMilliseconds(milliseconds)
+            : DefaultKeystrokeInterval;
     }
 
     /// <summary>

@@ -21,12 +21,12 @@ public sealed class SshSession : IAsyncDisposable
     private readonly SshChannelReadStream _error;
     private int _disposed;
 
-    internal SshSession(SshChannel channel, bool hasTerminal, ILogger logger)
+    internal SshSession(SshChannel channel, bool hasTerminal, ILogger logger, KeystrokeTimingObfuscator? obfuscator = null)
     {
         _channel = channel;
         _logger = logger;
         HasTerminal = hasTerminal;
-        _input = new SshChannelWriteStream(channel);
+        _input = new SshChannelWriteStream(channel, obfuscator);
         // Disposing the output while the session goes on asks an OpenSSH server to stop sending it (eow@openssh.com), as ssh does when
         // its own output closes; what arrives meanwhile is dropped.
         _output = new SshChannelReadStream(channel.ReadAsync, channel.StopReceiving);

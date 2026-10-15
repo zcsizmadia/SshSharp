@@ -167,6 +167,13 @@ public sealed class SshHostConfig
     /// </summary>
     public IReadOnlyList<SshChannelTimeout> ChannelTimeouts { get; init; } = [];
 
+    /// <summary>
+    /// <c>ObscureKeystrokeTiming yes|no|interval:milliseconds</c>: the interval keystrokes are sent on in terminal sessions, or null for
+    /// <c>no</c>. 20 ms for <c>yes</c> and when unset, as in ssh; a value that does not parse, or an interval outside 1 to 1000 ms, also
+    /// gives 20 ms. See <see cref="SshClientOptions.ObscureKeystrokeTiming"/>.
+    /// </summary>
+    public TimeSpan? ObscureKeystrokeTiming { get; init; } = SshConfig.DefaultKeystrokeInterval;
+
     /// <summary>The TTY request mode.</summary>
     public RequestTty RequestTty { get; init; }
 

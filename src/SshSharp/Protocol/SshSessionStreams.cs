@@ -96,8 +96,11 @@ internal sealed class SshChannelReadStream(Func<CancellationToken, ValueTask<Cha
     }
 }
 
-/// <summary>A session's stdin as a write-only, asynchronous <see cref="Stream"/>: writes are sent as channel data; disposing sends EOF.</summary>
-internal sealed class SshChannelWriteStream(SshChannel channel) : Stream
+/// <summary>
+/// A session's stdin as a write-only, asynchronous <see cref="Stream"/>: writes are sent as channel data; disposing sends EOF. With
+/// <paramref name="obfuscator"/> (a terminal session with <see cref="SshClientOptions.ObscureKeystrokeTiming"/>), typing is sent on its grid.
+/// </summary>
+internal sealed class SshChannelWriteStream(SshChannel channel, KeystrokeTimingObfuscator? obfuscator = null) : Stream
 {
     private int _closed;
 
@@ -114,7 +117,7 @@ internal sealed class SshChannelWriteStream(SshChannel channel) : Stream
     public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(_closed != 0, this);
-        return channel.SendDataAsync(buffer, cancellationToken);
+        return obfuscator is null ? channel.SendDataAsync(buffer, cancellationToken) : obfuscator.WriteAsync(buffer, cancellationToken);
     }
 
     public override Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) =>
@@ -124,7 +127,7 @@ internal sealed class SshChannelWriteStream(SshChannel channel) : Stream
 
     public override void Flush()
     {
-        // Nothing is buffered: every write is sent as it is made.
+        // Nothing is buffered: every write is sent before it completes.
     }
 
     public override void Write(byte[] buffer, int offset, int count) =>
@@ -144,6 +147,7 @@ internal sealed class SshChannelWriteStream(SshChannel channel) : Stream
             return;
         }
 
+        obfuscator?.Stop();
         try
         {
             await channel.SendEofAsync(cancellationToken).ConfigureAwait(false);

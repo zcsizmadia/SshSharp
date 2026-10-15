@@ -215,6 +215,29 @@ internal sealed class SshConnection : IAsyncDisposable
         }
     }
 
+    /// <summary>Whether a key re-exchange is running.</summary>
+    internal bool IsRekeying => _transport.IsRekeying;
+
+    /// <summary>
+    /// Queues a chaff packet for <see cref="KeystrokeTimingObfuscator"/>: a PING the size of a one-keystroke CHANNEL_DATA, as OpenSSH's
+    /// <c>ObscureKeystrokeTiming</c> sends (its 5-byte data, unlike our pings' 8, makes the pong one nobody waits for). False when the
+    /// server does not answer pings, which then gets no chaff.
+    /// </summary>
+    internal bool PostChaff()
+    {
+        if (!SupportsPing || _failure is not null)
+        {
+            return false;
+        }
+
+        Post(Build(w =>
+        {
+            w.WriteByte(SshMessage.Ping);
+            w.WriteString("PING!"u8);
+        }));
+        return true;
+    }
+
     /// <summary>SSH2_MSG_PING with an 8-byte number as its data (0 for keep-alive probes, which nobody waits for).</summary>
     private static byte[] PingMessage(ulong id) => Build(w =>
     {

@@ -80,6 +80,28 @@ the server performed it; without a terminal, OpenSSH declines.
 
 `StartCommandAsync(command, options)` takes the same options, for commands that need a terminal (`sudo`, `top`, editors).
 
+### Hiding keystroke timing
+
+Each key a person types is usually its own small packet, so someone watching the encrypted traffic can see when keys were
+pressed, and the gaps between them say a lot about what was typed (passwords included). `SshClientOptions.ObscureKeystrokeTiming`
+does what OpenSSH's `ObscureKeystrokeTiming` (9.5 and later) does for a session with a terminal: while someone types, small
+writes to `StandardInput` go out only on a fixed grid of intervals (a write completes when its interval comes), and the intervals
+with nothing typed carry a chaff packet of the same size, for a random 1 to 3 seconds after the last key:
+
+```csharp
+var options = new SshClientOptions
+{
+    // ...
+    ObscureKeystrokeTiming = TimeSpan.FromMilliseconds(20), // ssh's interval
+};
+```
+
+It is off by default, since only applications that relay a person's typing need it. The first key goes at once; writes of
+256 bytes or more (a paste, a script) also go at once and end the typing spell. Chaff is a transport ping, sent only to servers
+that announce `ping@openssh.com` (OpenSSH 9.5 and later); with other servers the keys still keep to the grid. Sessions without a
+terminal are never delayed. Connecting by alias applies `ssh_config`'s setting, and as in ssh that is on (20 ms) unless the
+configuration says `ObscureKeystrokeTiming no` (or another interval, `interval:50`).
+
 Disposing `StandardOutput` while the program runs on (the application has read what it needs) tells an OpenSSH server to stop
 sending output (`eow@openssh.com`, as ssh does when its own output closes), so it is not sent only to be dropped; the program
 may then get SIGPIPE when it writes, as `yes | head` does. With other servers the output is dropped on arrival.

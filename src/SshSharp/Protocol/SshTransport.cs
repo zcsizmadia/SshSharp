@@ -55,6 +55,9 @@ internal sealed class SshTransport : IAsyncDisposable
         _writer = PipeWriter.Create(stream, new StreamPipeWriterOptions(leaveOpen: true));
     }
 
+    /// <summary>Whether a key re-exchange is running (read without the send lock: a hint, not a guarantee).</summary>
+    internal bool IsRekeying => Volatile.Read(ref _rekeying);
+
     /// <summary>The server's identification, available after <see cref="ConnectAsync"/>.</summary>
     public SshIdentification? ServerIdentification { get; private set; }
 

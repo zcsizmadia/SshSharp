@@ -53,7 +53,7 @@ What is taken from the configuration: `HostName`, `Port`, `User`, `IdentityFile`
 `PreferredAuthentications`, `PubkeyAuthentication`, `PasswordAuthentication`, `KbdInteractiveAuthentication`, `BatchMode`,
 `ProxyJump`, `ProxyCommand`, `ServerAliveInterval`, `ServerAliveCountMax`, `ConnectTimeout`, `AddressFamily`,
 `BindAddress`, `BindInterface`, `ForwardAgent`, `AddKeysToAgent`, `GSSAPIAuthentication`, `GSSAPIDelegateCredentials`,
-`ChannelTimeout`, `RefuseConnection` and `KnownHostsCommand` (with `AllowKnownHostsCommand`); with `StartForwardings`, also `LocalForward`, `RemoteForward`,
+`ChannelTimeout`, `ObscureKeystrokeTiming`, `RefuseConnection` and `KnownHostsCommand` (with `AllowKnownHostsCommand`); with `StartForwardings`, also `LocalForward`, `RemoteForward`,
 `DynamicForward`, `GatewayPorts`, `ExitOnForwardFailure` and `ClearAllForwardings`.
 `Match` (including `Match exec`, which needs an opt-in) and `Include` work as in OpenSSH.
 

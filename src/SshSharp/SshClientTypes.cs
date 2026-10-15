@@ -221,6 +221,31 @@ public sealed class SshClientOptions
     public IReadOnlyList<SshChannelTimeout> ChannelTimeouts { get; init; } = [];
 
     /// <summary>
+    /// Hide the timing of keystrokes in sessions with a terminal, as OpenSSH's <c>ObscureKeystrokeTiming</c> (9.5+) does: while someone
+    /// types, small writes to <see cref="SshSession.StandardInput"/> are sent only once per interval (a write completes when its interval
+    /// comes), and the intervals with nothing typed carry a chaff packet of the same size, for a random 1 to 3 seconds after the last key.
+    /// Someone watching the encrypted traffic then cannot tell keys, or the time between them, from the packets. Larger writes (256 bytes
+    /// or more, such as a paste) go at once. Chaff is sent only to servers that announce <c>ping@openssh.com</c> (OpenSSH 9.5+). Null (the
+    /// default) sends every write at once. ssh uses 20 ms, and so does <see cref="SshClient.ConnectAsync(string, SshConfigConnectOptions?, CancellationToken)"/>
+    /// unless the config says otherwise. Between 1 ms and 1 second, as ssh allows.
+    /// </summary>
+    public TimeSpan? ObscureKeystrokeTiming
+    {
+        get => _obscureKeystrokeTiming;
+        init
+        {
+            if (value is { } interval && (interval < TimeSpan.FromMilliseconds(1) || interval > TimeSpan.FromSeconds(1)))
+            {
+                throw new ArgumentOutOfRangeException(nameof(value), interval, "The keystroke interval must be between 1 ms and 1 second.");
+            }
+
+            _obscureKeystrokeTiming = value;
+        }
+    }
+
+    private readonly TimeSpan? _obscureKeystrokeTiming;
+
+    /// <summary>
     /// Negotiate new keys after this many bytes have been transferred under the current ones. Default 1 GiB (RFC 4253 section 9).
     /// Values above 64 GiB (2^32 cipher blocks, the limit OpenSSH applies) are capped, and keys are also renewed every 2^31 packets.
     /// </summary>
