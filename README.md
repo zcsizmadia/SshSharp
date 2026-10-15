@@ -69,8 +69,8 @@ Console.WriteLine(result.StandardOutputText);
 | Connect over any `Stream` (WebSocket, named pipe, your own tunnel) | ✅ | ❌ |
 | Connect from a chosen local address or interface (`BindAddress`, `BindInterface`) | ✅ | ❌ |
 | Keep-alive that detects a dead server (`ServerAliveCountMax`) | ✅ | ❌ (keep-alives get no reply) |
-| SSH agent (`ssh-agent`, Windows OpenSSH agent, Pageant), including destination-constrained keys (`ssh-add -h`) | ✅ | ❌ |
 | Round-trip ping (`client.PingAsync`, OpenSSH's `ping@openssh.com`) | ✅ | ❌ |
+| SSH agent (`ssh-agent`, Windows OpenSSH agent, Pageant), including destination-constrained keys (`ssh-add -h`) | ✅ | ❌ |
 | Agent forwarding | ✅ | ❌ |
 | Password, public key, keyboard-interactive, multi-factor | ✅ | ✅ |
 | OpenSSH certificates | User and host | User (authentication) |
