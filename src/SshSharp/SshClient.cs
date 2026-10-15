@@ -61,6 +61,17 @@ public sealed partial class SshClient : IAsyncDisposable
     /// <summary>Why the connection ended (an <see cref="SshException"/>, usually), or null while it is up.</summary>
     public Exception? ConnectionError => _connection.Failure;
 
+    /// <summary>
+    /// Measures the round trip to the server and proves the connection is alive. OpenSSH 9.5 and later answer a transport ping
+    /// (<c>ping@openssh.com</c>); other servers get a <c>keepalive@openssh.com</c> request, whose answer arrives just as quickly.
+    /// </summary>
+    /// <exception cref="SshException">The connection is closed or failed meanwhile.</exception>
+    public Task<TimeSpan> PingAsync(CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed != 0, this);
+        return _connection.PingAsync(cancellationToken);
+    }
+
     /// <summary>Connects to <paramref name="host"/> over TCP, performs the handshake and authenticates.</summary>
     public static async Task<SshClient> ConnectAsync(string host, int port, SshClientOptions options, CancellationToken cancellationToken = default)
     {

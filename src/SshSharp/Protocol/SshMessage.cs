@@ -43,6 +43,10 @@ internal static class SshMessage
     public const byte ChannelRequest = 98;
     public const byte ChannelSuccess = 99;
     public const byte ChannelFailure = 100;
+
+    // OpenSSH's transport ping (PROTOCOL 1.8, ping@openssh.com).
+    public const byte Ping = 192;
+    public const byte Pong = 193;
 }
 
 /// <summary>Reason codes for <c>SSH_MSG_DISCONNECT</c> (RFC 4253 section 11.1).</summary>

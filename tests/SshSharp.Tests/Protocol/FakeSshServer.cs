@@ -359,12 +359,30 @@ internal sealed class FakeSshServer : IAsyncDisposable
         }
     }
 
+    /// <summary>The extensions the client announced in its EXT_INFO.</summary>
+    public Dictionary<string, string> ClientExtensions { get; } = new(StringComparer.Ordinal);
+
     /// <summary>Receives the next application message; a client-initiated re-exchange is handled on the way.</summary>
     public async ValueTask<DecodedPacket> ReceiveAsync(CancellationToken cancellationToken = default)
     {
         while (true)
         {
             var packet = await ReceiveRawAsync(cancellationToken);
+            if (packet.Payload.Span[0] == SshMessage.ExtInfo)
+            {
+                // The client's own extensions (RFC 8308), sent right after its first NEWKEYS; recorded, not handed to the test.
+                var reader = new SshReader(packet.Payload.Span);
+                reader.ReadByte();
+                var count = reader.ReadUInt32();
+                for (var i = 0u; i < count; i++)
+                {
+                    ClientExtensions[reader.ReadUtf8String()] = reader.ReadUtf8String();
+                }
+
+                packet.Dispose();
+                continue;
+            }
+
             if (packet.Payload.Span[0] != SshMessage.KexInit)
             {
                 return packet;

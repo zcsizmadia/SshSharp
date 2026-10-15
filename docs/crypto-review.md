@@ -16,7 +16,7 @@ outside review is planned before 1.0.
 | bcrypt_pbkdf | pyca/bcrypt known answer; keys encrypted by ssh-keygen with every supported cipher |
 | BLAKE2b | RFC 7693 |
 | Argon2d/i/id | RFC 9106 section 5 vectors; .ppk files written by PuTTY's puttygen (CI) |
-| sntrup761 | The NTRU Prime round-3 known-answer tests (key pair, ciphertext and shared secret, replayed with NIST's AES-256 CTR DRBG); `sntrup761x25519-sha512` and its `@openssh.com` name against OpenSSH (CI: Alpine 3.19 and 3.22, Windows); implicit rejection of tampered ciphertexts |
+| sntrup761 | The NTRU Prime round-3 known-answer tests (key pair, ciphertext and shared secret, replayed with NIST's AES-256 CTR DRBG); `sntrup761x25519-sha512` and its `@openssh.com` name against OpenSSH (CI: the Linux runners and the OpenSSH containers that offer it; OpenSSH for Windows 9.5 does not); implicit rejection of tampered ciphertexts |
 
 ## Constant-time review of the secret-key paths (M3)
 

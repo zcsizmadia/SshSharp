@@ -381,20 +381,24 @@ internal sealed class SshTransport : IAsyncDisposable
             throw;
         }
 
-        await SwitchKeysAsync(newSend, newReceive, strict, strictMessages, cancellationToken).ConfigureAwait(false);
+        // After the first exchange, a client may announce its own extensions (RFC 8308) when the server asked for them (ext-info-s).
+        await SwitchKeysAsync(newSend, newReceive, strict, strictMessages, sendExtInfo: initial && negotiated.ServerSupportsExtInfo, cancellationToken)
+            .ConfigureAwait(false);
     }
 
     /// <summary>
     /// Sends NEWKEYS and installs the new keys for each direction. Takes ownership of both protectors: one that is not installed when the
     /// exchange fails part way is wiped here, rather than left to the garbage collector.
     /// </summary>
-    private async Task SwitchKeysAsync(PacketProtector newSend, PacketProtector newReceive, bool strict, bool strictMessages, CancellationToken cancellationToken)
+    private async Task SwitchKeysAsync(PacketProtector newSend, PacketProtector newReceive, bool strict, bool strictMessages, bool sendExtInfo,
+        CancellationToken cancellationToken)
     {
         var sendInstalled = false;
         var receiveInstalled = false;
         try
         {
-            await SwitchKeysCoreAsync(newSend, newReceive, strict, strictMessages, () => sendInstalled = true, () => receiveInstalled = true, cancellationToken)
+            await SwitchKeysCoreAsync(newSend, newReceive, strict, strictMessages, sendExtInfo, () => sendInstalled = true, () => receiveInstalled = true,
+                cancellationToken)
                 .ConfigureAwait(false);
         }
         catch
@@ -413,7 +417,7 @@ internal sealed class SshTransport : IAsyncDisposable
         }
     }
 
-    private async Task SwitchKeysCoreAsync(PacketProtector newSend, PacketProtector newReceive, bool strict, bool strictMessages, Action sendInstalled,
+    private async Task SwitchKeysCoreAsync(PacketProtector newSend, PacketProtector newReceive, bool strict, bool strictMessages, bool sendExtInfo, Action sendInstalled,
         Action receiveInstalled, CancellationToken cancellationToken)
     {
         // Each side sends NEWKEYS under the old keys, then protects what it sends with the new ones; incoming switches on the peer's NEWKEYS.
@@ -428,6 +432,15 @@ internal sealed class SshTransport : IAsyncDisposable
             if (strict)
             {
                 _sendSequence = 0;
+            }
+
+            if (sendExtInfo)
+            {
+                // The first packet under the new keys (RFC 8308 section 2.4). ext-info-in-auth@openssh.com (PROTOCOL 1.10) lets the server
+                // send server-sig-algs again during authentication, for example when a Match block changes them for this user; the
+                // authentication reads the current list before each key.
+                PacketCodec.Encode(_writer, ClientExtInfo, _sendProtector, _sendSequence++);
+                await _writer.FlushAsync(_lifetime.Token).ConfigureAwait(false);
             }
 
             // Our side of the exchange is complete: application sends may resume, under the new keys.
@@ -784,6 +797,20 @@ internal sealed class SshTransport : IAsyncDisposable
         {
             return new SshException(SshFailureReason.ConnectionClosed, "The server closed the connection.");
         }
+    }
+
+    /// <summary>The client's EXT_INFO: <c>ext-info-in-auth@openssh.com</c> = "0".</summary>
+    private static readonly byte[] ClientExtInfo = BuildClientExtInfo();
+
+    private static byte[] BuildClientExtInfo()
+    {
+        var buffer = new ArrayBufferWriter<byte>(64);
+        var writer = new SshWriter(buffer);
+        writer.WriteByte(SshMessage.ExtInfo);
+        writer.WriteUInt32(1);
+        writer.WriteString("ext-info-in-auth@openssh.com");
+        writer.WriteString("0");
+        return buffer.WrittenSpan.ToArray();
     }
 
     private static Dictionary<string, string> ParseExtInfo(ReadOnlySpan<byte> payload, IReadOnlyDictionary<string, string> previous)
