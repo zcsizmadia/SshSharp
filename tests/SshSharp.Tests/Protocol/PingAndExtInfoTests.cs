@@ -55,6 +55,20 @@ public class PingAndExtInfoTests
     }
 
     [Test]
+    public async Task APingTheServerDropsDuringAKeyExchange_IsSentAgainAfterIt()
+    {
+        // OpenSSH never answers a PING that arrives while it re-keys; the client used to wait for that pong forever.
+        await using var server = new FakeSessionServer(new FakeServerOptions { ExtraExtensions = PingExtension }) { DropNextPingAndRekey = true };
+        await using var client = await ConnectAsync(server);
+
+        var roundTrip = await client.PingAsync(Timeout());
+
+        await Assert.That(roundTrip).IsLessThan(TimeSpan.FromSeconds(30));
+        await Assert.That(server.PingsReceived).IsEqualTo(2);
+        await Assert.That(server.Raw.KeyExchangeCount).IsGreaterThanOrEqualTo(2);
+    }
+
+    [Test]
     public async Task PingAsync_UsesTheTransportPing_WhereTheServerHasIt()
     {
         await using var server = new FakeSessionServer(new FakeServerOptions { ExtraExtensions = PingExtension });

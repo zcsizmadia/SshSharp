@@ -480,6 +480,12 @@ internal sealed class SshTransport : IAsyncDisposable
         || Interlocked.Read(ref _packetsReceivedSinceKex) >= _options.RekeyPackets
         || _options.TimeProvider.GetElapsedTime(_kexStartedAt) >= _options.RekeyInterval;
 
+    /// <summary>
+    /// Runs on the receive side after each key re-exchange completes, before the next message is read. OpenSSH drops a PING that
+    /// arrives during a key exchange (no PONG is ever sent), so the connection sends again the pings still waiting for theirs.
+    /// </summary>
+    public Action? KeyReexchanged { get; set; }
+
     /// <summary>We start a re-exchange: send KEXINIT and hold application sends back. The receive side completes it.</summary>
     private async ValueTask StartRekeyAsync(CancellationToken cancellationToken)
     {
@@ -492,6 +498,7 @@ internal sealed class SshTransport : IAsyncDisposable
             }
 
             SshLog.RekeyStarting(_options.Logger, "size or time threshold reached");
+            Instrumentation.Trace($"kex: we start a re-exchange (sent {Interlocked.Read(ref _bytesSinceKex)} bytes, received {Interlocked.Read(ref _packetsReceivedSinceKex)} packets since the last)");
             await SendClientKexInitLockedAsync(cancellationToken).ConfigureAwait(false);
         }
         finally
@@ -505,6 +512,7 @@ internal sealed class SshTransport : IAsyncDisposable
     {
         KexInitMessage clientInit;
         byte[] clientInitPayload;
+        Instrumentation.Trace($"kex: the server's KEXINIT (we were {(_rekeying ? "already re-keying" : "not re-keying")})");
         await _sendLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -525,6 +533,8 @@ internal sealed class SshTransport : IAsyncDisposable
         try
         {
             await ExchangeKeysAsync(clientInit, clientInitPayload, serverInitPayload, initial: false, serverInitSequence: 0, cancellationToken).ConfigureAwait(false);
+            Instrumentation.Trace("kex: re-exchange finished");
+            KeyReexchanged?.Invoke();
         }
         catch (Exception ex)
         {
@@ -539,6 +549,7 @@ internal sealed class SshTransport : IAsyncDisposable
     {
         var clientInit = KexInitMessage.ForClient(_options.Preferences, initial: false);
         var payload = Serialize(clientInit.Write);
+        Instrumentation.Trace($"kex: our KEXINIT out (bytes since the last exchange {Interlocked.Read(ref _bytesSinceKex)}, packets received {Interlocked.Read(ref _packetsReceivedSinceKex)})");
         _rekeying = true;
         _pendingClientInit = clientInit;
         _pendingClientInitPayload = payload;
@@ -575,6 +586,7 @@ internal sealed class SshTransport : IAsyncDisposable
             {
                 if (!kexMessage && _rekeying)
                 {
+                    Instrumentation.Trace($"kex: message {payload.Span[0]} waits for the re-exchange");
                     wait = _rekeyDone.Task;
                 }
                 else
