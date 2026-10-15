@@ -261,6 +261,8 @@ public class SessionInteropTests
             await Assert.That(yes.ExitSignal is "PIPE" || yes.ExitStatus is not null and not 0).IsTrue();
             stages.Step("closing the session");
             await yes.DisposeAsync();
+            stages.Step("pinging after the eow session");
+            await client.PingAsync(Timeout());
 
             // The other direction (sshd telling us the program closed its input) cannot be seen here: sshd sends eow@openssh.com only
             // to clients whose identification says OpenSSH (channels.c). The unit tests cover it.
