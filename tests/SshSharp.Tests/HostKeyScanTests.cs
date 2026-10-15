@@ -16,24 +16,45 @@ public class HostKeyScanTests
     /// <summary>Starts a fresh fake server per connection, as a real server would accept them, and counts the connections.</summary>
     private sealed class Servers(FakeServerOptions options) : IAsyncDisposable
     {
-        private readonly List<FakeSshServer> _started = [];
+        private readonly List<(FakeSshServer Server, Task Handshake)> _started = [];
 
         public int Count => _started.Count;
 
         public ValueTask<Stream> ConnectAsync(CancellationToken cancellationToken)
         {
             var server = new FakeSshServer(options);
-            _started.Add(server);
-            _ = server.StartAsync(cancellationToken);
+            _started.Add((server, server.StartAsync(cancellationToken)));
             return ValueTask.FromResult(server.ClientStream);
         }
 
+        /// <summary>How far each server's handshake got, and how its task ended: a scan that times out shows which side stopped (#188).</summary>
+        public string Describe() => string.Join("; ", _started.Select((s, i) => $"server {i + 1}: {s.Server.Stage}, " + s.Handshake switch
+        {
+            { IsFaulted: true } faulted => $"faulted with {faulted.Exception!.InnerException}",
+            { IsCanceled: true } => "cancelled",
+            { IsCompleted: true } => "completed",
+            _ => "still running",
+        }));
+
         public async ValueTask DisposeAsync()
         {
-            foreach (var server in _started)
+            foreach (var (server, _) in _started)
             {
                 await server.DisposeAsync();
             }
+        }
+    }
+
+    /// <summary>Scans the fake servers; a timeout is reported with how far each server got.</summary>
+    private static async Task<IReadOnlyList<SshHostKey>> ScanAsync(Servers servers, SshHostKeyScanOptions? options = null)
+    {
+        try
+        {
+            return await SshClient.ScanHostKeysAsync(servers.ConnectAsync, options ?? Patient(), Timeout());
+        }
+        catch (SshException ex) when (ex.Reason == SshFailureReason.Timeout)
+        {
+            throw new TimeoutException($"{ex.Message} {servers.Describe()}", ex);
         }
     }
 
@@ -46,7 +67,7 @@ public class HostKeyScanTests
     {
         await using var servers = new Servers(new FakeServerOptions { HostKey = Ed25519Key, ExtraHostKeys = [EcdsaKey, RsaKey] });
 
-        var keys = await SshClient.ScanHostKeysAsync(servers.ConnectAsync, Patient(), Timeout());
+        var keys = await ScanAsync(servers);
 
         // In SshSharp's preference order; RSA once, although the server offers it under two signature algorithms.
         await Assert.That(keys.Select(k => k.KeyType)).IsEquivalentTo(["ssh-ed25519", "ecdsa-sha2-nistp256", "ssh-rsa"]);
@@ -82,7 +103,7 @@ public class HostKeyScanTests
     {
         await using var servers = new Servers(new FakeServerOptions { HostKey = Ed25519Key, ExtraHostKeys = [EcdsaKey, RsaKey] });
 
-        var keys = await SshClient.ScanHostKeysAsync(servers.ConnectAsync, new SshHostKeyScanOptions { Timeout = InMemoryTimeout, HostKeyAlgorithms = ["rsa-sha2-256", "ecdsa-sha2-nistp256"] }, Timeout());
+        var keys = await ScanAsync(servers, new SshHostKeyScanOptions { Timeout = InMemoryTimeout, HostKeyAlgorithms = ["rsa-sha2-256", "ecdsa-sha2-nistp256"] });
 
         await Assert.That(keys.Select(k => k.Algorithm)).IsEquivalentTo(["rsa-sha2-256", "ecdsa-sha2-nistp256"]);
         await Assert.That(servers.Count).IsEqualTo(2);
@@ -93,7 +114,7 @@ public class HostKeyScanTests
     {
         await using var servers = new Servers(new FakeServerOptions { HostKey = Ed25519Key });
 
-        var keys = await SshClient.ScanHostKeysAsync(servers.ConnectAsync, new SshHostKeyScanOptions { Timeout = InMemoryTimeout, HostKeyAlgorithms = ["rsa-sha2-512"] }, Timeout());
+        var keys = await ScanAsync(servers, new SshHostKeyScanOptions { Timeout = InMemoryTimeout, HostKeyAlgorithms = ["rsa-sha2-512"] });
 
         await Assert.That(keys).IsEmpty();
         await Assert.That(servers.Count).IsEqualTo(1);
@@ -104,7 +125,7 @@ public class HostKeyScanTests
     {
         await using var servers = new Servers(new FakeServerOptions { HostKey = Ed25519Key, ExtraHostKeys = [EcdsaKey], Kex = global::SshSharp.Protocol.SshAlgorithms.EcdhNistp256, Cipher = "aes256-gcm@openssh.com" });
 
-        var keys = await SshClient.ScanHostKeysAsync(servers.ConnectAsync, new SshHostKeyScanOptions { Timeout = InMemoryTimeout, FipsMode = true }, Timeout());
+        var keys = await ScanAsync(servers, new SshHostKeyScanOptions { Timeout = InMemoryTimeout, FipsMode = true });
 
         await Assert.That(keys.Select(k => k.KeyType)).IsEquivalentTo(["ecdsa-sha2-nistp256"]);
     }
@@ -116,8 +137,8 @@ public class HostKeyScanTests
         var certificate = FakeHostKey.Certified(Ed25519Key, TestKeys.Certificate(authority, Ed25519Key.Blob, SshCertificateType.Host, ["host.example"]));
         await using var servers = new Servers(new FakeServerOptions { HostKey = Ed25519Key, HostCertificate = certificate });
 
-        var withCertificates = await SshClient.ScanHostKeysAsync(servers.ConnectAsync, new SshHostKeyScanOptions { Timeout = InMemoryTimeout, IncludeCertificates = true }, Timeout());
-        var plainOnly = await SshClient.ScanHostKeysAsync(servers.ConnectAsync, Patient(), Timeout());
+        var withCertificates = await ScanAsync(servers, new SshHostKeyScanOptions { Timeout = InMemoryTimeout, IncludeCertificates = true });
+        var plainOnly = await ScanAsync(servers);
 
         await Assert.That(withCertificates.Count).IsEqualTo(2);
         await Assert.That(withCertificates[0].Certificate).IsNotNull();
@@ -134,7 +155,7 @@ public class HostKeyScanTests
         var small = FakeHostKey.Rsa(1024);
         await using var servers = new Servers(new FakeServerOptions { HostKey = small });
 
-        var keys = await SshClient.ScanHostKeysAsync(servers.ConnectAsync, Patient(), Timeout());
+        var keys = await ScanAsync(servers);
 
         await Assert.That(keys.Single().KeySizeBits).IsEqualTo(1024);
     }
@@ -144,7 +165,7 @@ public class HostKeyScanTests
     {
         await using var servers = new Servers(new FakeServerOptions { HostKey = Ed25519Key, CorruptSignature = true });
 
-        await Assert.That(async () => await SshClient.ScanHostKeysAsync(servers.ConnectAsync, Patient(), Timeout())).Throws<SshHostKeyException>();
+        await Assert.That(async () => await ScanAsync(servers)).Throws<SshHostKeyException>();
     }
 
     [Test]

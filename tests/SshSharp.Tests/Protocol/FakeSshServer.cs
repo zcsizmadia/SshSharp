@@ -274,9 +274,20 @@ internal sealed class FakeSshServer : IAsyncDisposable
     public int KeyExchangeCount { get; private set; }
 
     /// <summary>Runs the server side of the handshake. Await it together with the client's ConnectAsync.</summary>
+    /// <summary>How far the initial handshake got, for tests that time out waiting for it (#188).</summary>
+    public string Stage
+    {
+        get => Volatile.Read(ref _stage);
+        private set => Volatile.Write(ref _stage, value);
+    }
+
+    private string _stage = "not started";
+
     public async Task StartAsync(CancellationToken cancellationToken = default)
     {
+        Stage = "reading the client's identification";
         ClientIdentification = await SshIdentification.ReadAsync(_reader, cancellationToken);
+        Stage = "sending the identification and KEXINIT";
 
         if (!Options.SilentOnConnect)
         {
@@ -299,6 +310,7 @@ internal sealed class FakeSshServer : IAsyncDisposable
         var serverInitPayload = Serialize(serverInit.Write);
         await SendKexAsync(serverInitPayload, cancellationToken);
 
+        Stage = "reading the client's KEXINIT";
         using var clientInitPacket = await ReceiveRawAsync(cancellationToken);
         var clientInitPayload = clientInitPacket.Payload.ToArray();
         ClientKexInit = KexInitMessage.Parse(clientInitPayload);
@@ -311,6 +323,7 @@ internal sealed class FakeSshServer : IAsyncDisposable
         }
 
         await ExchangeAsync(ClientKexInit, clientInitPayload, serverInit, serverInitPayload, initial: true, cancellationToken);
+        Stage = "handshake done";
     }
 
     /// <summary>Starts a key re-exchange from the server side. It completes when the client's KEXINIT arrives in <see cref="ReceiveAsync"/>.</summary>
@@ -490,6 +503,11 @@ internal sealed class FakeSshServer : IAsyncDisposable
             await SendKexAsync(new byte[] { SshMessage.KexEcdhReply, 0, 0, 0, 0 }, cancellationToken); // the "guessed" packet, to be discarded
         }
 
+        if (initial)
+        {
+            Stage = $"reading the client's key exchange init ({negotiated.Kex}, {negotiated.HostKey})";
+        }
+
         using var kexInitPacket = await ReceiveRawAsync(cancellationToken);
         var init = kexInitPacket.Payload.ToArray();
 
@@ -513,8 +531,17 @@ internal sealed class FakeSshServer : IAsyncDisposable
             ? certificate
             : !initial && Options.RekeyHostKey is { } replacement ? replacement
             : Options.ExtraHostKeys.FirstOrDefault(k => AlgorithmsFor(k).Contains(negotiated.HostKey)) ?? Options.HostKey;
+        if (initial)
+        {
+            Stage = "computing and sending the key exchange reply";
+        }
+
         var (reply, secret, hash, kexHash) = RunKex(negotiated.Kex, negotiated.HostKey, hostKey, init, clientInitPayload, serverInitPayload);
         await SendKexAsync(reply, cancellationToken);
+        if (initial)
+        {
+            Stage = "reply sent; sending NEWKEYS";
+        }
 
         if (initial)
         {
@@ -552,6 +579,11 @@ internal sealed class FakeSshServer : IAsyncDisposable
         finally
         {
             _sendLock.Release();
+        }
+
+        if (initial)
+        {
+            Stage = "NEWKEYS sent; reading the client's";
         }
 
         using var newKeysPacket = await ReceiveRawAsync(cancellationToken);
