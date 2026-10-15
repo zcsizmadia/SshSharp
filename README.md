@@ -60,7 +60,7 @@ Console.WriteLine(result.StandardOutputText);
 |---|---|---|
 | Target frameworks | .NET 8, .NET 10 | .NET Framework 4.6.2+, .NET Standard 2.0, .NET 8+ |
 | API | Async-only network API; `CancellationToken` on every network operation | Mostly synchronous; async connect, commands and SFTP |
-| `ssh_config` (`Host`, `Match`, `Include`; connect by alias; `KnownHostsCommand`, `RefuseConnection`) | ✅ | ❌ |
+| `ssh_config` (`Host`, `Match` with `localnetwork`, `sessiontype` and `command`, `Include`; connect by alias; `KnownHostsCommand`, `RefuseConnection`) | ✅ | ❌ |
 | `known_hosts` verification (hashed hosts, `@cert-authority`, `@revoked`, `StrictHostKeyChecking`) | ✅ | ❌ (verify in a `HostKeyReceived` handler) |
 | Revoked host keys (`RevokedHostKeys`: OpenSSH KRLs from `ssh-keygen -k`, or key lists) | ✅ | ❌ |
 | `UpdateHostKeys` (key rotation) | ✅ | ❌ |
@@ -89,7 +89,9 @@ Console.WriteLine(result.StandardOutputText);
 | Strict key exchange (Terrapin fix) | ✅ | ✅ |
 | Legacy algorithms (CBC, 3DES, SHA-1, `ssh-rsa`, DH group 1, zlib) | — (by design) | ✅ |
 | Commands, shells with a terminal, `expect`-style scripting | ✅ | ✅ |
-| Signals and BREAK (RFC 4335, for serial consoles) to a running session | ✅ | ❌ |
+| Environment variables for a session (`env` requests, as ssh's `SetEnv` and `SendEnv`) | ✅ | ❌ |
+| Any signal to a running session, including extension signals (`INFO@openssh.com`) | ✅ | ❌ (TERM or KILL, when cancelling a command) |
+| BREAK (RFC 4335, for serial consoles) | ✅ | ❌ |
 | Any subsystem (`ssh -s`) | ✅ | ❌ (SFTP and NETCONF only) |
 | Local, remote and dynamic port forwarding | ✅ (also started from `ssh_config`) | ✅ |
 | Remote dynamic forwarding (`ssh -R port`, a SOCKS proxy on the client side) | ✅ | ❌ |

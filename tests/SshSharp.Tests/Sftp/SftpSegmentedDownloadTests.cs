@@ -64,6 +64,21 @@ public sealed class SftpSegmentedDownloadTests : IDisposable
     }
 
     [Test]
+    public async Task AConnectionThatRefusesNewSessions_DownloadsOverTheOpenSession()
+    {
+        var data = RandomNumberGenerator.GetBytes((5 * 1024 * 1024) + 7);
+        await using var rig = await Rig.StartAsync(f => f.AddFile(Home + "/big.bin", data));
+        await rig.Client.PreventNewSessionsAsync(Timeout()); // opening a session now throws InvalidOperationException
+        var local = Path.Combine(_dir, "big.bin");
+
+        var total = await rig.Sftp.DownloadFileAsync("big.bin", local, new SftpTransferOptions { Segments = 4 }, Timeout());
+
+        await Assert.That(total).IsEqualTo(data.Length);
+        await Assert.That((await File.ReadAllBytesAsync(local)).SequenceEqual(data)).IsTrue();
+        await Assert.That(rig.Files.Sessions).IsEqualTo(1);
+    }
+
+    [Test]
     public async Task FourSegments_FetchEveryQuarter_OverFourSessions_IntoTheRightPlaces()
     {
         var data = RandomNumberGenerator.GetBytes((5 * 1024 * 1024) + 12345);

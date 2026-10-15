@@ -524,6 +524,10 @@ public sealed partial class SftpClient : IAsyncDisposable
                 {
                     break; // no more sessions: the ones open share the file
                 }
+                catch (InvalidOperationException)
+                {
+                    break; // the connection refuses new sessions (PreventNewSessionsAsync): this session downloads alone
+                }
             }
 
             SftpClient[] clients = [this, .. siblings];

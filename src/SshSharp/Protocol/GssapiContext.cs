@@ -30,7 +30,10 @@ internal static class Gssapi
     /// <summary>The Kerberos 5 mechanism, 1.2.840.113554.1.2.2, DER-encoded (tag 6, length 9), as RFC 4462 section 3.2 sends it.</summary>
     internal static readonly byte[] Krb5Oid = [0x06, 0x09, 0x2A, 0x86, 0x48, 0x86, 0xF7, 0x12, 0x01, 0x02, 0x02];
 
-    /// <summary>Whether this build can do <c>gssapi-with-mic</c>: it needs <c>NegotiateAuthentication.ComputeIntegrityCheck</c> (.NET 9 and later).</summary>
+    /// <summary>
+    /// Whether this build can do <c>gssapi-with-mic</c>: it needs <c>NegotiateAuthentication.ComputeIntegrityCheck</c>, which .NET 9 added,
+    /// so of this library's targets (net8.0, net10.0) only the net10.0 build has it.
+    /// </summary>
 #if NET10_0_OR_GREATER
     internal const bool IsSupported = true;
 #else
