@@ -7,7 +7,7 @@ if command -v dropbear > /dev/null 2>&1; then
   exec dropbear -F -E -R -p 22
 fi
 # AsyncSSH runs as the test account, so it listens on an unprivileged port (2222); it checks the password itself.
-if [ -f /usr/bin/su-exec ] && python3 -c 'import asyncssh' 2> /dev/null; then
+if [ "$SSH_SERVER" = "asyncssh" ]; then
   cd /home/sshsharp
   exec su-exec sshsharp env HOME=/home/sshsharp USER=sshsharp PORT=2222 python3 /asyncssh_server.py
 fi

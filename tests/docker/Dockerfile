@@ -3,6 +3,8 @@
 ARG BASE
 FROM ${BASE}
 ARG SERVER=openssh
+# The entrypoint starts the server the image was built for.
+ENV SSH_SERVER=${SERVER}
 # The scp program too, for the SCP interop tests. Dropbear runs an external sftp-server for the sftp subsystem, at the path it was
 # built with (/usr/libexec/sftp-server); Alpine's OpenSSH package installs one in /usr/lib/ssh. AsyncSSH is a pinned release from
 # PyPI, on Alpine's Python and cryptography; su-exec runs it as the test account.
