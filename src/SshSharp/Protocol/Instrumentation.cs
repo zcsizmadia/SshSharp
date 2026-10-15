@@ -43,8 +43,13 @@ internal static class Instrumentation
     public static void Trace(string message)
     {
         TraceEvents.Enqueue($"{DateTime.UtcNow:HH:mm:ss.ffffff} [{Environment.CurrentManagedThreadId}] {message}");
-        while (TraceEvents.Count > MaxTraceEvents && TraceEvents.TryDequeue(out _))
+        // The oldest go once the trace is full; another thread may have taken them already, which is as good.
+        while (TraceEvents.Count > MaxTraceEvents)
         {
+            if (!TraceEvents.TryDequeue(out _))
+            {
+                break;
+            }
         }
     }
 
