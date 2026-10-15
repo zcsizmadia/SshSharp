@@ -177,7 +177,7 @@ public class AgentInteropTests
     }
 
     [Test]
-    public async Task KeysAreAdded_Used_AndRemoved_AndTheAgentLocks()
+    public async Task KeysAreAdded_Used_AndRemoved()
     {
         if (Environment.GetEnvironmentVariable("SSHSHARP_TEST_AGENT") != "1" || SshAgent.FromEnvironment() is not { } agent)
         {
@@ -206,11 +206,8 @@ public class AgentInteropTests
             var signature = await SshSignature.SignAsync(held, message, "file", cancellationToken: token);
             await Assert.That(signature.Verify(message, "file")).IsTrue();
 
-            // Locked, it lists nothing; unlocked, the keys are back.
-            await agent.LockAsync("sshsharp-lock", token);
-            await Assert.That(await agent.GetKeysAsync(token)).IsEmpty();
-            await agent.UnlockAsync("sshsharp-lock", token);
-            await Assert.That((await agent.GetKeysAsync(token)).Any(k => k.PublicKey.Span.SequenceEqual(key.PublicKey.Span))).IsTrue();
+            // Locking is left to the unit tests: a locked agent here would empty the key list of tests that authenticate with it in
+            // parallel (they are not all in this class).
         }
         finally
         {

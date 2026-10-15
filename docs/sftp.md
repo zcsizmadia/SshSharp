@@ -40,10 +40,33 @@ latency. Each request is as large as the server allows (`limits@openssh.com`; 32
 | `Progress` | An `IProgress<long>` with the bytes transferred so far. |
 | `MaxRequestsInFlight` | The window of outstanding requests (1 to 1024). |
 | `Resume` | Continue an interrupted transfer, as `reget` and `reput` do: only the part the destination lacks is sent. |
+| `Segments` (default 1) | Download one file in up to 16 parallel ranges, each over its own SFTP session (see below). |
 
 A failed download leaves no partial local file behind, unless `Resume` is set, in which case what arrived is kept for the
 next attempt. A resume trusts that the destination's bytes are the start of the same file (nothing compares them), and a
 destination larger than the source is an error.
+
+### Segmented downloads
+
+One SFTP session is one SSH channel, and the data in flight on a channel is bounded by its flow-control window (2 MiB here), so
+a single download moves at most about 2 MiB per round trip: some 20 MiB/s at 100 ms of latency, however many requests are in
+flight. `Segments` splits a file into ranges and fetches each over its own session on the same connection, each with its own
+window (and, on OpenSSH, its own `sftp-server` process), writing them into the local file at their offsets:
+
+```csharp
+await sftp.DownloadFileAsync("backups/db.tar.zst", "db.tar.zst", new SftpTransferOptions { Segments = 4 });
+```
+
+It helps on links with high latency, or where a single session's server process is the limit. It does not help where the
+bandwidth is the limit (the sessions share one TCP connection), and it costs a few extra round trips to open the sessions, so
+files smaller than 1 MiB per segment use fewer segments. The server may allow fewer sessions than asked (sshd's `MaxSessions`,
+10 per connection by default); then the ranges are shared among the sessions it opens. `Progress` reports the total over all
+segments. The first range that fails stops the others and the local file is removed. A file that grows during the download is
+fetched to its new end; one that shrinks fails the download rather than leave a gap.
+
+Only `DownloadFileAsync` (and `DownloadDirectoryAsync`, per file) uses segments; `DownloadAsync` writes a stream in order, and
+`Resume` needs a sequential download (only that leaves a prefix to resume from), so with `Resume` set a file is fetched over one
+session. Uploads use one session.
 
 ### Directories
 

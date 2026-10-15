@@ -135,7 +135,50 @@ internal sealed class FakeSftpServer
 
     public void Install(FakeSessionServer server) => server.Subsystems["sftp"] = RunAsync;
 
+    /// <summary>How many SFTP sessions have started, and the most open at once.</summary>
+    public int Sessions { get; private set; }
+
+    public int MaxConcurrentSessions { get; private set; }
+
+    private int _openSessions;
+
+    /// <summary>Fails a READ at this offset with a Failure status (a disk error on the server, say).</summary>
+    public Func<long, bool>? FailReadAt { get; set; }
+
+    /// <summary>Every READ's offset, in arrival order across sessions.</summary>
+    public List<long> ReadOffsets { get; } = [];
+
+    /// <summary>Sessions share the file system, so requests are handled one at a time, whichever session they come from.</summary>
+    private byte[]? HandleLocked(byte[] packet)
+    {
+        lock (_nodes)
+        {
+            return Handle(packet);
+        }
+    }
+
     private async Task RunAsync(ExecScript script)
+    {
+        lock (_nodes)
+        {
+            Sessions++;
+            MaxConcurrentSessions = Math.Max(MaxConcurrentSessions, ++_openSessions);
+        }
+
+        try
+        {
+            await RunSessionAsync(script);
+        }
+        finally
+        {
+            lock (_nodes)
+            {
+                _openSessions--;
+            }
+        }
+    }
+
+    private async Task RunSessionAsync(ExecScript script)
     {
         // A reader queues requests as they arrive and a responder answers them, so requests the client sends without waiting pile up
         // in the queue (MaxOutstanding), and two queued ones can be answered in reverse order.
@@ -184,7 +227,7 @@ internal sealed class FakeSftpServer
                 await hold.Task;
             }
 
-            var reply = Handle(packet);
+            var reply = HandleLocked(packet);
             if (StderrPerReply > 0)
             {
                 await script.StderrAsync(new byte[StderrPerReply]);
@@ -197,7 +240,7 @@ internal sealed class FakeSftpServer
 
             if (ReorderReplies && packet[0] != 1 && queue.Reader.TryRead(out var next))
             {
-                var nextReply = Handle(next);
+                var nextReply = HandleLocked(next);
                 await script.StdoutAsync(Frame(nextReply!));
                 await script.StdoutAsync(Frame(reply!));
                 ReorderedPairs++;
@@ -438,6 +481,12 @@ internal sealed class FakeSftpServer
                 if (!_handles.TryGetValue(handle, out var open) || Follow(open.Path) is not { } node)
                 {
                     return Status(id, 4, "Bad handle");
+                }
+
+                ReadOffsets.Add(offset);
+                if (FailReadAt?.Invoke(offset) == true)
+                {
+                    return Status(id, 4, "Input/output error");
                 }
 
                 if (offset >= node.Data.Count)
