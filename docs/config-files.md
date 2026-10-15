@@ -35,11 +35,17 @@ to `SshExecMatcher.RunShell`, for configuration files you trust); without it, `M
 they cannot inject shell syntax.
 
 `KnownHostsCommand` asks a program for host keys, in addition to the known_hosts files, as OpenSSH 8.5+ does: its output is read
-as known_hosts lines. As in OpenSSH, it is split into arguments (no shell is involved), each argument has its tokens expanded
-(also `%H`, the name looked up, `[host]:port` for another port; `%I`, `HOSTNAME`, or `ORDER` when it runs before the key is known;
-and the presented key's `%K` base64, `%f` fingerprint and `%t` type, `NONE` before it is known; while a host certificate is checked,
-`%K` and `%t` are the certificate's, and the command runs again with the plain key if ssh falls back to it, as in OpenSSH), and the program must be given by
-absolute path (on Windows, not a `.bat` or `.cmd` file, which Windows would run through `cmd.exe`). A non-zero exit status fails the connection; unlike OpenSSH, the run is limited to 30 seconds and 1 MiB of output.
+as known_hosts lines. As in OpenSSH:
+
+- The command is split into arguments; no shell is involved. The program must be given by absolute path and is taken as written
+  (on Windows it cannot be a `.bat` or `.cmd` file, which Windows would run through `cmd.exe`).
+- Each argument after it has its environment variables (`${VAR}`) and tokens expanded, in one pass, so a variable's value is not
+  expanded again. Besides the usual tokens there are `%H`, the name looked up (`[host]:port` for another port); `%I`, `HOSTNAME`,
+  or `ORDER` when it runs before the key is known; and the presented key's `%K` (base64), `%f` (fingerprint) and `%t` (type),
+  `NONE` before it is known.
+- While a host certificate is checked, `%K` and `%t` are the certificate's; if the check falls back to the plain key, the command
+  runs again with that.
+- A non-zero exit status fails the connection. Unlike OpenSSH, the run is limited to 30 seconds and 1 MiB of output.
 Because its output decides which host keys are trusted, connecting by alias runs it only with
 `SshConfigConnectOptions.AllowKnownHostsCommand = true` (off by default); otherwise a configuration that names one fails the
 connection, rather than quietly checking fewer keys than it says, unless the application supplies its own `HostKeyVerifier`,

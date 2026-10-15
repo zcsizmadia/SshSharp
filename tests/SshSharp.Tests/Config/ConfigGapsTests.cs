@@ -193,6 +193,30 @@ public sealed class ConfigGapsTests : IDisposable
     }
 
     [Test]
+    public async Task KnownHostsCommand_ExpandsVariablesAndTokens_InOnePass_InTheArgumentsOnly()
+    {
+        // As OpenSSH's percent_dollar_expand: ${VAR} and %x in one pass, so a variable holding "%h" stays "%h".
+        var variables = new Dictionary<string, string> { ["ZONE"] = "lab", ["ODD"] = "50%h" };
+        var tokens = new SshTokenContext("h", "host.example", 22, "user", "local", _dir, "localhost", name => variables.GetValueOrDefault(name));
+
+        await Assert.That(tokens.ExpandTokensAndVariables("${ZONE}-%h-${ODD}")).IsEqualTo("lab-host.example-50%h");
+        await Assert.That(tokens.ExpandTokens("${ZONE}")).IsEqualTo("${ZONE}"); // other keywords keep their own rules
+        await Assert.That(() => tokens.ExpandTokensAndVariables("${UNSET}")).Throws<FormatException>();
+        await Assert.That(() => tokens.ExpandTokensAndVariables("${}")).Throws<FormatException>();
+        await Assert.That(() => tokens.ExpandTokensAndVariables("${ZONE")).Throws<FormatException>();
+
+        // Through the runner: the arguments are expanded (the output is a known_hosts line for host "lab" of zone ${ZONE}).
+        using var hostKey = SshPrivateKey.Generate(SshKeyType.Ed25519);
+        var presented = new SshHostKey(hostKey.KeyType, hostKey.KeyType, hostKey.Fingerprint, hostKey.PublicKey, 256);
+        var file = await KnownHostsCommandRunner.RunAsync(Echo("${ZONE} %t %K"), tokens, "h", 22, "HOSTNAME", presented, asCertificate: false, Timeout());
+        await Assert.That(file.Find("lab", 22).Single().KeyType).IsEqualTo(hostKey.KeyType);
+
+        // An unset variable makes the command malformed, so the connection fails rather than run it half-expanded.
+        await Assert.That(async () => await KnownHostsCommandRunner.RunAsync(Echo("${UNSET} %t %K"), tokens, "h", 22, "HOSTNAME", presented, false, Timeout()))
+            .Throws<SshException>().WithMessageContaining("malformed");
+    }
+
+    [Test]
     public async Task KnownHostsCommand_GetsTheCertificate_WhileTheCertificateIsChecked()
     {
         // As ssh: %K and %t are the certificate while it is checked, and the plain key when ssh falls back to that; %f is the plain key's.

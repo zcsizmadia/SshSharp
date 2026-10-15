@@ -27,9 +27,18 @@ internal sealed record SshTokenContext(
     /// <summary>
     /// Expands <c>%h %n %p %r %u %d %l %L %C %k %j %i %T %%</c>. An unknown token throws <see cref="FormatException"/>, as in OpenSSH.
     /// </summary>
-    public string ExpandTokens(string value)
+    public string ExpandTokens(string value) => Expand(value, variables: false);
+
+    /// <summary>
+    /// Expands <c>${VAR}</c> and the <c>%</c> tokens in one pass, as OpenSSH's percent_dollar_expand does for <c>KnownHostsCommand</c>
+    /// arguments: a variable's value is inserted as it is, not expanded again. An unset or empty-named variable throws
+    /// <see cref="FormatException"/>, as do unknown tokens.
+    /// </summary>
+    public string ExpandTokensAndVariables(string value) => Expand(value, variables: true);
+
+    private string Expand(string value, bool variables)
     {
-        if (!value.Contains('%', StringComparison.Ordinal))
+        if (!value.Contains('%', StringComparison.Ordinal) && !(variables && value.Contains("${", StringComparison.Ordinal)))
         {
             return value;
         }
@@ -37,6 +46,25 @@ internal sealed record SshTokenContext(
         var sb = new StringBuilder(value.Length + 16);
         for (var i = 0; i < value.Length; i++)
         {
+            if (variables && value[i] == '$' && i + 1 < value.Length && value[i + 1] == '{')
+            {
+                var close = value.IndexOf('}', i + 2);
+                if (close < 0)
+                {
+                    throw new FormatException($"Unterminated '${{' in '{value}'.");
+                }
+
+                var name = value[(i + 2)..close];
+                if (name.Length == 0)
+                {
+                    throw new FormatException($"An empty '${{}}' in '{value}'.");
+                }
+
+                sb.Append(GetEnvironmentVariable(name) ?? throw new FormatException($"Environment variable '{name}' is not set."));
+                i = close;
+                continue;
+            }
+
             if (value[i] != '%')
             {
                 sb.Append(value[i]);

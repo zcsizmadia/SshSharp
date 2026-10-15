@@ -148,7 +148,8 @@ A man in the middle can read, change, drop and inject bytes. The server itself m
 - `KnownHostsCommand` runs only with `SshConfigConnectOptions.AllowKnownHostsCommand = true`. It is off by default, unlike
   `ProxyCommand`, because its output is trusted as known_hosts lines: a configuration the application does not control must not
   be able to vouch for host keys. With it off, a configuration that names one fails the connection. As in OpenSSH, no shell is
-  involved (the command is split into arguments, each token-expanded on its own, and the program must be an absolute path), so
+  involved (the command is split into arguments, each expanded on its own, the program taken as written, and the program must be
+  an absolute path), so
   token values cannot inject commands; the run is limited to 30 seconds and 1 MiB of output. On Windows a batch file (`.bat`,
   `.cmd`) is refused, because Windows runs it through `cmd.exe`, which would reparse the arguments.
 - `Match localnetwork` reads the local interface addresses. As ssh_config(5) warns, a network address is not a trustworthy
