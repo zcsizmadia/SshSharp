@@ -364,6 +364,11 @@ internal sealed class FakeSessionServer : IAsyncDisposable
     /// <summary>When set, channel opens are answered only after this task completes (to race the client's cancellation).</summary>
     public Task? HoldChannelOpen { get; set; }
 
+    /// <summary>How many CHANNEL_OPEN messages arrived, counted before <see cref="HoldChannelOpen"/> holds them.</summary>
+    public int ChannelOpensReceived => Volatile.Read(ref _channelOpensReceived);
+
+    private int _channelOpensReceived;
+
     /// <summary>A snapshot of the channels the client has opened.</summary>
     public IReadOnlyList<ServerChannel> Channels
     {
@@ -881,6 +886,7 @@ internal sealed class FakeSessionServer : IAsyncDisposable
 
             case SshMessage.ChannelOpen:
             {
+                Interlocked.Increment(ref _channelOpensReceived);
                 var channelType = reader.ReadUtf8String();
                 var clientId = reader.ReadUInt32();
                 var window = reader.ReadUInt32();
