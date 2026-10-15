@@ -25,7 +25,8 @@ Features that SSH.NET users have asked for in its issue tracker, and that SshSha
 |---|---|
 | Verify host keys against `known_hosts` | `KnownHostsVerifier`, with hashed hosts, `@cert-authority`, `@revoked` and `StrictHostKeyChecking` (see [Host keys](host-keys.md)) |
 | Jump hosts / bastions | `ProxyJump` chains and `ProxyCommand` from `ssh_config`, or by hand: `OpenTcpTunnelAsync` to the next host and `SshClient.ConnectAsync(stream, ...)` over it (see [Connecting](connecting.md)) |
-| Use the keys in `ssh-agent`; agent forwarding | `SshAgent` and `ForwardAgent`, on Unix sockets and the Windows OpenSSH agent |
+| Use the keys in `ssh-agent`; agent forwarding | `SshAgent` and `ForwardAgent`, on Unix sockets, the Windows OpenSSH agent and PuTTY's Pageant (`SshAgent.Pageant()`) |
+| Add, remove and lock agent keys (`ssh-add`) | `agent.AddKeyAsync(key, constraints)` (lifetime, confirmation), `RemoveKeyAsync`, `RemoveAllKeysAsync`, `LockAsync` and `UnlockAsync`; `AddKeysToAgent` in `ssh_config` (see [Authentication](authentication.md)) |
 | A subsystem other than `sftp` | `client.StartSubsystemAsync(name)` |
 | A terminal for a single command (`ssh -t host cmd`) | `StartCommandAsync(command, new SshSessionOptions { Terminal = ... })` |
 | Send a signal to a command | `session.SendSignalAsync("TERM")` |
@@ -36,7 +37,12 @@ Features that SSH.NET users have asked for in its issue tracker, and that SshSha
 | Generate keys (`ssh-keygen -t`) | `SshPrivateKey.Generate(type)` and `SaveAsync(path, passphrase)` |
 | Sign and verify files or git commits (`ssh-keygen -Y`) | `SshSignature` and `SshAllowedSigners` (see [Signing](signing.md)) |
 | Connect from a chosen local address or interface | `SshClientOptions.LocalEndPoint`, `BindAddress` and `BindInterface` in `ssh_config` |
-| Agent keys limited to some hosts (`ssh-add -h`) | session binding and `publickey-hostbound`, automatically |
+| Agent keys limited to some hosts (`ssh-add -h`) | adding them: `SshAgentKeyConstraints.Destinations` (`restrict-destination-v00@openssh.com`); using them: session binding and `publickey-hostbound`, automatically |
+| Send a BREAK to a serial console | `session.SendBreakAsync()` (RFC 4335, as OpenSSH's `~B`) |
+| Revoked host keys | `KnownHostsVerifier.RevokedHostKeys` (`RevokedHostKeys` in `ssh_config`): OpenSSH KRLs from `ssh-keygen -k`, or key lists |
+| Measure the round trip | `client.PingAsync()` (`ping@openssh.com`, or a `keepalive@openssh.com` request on older servers) |
+| Close idle channels | `SshClientOptions.ChannelTimeouts` (`ChannelTimeout` in `ssh_config`, as OpenSSH 9.2+) |
+| Faster SFTP downloads over high-latency links | `SftpTransferOptions.Segments`: one file in parallel ranges, each over its own SFTP session (see [SFTP](sftp.md)) |
 | Kerberos / Active Directory sign-in (GSSAPI) | `SshClientOptions.Gssapi`, or `GSSAPIAuthentication yes` in `ssh_config` (.NET 10; see [Authentication](authentication.md)) |
 | Remote files as an `IFileSystem` or `IFileProvider` | the `SshSharp.IO.Abstractions` and `SshSharp.FileProviders` packages |
 | Detect a stalled connection, also while a write is blocked | keep-alive (`KeepAliveInterval`, `KeepAliveCountMax`): the probes don't wait for pending writes, so a server that stops reading is still detected |

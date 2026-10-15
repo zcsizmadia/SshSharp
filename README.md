@@ -60,7 +60,7 @@ Console.WriteLine(result.StandardOutputText);
 |---|---|---|
 | Target frameworks | .NET 8, .NET 10 | .NET Framework 4.6.2+, .NET Standard 2.0, .NET 8+ |
 | API | Async-only network API; `CancellationToken` on every network operation | Mostly synchronous; async connect, commands and SFTP |
-| `ssh_config` (`Host`, `Match`, `Include`; connect by alias) | ✅ | ❌ |
+| `ssh_config` (`Host`, `Match`, `Include`; connect by alias; `KnownHostsCommand`, `RefuseConnection`) | ✅ | ❌ |
 | `known_hosts` verification (hashed hosts, `@cert-authority`, `@revoked`, `StrictHostKeyChecking`) | ✅ | ❌ (verify in a `HostKeyReceived` handler) |
 | Revoked host keys (`RevokedHostKeys`: OpenSSH KRLs from `ssh-keygen -k`, or key lists) | ✅ | ❌ |
 | `UpdateHostKeys` (key rotation) | ✅ | ❌ |
@@ -72,9 +72,9 @@ Console.WriteLine(result.StandardOutputText);
 | Keep-alive that detects a dead server (`ServerAliveCountMax`) | ✅ | ❌ (keep-alives get no reply) |
 | Round-trip ping (`client.PingAsync`, OpenSSH's `ping@openssh.com`) | ✅ | ❌ |
 | Channel idle timeouts by channel type (`ChannelTimeout`, OpenSSH 9.2+) | ✅ | ❌ |
-| SSH agent (`ssh-agent`, Windows OpenSSH agent, Pageant), including destination-constrained keys (`ssh-add -h`) | ✅ | ❌ |
+| SSH agent (`ssh-agent`, Windows OpenSSH agent, PuTTY's Pageant) | ✅ | ❌ |
 | Agent forwarding | ✅ | ❌ |
-| Agent key management (`ssh-add`: add with lifetime, confirmation or destination constraints (`-h`), remove, lock; `AddKeysToAgent`) | ✅ | ❌ |
+| Agent key management (`ssh-add`: add with lifetime, confirmation or destination constraints (`-h`), remove, lock; `AddKeysToAgent`), and signing with destination-constrained keys | ✅ | ❌ |
 | Password, public key, keyboard-interactive, multi-factor | ✅ | ✅ |
 | Kerberos (GSSAPI, `gssapi-with-mic`; .NET 10) | ✅ | ❌ |
 | OpenSSH certificates | User and host | User (authentication) |
@@ -101,7 +101,7 @@ Console.WriteLine(result.StandardOutputText);
 | Remote files as an `IFileSystem` (System.IO.Abstractions: `File`, `Directory`, `Path`, streams) | ✅ (`SshSharp.IO.Abstractions`) | ❌ |
 | Remote files as an `IFileProvider` (ASP.NET Core static files, Razor, configuration) | ✅ (`SshSharp.FileProviders`) | ❌ |
 | Native AOT | ✅ (an AOT-compiled binary connects to a real server in CI) | ✅ (AOT-compatible; an AOT publish is checked in CI) |
-| Diagnostics | `ILogger`, `ActivitySource` tracing, `Meter` metrics | `ILogger` |
+| Diagnostics | `ILogger`, `ActivitySource` tracing, `Meter` metrics (OpenTelemetry semantic conventions) | `ILogger` |
 | Fuzzing | ✅ (coverage-guided, nightly; every parser in each test run) | ❌ |
 | Mutation testing | ✅ (Stryker.NET, weekly) | ❌ |
 | Maturity | New, pre-1.0; managed crypto awaiting an outside review | More than a decade of production use |

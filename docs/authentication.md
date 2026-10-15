@@ -25,7 +25,9 @@ var options = new SshClientOptions { UserName = "deploy", PrivateKeys = [ed25519
 
 Formats: the OpenSSH format (`BEGIN OPENSSH PRIVATE KEY`, also encrypted), PKCS#8 (also encrypted, for RSA and ECDSA),
 PKCS#1 and SEC1 PEM, and PuTTY `.ppk` versions 2 and 3 (also encrypted). Key types: Ed25519, ECDSA (nistp256/384/521) and
-RSA (2048 bits or more; signs with `rsa-sha2-256/512` as the server's `server-sig-algs` allows). The server is asked
+RSA (2048 bits or more; signs with `rsa-sha2-256/512` as the server's `server-sig-algs` allows). The client announces
+`ext-info-in-auth@openssh.com`, so a server can send `server-sig-algs` again during authentication (for example when a `Match`
+block changes them for this user), and each key uses the latest list. The server is asked
 whether it accepts a key before anything is signed. `SshPrivateKey.Parse` reads a key from a string.
 
 `Fingerprint`, `Comment`, `PublicKey` and `ToAuthorizedKeysLine()` describe a key. Dispose keys when done: it clears the
@@ -90,7 +92,8 @@ for the hosts it allows. Forwarded agent connections are bound as forwarding one
 (`ssh-add -h "a>b"`) apply too. Agents without the extension sign as before.
 
 Connecting by `ssh_config` alias uses the agent automatically, as `ssh` does: `IdentityAgent`, else `SSH_AUTH_SOCK`.
-Agent keys that match an `IdentityFile` come first (and an encrypted identity file is not opened at all), and
+Agent keys that match an `IdentityFile` (by the `.pub` file next to it) come first, and that identity file is then not opened at
+all, and
 `IdentitiesOnly yes` leaves the agent's other keys out. `UseAgent = false` turns it off.
 
 ### Agent forwarding
@@ -124,6 +127,7 @@ user, SYSTEM or the Administrators group, so another user cannot pose as the age
 `SshAgent` does what `ssh-add` does:
 
 ```csharp
+var agent = SshAgent.FromEnvironment() ?? throw new InvalidOperationException("No SSH agent is running.");
 using var key = await SshPrivateKey.LoadFileAsync("/home/me/.ssh/id_ed25519", passphrase);
 await agent.AddKeyAsync(key, new SshAgentKeyConstraints { Lifetime = TimeSpan.FromHours(1), Confirm = true }); // ssh-add -t 1h -c
 await agent.RemoveKeyAsync(key);                                                                                 // ssh-add -d
@@ -159,8 +163,10 @@ that SshSharp sends with every agent signature, as ssh does; a signature on an u
 directly, with host keys from anywhere.
 
 With `ssh_config`, `AddKeysToAgent yes` (or `confirm`, optionally with a lifetime such as `AddKeysToAgent confirm 1h`) adds an
-identity file's key to the agent once the server has accepted it, so the next connection uses the agent and does not read the
-file (or ask for its passphrase) again. Keys you pass in `SshConfigConnectOptions.PrivateKeys` are yours to manage and are never
+identity file's key to the agent once the server has accepted it, so the next connection uses the agent. The identity file is
+matched to the agent's key through its `.pub` file: when one sits next to it, the next connection does not read the private key
+file (or ask for its passphrase) again; without one, the private key file is still read to learn its public key, and an encrypted
+one still needs its passphrase. Keys you pass in `SshConfigConnectOptions.PrivateKeys` are yours to manage and are never
 added. `ask` is treated as `no`: it needs a prompt this library does not show.
 
 ## Keyboard-interactive

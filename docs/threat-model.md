@@ -1,8 +1,10 @@
 # Threat model
 
 SshSharp is an SSH **client** library. This page lists who and what it trusts, and what it does about the rest.
-It is reviewed before each release; the last review covered everything up to 0.5.0, including SFTP and its adapters,
-proxies, remote dynamic and Unix-socket forwarding, destination-constrained agent keys, SSH signatures and sntrup761.
+It is reviewed before each release; the last review covered everything up to 0.6.0, including SFTP and its adapters,
+proxies, remote dynamic and Unix-socket forwarding, destination-constrained agent keys, SSH signatures and sntrup761, and the
+areas added in 0.6.0: Kerberos (`gssapi-with-mic`), adding keys to the agent and Pageant, revoked host keys (KRLs),
+`ping@openssh.com`, channel idle timeouts (`ChannelTimeout`) and segmented SFTP downloads.
 
 ## Trusted
 
@@ -130,7 +132,9 @@ A man in the middle can read, change, drop and inject bytes. The server itself m
 - Passwords, private keys and command text are never logged. User names and host names are not logged either; host key
   fingerprints and algorithm names are.
 - Derived keys and key material are wiped (`CryptographicOperations.ZeroMemory`) when no longer needed. Managed strings
-  (the `Password` option) cannot be wiped; this is a known limitation.
+  (the `Password` option) cannot be wiped; this is a known limitation. The same holds for `SshGssapiOptions.Credential`: a
+  `NetworkCredential` keeps its password as a managed string, so prefer the platform's ticket (`kinit`, or the Windows logon
+  session) to an explicit credential.
 - The managed X25519, Ed25519, sntrup761 and Poly1305 code avoids branches and table lookups on secret data. DH (group14/16) uses
   `BigInteger.ModPow`, which is not constant-time, on an ephemeral exponent used once; curve25519 and ECDH are preferred.
 

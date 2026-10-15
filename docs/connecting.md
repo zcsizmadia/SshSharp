@@ -267,7 +267,8 @@ Keep-alive probes are OpenSSH transport pings (`ping@openssh.com`) where the ser
 `client.PingAsync()` measures a round trip the same way, and also proves the connection is alive:
 
 ```csharp
-var roundTrip = await client.PingAsync();
+using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10)); // otherwise a silent server is waited for until the connection ends
+var roundTrip = await client.PingAsync(cts.Token);
 Console.WriteLine($"{roundTrip.TotalMilliseconds:F1} ms");
 ```
 
@@ -294,8 +295,9 @@ var options = new SshClientOptions
 };
 ```
 
-The types are `session`, `direct-tcpip`, `direct-streamlocal@openssh.com`, `forwarded-tcpip`, `forwarded-streamlocal@openssh.com`,
-`agent-connection`, `x11-connection` and `tun-connection` (patterns such as `direct-*` and `*` work; names are case-sensitive).
+The types are `session`, `direct-tcpip`, `direct-streamlocal@openssh.com`, `forwarded-tcpip`, `forwarded-streamlocal@openssh.com`
+and `agent-connection` (patterns such as `direct-*` and `*` work; names are case-sensitive). OpenSSH's `x11-connection` and
+`tun-connection` are accepted but never match: SshSharp has no X11 or tunnel-device forwarding, so it has no such channels.
 Data sent or received in either direction resets a channel's clock. An idle channel is closed with an ordinary channel close: the
 connection stays up, a session's output streams end, and a forwarded connection's local socket is closed. In `ssh_config`, write
 `ChannelTimeout session=0 direct-*=10m *=1h` (`none` turns it off); connecting by alias applies it.
