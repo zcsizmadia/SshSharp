@@ -71,18 +71,29 @@ builder.Services.AddOpenTelemetry()
     .WithMetrics(metrics => metrics.AddMeter(SshTelemetry.SourceName));
 ```
 
-| Activity | Tags |
-|---|---|
-| `SshSharp.Connect` | `ssh.kex`, `ssh.kex.post_quantum`, `ssh.cipher`, `ssh.host_key.type` |
-| `SshSharp.Command` | `ssh.command.exit_status` |
+| Activity | Kind | Tags |
+|---|---|---|
+| `SshSharp.Connect` | Client | `network.protocol.name` (`ssh`), `network.protocol.version` (`2.0`), `network.transport` (`tcp`) and `server.port` for TCP connections, `ssh.kex`, `ssh.kex.post_quantum`, `ssh.cipher`, `ssh.host_key.type`; on failure `error.type` |
+| `SshSharp.Command` | Internal | `ssh.command.exit_status`; on failure `error.type` |
 
 | Instrument | Unit | Description |
 |---|---|---|
 | `sshsharp.connections` | `{connection}` | Open connections |
-| `sshsharp.connect.duration` | `s` | Time to connect, exchange keys and authenticate; tagged `ssh.kex.post_quantum` |
+| `sshsharp.connect.duration` | `s` | Time to connect, exchange keys and authenticate, successful (tagged `ssh.kex.post_quantum`) or not (tagged `error.type`) |
 | `sshsharp.bytes.sent` / `sshsharp.bytes.received` | `By` | Message payload bytes |
 | `sshsharp.key_exchanges` | `{exchange}` | Completed key exchanges |
 | `sshsharp.channels` | `{channel}` | Open channels |
-| `sshsharp.commands` | `{command}` | Commands run, tagged by outcome |
+| `sshsharp.commands` | `{command}` | Commands run, tagged `result` (`success`, `failure` for a non-zero exit status, `error`) and, for errors, `error.type` |
+
+`error.type` follows OpenTelemetry's semantic conventions: an `SshException`'s `Reason` (`AuthenticationFailed`, `Timeout`,
+`HostKeyRejected`, ...), otherwise the exception's type name; failed spans also get the `Error` status. `server.address` is not
+recorded, because this library never records host names (see the [threat model](threat-model.md)). To have it, add it to a parent
+span of your own, or in an `ActivityListener`:
+
+```csharp
+using var span = MyActivitySource.StartActivity("connect to build host");
+span?.SetTag("server.address", host);
+await using var client = await SshClient.ConnectAsync(host, 22, options);
+```
 
 Nothing is recorded unless something listens.

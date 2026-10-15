@@ -230,6 +230,14 @@ public class SshObservabilityTests
         await Assert.That(connect.GetTagItem("ssh.host_key.type")).IsEqualTo("ssh-ed25519");
         await Assert.That(connect.Status).IsEqualTo(ActivityStatusCode.Unset);
 
+        // OpenTelemetry's general attributes; no server.address (host names are never recorded), and no server.port over a plain Stream.
+        await Assert.That(connect.Kind).IsEqualTo(ActivityKind.Client);
+        await Assert.That(connect.GetTagItem("network.protocol.name")).IsEqualTo("ssh");
+        await Assert.That(connect.GetTagItem("network.protocol.version")).IsEqualTo("2.0");
+        await Assert.That(connect.GetTagItem("server.address")).IsNull();
+        await Assert.That(connect.GetTagItem("server.port")).IsNull();
+        await Assert.That(connect.GetTagItem("error.type")).IsNull();
+
         var command = mine.Single(a => a.OperationName == "SshSharp.Command");
         await Assert.That(command.GetTagItem("ssh.command.exit_status")).IsEqualTo(3);
         await Assert.That(command.Tags.Any(t => t.Value?.Contains("failing", StringComparison.Ordinal) == true)).IsFalse();
@@ -260,6 +268,53 @@ public class SshObservabilityTests
         }
         await Assert.That(connect.Status).IsEqualTo(ActivityStatusCode.Error);
         await Assert.That(connect.StatusDescription).IsEqualTo(nameof(SshAuthenticationException));
+        await Assert.That(connect.GetTagItem("error.type")).IsEqualTo(nameof(SshFailureReason.AuthenticationFailed));
+    }
+
+    [Test]
+    public async Task FailedConnects_AreTimed_WithTheirErrorType_AndFailedCommandsCounted()
+    {
+        var seen = new List<(string Instrument, IReadOnlyList<KeyValuePair<string, object?>> Tags)>();
+        var lockObject = new object();
+        using var listener = new MeterListener();
+        listener.InstrumentPublished = (instrument, l) =>
+        {
+            if (instrument.Meter.Name == SshTelemetry.SourceName)
+            {
+                l.EnableMeasurementEvents(instrument);
+            }
+        };
+        listener.SetMeasurementEventCallback<double>((instrument, _, tags, _) => { lock (lockObject) { seen.Add((instrument.Name, tags.ToArray())); } });
+        listener.SetMeasurementEventCallback<long>((instrument, _, tags, _) => { lock (lockObject) { seen.Add((instrument.Name, tags.ToArray())); } });
+        listener.Start();
+
+        await using (var server = new FakeSessionServer { Password = "right" })
+        {
+            _ = server.StartAsync();
+            await Assert.That(async () => await SshClient.ConnectAsync(server.ClientStream, Options(password: "wrong"), true, Timeout())).Throws<SshException>();
+        }
+
+        await using (var server = new FakeSessionServer { RefuseExec = true })
+        await using (var client = await ConnectAsync(server, Options()))
+        {
+            await Assert.That(async () => await client.RunCommandAsync("refused", Timeout())).Throws<SshException>();
+        }
+
+        List<(string Instrument, IReadOnlyList<KeyValuePair<string, object?>> Tags)> snapshot;
+        lock (lockObject)
+        {
+            snapshot = [.. seen];
+        }
+
+        // Other tests run in parallel and record too: look for these measurements among them.
+        await Assert.That(snapshot.Any(m => m.Instrument == "sshsharp.connect.duration"
+            && m.Tags.Any(t => t.Key == "error.type" && (string?)t.Value == nameof(SshFailureReason.AuthenticationFailed)))).IsTrue();
+        await Assert.That(snapshot.Any(m => m.Instrument == "sshsharp.commands"
+            && m.Tags.Any(t => t.Key == "result" && (string?)t.Value == "error")
+            && m.Tags.Any(t => t.Key == "error.type" && (string?)t.Value == nameof(SshFailureReason.ChannelClosed)))).IsTrue();
+        await Assert.That(snapshot.Any(m => m.Instrument == "sshsharp.commands"
+            && m.Tags.Any(t => t.Key == "result" && (string?)t.Value == "success")
+            && m.Tags.Any(t => t.Key == "error.type"))).IsFalse();
     }
 
     [Test]
