@@ -30,6 +30,7 @@ public sealed class RemoteSocketForwardingTests : IDisposable
     private sealed class UpperCaseService : IDisposable
     {
         private readonly Socket _listener;
+        private readonly System.Collections.Concurrent.ConcurrentQueue<string> _events = new();
 
         public UpperCaseService(EndPoint endPoint)
         {
@@ -38,6 +39,7 @@ public sealed class RemoteSocketForwardingTests : IDisposable
             _listener.Listen();
             _ = Task.Run(async () =>
             {
+                var connection = 0;
                 while (true)
                 {
                     Socket socket;
@@ -50,19 +52,31 @@ public sealed class RemoteSocketForwardingTests : IDisposable
                         return;
                     }
 
+                    var n = ++connection;
+                    Note($"#{n} accepted");
                     _ = Task.Run(async () =>
                     {
-                        using (socket)
+                        try
                         {
-                            using var received = new MemoryStream();
-                            var buffer = new byte[4096];
-                            while (await socket.ReceiveAsync(buffer, SocketFlags.None) is var read and > 0)
+                            using (socket)
                             {
-                                received.Write(buffer, 0, read);
-                            }
+                                using var received = new MemoryStream();
+                                var buffer = new byte[4096];
+                                while (await socket.ReceiveAsync(buffer, SocketFlags.None) is var read and > 0)
+                                {
+                                    received.Write(buffer, 0, read);
+                                    Note($"#{n} received {read} bytes");
+                                }
 
-                            await socket.SendAsync(Encoding.ASCII.GetBytes(Encoding.ASCII.GetString(received.ToArray()).ToUpperInvariant()), SocketFlags.None);
-                            socket.Shutdown(SocketShutdown.Send);
+                                Note($"#{n} end of stream after {received.Length} bytes; answering");
+                                var sent = await socket.SendAsync(Encoding.ASCII.GetBytes(Encoding.ASCII.GetString(received.ToArray()).ToUpperInvariant()), SocketFlags.None);
+                                socket.Shutdown(SocketShutdown.Send);
+                                Note($"#{n} sent {sent} bytes and shut down its sending side");
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            Note($"#{n} failed: {ex.GetType().Name}: {ex.Message}");
                         }
                     });
                 }
@@ -71,16 +85,48 @@ public sealed class RemoteSocketForwardingTests : IDisposable
 
         public int Port => ((IPEndPoint)_listener.LocalEndPoint!).Port;
 
+        /// <summary>What the service did, for a test that hangs.</summary>
+        public string Events => string.Join("; ", _events);
+
+        private void Note(string what) => _events.Enqueue($"{DateTime.UtcNow:HH:mm:ss.ffffff} {what}");
+
         public void Dispose() => _listener.Dispose();
     }
 
-    private static async Task<string> ExchangeAsync(Stream remote, string request)
+    /// <summary>
+    /// Writes <paramref name="request"/>, ends the input, and reads the answer to its end. A hang reports how far it got, what the service
+    /// did and (in the instrumented build) the relay's trace: this has hung once on a Windows runner (#188).
+    /// </summary>
+    private static async Task<string> ExchangeAsync(Stream remote, string request, UpperCaseService? service = null, string? relayEndPoint = null)
     {
-        await remote.WriteAsync(Encoding.ASCII.GetBytes(request), Timeout());
-        ((DuplexStream)remote).CloseWrite();
+        var stage = "writing the request";
         using var buffer = new MemoryStream();
-        await remote.CopyToAsync(buffer, Timeout());
-        return Encoding.ASCII.GetString(buffer.ToArray());
+        try
+        {
+            await remote.WriteAsync(Encoding.ASCII.GetBytes(request), Timeout());
+            stage = "ending the input (EOF)";
+            ((DuplexStream)remote).CloseWrite();
+            stage = "reading the answer";
+            await remote.CopyToAsync(buffer, Timeout());
+            return Encoding.ASCII.GetString(buffer.ToArray());
+        }
+        catch (OperationCanceledException ex)
+        {
+            throw new TimeoutException($"Stuck {stage}; {buffer.Length} bytes of the answer came back. Service: {service?.Events ?? "(none)"}. Relay: {RelayTrace(relayEndPoint)}", ex);
+        }
+    }
+
+    /// <summary>The instrumented build's trace of the relay for <paramref name="endPoint"/> (its start event names the socket), or of the last relays.</summary>
+    private static string RelayTrace(string? endPoint)
+    {
+        if (!SshSharp.Protocol.Instrumentation.Enabled)
+        {
+            return "(not traced: build with -p:SshSharpInstrument=true)";
+        }
+
+        var start = endPoint is null ? null : SshSharp.Protocol.Instrumentation.RecentTrace(endPoint, max: 1);
+        var id = start is { Length: > 0 } ? System.Text.RegularExpressions.Regex.Match(start, @"relay#\d+").Value : null;
+        return Environment.NewLine + SshSharp.Protocol.Instrumentation.RecentTrace(id is { Length: > 0 } ? id + ":" : "relay#", max: id is { Length: > 0 } ? 60 : 30);
     }
 
     [Test]
@@ -98,7 +144,7 @@ public sealed class RemoteSocketForwardingTests : IDisposable
         var answers = await Task.WhenAll(Enumerable.Range(0, 3).Select(async i =>
         {
             await using var remote = (await server.ConnectForwardedSocketAsync("/run/app/db.sock"))!;
-            return await ExchangeAsync(remote, $"query {i}");
+            return await ExchangeAsync(remote, $"query {i}", service);
         }));
         await Assert.That(answers).IsEquivalentTo(["QUERY 0", "QUERY 1", "QUERY 2"]);
     }
@@ -115,7 +161,7 @@ public sealed class RemoteSocketForwardingTests : IDisposable
 
         await Assert.That(forwarder.LocalSocketPath).IsEqualTo(local);
         await using var remote = (await server.ConnectForwardedSocketAsync("/home/tester/.gnupg/S.gpg-agent"))!;
-        await Assert.That(await ExchangeAsync(remote, "sign this")).IsEqualTo("SIGN THIS");
+        await Assert.That(await ExchangeAsync(remote, "sign this", service, local)).IsEqualTo("SIGN THIS");
     }
 
     [Test]
@@ -179,7 +225,7 @@ public sealed class RemoteSocketForwardingTests : IDisposable
             await Assert.That(client.RemoteSocketForwardings[0].LocalPort).IsEqualTo(service.Port);
             await Assert.That(client.RemoteSocketForwardings[1].LocalSocketPath).IsEqualTo($"{dir}/agent.sock");
             await using var remote = (await server.ConnectForwardedSocketAsync("/run/app.sock"))!;
-            await Assert.That(await ExchangeAsync(remote, "from config")).IsEqualTo("FROM CONFIG");
+            await Assert.That(await ExchangeAsync(remote, "from config", service)).IsEqualTo("FROM CONFIG");
         }
     }
 

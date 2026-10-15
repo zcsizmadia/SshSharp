@@ -32,6 +32,26 @@ internal static class Instrumentation
     /// <summary>How many problems were reported in this process.</summary>
     public static int Reports => Volatile.Read(ref _reports);
 
+    private static readonly ConcurrentQueue<string> TraceEvents = new();
+    private const int MaxTraceEvents = 4000;
+
+    /// <summary>
+    /// Records an event in a bounded in-memory trace (the newest <see cref="MaxTraceEvents"/>), for a test that hangs to show what led
+    /// to it (<see cref="RecentTrace"/>). Not a problem report: nothing is written, and the stress loop does not fail on it.
+    /// </summary>
+    [Conditional("SSHSHARP_INSTRUMENT")]
+    public static void Trace(string message)
+    {
+        TraceEvents.Enqueue($"{DateTime.UtcNow:HH:mm:ss.ffffff} [{Environment.CurrentManagedThreadId}] {message}");
+        while (TraceEvents.Count > MaxTraceEvents && TraceEvents.TryDequeue(out _))
+        {
+        }
+    }
+
+    /// <summary>The traced events containing <paramref name="filter"/>, oldest first (empty unless this build is instrumented).</summary>
+    public static string RecentTrace(string filter, int max = 60) =>
+        string.Join(Environment.NewLine, TraceEvents.Where(e => e.Contains(filter, StringComparison.Ordinal)).TakeLast(max));
+
     [Conditional("SSHSHARP_INSTRUMENT")]
     public static void Rented(byte[] buffer, string owner)
     {
