@@ -1157,7 +1157,12 @@ internal sealed class FakeSessionServer : IAsyncDisposable
         {
             while (await tunnel.ReadAsync(buffer, _cts.Token) is var read and > 0)
             {
-                await SendDataAsync(channel, buffer[..read], extended: false);
+                // As a script: nothing may follow the CLOSE, which the client's CLOSE can trigger at any moment.
+                await SendDataAsync(channel, buffer[..read], extended: false, fromScript: true);
+                if (channel.CloseSent)
+                {
+                    return;
+                }
             }
 
             // Like sshd: the far end finished writing, which is EOF; CLOSE follows once the client has finished too (a half-close

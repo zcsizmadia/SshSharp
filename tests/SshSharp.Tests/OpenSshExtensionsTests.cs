@@ -50,14 +50,13 @@ public class OpenSshExtensionsTests
     [Test]
     public async Task AnEndOfWriteFromTheServer_FailsFurtherInput()
     {
-        var closedInput = new TaskCompletionSource();
         await using var server = new FakeSessionServer(new FakeServerOptions { Identification = OpenSsh })
         {
             OnExec = async script =>
             {
                 await script.ReadInputAsync(); // the first line, then the program closes its input
                 await script.EndOfWriteAsync();
-                closedInput.SetResult();
+                await script.StdoutAsync("closed\n"u8.ToArray()); // after the request: once the client reads this, it has handled that
                 await Task.Delay(Timeout().IsCancellationRequested ? 0 : 30_000);
             },
         };
@@ -65,8 +64,12 @@ public class OpenSshExtensionsTests
         await using var session = await client.StartCommandAsync("head -n 1", cancellationToken: Timeout());
 
         await session.StandardInput.WriteAsync("line\n"u8.ToArray(), Timeout());
-        await closedInput.Task.WaitAsync(Timeout());
-        await Task.Delay(100); // the request reaches the client after the script's signal
+
+        // The client handles messages in order, so the output after the request proves the request was seen (a fixed wait did not,
+        // under the stress run's load).
+        var marker = new byte["closed\n".Length];
+        await session.StandardOutput.ReadExactlyAsync(marker, Timeout());
+        await Assert.That(System.Text.Encoding.ASCII.GetString(marker)).IsEqualTo("closed\n");
 
         var error = await Assert.ThrowsAsync<SshException>(async () => await session.StandardInput.WriteAsync("more\n"u8.ToArray(), Timeout()));
         await Assert.That(error!.Reason).IsEqualTo(SshFailureReason.ChannelClosed);
