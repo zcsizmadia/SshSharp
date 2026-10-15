@@ -17,6 +17,9 @@ internal sealed class ExecScript(FakeSessionServer server, FakeSessionServer.Ser
 
     public Task ExitStatusAsync(uint status) => server.SendRequestAsync(channel, "exit-status", w => w.WriteUInt32(status), fromScript: true);
 
+    /// <summary>OpenSSH's <c>eow@openssh.com</c>: the program closed its input, so the client should stop sending it.</summary>
+    public Task EndOfWriteAsync() => server.SendRequestAsync(channel, "eow@openssh.com", _ => { }, fromScript: true);
+
     public Task ExitSignalAsync(string signal) => server.SendRequestAsync(channel, "exit-signal", w =>
     {
         w.WriteString(signal);

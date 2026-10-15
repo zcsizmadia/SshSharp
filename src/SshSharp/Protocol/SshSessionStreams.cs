@@ -4,7 +4,7 @@ namespace SshSharp.Protocol;
 /// One direction of a session's output (stdout or stderr) as a read-only, asynchronous <see cref="Stream"/>. Reads hand out the received
 /// packets' bytes without buffering them again; each packet is released, which lets the server send more, once it has been read.
 /// </summary>
-internal sealed class SshChannelReadStream(Func<CancellationToken, ValueTask<ChannelData?>> source) : Stream
+internal sealed class SshChannelReadStream(Func<CancellationToken, ValueTask<ChannelData?>> source, Action? disposed = null) : Stream
 {
     private ChannelData? _current;
     private int _offset;
@@ -82,6 +82,7 @@ internal sealed class SshChannelReadStream(Func<CancellationToken, ValueTask<Cha
         if (disposing && Interlocked.Exchange(ref _disposed, 1) == 0)
         {
             Release();
+            disposed?.Invoke();
         }
 
         base.Dispose(disposing);

@@ -236,6 +236,69 @@ public class SessionInteropTests
     }
 
     [Test]
+    public async Task OpenSshExtensions_EndOfWrite_AndNoMoreSessions()
+    {
+        await using var client = await ConnectAsync();
+        if (client is null || !RealServer.IsOpenSsh || RealServer.IsWindows)
+        {
+            Skip.Test("An OpenSSH server on a Unix-like system is needed (eow@openssh.com and no-more-sessions@openssh.com are OpenSSH's).");
+            return;
+        }
+
+        SshSession? yes = null;
+        await Stages.RunAsync(async stages =>
+        {
+            // Our output closed: sshd stops sending, so `yes` gets SIGPIPE and ends instead of running on.
+            stages.Step("starting yes");
+            yes = await client.StartCommandAsync("yes", cancellationToken: Timeout());
+            stages.Step("reading some of its output");
+            var buffer = new byte[4096];
+            await yes.StandardOutput.ReadExactlyAsync(buffer, Timeout());
+            stages.Step("disposing its output");
+            await yes.StandardOutput.DisposeAsync();
+            stages.Step("waiting for yes to end");
+            await yes.WaitForExitAsync(Timeout());
+            await Assert.That(yes.ExitSignal is "PIPE" || yes.ExitStatus is not null and not 0).IsTrue();
+            stages.Step("closing the session");
+            await yes.DisposeAsync();
+            stages.Step("pinging after the eow session");
+            await client.PingAsync(Timeout());
+
+            // The other direction (sshd telling us the program closed its input) cannot be seen here: sshd sends eow@openssh.com only
+            // to clients whose identification says OpenSSH (channels.c). The unit tests cover it.
+
+            // OpenSSH takes no-more-sessions@openssh.com without dropping the connection; other channels still work.
+            stages.Step("sending no-more-sessions");
+            await Assert.That(await client.PreventNewSessionsAsync(Timeout())).IsTrue();
+            await Assert.That(async () => await client.RunCommandAsync("true", Timeout())).Throws<InvalidOperationException>();
+            stages.Step("pinging after no-more-sessions");
+            await client.PingAsync(Timeout());
+            await Assert.That(client.IsConnected).IsTrue();
+        }, () => $"yes: exit status {yes?.ExitStatus?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "none"}, signal {yes?.ExitSignal ?? "none"}; connected {client.IsConnected}, error {client.ConnectionError?.Message ?? "none"}. {ConnectionInternals(client)}");
+    }
+
+    /// <summary>For a stuck test: when the connection last received a packet, whether a key re-exchange is under way, what waits to be sent.</summary>
+    private static string ConnectionInternals(SshClient client)
+    {
+        const System.Reflection.BindingFlags Private = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+        var connection = client.Connection;
+        var lastReceived = (long)typeof(SshSharp.Protocol.SshConnection).GetField("_lastReceived", Private)!.GetValue(connection)!;
+        var transport = typeof(SshSharp.Protocol.SshConnection).GetField("_transport", Private)!.GetValue(connection)!;
+        var rekeying = transport.GetType().GetField("_rekeying", Private)!.GetValue(transport);
+        var outbox = typeof(SshSharp.Protocol.SshConnection).GetField("_outbox", Private)!.GetValue(connection)!;
+        var reader = outbox.GetType().GetProperty("Reader")!.GetValue(outbox)!;
+        var queued = reader.GetType().GetProperty("CanCount")?.GetValue(reader) is true ? reader.GetType().GetProperty("Count")!.GetValue(reader) : "?";
+        object? Field(object target, string name) => target.GetType().GetField(name, Private)?.GetValue(target);
+        var sendLock = (SemaphoreSlim)Field(transport, "_sendLock")!;
+        var receiveLoop = Field(connection, "_loop") as Task;
+        var outboxLoop = Field(connection, "_outboxLoop") as Task;
+        var pings = Field(connection, "_pings") as System.Collections.ICollection;
+        return $"Last packet received {connection.Time.GetElapsedTime(lastReceived).TotalSeconds:0.0} s ago; rekeying {rekeying}; {queued} messages waiting "
+            + $"in the outbox; transport send lock {(sendLock.CurrentCount == 0 ? "HELD" : "free")}; receive loop {receiveLoop?.Status}; outbox loop "
+            + $"{outboxLoop?.Status}; {pings?.Count} pings awaiting a pong; packets received since the key exchange {Field(transport, "_packetsReceivedSinceKex")}.";
+    }
+
+    [Test]
     public async Task PingAsync_MeasuresARoundTrip_WithPingsOrWithoutThem()
     {
         await using var client = await ConnectAsync();

@@ -75,6 +75,21 @@ public sealed partial class SshClient : IAsyncDisposable
         return _connection.PingAsync(cancellationToken);
     }
 
+    /// <summary>
+    /// Opens no more sessions on this connection (commands, shells, SFTP), and tells an OpenSSH server to refuse any as well, as ssh does
+    /// once it knows it will not open another (OpenSSH's <c>no-more-sessions@openssh.com</c>): a process that later gets hold of this
+    /// connection cannot quietly start a session on it, and an OpenSSH server drops the connection if one is tried anyway. Sessions already
+    /// open, port forwarding and tunnels are unaffected. Like ssh, the request goes only to OpenSSH servers (some others abort on it);
+    /// with others, only this client refuses.
+    /// </summary>
+    /// <returns>Whether the server was told; false for servers other than OpenSSH.</returns>
+    /// <exception cref="SshException">The connection is closed or failed meanwhile.</exception>
+    public Task<bool> PreventNewSessionsAsync(CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed != 0, this);
+        return _connection.PreventNewSessionsAsync(cancellationToken);
+    }
+
     /// <summary>Connects to <paramref name="host"/> over TCP, performs the handshake and authenticates.</summary>
     public static async Task<SshClient> ConnectAsync(string host, int port, SshClientOptions options, CancellationToken cancellationToken = default)
     {

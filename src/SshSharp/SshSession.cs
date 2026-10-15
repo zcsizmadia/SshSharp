@@ -27,14 +27,25 @@ public sealed class SshSession : IAsyncDisposable
         _logger = logger;
         HasTerminal = hasTerminal;
         _input = new SshChannelWriteStream(channel);
-        _output = new SshChannelReadStream(channel.ReadAsync);
+        // Disposing the output while the session goes on asks an OpenSSH server to stop sending it (eow@openssh.com), as ssh does when
+        // its own output closes; what arrives meanwhile is dropped.
+        _output = new SshChannelReadStream(channel.ReadAsync, channel.StopReceiving);
         _error = new SshChannelReadStream(channel.ReadExtendedAsync);
     }
 
-    /// <summary>The program's input. Writes are sent as they are made; <see cref="CloseInputAsync"/> (or disposing the stream) sends end-of-file.</summary>
+    /// <summary>
+    /// The program's input. Writes are sent as they are made; <see cref="CloseInputAsync"/> (or disposing the stream) sends end-of-file.
+    /// Once the server reports that the program closed its input (<c>eow@openssh.com</c>), writes fail with an
+    /// <see cref="SshException"/> (<see cref="SshFailureReason.ChannelClosed"/>), as writing to a pipe whose reader has gone does. OpenSSH's
+    /// sshd sends that only to clients that identify as OpenSSH, so with it the data is accepted and dropped there instead.
+    /// </summary>
     public Stream StandardInput => _input;
 
-    /// <summary>The program's output (asynchronous reads only). Ends when the server sends end-of-file.</summary>
+    /// <summary>
+    /// The program's output (asynchronous reads only). Ends when the server sends end-of-file. Disposing it while the session goes on
+    /// tells an OpenSSH server to stop sending output (<c>eow@openssh.com</c>, as ssh does when its own output closes); output that still
+    /// arrives is dropped. The program may then get SIGPIPE when it writes.
+    /// </summary>
     public Stream StandardOutput => _output;
 
     /// <summary>The program's error output (asynchronous reads only). Empty with a terminal, where the server merges it into <see cref="StandardOutput"/>.</summary>
@@ -81,16 +92,21 @@ public sealed class SshSession : IAsyncDisposable
 
     /// <summary>
     /// Sends a signal to the program (RFC 4254 section 6.9): a name without the <c>SIG</c> prefix, such as <c>INT</c>, <c>TERM</c> or
-    /// <c>KILL</c>. Current OpenSSH delivers it; older versions and other servers may ignore it, since the request has no reply. With a
+    /// <c>KILL</c>, or an extension name (<c>name@domain</c>, RFC 4250), such as OpenSSH's <c>INFO@openssh.com</c> (SIGINFO, on BSD-derived
+    /// systems). Current OpenSSH delivers it; older versions and other servers may ignore it, since the request has no reply. With a
     /// terminal, writing Ctrl-C (<c>0x03</c>) to <see cref="StandardInput"/> interrupts the foreground program the way a user would.
     /// </summary>
     public async Task SendSignalAsync(string signal, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrEmpty(signal);
         ObjectDisposedException.ThrowIf(_disposed != 0, this);
-        if (signal.StartsWith("SIG", StringComparison.Ordinal) || !signal.All(char.IsAsciiLetterOrDigit))
+        var at = signal.IndexOf('@', StringComparison.Ordinal);
+        var name = at < 0 ? signal : signal[..at];
+        var domain = at < 0 ? null : signal[(at + 1)..];
+        if (name.Length == 0 || name.StartsWith("SIG", StringComparison.Ordinal) || !name.All(char.IsAsciiLetterOrDigit)
+            || (domain is not null && (domain.Length == 0 || !domain.All(c => char.IsAsciiLetterOrDigit(c) || c is '.' or '-'))))
         {
-            throw new ArgumentException("A signal is a name without the SIG prefix, such as INT, TERM or KILL.", nameof(signal));
+            throw new ArgumentException("A signal is a name without the SIG prefix, such as INT, TERM or KILL, or an extension name such as INFO@openssh.com.", nameof(signal));
         }
 
         await _channel.RequestAsync("signal", false, w => w.WriteString(signal), cancellationToken).ConfigureAwait(false);

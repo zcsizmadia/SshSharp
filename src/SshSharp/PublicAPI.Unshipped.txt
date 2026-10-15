@@ -1,6 +1,7 @@
 #nullable enable
 static SshSharp.SshAgent.Pageant() -> SshSharp.SshAgent?
 SshSharp.SshClient.PingAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.TimeSpan>!
+SshSharp.SshClient.PreventNewSessionsAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
 override SshSharp.SshAgentKeyConstraints.Equals(object? obj) -> bool
 override SshSharp.SshAgentKeyConstraints.GetHashCode() -> int
 override SshSharp.SshAgentKeyConstraints.ToString() -> string!
