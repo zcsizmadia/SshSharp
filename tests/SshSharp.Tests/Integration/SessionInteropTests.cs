@@ -148,9 +148,9 @@ public class SessionInteropTests
             return;
         }
 
-        if (!RealServer.IsOpenSsh)
+        if (!RealServer.HasSftp)
         {
-            Skip.Test("Dropbear needs a separate sftp-server, which the test image does not install.");
+            Skip.Test("The server has no sftp subsystem (Dropbear needs a separate sftp-server).");
             return;
         }
 
@@ -175,6 +175,13 @@ public class SessionInteropTests
         if (client is null)
         {
             Skip.Test("SSHSHARP_TEST_SSHD, SSHSHARP_TEST_USER and SSHSHARP_TEST_PASSWORD are needed.");
+            return;
+        }
+
+        if (RealServer.IsAsyncSsh)
+        {
+            // A server built on AsyncSSH's process_factory accepts every subsystem request; the CI server ends unknown ones at once.
+            Skip.Test("The AsyncSSH test server accepts every subsystem request.");
             return;
         }
 
