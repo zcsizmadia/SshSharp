@@ -116,7 +116,8 @@ the keys). Connecting by `ssh_config` alias follows `ForwardAgent yes`.
 
 On Windows, when `SSH_AUTH_SOCK` is not set and the OpenSSH agent service is not running, `FromEnvironment()` finds PuTTY's Pageant
 (0.75 and later) on the pipe it creates for the current user; `SshAgent.Pageant()` asks for Pageant specifically. Pageant's keys work like
-any agent's, including for signing (`SshSignature`) and agent forwarding.
+any agent's, including for signing (`SshSignature`) and agent forwarding. An agent pipe is used only when it belongs to the current
+user, SYSTEM or the Administrators group, so another user cannot pose as the agent by creating its pipe first.
 
 ### Managing the agent's keys
 
@@ -159,7 +160,8 @@ directly, with host keys from anywhere.
 
 With `ssh_config`, `AddKeysToAgent yes` (or `confirm`, optionally with a lifetime such as `AddKeysToAgent confirm 1h`) adds an
 identity file's key to the agent once the server has accepted it, so the next connection uses the agent and does not read the
-file (or ask for its passphrase) again. `ask` is treated as `no`: it needs a prompt this library does not show.
+file (or ask for its passphrase) again. Keys you pass in `SshConfigConnectOptions.PrivateKeys` are yours to manage and are never
+added. `ask` is treated as `no`: it needs a prompt this library does not show.
 
 ## Keyboard-interactive
 

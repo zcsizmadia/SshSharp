@@ -213,6 +213,9 @@ public abstract class SshPrivateKey : IDisposable
     internal virtual void WritePrivateFields(SshWriter writer) =>
         throw new NotSupportedException("This key's private material cannot be exported: it is held by an agent, or paired with a certificate (export the key it was made from).");
 
+    /// <summary>Whether an agent holds the private material (an agent's key, or one paired with a certificate), so it cannot be added to one.</summary>
+    internal virtual bool HeldByAgent => false;
+
     /// <summary>The user certificate this key authenticates with, if it was paired with one (<see cref="WithCertificate"/>).</summary>
     public SshCertificate? Certificate { get; private protected init; }
 
@@ -277,6 +280,8 @@ public abstract class SshPrivateKey : IDisposable
         }
 
         internal override IReadOnlyList<string> SignatureAlgorithms { get; }
+
+        internal override bool HeldByAgent => _key.HeldByAgent;
 
         internal override byte[] Sign(string algorithm, ReadOnlySpan<byte> data) => _key.Sign(SshCertificate.BaseAlgorithm(algorithm), data);
 

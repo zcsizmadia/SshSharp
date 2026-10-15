@@ -6,7 +6,7 @@ namespace SshSharp.Config;
 /// <summary>
 /// Runs <c>KnownHostsCommand</c> as OpenSSH does (sshconnect.c, load_hostkeys_command): the command is split into arguments (no shell
 /// is involved, so token values cannot inject anything), each argument has its tokens expanded, and the program, which must be given
-/// by absolute path, is run directly. Its standard output is read as known_hosts lines. A non-zero exit status fails the connection.
+/// by absolute path, is run directly. On Windows a batch file is refused, since Windows would run it through cmd.exe. Its standard output is read as known_hosts lines. A non-zero exit status fails the connection.
 /// Unlike OpenSSH, the run is bounded: <see cref="Timeout"/> and <see cref="MaxOutput"/>.
 /// </summary>
 internal static class KnownHostsCommandRunner
@@ -50,6 +50,13 @@ internal static class KnownHostsCommandRunner
         if (arguments.Count == 0 || !Path.IsPathFullyQualified(arguments[0]))
         {
             throw new SshException(SshFailureReason.ConnectFailed, "KnownHostsCommand must name its program by absolute path.");
+        }
+
+        if (OperatingSystem.IsWindows() &&
+            Path.GetExtension(arguments[0].TrimEnd('.', ' ')).ToUpperInvariant() is ".BAT" or ".CMD")
+        {
+            // Windows starts a batch file through cmd.exe, which reparses the arguments (%VAR%, ^, !): token values could then reach a shell.
+            throw new SshException(SshFailureReason.ConnectFailed, "KnownHostsCommand cannot be a batch file on Windows: cmd.exe would reparse its arguments. Use an executable, for example powershell.exe -File script.ps1.");
         }
 
         var start = new ProcessStartInfo(arguments[0])

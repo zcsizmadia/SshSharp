@@ -182,4 +182,37 @@ public sealed class ConfigGapsTests : IDisposable
             await Assert.That(client.IsConnected).IsTrue();
         }
     }
+
+    [Test]
+    public async Task KnownHostsCommand_ThatIsABatchFile_IsRefusedOnWindows()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return; // elsewhere a .cmd file is just a program
+        }
+
+        foreach (var program in new[] { "lookup.cmd", "lookup.BAT", "lookup.bat." })
+        {
+            await using var server = new FakeSessionServer();
+            var error = await Assert.ThrowsAsync<SshException>(async () =>
+                await ConnectWithCommandAsync(server, $"\"{Path.Combine(_dir, program)}\" %H", allow: true));
+            await Assert.That(error!.Message).Contains("batch file");
+        }
+    }
+
+    [Test]
+    public async Task AJumpHost_IsResolvedWithoutTheCallersSession()
+    {
+        // ssh runs each ProxyJump hop as ssh -W: session type none, no command.
+        var options = Options(sessionType: "subsystem", command: "sftp");
+        var hop = options.With(user: null, port: null, jumpHost: true);
+        var destination = options.With(user: null, port: null);
+
+        await Assert.That(hop.SessionType).IsEqualTo("none");
+        await Assert.That(hop.Command).IsNull();
+        await Assert.That(destination.SessionType).IsEqualTo("subsystem");
+        await Assert.That(destination.Command).IsEqualTo("sftp");
+        await Assert.That(ResolvedPort("Match sessiontype subsystem\n Port 1001\n", hop)).IsEqualTo(22);
+        await Assert.That(ResolvedPort("Match sessiontype none\n Port 1002\n", hop)).IsEqualTo(1002);
+    }
 }
