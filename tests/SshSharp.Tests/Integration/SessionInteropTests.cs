@@ -178,6 +178,13 @@ public class SessionInteropTests
             return;
         }
 
+        if (RealServer.IsAsyncSsh)
+        {
+            // A server built on AsyncSSH's process_factory accepts every subsystem request; the CI server ends unknown ones at once.
+            Skip.Test("The AsyncSSH test server accepts every subsystem request.");
+            return;
+        }
+
         var error = await Assert.ThrowsAsync<SshException>(async () => await client.StartSubsystemAsync("sshsharp-no-such-subsystem", cancellationToken: Timeout()));
         await Assert.That(error!.Reason).IsEqualTo(SshFailureReason.ChannelClosed);
         await Assert.That((await client.RunCommandAsync("true", Timeout())).ExitStatus).IsEqualTo(0);

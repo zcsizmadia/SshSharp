@@ -56,9 +56,10 @@ public class ExecInteropTests
         }
         else
         {
-            // The claim itself, without timing: OpenSSH answers keepalive@openssh.com (with a failure, which is still an answer).
+            // The claim itself, without timing: the server answers keepalive@openssh.com. OpenSSH and Dropbear answer with a failure
+            // (still an answer); AsyncSSH knows the request and answers with a success.
             var reply = await client.Connection.SendGlobalRequestAsync("keepalive@openssh.com", wantReply: true, null, Timeout());
-            await Assert.That(reply.Success).IsFalse();
+            await Assert.That(reply.Success).IsEqualTo(RealServer.IsAsyncSsh);
         }
 
         // And an idle connection with keep-alives running stays up. The margins are generous: the interop tests run in parallel on

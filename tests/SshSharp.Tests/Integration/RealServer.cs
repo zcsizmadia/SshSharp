@@ -64,6 +64,9 @@ internal static class RealServer
 
     public static bool IsOpenSsh => Software == "OpenSSH";
 
+    /// <summary>Whether the server is the CI matrix's AsyncSSH container (tests/docker/asyncssh_server.py).</summary>
+    public static bool IsAsyncSsh => Software == "AsyncSSH";
+
     /// <summary>
     /// Whether the server has an sftp subsystem: every one tested, and Dropbear when its image has OpenSSH's sftp-server where Dropbear
     /// runs it (SSHSHARP_TEST_DROPBEAR_SFTP=1, set by CI after checking).
