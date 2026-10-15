@@ -217,4 +217,79 @@ public class AgentInteropTests
 
         await Assert.That((await agent.GetKeysAsync(token)).Any(k => k.PublicKey.Span.SequenceEqual(key.PublicKey.Span))).IsFalse();
     }
+
+    [Test]
+    public async Task ADestinationConstrainedKey_SignsInOnlyWhereItIsAllowed()
+    {
+        var user = Environment.GetEnvironmentVariable("SSHSHARP_TEST_USER");
+        var password = Environment.GetEnvironmentVariable("SSHSHARP_TEST_PASSWORD");
+        if (Environment.GetEnvironmentVariable("SSHSHARP_TEST_AGENT") != "1" || RealServer.Endpoint is not var (host, port)
+            || string.IsNullOrEmpty(user) || string.IsNullOrEmpty(password) || SshAgent.FromEnvironment() is not { } agent)
+        {
+            Skip.Test("SSHSHARP_TEST_AGENT=1, SSH_AUTH_SOCK, SSHSHARP_TEST_SSHD, SSHSHARP_TEST_USER and SSHSHARP_TEST_PASSWORD are needed.");
+            return;
+        }
+
+        var token = new CancellationTokenSource(TimeSpan.FromSeconds(90)).Token;
+        var trustAll = SshHostKeyVerifier.FromDelegate((_, _) => ValueTask.FromResult(true));
+        var hostKeys = (await SshClient.ScanHostKeysAsync(host, port, cancellationToken: token)).Select(k => new SshAgentHostKey(k.PublicKey)).ToList();
+        using var other = SshPrivateKey.Generate(SshKeyType.Ed25519);
+        using var key = SshPrivateKey.Generate(SshKeyType.Ed25519, "restricted-by-sshsharp");
+        var marker = "sshsharp-restricted-" + Guid.NewGuid().ToString("N");
+
+        // The key may sign in to this server only; it goes into the account's authorized_keys for the test.
+        await using var admin = await SshClient.ConnectAsync(host, port, new SshClientOptions { UserName = user, Password = password, HostKeyVerifier = trustAll }, token);
+        var line = $"{key.KeyType} {Convert.ToBase64String(key.PublicKey.Span)} {marker}";
+        await Assert.That((await admin.RunCommandAsync($"mkdir -p ~/.ssh && echo '{line}' >> ~/.ssh/authorized_keys", token)).ExitStatus).IsEqualTo(0);
+        try
+        {
+            async Task<bool> SignsInAsync()
+            {
+                var held = (await agent.GetKeysAsync(token)).Single(k => k.PublicKey.Span.SequenceEqual(key.PublicKey.Span));
+                try
+                {
+                    await using var client = await SshClient.ConnectAsync(host, port,
+                        new SshClientOptions { UserName = user, PrivateKeys = [held], HostKeyVerifier = trustAll }, token);
+                    return (await client.RunCommandAsync("echo restricted", token)).StandardOutputText.Trim() == "restricted";
+                }
+                catch (SshAuthenticationException)
+                {
+                    return false;
+                }
+            }
+
+            await agent.AddKeyAsync(key, new SshAgentKeyConstraints
+            {
+                Destinations = [new SshAgentDestination { To = new SshAgentHost(host, hostKeys) }],
+            }, token);
+
+            // Outside a bound session (SshSignature uses a plain agent connection), OpenSSH's agent refuses a constrained key.
+            var held = (await agent.GetKeysAsync(token)).Single(k => k.PublicKey.Span.SequenceEqual(key.PublicKey.Span));
+            await Assert.That(async () => await SshSignature.SignAsync(held, "unbound"u8.ToArray(), "file", cancellationToken: token)).Throws<SshException>();
+
+            // Bound to this server's session, it signs in.
+            await Assert.That(await SignsInAsync()).IsTrue();
+
+            // Restricted to another host instead, the agent refuses it here.
+            await agent.RemoveKeyAsync(key, token);
+            await agent.AddKeyAsync(key, new SshAgentKeyConstraints
+            {
+                Destinations = [new SshAgentDestination { To = new SshAgentHost("elsewhere.invalid", [new SshAgentHostKey(other.PublicKey)]) }],
+            }, token);
+            await Assert.That(await SignsInAsync()).IsFalse();
+        }
+        finally
+        {
+            try
+            {
+                await agent.RemoveKeyAsync(key, token);
+            }
+            catch (SshException)
+            {
+                // Not added (the test failed before that).
+            }
+
+            await admin.RunCommandAsync($"sed -i '/{marker}/d' ~/.ssh/authorized_keys", token);
+        }
+    }
 }

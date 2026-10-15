@@ -44,6 +44,7 @@ public sealed class SshAgent
     private const byte AddIdConstrained = 25;
     private const byte ConstrainLifetime = 1;
     private const byte ConstrainConfirm = 2;
+    private const byte ConstrainExtension = 255;
     private const byte Extension = 27;
     private const byte ExtensionFailure = 28;
     private const byte ExtensionResponse = 29;
@@ -268,7 +269,7 @@ public sealed class SshAgent
             throw new NotSupportedException("This key is held by an agent; only a key loaded from a file or generated here can be added.");
         }
 
-        var constrained = constraints is { Lifetime: not null } or { Confirm: true };
+        var constrained = constraints is { Lifetime: not null } or { Confirm: true } or { Destinations.Count: > 0 };
         using var message = new ZeroingBufferWriter(4096);
         var writer = new SshWriter(message);
         writer.WriteByte(constrained ? AddIdConstrained : AddIdentity);
@@ -285,8 +286,45 @@ public sealed class SshAgent
             writer.WriteByte(ConstrainConfirm);
         }
 
+        if (constraints is { Destinations.Count: > 0 } restricted)
+        {
+            writer.WriteByte(ConstrainExtension);
+            writer.WriteString("restrict-destination-v00@openssh.com");
+            writer.WriteString(EncodeDestinations(restricted.Destinations));
+        }
+
         await ExpectSuccessAsync(message.WrittenSpan.ToArray(), "add the key", clear: true, cancellationToken).ConfigureAwait(false);
     }
+
+    /// <summary>
+    /// The <c>restrict-destination-v00@openssh.com</c> constraint body (PROTOCOL.agent, as ssh-add encodes it): each destination as a
+    /// string holding its from hop, its to hop and a reserved string; each hop as a string holding the user, the host name, a reserved
+    /// string, then every host key as a string and an is-CA byte.
+    /// </summary>
+    internal static byte[] EncodeDestinations(IReadOnlyList<SshAgentDestination> destinations) => SshPrivateKey.Encode(all =>
+    {
+        foreach (var destination in destinations)
+        {
+            all.WriteString(SshPrivateKey.Encode(constraint =>
+            {
+                constraint.WriteString(EncodeHop(destination.From));
+                constraint.WriteString(EncodeHop(destination.To));
+                constraint.WriteString(ReadOnlySpan<byte>.Empty);
+            }));
+        }
+    });
+
+    private static byte[] EncodeHop(SshAgentHost? host) => SshPrivateKey.Encode(hop =>
+    {
+        hop.WriteString(host?.UserName ?? string.Empty);
+        hop.WriteString(host?.HostName ?? string.Empty);
+        hop.WriteString(ReadOnlySpan<byte>.Empty);
+        foreach (var key in host?.HostKeys ?? [])
+        {
+            hop.WriteString(key.PublicKey.Span);
+            hop.WriteBoolean(key.IsCertificateAuthority);
+        }
+    });
 
     /// <summary>Removes one key from the agent (<c>ssh-add -d</c>): one from <see cref="GetKeysAsync"/>, or the key a file holds.</summary>
     /// <exception cref="SshException">The agent is not running or does not hold the key (<see cref="SshFailureReason.AgentFailed"/>).</exception>
