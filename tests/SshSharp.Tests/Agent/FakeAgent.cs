@@ -301,7 +301,11 @@ internal sealed class FakeAgent : IAsyncDisposable
     public string? LockPassphrase { get; private set; }
 
     /// <summary>One ADD_IDENTITY or ADD_ID_CONSTRAINED: the key type, the bytes after it (certificate and private fields), and the constraints.</summary>
-    public sealed record Added(string KeyType, byte[] Fields, string Comment, uint? LifetimeSeconds, bool Confirm);
+    public sealed record Added(string KeyType, byte[] Fields, string Comment, uint? LifetimeSeconds, bool Confirm)
+    {
+        /// <summary>Extension constraints (SSH_AGENT_CONSTRAIN_EXTENSION): name and body.</summary>
+        public Dictionary<string, byte[]> Extensions { get; init; } = [];
+    }
 
     public List<Added> AddRequests { get; } = [];
 
@@ -346,6 +350,7 @@ internal sealed class FakeAgent : IAsyncDisposable
         var commentEnd = request.Length - reader.Remaining.Length;
         uint? lifetime = null;
         var confirm = false;
+        var extensions = new Dictionary<string, byte[]>(StringComparer.Ordinal);
         while (!reader.IsEmpty)
         {
             switch (reader.ReadByte())
@@ -356,12 +361,15 @@ internal sealed class FakeAgent : IAsyncDisposable
                 case 2:
                     confirm = true;
                     break;
+                case 255:
+                    extensions[reader.ReadUtf8String()] = reader.ReadString().ToArray();
+                    break;
                 default:
                     return [5];
             }
         }
 
-        AddRequests.Add(new Added(type, request[fieldsStart..fieldsEnd], comment, lifetime, confirm));
+        AddRequests.Add(new Added(type, request[fieldsStart..fieldsEnd], comment, lifetime, confirm) { Extensions = extensions });
         if (!certificate)
         {
             // As a decrypted OpenSSH key file's private section: two check values, the key and comment, padding to 8 bytes.

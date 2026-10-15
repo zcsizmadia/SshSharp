@@ -135,6 +135,28 @@ A key paired with a certificate (`WithCertificate`) is added with it, as `ssh-ad
 agent ask before each use (OpenSSH's agent runs `ssh-askpass`). Each call throws `SshException` (`AgentFailed`) when the agent
 refuses, for example a locked agent or a constraint it does not support.
 
+**Destination constraints** (`ssh-add -h`, OpenSSH 8.9 and later) limit where the agent lets a key sign in: only to the listed
+hosts, recognised by their host keys, and so also only there through agent forwarding. Each destination is one `-h` argument,
+with host keys looked up in `known_hosts` as `ssh-add` does (`@cert-authority` keys count for the hosts they sign):
+
+```csharp
+var knownHosts = await KnownHostsFile.LoadAsync("/home/me/.ssh/known_hosts");
+await agent.AddKeyAsync(key, new SshAgentKeyConstraints
+{
+    Destinations =
+    [
+        SshAgentDestination.Parse("bastion.example.com", knownHosts),                  // ssh-add -h bastion.example.com
+        SshAgentDestination.Parse("bastion.example.com>deploy@app1", knownHosts),     //        -h "bastion.example.com>deploy@app1"
+    ],
+});
+```
+
+A forwarded key needs a destination for every hop, as in the example: from here to the bastion, and from the bastion to the
+application server, as `deploy` only. The agent enforces the constraints through the session binding (`session-bind@openssh.com`)
+that SshSharp sends with every agent signature, as ssh does; a signature on an unbound agent connection (for example
+`SshSignature.SignAsync` with that key) is refused. `SshAgentDestination`, `SshAgentHost` and `SshAgentHostKey` can also be built
+directly, with host keys from anywhere.
+
 With `ssh_config`, `AddKeysToAgent yes` (or `confirm`, optionally with a lifetime such as `AddKeysToAgent confirm 1h`) adds an
 identity file's key to the agent once the server has accepted it, so the next connection uses the agent and does not read the
 file (or ask for its passphrase) again. `ask` is treated as `no`: it needs a prompt this library does not show.

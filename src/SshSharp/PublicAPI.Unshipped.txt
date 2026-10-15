@@ -40,3 +40,49 @@ SshSharp.KnownHostsVerifier.RevokedHostKeys.get -> string?
 SshSharp.KnownHostsVerifier.RevokedHostKeys.init -> void
 [SSHSHARP001]SshSharp.Sftp.SftpTransferOptions.Segments.get -> int
 [SSHSHARP001]SshSharp.Sftp.SftpTransferOptions.Segments.init -> void
+override SshSharp.SshAgentDestination.Equals(object? obj) -> bool
+override SshSharp.SshAgentDestination.GetHashCode() -> int
+override SshSharp.SshAgentDestination.ToString() -> string!
+override SshSharp.SshAgentHost.Equals(object? obj) -> bool
+override SshSharp.SshAgentHost.GetHashCode() -> int
+override SshSharp.SshAgentHost.ToString() -> string!
+override SshSharp.SshAgentHostKey.Equals(object? obj) -> bool
+override SshSharp.SshAgentHostKey.GetHashCode() -> int
+override SshSharp.SshAgentHostKey.ToString() -> string!
+SshSharp.SshAgentDestination
+SshSharp.SshAgentDestination.<Clone>$() -> SshSharp.SshAgentDestination!
+SshSharp.SshAgentDestination.Equals(SshSharp.SshAgentDestination? other) -> bool
+SshSharp.SshAgentDestination.From.get -> SshSharp.SshAgentHost?
+SshSharp.SshAgentDestination.From.init -> void
+SshSharp.SshAgentDestination.SshAgentDestination() -> void
+SshSharp.SshAgentDestination.To.get -> SshSharp.SshAgentHost!
+SshSharp.SshAgentDestination.To.init -> void
+SshSharp.SshAgentHost
+SshSharp.SshAgentHost.<Clone>$() -> SshSharp.SshAgentHost!
+SshSharp.SshAgentHost.Deconstruct(out string! HostName, out System.Collections.Generic.IReadOnlyList<SshSharp.SshAgentHostKey!>! HostKeys) -> void
+SshSharp.SshAgentHost.Equals(SshSharp.SshAgentHost? other) -> bool
+SshSharp.SshAgentHost.HostKeys.get -> System.Collections.Generic.IReadOnlyList<SshSharp.SshAgentHostKey!>!
+SshSharp.SshAgentHost.HostKeys.init -> void
+SshSharp.SshAgentHost.HostName.get -> string!
+SshSharp.SshAgentHost.HostName.init -> void
+SshSharp.SshAgentHost.SshAgentHost(string! HostName, System.Collections.Generic.IReadOnlyList<SshSharp.SshAgentHostKey!>! HostKeys) -> void
+SshSharp.SshAgentHost.UserName.get -> string?
+SshSharp.SshAgentHost.UserName.init -> void
+SshSharp.SshAgentHostKey
+SshSharp.SshAgentHostKey.<Clone>$() -> SshSharp.SshAgentHostKey!
+SshSharp.SshAgentHostKey.Deconstruct(out System.ReadOnlyMemory<byte> PublicKey, out bool IsCertificateAuthority) -> void
+SshSharp.SshAgentHostKey.Equals(SshSharp.SshAgentHostKey? other) -> bool
+SshSharp.SshAgentHostKey.IsCertificateAuthority.get -> bool
+SshSharp.SshAgentHostKey.IsCertificateAuthority.init -> void
+SshSharp.SshAgentHostKey.PublicKey.get -> System.ReadOnlyMemory<byte>
+SshSharp.SshAgentHostKey.PublicKey.init -> void
+SshSharp.SshAgentHostKey.SshAgentHostKey(System.ReadOnlyMemory<byte> PublicKey, bool IsCertificateAuthority = false) -> void
+SshSharp.SshAgentKeyConstraints.Destinations.get -> System.Collections.Generic.IReadOnlyList<SshSharp.SshAgentDestination!>!
+SshSharp.SshAgentKeyConstraints.Destinations.init -> void
+static SshSharp.SshAgentDestination.operator !=(SshSharp.SshAgentDestination? left, SshSharp.SshAgentDestination? right) -> bool
+static SshSharp.SshAgentDestination.operator ==(SshSharp.SshAgentDestination? left, SshSharp.SshAgentDestination? right) -> bool
+static SshSharp.SshAgentDestination.Parse(string! specification, params SshSharp.Config.KnownHostsFile![]! knownHosts) -> SshSharp.SshAgentDestination!
+static SshSharp.SshAgentHost.operator !=(SshSharp.SshAgentHost? left, SshSharp.SshAgentHost? right) -> bool
+static SshSharp.SshAgentHost.operator ==(SshSharp.SshAgentHost? left, SshSharp.SshAgentHost? right) -> bool
+static SshSharp.SshAgentHostKey.operator !=(SshSharp.SshAgentHostKey? left, SshSharp.SshAgentHostKey? right) -> bool
+static SshSharp.SshAgentHostKey.operator ==(SshSharp.SshAgentHostKey? left, SshSharp.SshAgentHostKey? right) -> bool

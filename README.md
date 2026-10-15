@@ -73,7 +73,7 @@ Console.WriteLine(result.StandardOutputText);
 | Round-trip ping (`client.PingAsync`, OpenSSH's `ping@openssh.com`) | ✅ | ❌ |
 | SSH agent (`ssh-agent`, Windows OpenSSH agent, Pageant), including destination-constrained keys (`ssh-add -h`) | ✅ | ❌ |
 | Agent forwarding | ✅ | ❌ |
-| Agent key management (`ssh-add`: add with lifetime or confirmation, remove, lock; `AddKeysToAgent`) | ✅ | ❌ |
+| Agent key management (`ssh-add`: add with lifetime, confirmation or destination constraints (`-h`), remove, lock; `AddKeysToAgent`) | ✅ | ❌ |
 | Password, public key, keyboard-interactive, multi-factor | ✅ | ✅ |
 | OpenSSH certificates | User and host | User (authentication) |
 | Private key formats | OpenSSH, PKCS#1/#8, SEC1, PuTTY `.ppk` | OpenSSH, PKCS#1/#8, PuTTY `.ppk`, ssh.com |
