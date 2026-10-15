@@ -32,13 +32,28 @@ internal static class LocalNetwork
     /// <exception cref="FormatException">An entry is not a network in CIDR form.</exception>
     public static bool AnyInside(IReadOnlyList<IPAddress> addresses, string networks)
     {
-        var parsed = networks.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(Parse).ToList();
-        if (parsed.Count == 0)
+        var parsed = ParseList(networks);
+        return addresses.Any(address => parsed.Any(network => Contains(network, address)));
+    }
+
+    /// <summary>
+    /// Checks the list as OpenSSH does before evaluating anything (readconf.c runs addr_match_cidr_list over it first): a malformed
+    /// list is an error even on a <c>Match</c> line whose earlier criteria already failed.
+    /// </summary>
+    /// <exception cref="FormatException">An entry is empty or not a network in CIDR form.</exception>
+    public static void Validate(string networks) => ParseList(networks);
+
+    private static List<(IPAddress Network, int Length)> ParseList(string networks)
+    {
+        if (networks.Length == 0)
         {
             throw new FormatException("Match localnetwork needs at least one network.");
         }
 
-        return addresses.Any(address => parsed.Any(network => Contains(network, address)));
+        // As addr_match_cidr_list: an empty entry ("a,,b", a trailing comma) is an error, not skipped.
+        return [.. networks.Split(',').Select(entry => entry.Length == 0
+            ? throw new FormatException($"Match localnetwork: the list '{networks}' has an empty entry.")
+            : Parse(entry))];
     }
 
     private static (IPAddress Network, int Length) Parse(string entry)
@@ -58,7 +73,29 @@ internal static class LocalNetwork
             throw new FormatException($"Match localnetwork: '{entry}' has an invalid prefix length.");
         }
 
+        // As addr_pton_cidr: the address must be the network itself, its bits past the prefix all zero (10.1.2.3/8 is an error,
+        // "Inconsistent mask length", not 10.0.0.0/8).
+        var bytes = network.GetAddressBytes();
+        for (var bit = length; bit < bits; bit++)
+        {
+            if ((bytes[bit / 8] & (0x80 >> (bit % 8))) != 0)
+            {
+                throw new FormatException($"Match localnetwork: '{entry}' has bits set past its prefix length (the network is {Masked(bytes, length)}/{length}).");
+            }
+        }
+
         return (network, length);
+    }
+
+    private static IPAddress Masked(byte[] bytes, int length)
+    {
+        var masked = (byte[])bytes.Clone();
+        for (var bit = length; bit < masked.Length * 8; bit++)
+        {
+            masked[bit / 8] &= (byte)~(0x80 >> (bit % 8));
+        }
+
+        return new IPAddress(masked);
     }
 
     private static bool Contains((IPAddress Network, int Length) network, IPAddress address)

@@ -502,6 +502,14 @@ public sealed partial class SftpClient : IAsyncDisposable
         SftpTransferOptions options, CancellationToken cancellationToken)
     {
         var size = attributes.Size!.Value;
+
+        // A file that is there already fails the download before any session is opened for it (CreateNew below still decides, should
+        // one appear meanwhile).
+        if (!options.Overwrite && File.Exists(localPath))
+        {
+            throw new IOException($"The file '{localPath}' already exists.");
+        }
+
         // The sessions first: the server may allow fewer than asked (sshd's MaxSessions), and the ranges are split among those it opens.
         var siblings = new List<SftpClient>();
         try

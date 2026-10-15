@@ -69,6 +69,14 @@ public sealed class ConfigGapsTests : IDisposable
         await Assert.That(() => ResolvedPort(Block("localnetwork 300.1.1.1/8"), Options(Addresses))).Throws<FormatException>();
         await Assert.That(() => ResolvedPort(Block("localnetwork nonsense"), Options(Addresses))).Throws<FormatException>();
 
+        // As OpenSSH (addr_pton_cidr, addr_match_cidr_list): host bits past the prefix and empty entries are errors, and the list is
+        // checked even when an earlier criterion on the line has already failed.
+        await Assert.That(() => ResolvedPort(Block("localnetwork 10.1.2.3/8"), Options(Addresses))).Throws<FormatException>().WithMessageContaining("10.0.0.0/8");
+        await Assert.That(() => ResolvedPort(Block("localnetwork fe80::1/10"), Options(Addresses))).Throws<FormatException>();
+        await Assert.That(() => ResolvedPort(Block("localnetwork 10.0.0.0/8,,192.168.0.0/16"), Options(Addresses))).Throws<FormatException>();
+        await Assert.That(() => ResolvedPort(Block("localnetwork 10.0.0.0/8,"), Options(Addresses))).Throws<FormatException>();
+        await Assert.That(() => ResolvedPort(Block("host other localnetwork 10.1.2.3/8"), Options(Addresses))).Throws<FormatException>();
+
         // Without an injected list, the machine's own interfaces are read; loopback is always among them where interfaces are up.
         await Assert.That(ResolvedPort(Block("localnetwork 127.0.0.0/8,::1/128,0.0.0.0/0,::/0"), Options())).IsEqualTo(2222);
     }

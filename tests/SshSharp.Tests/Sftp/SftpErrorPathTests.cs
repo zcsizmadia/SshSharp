@@ -355,6 +355,27 @@ public sealed class SftpErrorPathTests : IDisposable
     }
 
     [Test]
+    public async Task ASegmentedDownload_OverAnExistingFile_FailsBeforeOpeningSessions()
+    {
+        await using var rig = await Rig.StartAsync(f => f.AddFile(Home + "/big.bin", new byte[4 * 1024 * 1024]));
+        var opened = 0;
+        var open = rig.Sftp.OpenSibling!;
+        rig.Sftp.OpenSibling = ct =>
+        {
+            Interlocked.Increment(ref opened);
+            return open(ct);
+        };
+        var local = Path.Combine(_dir, "big.bin");
+        await File.WriteAllTextAsync(local, "keep me");
+
+        await Assert.That(async () => await rig.Sftp.DownloadFileAsync("big.bin", local, new SftpTransferOptions { Segments = 4, Overwrite = false }, Timeout()))
+            .Throws<IOException>().WithMessageContaining("already exists");
+
+        await Assert.That(opened).IsEqualTo(0);
+        await Assert.That(await File.ReadAllTextAsync(local)).IsEqualTo("keep me");
+    }
+
+    [Test]
     public async Task ASegmentedDownload_OfAFileReplacedMeanwhile_Fails()
     {
         // The first FSTAT (on the first handle) sees the file as it was; the later ones, on the handles the other sessions open by
