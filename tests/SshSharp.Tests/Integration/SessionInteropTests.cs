@@ -7,7 +7,7 @@ public class SessionInteropTests
 {
     private static CancellationToken Timeout() => new CancellationTokenSource(TimeSpan.FromSeconds(60)).Token;
 
-    private static async Task<SshClient?> ConnectAsync()
+    private static async Task<SshClient?> ConnectAsync(TimeSpan? obscureKeystrokeTiming = null)
     {
         var user = Environment.GetEnvironmentVariable("SSHSHARP_TEST_USER");
         var password = Environment.GetEnvironmentVariable("SSHSHARP_TEST_PASSWORD");
@@ -25,6 +25,7 @@ public class SessionInteropTests
             Password = password,
             PrivateKeys = key is null ? [] : [key],
             HostKeyVerifier = SshHostKeyVerifier.FromDelegate((_, _) => ValueTask.FromResult(true)),
+            ObscureKeystrokeTiming = obscureKeystrokeTiming,
         };
         return await SshClient.ConnectAsync(host, port, options, Timeout());
     }
@@ -62,6 +63,35 @@ public class SessionInteropTests
             // OpenSSH for Windows runs the shell through ConPTY and does not pass its exit status on.
             await Assert.That(session.ExitStatus).IsEqualTo(7);
         }
+    }
+
+    [Test]
+    public async Task KeystrokesTypedOneByOne_WithObscuredTiming_ReachTheShell()
+    {
+        await using var client = await ConnectAsync(TimeSpan.FromMilliseconds(20));
+        if (client is null)
+        {
+            Skip.Test("SSHSHARP_TEST_SSHD, SSHSHARP_TEST_USER and SSHSHARP_TEST_PASSWORD are needed.");
+            return;
+        }
+
+        // Each key is its own write, sent on the 20 ms grid; the pause fills ticks with chaff pings, which the server answers (if it
+        // has ping@openssh.com) or never sees (if it does not), and the session goes on either way.
+        await using var session = await client.StartShellAsync(new SshSessionOptions { Terminal = new SshTerminalOptions { TerminalType = "dumb" } }, Timeout());
+        foreach (var key in "echo typed-$((6*7))"u8.ToArray())
+        {
+            await session.StandardInput.WriteAsync(new[] { key }, Timeout());
+        }
+
+        await Task.Delay(300);
+        foreach (var key in "; exit\n"u8.ToArray())
+        {
+            await session.StandardInput.WriteAsync(new[] { key }, Timeout());
+        }
+
+        var output = await ReadAllAsync(session.StandardOutput);
+        await Assert.That(output).Contains("typed-42");
+        await Assert.That(client.IsConnected).IsTrue();
     }
 
     [Test]

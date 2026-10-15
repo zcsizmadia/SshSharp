@@ -124,3 +124,7 @@ SshSharp.SshClientOptions.ChannelTimeouts.get -> System.Collections.Generic.IRea
 SshSharp.SshClientOptions.ChannelTimeouts.init -> void
 static SshSharp.SshChannelTimeout.operator !=(SshSharp.SshChannelTimeout? left, SshSharp.SshChannelTimeout? right) -> bool
 static SshSharp.SshChannelTimeout.operator ==(SshSharp.SshChannelTimeout? left, SshSharp.SshChannelTimeout? right) -> bool
+SshSharp.Config.SshHostConfig.ObscureKeystrokeTiming.get -> System.TimeSpan?
+SshSharp.Config.SshHostConfig.ObscureKeystrokeTiming.init -> void
+SshSharp.SshClientOptions.ObscureKeystrokeTiming.get -> System.TimeSpan?
+SshSharp.SshClientOptions.ObscureKeystrokeTiming.init -> void

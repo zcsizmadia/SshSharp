@@ -290,7 +290,11 @@ public sealed partial class SshClient : IAsyncDisposable
             }
 
             SshLog.SessionStarted(_logger, kind, channel.LocalId, terminal is not null);
-            return new SshSession(channel, terminal is not null, _logger);
+            // As ssh: only a session with a terminal is typed into.
+            var obfuscator = terminal is not null && _options.ObscureKeystrokeTiming is { } interval
+                ? new KeystrokeTimingObfuscator(channel, _connection, interval)
+                : null;
+            return new SshSession(channel, terminal is not null, _logger, obfuscator);
         }
         catch
         {

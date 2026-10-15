@@ -118,6 +118,9 @@ internal sealed class SshChannel
     /// <summary>Whether the channel is open and our CLOSE is still unsent.</summary>
     internal bool IsOpenForTimeout => Volatile.Read(ref _state) == 1 && !Volatile.Read(ref _closeSent);
 
+    /// <summary>Whether our CLOSE is still unsent, so data may still be sent.</summary>
+    internal bool IsOpenForSending => !Volatile.Read(ref _closeSent);
+
     private void Touch() => Interlocked.Exchange(ref _lastActivity, _connection.Time.GetTimestamp());
 
     /// <summary>Whether our CLOSE is still unsent; checked under the transport's send lock (one delegate per channel, not per packet).</summary>
