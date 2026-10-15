@@ -68,6 +68,7 @@ public sealed class GssapiTests : IDisposable
     [Arguments("refused")]
     [Arguments("no-ticket")]
     [Arguments("error-token")]
+    [Arguments("last-token-rejected")]
     [Arguments("mic-rejected")]
     [Arguments("ticket-fails-later")]
     public async Task WhenKerberosFails_TheNextMethodIsTried(string failure)
@@ -91,6 +92,7 @@ public sealed class GssapiTests : IDisposable
             {
                 "refused" => null,
                 "error-token" => new FakeGssapiServer { FailWithErrorToken = true },
+                "last-token-rejected" => new FakeGssapiServer { FailLastTokenWithErrorToken = true },
                 "mic-rejected" => new FakeGssapiServer { RejectMic = true },
                 "ticket-fails-later" => new FakeGssapiServer { Rounds = 2 },
                 _ => new FakeGssapiServer(),
