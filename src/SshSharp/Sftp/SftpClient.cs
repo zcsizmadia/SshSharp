@@ -522,7 +522,7 @@ public sealed partial class SftpClient : IAsyncDisposable
                 }
             }
 
-            var clients = (SftpClient[])[this, .. siblings];
+            SftpClient[] clients = [this, .. siblings];
             var mode = options.Overwrite ? FileMode.Create : FileMode.CreateNew;
             var created = false;
             try
