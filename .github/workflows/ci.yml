@@ -459,7 +459,7 @@ jobs:
             'MaxSessions 64'
             'AllowTcpForwarding yes'
             'SyslogFacility LOCAL0' # log to a file (logs\sshd.log), not the event log
-            'LogLevel DEBUG1'
+            'LogLevel DEBUG2' # channel EOF and shutdown events (rcvd eof, chan_shutdown_write), for the intermittent stdin hang (#86)
             'KexAlgorithms +diffie-hellman-group14-sha256,diffie-hellman-group16-sha512'
           ) + (Get-Content $config | Where-Object { $_ -notmatch '^\s*(Port|ListenAddress|PasswordAuthentication|Match|AuthorizedKeysFile|AllowGroups|AllowUsers|DenyGroups|DenyUsers)\b' -and $_ -notmatch '^\s+' }) |
             Set-Content $config -Encoding ascii
@@ -510,5 +510,14 @@ jobs:
           $log | Select-String -Pattern 'hostkeys|send reply'
           "--- global requests, errors and channel opens ---"
           $log | Select-String -Pattern 'global_request|keepalive|error|fatal|channel_open|direct-tcpip|forward' | Select-Object -Last 150
+          "--- channel EOF and close events ---"
+          $log | Select-String -Pattern 'rcvd eof|send eof|rcvd close|send close|chan_shutdown|read<=0|obuf empty|exit-status|session_exit_message|Starting session' | Select-Object -Last 150
           "--- tail ---"
           $log | Select-Object -Last 100
+          Copy-Item "$env:ProgramData\ssh\logs\sshd.log" "$env:RUNNER_TEMP\sshd.log" -ErrorAction SilentlyContinue
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: failure()
+        with:
+          name: sshd-log-windows
+          path: ${{ runner.temp }}/sshd.log
+          if-no-files-found: ignore
