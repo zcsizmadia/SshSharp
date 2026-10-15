@@ -1,1 +1,16 @@
 #nullable enable
+[SSHSHARP001]SshSharp.FileProviders.SftpFileProvider
+[SSHSHARP001]SshSharp.FileProviders.SftpFileProvider.ClearCache() -> void
+[SSHSHARP001]SshSharp.FileProviders.SftpFileProvider.GetDirectoryContents(string! subpath) -> Microsoft.Extensions.FileProviders.IDirectoryContents!
+[SSHSHARP001]SshSharp.FileProviders.SftpFileProvider.GetFileInfo(string! subpath) -> Microsoft.Extensions.FileProviders.IFileInfo!
+[SSHSHARP001]SshSharp.FileProviders.SftpFileProvider.Root.get -> string!
+[SSHSHARP001]SshSharp.FileProviders.SftpFileProvider.SftpFileProvider(SshSharp.Sftp.SftpClient! sftp, string! root, SshSharp.FileProviders.SftpFileProviderOptions? options = null) -> void
+[SSHSHARP001]SshSharp.FileProviders.SftpFileProvider.Watch(string! filter) -> Microsoft.Extensions.Primitives.IChangeToken!
+[SSHSHARP001]SshSharp.FileProviders.SftpFileProviderOptions
+[SSHSHARP001]SshSharp.FileProviders.SftpFileProviderOptions.CacheDuration.get -> System.TimeSpan
+[SSHSHARP001]SshSharp.FileProviders.SftpFileProviderOptions.CacheDuration.init -> void
+[SSHSHARP001]SshSharp.FileProviders.SftpFileProviderOptions.OperationTimeout.get -> System.TimeSpan
+[SSHSHARP001]SshSharp.FileProviders.SftpFileProviderOptions.OperationTimeout.init -> void
+[SSHSHARP001]SshSharp.FileProviders.SftpFileProviderOptions.SftpFileProviderOptions() -> void
+[SSHSHARP001]SshSharp.FileProviders.SftpFileProviderOptions.MaxCacheEntries.get -> int
+[SSHSHARP001]SshSharp.FileProviders.SftpFileProviderOptions.MaxCacheEntries.init -> void
