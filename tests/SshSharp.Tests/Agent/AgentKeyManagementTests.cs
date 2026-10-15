@@ -176,4 +176,45 @@ public sealed class AgentKeyManagementTests : IDisposable
         await Assert.That(added.LifetimeSeconds).IsEqualTo(3600u);
         await Assert.That(fake.Keys.Single().Key.PublicKey.ToArray().SequenceEqual(key.PublicKey.ToArray())).IsTrue();
     }
+
+    [Test]
+    public async Task AddKeysToAgent_LeavesTheCallersOwnKeysAlone()
+    {
+        using var key = SshPrivateKey.Generate(SshKeyType.Ed25519, "in-memory@example");
+        await using var fake = new FakeAgent();
+        await using var server = new FakeSessionServer { AdvertisedMethods = ["publickey"], AuthorizedKeys = [key.PublicKey.ToArray()] };
+        var config = $"Host *\n User tester\n IdentityAgent \"{fake.Path}\"\n AddKeysToAgent yes\n StrictHostKeyChecking no\n UserKnownHostsFile none\n";
+
+        await using (var client = await SshClient.ConnectAsync("target", new SshConfigConnectOptions
+        {
+            Config = SshConfig.Parse(config),
+            ResolveOptions = new SshConfigResolveOptions { LocalUser = "local", HomeDirectory = _dir },
+            PrivateKeys = [key],
+            TcpConnector = (_, _, _, _) =>
+            {
+                _ = server.StartAsync();
+                return ValueTask.FromResult<(Stream, IAsyncDisposable?)>((server.ClientStream, null));
+            },
+        }, Timeout()))
+        {
+            await Assert.That(client.IsConnected).IsTrue();
+        }
+
+        await Assert.That(fake.AddRequests).IsEmpty();
+    }
+
+    [Test]
+    public async Task AnAgentKeyWithACertificate_CannotBeAdded()
+    {
+        await using var fake = new FakeAgent();
+        var agent = new SshAgent(fake.Path);
+        using var authority = SshPrivateKey.Generate(SshKeyType.Ed25519);
+        using var key = SshPrivateKey.Generate(SshKeyType.Ed25519);
+        await agent.AddKeyAsync(key, cancellationToken: Timeout());
+        var held = (await agent.GetKeysAsync(Timeout())).Single();
+        var certificate = SshCertificate.Parse(TestKeys.CertificateLine(
+            TestKeys.Certificate(authority, key.PublicKey.ToArray(), SshCertificateType.User, ["tester"])));
+
+        await Assert.That(async () => await agent.AddKeyAsync(held.WithCertificate(certificate), cancellationToken: Timeout())).Throws<NotSupportedException>();
+    }
 }

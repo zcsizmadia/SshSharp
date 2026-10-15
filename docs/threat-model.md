@@ -68,8 +68,20 @@ A man in the middle can read, change, drop and inject bytes. The server itself m
 - **Agent forwarding** relays the agent protocol unchanged, as `ssh -A` does: while the connection is up, the server can ask the
   agent to sign with any of its keys. Forward the agent only to servers you trust, and use the agent's own confirmation
   (`ssh-add -c`) for sensitive keys.
+- **Transport pings** (`ping@openssh.com`) are answered with a pong, as OpenSSH answers them. Pongs not yet sent are capped
+  (256 KiB), so a server that pings but stops reading cannot grow the client's memory; pings past the cap go unanswered.
 - Forwarded connections the server opens are capped (`SshClientOptions.MaxForwardedConnections`, 1,000 by default); above
   it, new ones are refused. Within that, a server can still send data up to each channel's window (2 MiB).
+
+### The agent
+
+- **Windows named pipes:** any user can create a pipe under a name nobody holds yet, so another user on the same machine could
+  create the OpenSSH agent's pipe while the service is stopped, or Pageant's (its name is derived from the user name and a value
+  every process on the machine computes alike). SshSharp therefore uses an agent pipe only when its owner is the current user,
+  SYSTEM or the Administrators group, as PuTTY checks Pageant's pipe; otherwise no signing request or key is sent to it.
+- **Adding keys** (`AddKeyAsync`, `AddKeysToAgent`): the private key goes to the agent the application named. `AddKeysToAgent`
+  adds only identity-file keys the server accepted, never keys the application passed in `PrivateKeys`. The lock passphrase
+  (`LockAsync`) is a managed string and cannot be wiped.
 
 ### Local listeners (port forwarding and SOCKS)
 
@@ -133,7 +145,8 @@ A man in the middle can read, change, drop and inject bytes. The server itself m
   `ProxyCommand`, because its output is trusted as known_hosts lines: a configuration the application does not control must not
   be able to vouch for host keys. With it off, a configuration that names one fails the connection. As in OpenSSH, no shell is
   involved (the command is split into arguments, each token-expanded on its own, and the program must be an absolute path), so
-  token values cannot inject commands; the run is limited to 30 seconds and 1 MiB of output.
+  token values cannot inject commands; the run is limited to 30 seconds and 1 MiB of output. On Windows a batch file (`.bat`,
+  `.cmd`) is refused, because Windows runs it through `cmd.exe`, which would reparse the arguments.
 - `Match localnetwork` reads the local interface addresses. As ssh_config(5) warns, a network address is not a trustworthy
   criterion: anyone who controls the network can choose which block applies.
 - Host and user names supplied by the caller are substituted into those commands (`%h`, `%n`, `%r`), so they are refused when

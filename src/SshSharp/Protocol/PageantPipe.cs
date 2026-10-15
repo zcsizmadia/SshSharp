@@ -10,8 +10,9 @@ namespace SshSharp.Protocol;
 /// The named pipe Pageant (PuTTY's agent, 0.75 and later) listens on, derived as PuTTY derives it (windows/utils/agent_named_pipe_name.c):
 /// <c>\\.\pipe\pageant.&lt;user&gt;.&lt;hex SHA-256&gt;</c>. The user is the user principal name before its <c>@</c> (the account name when there
 /// is none); the hash is of the string <c>"Pageant"</c>, zero-padded to <c>CryptProtectMemory</c>'s 16-byte block, encrypted with
-/// <c>CRYPTPROTECTMEMORY_CROSS_PROCESS</c> (so only processes of the same logon session agree on it), and hashed with its length as an
-/// SSH string. The pipe speaks the ordinary agent protocol.
+/// <c>CRYPTPROTECTMEMORY_CROSS_PROCESS</c>, and hashed with its length as an SSH string. The pipe speaks the ordinary agent protocol.
+/// The name is no secret: every process on the machine encrypts alike, so another user can derive it and create the pipe first. The
+/// owner check when connecting (<c>SshAgent.IsTrustedPipeOwner</c>) is what keeps keys and sign requests from reaching such a pipe.
 /// </summary>
 [SupportedOSPlatform("windows")]
 internal static class PageantPipe

@@ -73,8 +73,12 @@ public sealed class SshConfigResolveOptions
     /// </summary>
     public Func<IReadOnlyList<System.Net.IPAddress>>? LocalAddresses { get; init; }
 
-    /// <summary>A copy with the user and port overridden where given (from a destination like <c>user@host:port</c>).</summary>
-    internal SshConfigResolveOptions With(string? user, int? port) => new()
+    /// <summary>
+    /// A copy with the user and port overridden where given (from a destination like <c>user@host:port</c>). A jump host gets session
+    /// type <c>none</c> and no command, as the <c>ssh -W</c> that ssh runs for each ProxyJump hop has: the caller's session is the
+    /// destination's, not the hop's.
+    /// </summary>
+    internal SshConfigResolveOptions With(string? user, int? port, bool jumpHost = false) => new()
     {
         User = user ?? User,
         Port = port ?? Port,
@@ -85,8 +89,8 @@ public sealed class SshConfigResolveOptions
         ExecMatcher = ExecMatcher,
         HostCanonicalizer = HostCanonicalizer,
         Tag = Tag,
-        SessionType = SessionType,
-        Command = Command,
+        SessionType = jumpHost ? "none" : SessionType,
+        Command = jumpHost ? null : Command,
         LocalAddresses = LocalAddresses,
     };
 }

@@ -2,6 +2,8 @@ using System.Buffers;
 using System.Buffers.Binary;
 using System.IO.Pipes;
 using System.Net.Sockets;
+using System.Runtime.Versioning;
+using System.Security.Principal;
 using SshSharp.Keys;
 using SshSharp.Protocol;
 
@@ -264,7 +266,7 @@ public sealed class SshAgent
     public async Task AddKeyAsync(SshPrivateKey key, SshAgentKeyConstraints? constraints = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(key);
-        if (key is AgentKey)
+        if (key.HeldByAgent)
         {
             throw new NotSupportedException("This key is held by an agent; only a key loaded from a file or generated here can be added.");
         }
@@ -515,6 +517,28 @@ public sealed class SshAgent
 
     private static readonly TimeSpan PipeListingTimeout = TimeSpan.FromSeconds(2);
 
+    /// <summary>
+    /// Whether the pipe's server is someone the user can trust with keys: any user can create a pipe under a name nobody holds yet, so
+    /// another user who creates the agent's pipe first (a stopped agent service, or Pageant's name, which every process can derive) would
+    /// otherwise receive sign requests and added keys. PuTTY refuses a Pageant pipe not owned by the user for the same reason.
+    /// </summary>
+    [SupportedOSPlatform("windows")]
+    private static bool IsTrustedPipeOwner(NamedPipeClientStream pipe)
+    {
+        try
+        {
+            using var identity = WindowsIdentity.GetCurrent();
+            return pipe.GetAccessControl().GetOwner(typeof(SecurityIdentifier)) is SecurityIdentifier owner &&
+                (owner == identity.User ||
+                 owner.IsWellKnown(WellKnownSidType.LocalSystemSid) ||
+                 owner.IsWellKnown(WellKnownSidType.BuiltinAdministratorsSid));
+        }
+        catch (SystemException) // no READ_CONTROL on the pipe, or a security descriptor that cannot be read: not trusted
+        {
+            return false;
+        }
+    }
+
     private static async ValueTask<Stream> ConnectAsync(string path, CancellationToken cancellationToken)
     {
         if (path.StartsWith(PipePrefix, StringComparison.OrdinalIgnoreCase))
@@ -535,6 +559,11 @@ public sealed class SshAgent
             try
             {
                 await pipe.ConnectAsync(5000, cancellationToken).ConfigureAwait(false);
+                if (!IsTrustedPipeOwner(pipe))
+                {
+                    throw new IOException($"The pipe {path} is not owned by the current user, SYSTEM or Administrators; it is not used as an agent.");
+                }
+
                 return pipe;
             }
             catch

@@ -42,7 +42,7 @@ public sealed partial class SshClient
             throw new SshException(SshFailureReason.ConnectFailed, "ProxyJump/ProxyCommand chains nest too deeply (is there a loop in ssh_config?).");
         }
 
-        var resolveOptions = (options.ResolveOptions ?? new SshConfigResolveOptions()).With(user, port);
+        var resolveOptions = (options.ResolveOptions ?? new SshConfigResolveOptions()).With(user, port, jumpHost: depth > 0);
         var hostConfig = config.Resolve(host, resolveOptions);
         var logger = options.Logger ?? NullLogger.Instance;
         if (hostConfig.RefuseConnection)
@@ -155,23 +155,24 @@ public sealed partial class SshClient
 
             var client = await ConnectCoreAsync(stream, clientOptions, leaveOpen: false, owner, hostConfig.HostName, hostConfig.Port, token).ConfigureAwait(false);
             owner = null; // the client owns it now
-            if (hostConfig.AddKeysToAgent is { } constraints && ResolveAgent(hostConfig, options) is { } keyAgent)
+            try
             {
-                await AddAcceptedKeysToAgentAsync(client, keyAgent, constraints, logger, token).ConfigureAwait(false);
-            }
-
-            if (depth == 0 && options.StartForwardings)
-            {
-                // Only the destination's forwardings: jump hosts are a way to get there.
-                try
+                // After the connect, so ConnectTimeout no longer applies: the caller's token does.
+                if (hostConfig.AddKeysToAgent is { } constraints && ResolveAgent(hostConfig, options) is { } keyAgent)
                 {
+                    await AddAcceptedKeysToAgentAsync(client, keys, keyAgent, constraints, logger, cancellationToken).ConfigureAwait(false);
+                }
+
+                if (depth == 0 && options.StartForwardings)
+                {
+                    // Only the destination's forwardings: jump hosts are a way to get there.
                     await client.StartConfiguredForwardingsAsync(hostConfig, cancellationToken).ConfigureAwait(false);
                 }
-                catch
-                {
-                    await client.DisposeAsync().ConfigureAwait(false);
-                    throw;
-                }
+            }
+            catch
+            {
+                await client.DisposeAsync().ConfigureAwait(false);
+                throw;
             }
 
             return client;
@@ -367,12 +368,13 @@ public sealed partial class SshClient
 
     /// <summary>
     /// <c>AddKeysToAgent</c>: the identity-file keys the server accepted go to the agent, so later connections use them without loading the
-    /// file (or asking for its passphrase) again. Best effort, as with ssh: an agent that is not running or refuses is logged, not fatal.
+    /// file (or asking for its passphrase) again. Keys the caller passed in <see cref="SshConfigConnectOptions.PrivateKeys"/> are the
+    /// caller's to manage and never go to the agent. Best effort, as with ssh: an agent that is not running or refuses is logged, not fatal.
     /// </summary>
-    private static async Task AddAcceptedKeysToAgentAsync(SshClient client, SshAgent agent, SshAgentKeyConstraints constraints, ILogger logger,
-        CancellationToken cancellationToken)
+    private static async Task AddAcceptedKeysToAgentAsync(SshClient client, List<SshPrivateKey> identityKeys, SshAgent agent, SshAgentKeyConstraints constraints,
+        ILogger logger, CancellationToken cancellationToken)
     {
-        foreach (var key in client.AcceptedKeys.Where(k => k is not AgentKey))
+        foreach (var key in client.AcceptedKeys.Where(k => !k.HeldByAgent && identityKeys.Contains(k, ReferenceEqualityComparer.Instance)))
         {
             try
             {

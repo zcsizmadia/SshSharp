@@ -34,6 +34,8 @@ internal sealed class SshConnection : IAsyncDisposable
     private readonly Queue<TaskCompletionSource<GlobalReply>> _globalReplies = new();
     private readonly ConcurrentDictionary<ulong, TaskCompletionSource> _pings = new();
     private long _pingCounter;
+    private long _queuedPongBytes;
+    private const long MaxQueuedPongBytes = 256 * 1024;
     private readonly CancellationTokenSource _closed = new();
     private readonly TimeProvider _time;
     private long _lastReceived;
@@ -128,7 +130,8 @@ internal sealed class SshConnection : IAsyncDisposable
                     // As OpenSSH: an ordinary close. The peer answers with its CLOSE, which ends the channel's streams; forwarded and
                     // tunnelled connections close their local sockets with it.
                     SshLog.ChannelTimedOut(_logger, channel.LocalId, type, (int)limit.TotalSeconds);
-                    _ = channel.CloseAsync(CancellationToken.None).AsTask();
+                    _ = channel.CloseAsync(CancellationToken.None).AsTask().ContinueWith(static t => _ = t.Exception, CancellationToken.None,
+                        TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default); // a close racing the connection's end has nobody to tell
                 }
             }
         }
@@ -625,13 +628,27 @@ internal sealed class SshConnection : IAsyncDisposable
 
             case SshMessage.Ping:
             {
-                // PROTOCOL 1.8: the pong echoes the ping's data.
+                // PROTOCOL 1.8: the pong echoes the ping's data. A server that pings but does not read would grow the outbox by what it
+                // sends, so pongs not yet sent are capped; the pings past that go unanswered, which only a misbehaving server notices.
                 var data = reader.ReadString().ToArray();
-                Post(Build(w =>
+                var pong = Build(w =>
                 {
                     w.WriteByte(SshMessage.Pong);
                     w.WriteString(data);
-                }));
+                });
+                if (Interlocked.Add(ref _queuedPongBytes, pong.Length) <= MaxQueuedPongBytes)
+                {
+                    PostIf(pong, () =>
+                    {
+                        Interlocked.Add(ref _queuedPongBytes, -pong.Length);
+                        return true;
+                    });
+                }
+                else
+                {
+                    Interlocked.Add(ref _queuedPongBytes, -pong.Length);
+                }
+
                 return false;
             }
 
