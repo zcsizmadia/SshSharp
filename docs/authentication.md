@@ -118,6 +118,27 @@ On Windows, when `SSH_AUTH_SOCK` is not set and the OpenSSH agent service is not
 (0.75 and later) on the pipe it creates for the current user; `SshAgent.Pageant()` asks for Pageant specifically. Pageant's keys work like
 any agent's, including for signing (`SshSignature`) and agent forwarding.
 
+### Managing the agent's keys
+
+`SshAgent` does what `ssh-add` does:
+
+```csharp
+using var key = await SshPrivateKey.LoadFileAsync("/home/me/.ssh/id_ed25519", passphrase);
+await agent.AddKeyAsync(key, new SshAgentKeyConstraints { Lifetime = TimeSpan.FromHours(1), Confirm = true }); // ssh-add -t 1h -c
+await agent.RemoveKeyAsync(key);                                                                                 // ssh-add -d
+await agent.RemoveAllKeysAsync();                                                                                // ssh-add -D
+await agent.LockAsync(lockPassphrase);                                                                           // ssh-add -x
+await agent.UnlockAsync(lockPassphrase);                                                                         // ssh-add -X
+```
+
+A key paired with a certificate (`WithCertificate`) is added with it, as `ssh-add` adds a key's `-cert.pub`. `Confirm` makes the
+agent ask before each use (OpenSSH's agent runs `ssh-askpass`). Each call throws `SshException` (`AgentFailed`) when the agent
+refuses, for example a locked agent or a constraint it does not support.
+
+With `ssh_config`, `AddKeysToAgent yes` (or `confirm`, optionally with a lifetime such as `AddKeysToAgent confirm 1h`) adds an
+identity file's key to the agent once the server has accepted it, so the next connection uses the agent and does not read the
+file (or ask for its passphrase) again. `ask` is treated as `no`: it needs a prompt this library does not show.
+
 ## Keyboard-interactive
 
 One-time codes, PAM prompts and other challenge-response logins (RFC 4256):

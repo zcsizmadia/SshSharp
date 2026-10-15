@@ -240,6 +240,7 @@ public sealed class SshConfig
             BindAddress = First("bindaddress") is { Length: > 0 } bindAddress ? bindAddress : null,
             BindInterface = First("bindinterface") is { Length: > 0 } bindInterface ? bindInterface : null,
             ForwardAgent = First("forwardagent") is { } fa && !IsNo(fa),
+            AddKeysToAgent = ParseAddKeysToAgent(All("addkeystoagent") is { Count: > 0 } addKeys ? string.Join(' ', addKeys) : null),
             RequestTty = ParseTty(First("requesttty")),
             PreferredAuthentications = [.. All("preferredauthentications").SelectMany(v => v.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))],
             PubkeyAuthentication = Bool(First("pubkeyauthentication"), true),
@@ -303,6 +304,44 @@ public sealed class SshConfig
     private static bool IsNo(string value) => value.ToLowerInvariant() is "no" or "false" or "off";
 
     private static bool Bool(string? value, bool fallback) => value is null ? fallback : !IsNo(value);
+
+    /// <summary>
+    /// <c>AddKeysToAgent yes|confirm|ask|no [time]</c>, or just a time (meaning yes), as ssh_config(5) has it. <c>ask</c>, and anything
+    /// malformed, mean no.
+    /// </summary>
+    internal static SshAgentKeyConstraints? ParseAddKeysToAgent(string? value)
+    {
+        if (value is null)
+        {
+            return null;
+        }
+
+        var parts = value.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length is 0 or > 2)
+        {
+            return null;
+        }
+
+        var mode = parts[0].ToLowerInvariant();
+        TimeSpan? lifetime = null;
+        if (parts.Length == 2 || mode is not ("yes" or "no" or "ask" or "confirm"))
+        {
+            if (!SshTime.TryParse(parts[^1], out var time) || time <= TimeSpan.Zero)
+            {
+                return null;
+            }
+
+            lifetime = time;
+            mode = parts.Length == 2 ? mode : "yes";
+        }
+
+        return mode switch
+        {
+            "yes" => new SshAgentKeyConstraints { Lifetime = lifetime },
+            "confirm" => new SshAgentKeyConstraints { Lifetime = lifetime, Confirm = true },
+            _ => null,
+        };
+    }
 
     private static TimeSpan? Time(string? value) => value is not null && SshTime.TryParse(value, out var t) ? t : null;
 

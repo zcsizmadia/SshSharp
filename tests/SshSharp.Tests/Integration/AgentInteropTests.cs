@@ -175,4 +175,49 @@ public class AgentInteropTests
             throw new InvalidOperationException($"{Path.GetFileName(program)} failed ({process.ExitCode}): {error}");
         }
     }
+
+    [Test]
+    public async Task KeysAreAdded_Used_AndRemoved_AndTheAgentLocks()
+    {
+        if (Environment.GetEnvironmentVariable("SSHSHARP_TEST_AGENT") != "1" || SshAgent.FromEnvironment() is not { } agent)
+        {
+            Skip.Test("SSHSHARP_TEST_AGENT=1 and SSH_AUTH_SOCK are needed.");
+            return;
+        }
+
+        var token = new CancellationTokenSource(TimeSpan.FromSeconds(60)).Token;
+        using var key = SshPrivateKey.Generate(SshKeyType.EcdsaNistp256, "added-by-sshsharp");
+        using var authority = SshPrivateKey.Generate(SshKeyType.Ed25519);
+        using var rsa = SshPrivateKey.Generate(SshKeyType.Rsa, rsaBits: 2048);
+        using var certified = rsa.WithCertificate(SshCertificate.Parse(SshSharp.Tests.Keys.TestKeys.CertificateLine(
+            SshSharp.Tests.Keys.TestKeys.Certificate(authority, rsa.PublicKey.ToArray(), SshCertificateType.User, ["tester"]))));
+        try
+        {
+            // A plain key with a lifetime, and an RSA key with its certificate, as ssh-add -t 600 and ssh-add with a -cert.pub do.
+            await agent.AddKeyAsync(key, new SshAgentKeyConstraints { Lifetime = TimeSpan.FromMinutes(10) }, token);
+            await agent.AddKeyAsync(certified, cancellationToken: token);
+
+            var keys = await agent.GetKeysAsync(token);
+            var held = keys.Single(k => k.PublicKey.Span.SequenceEqual(key.PublicKey.Span));
+            await Assert.That(held.Comment).IsEqualTo("added-by-sshsharp");
+            await Assert.That(keys.Any(k => k.PublicKey.Span.SequenceEqual(certified.PublicKey.Span))).IsTrue();
+
+            var message = "signed by ssh-agent"u8.ToArray();
+            var signature = await SshSignature.SignAsync(held, message, "file", cancellationToken: token);
+            await Assert.That(signature.Verify(message, "file")).IsTrue();
+
+            // Locked, it lists nothing; unlocked, the keys are back.
+            await agent.LockAsync("sshsharp-lock", token);
+            await Assert.That(await agent.GetKeysAsync(token)).IsEmpty();
+            await agent.UnlockAsync("sshsharp-lock", token);
+            await Assert.That((await agent.GetKeysAsync(token)).Any(k => k.PublicKey.Span.SequenceEqual(key.PublicKey.Span))).IsTrue();
+        }
+        finally
+        {
+            await agent.RemoveKeyAsync(key, token);
+            await agent.RemoveKeyAsync(certified, token);
+        }
+
+        await Assert.That((await agent.GetKeysAsync(token)).Any(k => k.PublicKey.Span.SequenceEqual(key.PublicKey.Span))).IsFalse();
+    }
 }

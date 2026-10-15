@@ -137,7 +137,7 @@ internal static class PrivateKeyParser
         }
     }
 
-    private static SshPrivateKey ParseOpenSshPrivate(ReadOnlySpan<byte> section)
+    internal static SshPrivateKey ParseOpenSshPrivate(ReadOnlySpan<byte> section)
     {
         var reader = new SshReader(section);
         var check1 = reader.ReadUInt32();

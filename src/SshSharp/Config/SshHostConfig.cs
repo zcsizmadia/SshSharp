@@ -126,6 +126,13 @@ public sealed class SshHostConfig
     /// <summary>Whether agent forwarding is requested.</summary>
     public bool ForwardAgent { get; init; }
 
+    /// <summary>
+    /// <c>AddKeysToAgent</c>: when not null, a key loaded from an identity file that the server accepts is added to the agent with these
+    /// constraints (<c>yes</c>; <c>confirm</c> asks for each use; a time interval sets the lifetime). Null for <c>no</c> (the default) and
+    /// for <c>ask</c>, which needs a prompt this library does not show.
+    /// </summary>
+    public SshAgentKeyConstraints? AddKeysToAgent { get; init; }
+
     /// <summary>The TTY request mode.</summary>
     public RequestTty RequestTty { get; init; }
 

@@ -4,6 +4,7 @@ using System.Net.Sockets;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using SshSharp.Config;
+using SshSharp.Keys;
 using SshSharp.Protocol;
 
 namespace SshSharp;
@@ -134,6 +135,11 @@ public sealed partial class SshClient
 
             var client = await ConnectCoreAsync(stream, clientOptions, leaveOpen: false, owner, hostConfig.HostName, hostConfig.Port, token).ConfigureAwait(false);
             owner = null; // the client owns it now
+            if (hostConfig.AddKeysToAgent is { } constraints && ResolveAgent(hostConfig, options) is { } keyAgent)
+            {
+                await AddAcceptedKeysToAgentAsync(client, keyAgent, constraints, logger, token).ConfigureAwait(false);
+            }
+
             if (depth == 0 && options.StartForwardings)
             {
                 // Only the destination's forwardings: jump hosts are a way to get there.
@@ -337,6 +343,27 @@ public sealed partial class SshClient
         }
 
         return [.. certified, .. plain];
+    }
+
+    /// <summary>
+    /// <c>AddKeysToAgent</c>: the identity-file keys the server accepted go to the agent, so later connections use them without loading the
+    /// file (or asking for its passphrase) again. Best effort, as with ssh: an agent that is not running or refuses is logged, not fatal.
+    /// </summary>
+    private static async Task AddAcceptedKeysToAgentAsync(SshClient client, SshAgent agent, SshAgentKeyConstraints constraints, ILogger logger,
+        CancellationToken cancellationToken)
+    {
+        foreach (var key in client.AcceptedKeys.Where(k => k is not AgentKey))
+        {
+            try
+            {
+                await agent.AddKeyAsync(key, constraints, cancellationToken).ConfigureAwait(false);
+                SshLog.KeyAddedToAgent(logger, key.Fingerprint);
+            }
+            catch (Exception ex) when (ex is SshException { Reason: SshFailureReason.AgentFailed } or NotSupportedException)
+            {
+                SshLog.AgentUnavailable(logger, ex.Message);
+            }
+        }
     }
 
     /// <summary>The agent's keys for this host, or none: no agent configured, <c>IdentityAgent none</c>, or the agent is not running.</summary>

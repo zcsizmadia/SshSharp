@@ -37,6 +37,9 @@ public sealed partial class SshClient : IAsyncDisposable
     /// <summary>What binds an agent connection to this session; forwarded agent connections are bound with it (<c>is_forwarding</c>).</summary>
     internal AgentBinding? AgentBinding { get; init; }
 
+    /// <summary>The keys the server accepted during authentication (a success, or a partial success on the way), for AddKeysToAgent.</summary>
+    internal IReadOnlyList<SshPrivateKey> AcceptedKeys { get; private set; } = [];
+
     /// <summary>The server's identification string, for example <c>SSH-2.0-OpenSSH_9.9</c>.</summary>
     public string ServerIdentification { get; }
 
@@ -320,8 +323,11 @@ public sealed partial class SshClient : IAsyncDisposable
         try
         {
             await transport.ConnectAsync(cancellationToken).ConfigureAwait(false);
-            await AuthenticateAsync(transport, options, logger, cancellationToken).ConfigureAwait(false);
-            return CompleteConnection(transport, stream, options, leaveOpen, owner, host, port, logger, activity, started);
+            var acceptedKeys = new List<SshPrivateKey>();
+            await AuthenticateAsync(transport, options, logger, acceptedKeys, cancellationToken).ConfigureAwait(false);
+            var client = CompleteConnection(transport, stream, options, leaveOpen, owner, host, port, logger, activity, started);
+            client.AcceptedKeys = acceptedKeys;
+            return client;
         }
         catch (Exception ex)
         {
@@ -459,7 +465,8 @@ public sealed partial class SshClient : IAsyncDisposable
     /// <summary>Walks of the method order; each one after the first needs a partial success, so this bounds a server that never finishes.</summary>
     private const int MaxAuthenticationPasses = 8;
 
-    private static async Task AuthenticateAsync(SshTransport transport, SshClientOptions options, ILogger logger, CancellationToken cancellationToken)
+    private static async Task AuthenticateAsync(SshTransport transport, SshClientOptions options, ILogger logger, List<SshPrivateKey> acceptedKeys,
+        CancellationToken cancellationToken)
     {
         var auth = new SshUserAuth(transport, options.UserName, options.AuthenticationBanner);
         await auth.RequestServiceAsync(cancellationToken).ConfigureAwait(false);
@@ -515,6 +522,7 @@ public sealed partial class SshClient : IAsyncDisposable
 
                             if (result.Success || result.PartialSuccess)
                             {
+                                acceptedKeys.Add(key);
                                 break;
                             }
 
