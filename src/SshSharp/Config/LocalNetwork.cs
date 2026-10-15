@@ -18,8 +18,9 @@ internal static class LocalNetwork
                 .Select(a => a.Address)
                 .Where(a => a.AddressFamily is AddressFamily.InterNetwork or AddressFamily.InterNetworkV6)];
         }
-        catch (NetworkInformationException)
+        catch (Exception ex) when (ex is NetworkInformationException or PlatformNotSupportedException)
         {
+            // No interfaces to read (a platform without the API, such as a browser): no local network matches.
             return [];
         }
     }
