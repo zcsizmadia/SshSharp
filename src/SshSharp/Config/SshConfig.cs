@@ -224,6 +224,10 @@ public sealed class SshConfig
             ProxyJump = proxyJump is null || proxyJump.Equals("none", StringComparison.OrdinalIgnoreCase)
                 ? [] : [.. proxyJump.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)],
             ProxyCommand = proxyCommand,
+            RefuseConnection = Bool(First("refuseconnection"), false),
+            KnownHostsCommand = First("knownhostscommand") is { Length: > 0 } knownHostsCommand && !knownHostsCommand.Trim().Equals("none", StringComparison.OrdinalIgnoreCase)
+                ? knownHostsCommand : null,
+            Tokens = ctx,
             UserKnownHostsFiles = [.. userKnownHosts.Select(v => ctx.ExpandPath(ctx.ExpandTokens(v)))],
             GlobalKnownHostsFiles = [.. globalKnownHosts.Select(v => ctx.ExpandPath(ctx.ExpandTokens(v)))],
             StrictHostKeyChecking = ParseStrict(First("stricthostkeychecking")),

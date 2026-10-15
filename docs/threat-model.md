@@ -114,11 +114,18 @@ A man in the middle can read, change, drop and inject bytes. The server itself m
 
 ### Configuration input
 
-`ssh_config` can run local commands (`Match exec`, `ProxyCommand`), as in OpenSSH.
+`ssh_config` can run local commands (`Match exec`, `ProxyCommand`, `KnownHostsCommand`), as in OpenSSH.
 
 - `Match exec` runs nothing unless the application opts in with an exec runner.
 - `ProxyCommand` runs by default, as with `ssh`. Applications that load configurations they do not control can turn it off
   with `SshConfigConnectOptions.AllowProxyCommand = false`.
+- `KnownHostsCommand` runs only with `SshConfigConnectOptions.AllowKnownHostsCommand = true`. It is off by default, unlike
+  `ProxyCommand`, because its output is trusted as known_hosts lines: a configuration the application does not control must not
+  be able to vouch for host keys. With it off, a configuration that names one fails the connection. As in OpenSSH, no shell is
+  involved (the command is split into arguments, each token-expanded on its own, and the program must be an absolute path), so
+  token values cannot inject commands; the run is limited to 30 seconds and 1 MiB of output.
+- `Match localnetwork` reads the local interface addresses. As ssh_config(5) warns, a network address is not a trustworthy
+  criterion: anyone who controls the network can choose which block applies.
 - Host and user names supplied by the caller are substituted into those commands (`%h`, `%n`, `%r`), so they are refused when
   they contain shell metacharacters, control characters or a leading `-` (the CVE-2023-51385 pattern). Host names may not
   contain white space either, which would split `%h` into extra arguments. User names may (Windows account names can).

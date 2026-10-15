@@ -103,8 +103,6 @@ public class SshConfigHardeningTests
     }
 
     [Test]
-    [Arguments("Match !localnetwork 10.0.0.0/8\n Port 5\n")]
-    [Arguments("Match localnetwork 10.0.0.0/8\n Port 5\n")]
     [Arguments("Match version 9.9\n Port 5\n")]
     [Arguments("Match !sessiontype shell\n Port 5\n")]
     [Arguments("Match all command uptime\n Port 5\n")]

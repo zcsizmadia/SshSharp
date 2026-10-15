@@ -45,6 +45,16 @@ public sealed partial class SshClient
         var resolveOptions = (options.ResolveOptions ?? new SshConfigResolveOptions()).With(user, port);
         var hostConfig = config.Resolve(host, resolveOptions);
         var logger = options.Logger ?? NullLogger.Instance;
+        if (hostConfig.RefuseConnection)
+        {
+            // OpenSSH 10.0's RefuseConnection: a Match block rules this connection out; nothing touches the network.
+            throw new SshException(SshFailureReason.ConnectFailed, "The configuration refuses this connection (RefuseConnection).");
+        }
+
+        if (hostConfig.KnownHostsCommand is not null && options.HostKeyVerifier is null && !options.AllowKnownHostsCommand)
+        {
+            throw new SshException(SshFailureReason.ConnectFailed, "The configuration names a KnownHostsCommand, and AllowKnownHostsCommand is off.");
+        }
 
         using var timeout = hostConfig.ConnectTimeout is { } limit ? new CancellationTokenSource(limit) : null;
         using var linked = timeout is null ? null : CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeout.Token);
@@ -124,7 +134,7 @@ public sealed partial class SshClient
                 AuthenticationOrder = AuthenticationOrder(hostConfig),
                 ForwardAgent = hostConfig.ForwardAgent ? ResolveAgent(hostConfig, options) : null,
                 HostKeyVerifier = options.HostKeyVerifier ?? KnownHostsVerifier.FromConfig(hostConfig, hostConfig.BatchMode ? null : options.AskHostKey,
-                    hostConfig.BatchMode ? null : options.ConfirmHostKeyUpdate),
+                    hostConfig.BatchMode ? null : options.ConfirmHostKeyUpdate, options.AllowKnownHostsCommand),
                 HostKeyAlias = hostConfig.HostKeyAlias,
                 KeepAliveInterval = hostConfig.ServerAliveInterval,
                 KeepAliveCountMax = hostConfig.ServerAliveCountMax,

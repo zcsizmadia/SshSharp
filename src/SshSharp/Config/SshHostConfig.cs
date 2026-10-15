@@ -78,6 +78,22 @@ public sealed class SshHostConfig
     /// <summary>The <c>ProxyCommand</c>, with tokens expanded, or null.</summary>
     public string? ProxyCommand { get; init; }
 
+    /// <summary>
+    /// <c>RefuseConnection yes</c>: connecting to this host is refused outright, before any network activity (OpenSSH 10.0+; meant for
+    /// <c>Match</c> blocks that rule out a situation).
+    /// </summary>
+    public bool RefuseConnection { get; init; }
+
+    /// <summary>
+    /// The <c>KnownHostsCommand</c>, as written (its tokens, including <c>%H %I %K %f %t</c>, are expanded each time it runs), or null.
+    /// Connecting by alias runs it only with <see cref="SshConfigConnectOptions.AllowKnownHostsCommand"/>; its output is read as
+    /// known_hosts lines, in addition to the files.
+    /// </summary>
+    public string? KnownHostsCommand { get; init; }
+
+    /// <summary>The token values of this resolution, for commands expanded later (<c>KnownHostsCommand</c>).</summary>
+    internal SshTokenContext? Tokens { get; init; }
+
     /// <summary>User known_hosts files, with <c>~</c> expanded.</summary>
     public IReadOnlyList<string> UserKnownHostsFiles { get; init; } = [];
 

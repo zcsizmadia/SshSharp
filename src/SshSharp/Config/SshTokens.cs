@@ -21,6 +21,9 @@ internal sealed record SshTokenContext(
     /// <summary>The <c>ProxyJump</c> value, or empty (<c>%j</c>).</summary>
     public string ProxyJump { get; init; } = string.Empty;
 
+    /// <summary>Tokens only some keywords have (<c>KnownHostsCommand</c>'s <c>%H %I %K %f %t</c>), by letter.</summary>
+    public IReadOnlyDictionary<char, string>? Extra { get; init; }
+
     /// <summary>
     /// Expands <c>%h %n %p %r %u %d %l %L %C %k %j %i %T %%</c>. An unknown token throws <see cref="FormatException"/>, as in OpenSSH.
     /// </summary>
@@ -61,6 +64,7 @@ internal sealed record SshTokenContext(
                 'j' => ProxyJump,
                 'i' => LocalUserId(),
                 'T' => "NONE", // no tun device is ever opened
+                var other when Extra is not null && Extra.TryGetValue(other, out var extra) => extra,
                 _ => throw new FormatException($"Unknown token '%{value[i]}' in '{value}'."),
             });
         }
