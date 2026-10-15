@@ -274,7 +274,20 @@ public class SessionInteropTests
             stages.Step("pinging after no-more-sessions");
             await client.PingAsync(Timeout());
             await Assert.That(client.IsConnected).IsTrue();
-        }, () => $"yes: exit status {yes?.ExitStatus?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "none"}, signal {yes?.ExitSignal ?? "none"}; connected {client.IsConnected}, error {client.ConnectionError?.Message ?? "none"}.");
+        }, () => $"yes: exit status {yes?.ExitStatus?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "none"}, signal {yes?.ExitSignal ?? "none"}; connected {client.IsConnected}, error {client.ConnectionError?.Message ?? "none"}. {ConnectionInternals(client)}");
+    }
+
+    /// <summary>For a stuck test: when the connection last received a packet, whether a key re-exchange is under way, what waits to be sent.</summary>
+    private static string ConnectionInternals(SshClient client)
+    {
+        const System.Reflection.BindingFlags Private = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+        var connection = client.Connection;
+        var lastReceived = (long)typeof(SshSharp.Protocol.SshConnection).GetField("_lastReceived", Private)!.GetValue(connection)!;
+        var transport = typeof(SshSharp.Protocol.SshConnection).GetField("_transport", Private)!.GetValue(connection)!;
+        var rekeying = transport.GetType().GetField("_rekeying", Private)!.GetValue(transport);
+        dynamic outbox = typeof(SshSharp.Protocol.SshConnection).GetField("_outbox", Private)!.GetValue(connection)!;
+        int queued = outbox.Reader.Count;
+        return $"Last packet received {connection.Time.GetElapsedTime(lastReceived).TotalSeconds:0.0} s ago; rekeying {rekeying}; {queued} messages waiting in the outbox.";
     }
 
     [Test]
