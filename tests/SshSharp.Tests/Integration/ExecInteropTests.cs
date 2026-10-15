@@ -29,12 +29,6 @@ public class ExecInteropTests
     [Test]
     public async Task KeepAlivesAreAnswered_SoAnIdleConnectionStaysUp()
     {
-        if (RealServer.IsWindows)
-        {
-            // OpenSSH for Windows 9.5 often fails to answer keepalive@openssh.com ("server_input_global_request: send reply: Connection
-            // aborted" in its log); OpenSSH's own client with ServerAliveInterval times out against it the same way (checked in CI).
-            Skip.Test("OpenSSH for Windows does not answer keep-alives reliably.");
-        }
         if (!Configured)
         {
             Skip.Test("No real server account configured.");
@@ -51,9 +45,22 @@ public class ExecInteropTests
         };
         await using var client = await SshClient.ConnectAsync(host, port, options, Timeout());
 
-        // The claim itself, without timing: OpenSSH answers keepalive@openssh.com (with a failure, which is still an answer).
-        var reply = await client.Connection.SendGlobalRequestAsync("keepalive@openssh.com", wantReply: true, null, Timeout());
-        await Assert.That(reply.Success).IsFalse();
+        if (RealServer.IsWindows)
+        {
+            // OpenSSH for Windows 9.5 often fails to answer keepalive@openssh.com ("server_input_global_request: send reply: Connection
+            // aborted" in its log; OpenSSH's own client with ServerAliveInterval times out against it the same way). Keep-alives work
+            // there only as transport pings (ping@openssh.com), which the client uses when the server announces them.
+            if (!client.Connection.SupportsPing)
+            {
+                Skip.Test("OpenSSH for Windows does not answer keepalive@openssh.com reliably, and this one announces no ping@openssh.com.");
+            }
+        }
+        else
+        {
+            // The claim itself, without timing: OpenSSH answers keepalive@openssh.com (with a failure, which is still an answer).
+            var reply = await client.Connection.SendGlobalRequestAsync("keepalive@openssh.com", wantReply: true, null, Timeout());
+            await Assert.That(reply.Success).IsFalse();
+        }
 
         // And an idle connection with keep-alives running stays up. The margins are generous: the interop tests run in parallel on
         // small CI runners, and a stalled test process is a genuine miss as far as the keep-alive is concerned.

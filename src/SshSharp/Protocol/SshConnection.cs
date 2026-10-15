@@ -32,6 +32,8 @@ internal sealed class SshConnection : IAsyncDisposable
 
     // Global requests are answered in order (RFC 4254 section 4), so waiters are queued exactly when their request is committed to the wire.
     private readonly Queue<TaskCompletionSource<GlobalReply>> _globalReplies = new();
+    private readonly ConcurrentDictionary<ulong, TaskCompletionSource> _pings = new();
+    private long _pingCounter;
     private readonly CancellationTokenSource _closed = new();
     private readonly TimeProvider _time;
     private long _lastReceived;
@@ -107,6 +109,52 @@ internal sealed class SshConnection : IAsyncDisposable
         return reply is null ? new GlobalReply(true, []) : await reply.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
     }
 
+    /// <summary>Whether the server answers transport pings (it announced <c>ping@openssh.com</c> version 0 in EXT_INFO).</summary>
+    internal bool SupportsPing => ServerExtensions.TryGetValue("ping@openssh.com", out var version) && version == "0";
+
+    /// <summary>
+    /// Measures a round trip to the server: an OpenSSH transport ping (<c>ping@openssh.com</c>) where the server announces it, otherwise
+    /// a <c>keepalive@openssh.com</c> global request, whose answer (a refusal, usually) arrives just as fast.
+    /// </summary>
+    public async Task<TimeSpan> PingAsync(CancellationToken cancellationToken)
+    {
+        var started = _time.GetTimestamp();
+        if (!SupportsPing)
+        {
+            await SendGlobalRequestAsync("keepalive@openssh.com", wantReply: true, null, cancellationToken).ConfigureAwait(false);
+            return _time.GetElapsedTime(started);
+        }
+
+        // Each ping carries its own number, so concurrent pings are told apart by their pongs (which echo it).
+        var id = (ulong)Interlocked.Increment(ref _pingCounter);
+        var pong = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _pings[id] = pong;
+        try
+        {
+            if (_failure is { } failure)
+            {
+                throw failure;
+            }
+
+            await SendAsync(PingMessage(id), cancellationToken).ConfigureAwait(false);
+            await pong.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+            return _time.GetElapsedTime(started);
+        }
+        finally
+        {
+            _pings.TryRemove(id, out _);
+        }
+    }
+
+    /// <summary>SSH2_MSG_PING with an 8-byte number as its data (0 for keep-alive probes, which nobody waits for).</summary>
+    private static byte[] PingMessage(ulong id) => Build(w =>
+    {
+        w.WriteByte(SshMessage.Ping);
+        Span<byte> data = stackalloc byte[8];
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt64BigEndian(data, id);
+        w.WriteString(data);
+    });
+
     private void EnqueueGlobalReply(TaskCompletionSource<GlobalReply> reply)
     {
         lock (_globalReplies)
@@ -163,9 +211,18 @@ internal sealed class SshConnection : IAsyncDisposable
                     return;
                 }
 
-                // Any packet from the server counts as an answer; the reply itself is not awaited (a dead server never sends it).
-                var probe = SendGlobalRequestAsync("keepalive@openssh.com", wantReply: true, null, _stop.Token);
-                _ = probe.ContinueWith(static t => _ = t.Exception, CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
+                // Any packet from the server counts as an answer; the reply itself is not awaited (a dead server never sends it). A transport
+                // ping where the server has one (cheaper, and answered by servers whose global-request replies get lost), otherwise the
+                // keepalive@openssh.com global request, as OpenSSH's client sends.
+                if (SupportsPing)
+                {
+                    Post(PingMessage(0));
+                }
+                else
+                {
+                    var probe = SendGlobalRequestAsync("keepalive@openssh.com", wantReply: true, null, _stop.Token);
+                    _ = probe.ContinueWith(static t => _ = t.Exception, CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
+                }
             }
         }
         catch (OperationCanceledException) when (_stop.IsCancellationRequested)
@@ -457,6 +514,12 @@ internal sealed class SshConnection : IAsyncDisposable
             }
         }
 
+        // A ping registers before it checks for a failure, so either it sees the failure or the failure reaches it here.
+        foreach (var ping in _pings.Values)
+        {
+            ping.TrySetException(exception);
+        }
+
         try
         {
             _closed.Cancel();
@@ -509,6 +572,29 @@ internal sealed class SshConnection : IAsyncDisposable
             case SshMessage.RequestSuccess or SshMessage.RequestFailure:
                 CompleteGlobalReply(new GlobalReply(type == SshMessage.RequestSuccess, reader.Remaining.ToArray()));
                 return false;
+
+            case SshMessage.Ping:
+            {
+                // PROTOCOL 1.8: the pong echoes the ping's data.
+                var data = reader.ReadString().ToArray();
+                Post(Build(w =>
+                {
+                    w.WriteByte(SshMessage.Pong);
+                    w.WriteString(data);
+                }));
+                return false;
+            }
+
+            case SshMessage.Pong:
+            {
+                var data = reader.ReadString();
+                if (data.Length == 8 && _pings.TryGetValue(System.Buffers.Binary.BinaryPrimitives.ReadUInt64BigEndian(data), out var waiting))
+                {
+                    waiting.TrySetResult();
+                }
+
+                return false; // a keep-alive's pong, or one nobody waits for any more: receiving it was the point
+            }
 
             case SshMessage.ChannelOpenConfirmation:
             {

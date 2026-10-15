@@ -161,4 +161,25 @@ public class SessionInteropTests
         await session.WaitForExitAsync(Timeout());
         await Assert.That(session.ExitStatus).IsEqualTo(4);
     }
+
+    [Test]
+    public async Task PingAsync_MeasuresARoundTrip_WithPingsOrWithoutThem()
+    {
+        await using var client = await ConnectAsync();
+        if (client is null)
+        {
+            Skip.Test("SSHSHARP_TEST_SSHD, SSHSHARP_TEST_USER and SSHSHARP_TEST_PASSWORD are needed.");
+            return;
+        }
+
+        // OpenSSH 9.5+ answers transport pings; older OpenSSH and Dropbear answer the keepalive@openssh.com request instead.
+        for (var i = 0; i < 3; i++)
+        {
+            var roundTrip = await client.PingAsync(Timeout());
+            await Assert.That(roundTrip).IsLessThan(TimeSpan.FromSeconds(30));
+        }
+
+        var result = await client.RunCommandAsync("echo still-here", Timeout());
+        await Assert.That(result.StandardOutputText.Trim()).IsEqualTo("still-here");
+    }
 }

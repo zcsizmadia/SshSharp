@@ -261,9 +261,19 @@ client.ConnectionClosed.Register(() => Console.WriteLine($"Disconnected: {client
 `IsConnected` turns false once the server disconnects, the connection fails (including missed keep-alives) or the client
 is disposed.
 
-> **OpenSSH for Windows:** the server built into Windows (OpenSSH for Windows 9.5) often fails to answer keep-alives, and
-> the connection then ends after `KeepAliveCountMax` intervals, as it does with OpenSSH's own `ssh -o ServerAliveInterval`.
-> Against such servers, leave `KeepAliveInterval` unset or use a long interval with a generous `KeepAliveCountMax`.
+Keep-alive probes are OpenSSH transport pings (`ping@openssh.com`) where the server announces them (OpenSSH 9.5 and later), and
+`keepalive@openssh.com` requests otherwise, as OpenSSH's client sends. Any packet from the server counts as an answer.
+`client.PingAsync()` measures a round trip the same way, and also proves the connection is alive:
+
+```csharp
+var roundTrip = await client.PingAsync();
+Console.WriteLine($"{roundTrip.TotalMilliseconds:F1} ms");
+```
+
+> **OpenSSH for Windows:** the server built into Windows (OpenSSH for Windows 9.5) often fails to answer `keepalive@openssh.com`
+> requests, and without pings the connection then ends after `KeepAliveCountMax` intervals, as it does with OpenSSH's own
+> `ssh -o ServerAliveInterval`. Against such a server, when it does not announce pings, leave `KeepAliveInterval` unset or use a
+> long interval with a generous `KeepAliveCountMax`.
 
 ## Algorithms
 

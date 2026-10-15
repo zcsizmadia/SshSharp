@@ -310,6 +310,19 @@ internal sealed class FakeSessionServer : IAsyncDisposable
     /// <summary>Every authentication method the client tried, in order; signed publickey attempts add "publickey-signed:alg".</summary>
     public List<string> AuthAttempts { get; } = [];
 
+    /// <summary>The signature algorithm of every publickey request, in order.</summary>
+    public List<string> PublicKeyAlgorithms { get; } = [];
+
+    /// <summary>Extensions to send in a second EXT_INFO during authentication, to a client that announced ext-info-in-auth@openssh.com.</summary>
+    public IReadOnlyDictionary<string, string>? ExtInfoDuringAuth { get; init; }
+
+    private bool _lateExtInfoSent;
+
+    /// <summary>Whether transport pings (ping@openssh.com) are answered; how many arrived.</summary>
+    public bool AnswerPings { get; set; } = true;
+
+    public int PingsReceived { get; private set; }
+
     private bool _publicKeyDone;
 
     /// <summary>
@@ -415,6 +428,37 @@ internal sealed class FakeSessionServer : IAsyncDisposable
     private async Task HandleAsync(ReadOnlyMemory<byte> payloadMemory)
     {
         var payload = payloadMemory.ToArray();
+        if (payload[0] == SshMessage.UserAuthRequest && ExtInfoDuringAuth is { } lateExtensions && !_lateExtInfoSent
+            && _server.ClientExtensions.ContainsKey("ext-info-in-auth@openssh.com"))
+        {
+            // PROTOCOL 1.10: after the client's first USERAUTH_REQUEST, a second EXT_INFO (per-user server-sig-algs, for example).
+            _lateExtInfoSent = true;
+            await _server.SendAsync(Build(w =>
+            {
+                w.WriteByte(SshMessage.ExtInfo);
+                w.WriteUInt32((uint)lateExtensions.Count);
+                foreach (var (name, value) in lateExtensions)
+                {
+                    w.WriteString(name);
+                    w.WriteString(value);
+                }
+            }));
+        }
+
+        if (payload[0] == SshMessage.Ping)
+        {
+            PingsReceived++;
+            if (AnswerPings)
+            {
+                var ping = new SshReader(payload);
+                ping.ReadByte();
+                var data = ping.ReadString().ToArray();
+                await _server.SendAsync(Build(w => { w.WriteByte(SshMessage.Pong); w.WriteString(data); }));
+            }
+
+            return;
+        }
+
         if (payload[0] == SshMessage.UserAuthRequest && AuthenticationBanner is { } bannerText && !_bannerSent)
         {
             // Before the first authentication reply, like sshd's Banner.
@@ -465,6 +509,10 @@ internal sealed class FakeSessionServer : IAsyncDisposable
                     var hasSignature = reader.ReadBoolean();
                     var algorithm = reader.ReadUtf8String();
                     var blob = reader.ReadString().ToArray();
+                    lock (PublicKeyAlgorithms)
+                    {
+                        PublicKeyAlgorithms.Add(algorithm);
+                    }
 
                     // Host-bound (PROTOCOL 3.1): the client names the host key it verified, which must be the one this server presented.
                     var boundHostKey = method == HostBoundMethod ? reader.ReadString().ToArray() : null;
