@@ -272,6 +272,40 @@ public class SshObservabilityTests
     }
 
     [Test]
+    public async Task ARefusedTcpConnection_IsInTheTrace()
+    {
+        var stopped = new List<Activity>();
+        var lockObject = new object();
+        using var listener = new ActivityListener
+        {
+            ShouldListenTo = source => source.Name == SshTelemetry.SourceName,
+            Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllDataAndRecorded,
+            ActivityStopped = activity => { lock (lockObject) { stopped.Add(activity); } },
+        };
+        ActivitySource.AddActivityListener(listener);
+
+        // A port nothing listens on any more: the connection is refused before any SSH happens.
+        var probe = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+        probe.Start();
+        var port = ((System.Net.IPEndPoint)probe.LocalEndpoint).Port;
+        probe.Stop();
+
+        using var root = new Activity("test-root-3").Start();
+        await Assert.That(async () => await SshClient.ConnectAsync("127.0.0.1", port, Options(), Timeout())).Throws<Exception>();
+
+        Activity connect;
+        lock (lockObject)
+        {
+            connect = stopped.Single(a => a.TraceId == root.TraceId && a.OperationName == "SshSharp.Connect");
+        }
+
+        await Assert.That(connect.Status).IsEqualTo(ActivityStatusCode.Error);
+        await Assert.That(connect.GetTagItem("error.type")).IsNotNull();
+        await Assert.That(connect.GetTagItem("network.transport")).IsEqualTo("tcp");
+        await Assert.That(connect.GetTagItem("server.port")).IsEqualTo(port);
+    }
+
+    [Test]
     public async Task FailedConnects_AreTimed_WithTheirErrorType_AndFailedCommandsCounted()
     {
         var seen = new List<(string Instrument, IReadOnlyList<KeyValuePair<string, object?>> Tags)>();

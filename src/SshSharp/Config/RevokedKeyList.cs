@@ -240,10 +240,10 @@ internal sealed class RevokedKeyList
                     break;
 
                 case SectionSignature:
-                    // The signing key and signature: parsed (so a truncated one is an error), not verified.
-                    section.ReadString();
-                    section.ReadString();
-                    Expect(section.IsEmpty, "Trailing data in a KRL signature section.");
+                    // Unlike other sections, the string after the type is the signing key, and the signature follows it as another
+                    // string (PROTOCOL.krl: byte type, string signature_key, string signature). Parsed, so a truncated one is an
+                    // error; not verified.
+                    reader.ReadString();
                     signed = true;
                     break;
 

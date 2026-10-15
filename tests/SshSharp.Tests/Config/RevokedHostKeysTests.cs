@@ -83,6 +83,16 @@ public sealed class RevokedHostKeysTests : IDisposable
             return this;
         }
 
+        /// <summary>A signature section, which ssh-keygen -s wrote unlike the others: byte 4, string signing key, string signature.</summary>
+        public Krl Signature(byte[] key, byte[] signature)
+        {
+            var w = new SshWriter(_sections);
+            w.WriteByte(4);
+            w.WriteString(key);
+            w.WriteString(signature);
+            return this;
+        }
+
         public Krl Certificates(byte[]? authority, params (byte Type, Action<SshWriter> Data)[] subsections) => Section(1, w =>
         {
             w.WriteString(authority ?? []);
@@ -221,7 +231,8 @@ public sealed class RevokedHostKeysTests : IDisposable
             new Krl().Certificates(authority, (0x20, w => w.WriteUInt64(0))).Build(),              // serial 0
             new Krl().Certificates(authority, (0x21, w => { w.WriteUInt64(9); w.WriteUInt64(3); })).Build(), // an empty range
             new Krl().Section(3, w => w.WriteString(new byte[19])).Build(),                       // a SHA-1 of the wrong length
-            new Krl().Section(4, w => { w.WriteString(authority); w.WriteString(new byte[64]); }).Section(2, w => w.WriteString(key.Blob)).Build(), // after a signature
+            new Krl().Signature(authority, new byte[64]).Section(2, w => w.WriteString(key.Blob)).Build(), // after a signature
+            new Krl().Section(2, w => w.WriteString(key.Blob)).Build().Concat(new byte[] { 4, 0, 0, 0, 1, 0 }).ToArray(), // a signature without one
             new Krl().Build()[..20],                                                               // truncated
         ];
 
@@ -239,7 +250,8 @@ public sealed class RevokedHostKeysTests : IDisposable
         // A non-critical extension and a trailing signature section (not verified) are fine.
         var usable = new Krl()
             .Section(255, w => { w.WriteString("future"); w.WriteBoolean(false); w.WriteString("data"); })
-            .Section(4, w => { w.WriteString(authority); w.WriteString(new byte[64]); })
+            .Signature(authority, new byte[64])
+            .Signature(authority, new byte[64]) // ssh-keygen -s can sign with several keys
             .Build();
         await Assert.That(Revoked(usable, key)).IsFalse();
     }
