@@ -242,6 +242,12 @@ internal sealed class SshChannel
             throw new InvalidOperationException("The peer does not accept data on this channel (maximum packet size 0).");
         }
 
+        if (!data.IsEmpty && PeerStoppedReading)
+        {
+            // As writing to a pipe whose reader has gone: the remote program closed its input (eow@openssh.com).
+            throw new SshException(SshFailureReason.ChannelClosed, "The server no longer reads this channel's data: the remote program closed its input.");
+        }
+
         while (!data.IsEmpty)
         {
             var count = await _sendWindow.AcquireAsync((int)Math.Min(data.Length, _remoteMaxPacket), cancellationToken).ConfigureAwait(false);
@@ -444,6 +450,44 @@ internal sealed class SshChannel
         Consumed(length);
     }
 
+    private int _peerStoppedReading;
+    private int _discardIncoming;
+
+    /// <summary>
+    /// The peer sent <c>eow@openssh.com</c> (OpenSSH PROTOCOL 2.1): it no longer reads this channel's data (on a session, the program
+    /// closed its input), so sending more would only be thrown away there.
+    /// </summary>
+    internal bool PeerStoppedReading => Volatile.Read(ref _peerStoppedReading) != 0;
+
+    /// <summary>
+    /// The local reader of this channel's data is gone (a session's standard output was disposed while the session goes on): what is
+    /// queued and what still arrives is dropped, its window given back, and an OpenSSH peer is asked to stop sending
+    /// (<c>eow@openssh.com</c>, as ssh sends when its local output closes; only to OpenSSH, as some others abort on it).
+    /// </summary>
+    internal void StopReceiving()
+    {
+        if (Interlocked.Exchange(ref _discardIncoming, 1) != 0)
+        {
+            return;
+        }
+
+        while (_incoming.Reader.TryRead(out var item))
+        {
+            item.Dispose();
+        }
+
+        if (_connection.PeerIsOpenSsh)
+        {
+            _connection.PostIf(Build(w =>
+            {
+                w.WriteByte(SshMessage.ChannelRequest);
+                w.WriteUInt32(RemoteId);
+                w.WriteString("eow@openssh.com");
+                w.WriteBoolean(false);
+            }), _isOpenForSending);
+        }
+    }
+
     internal static byte[] BuildOpenFailure(uint recipientChannel, ChannelOpenFailureReason reason, string description) => Build(w =>
     {
         w.WriteByte(SshMessage.ChannelOpenFailure);
@@ -473,6 +517,14 @@ internal sealed class SshChannel
 
         // Nobody will read an abandoned channel; don't hold its buffers until it closes.
         var queue = isExtended && SplitExtended ? _extended : _incoming;
+        if (queue == _incoming && Volatile.Read(ref _discardIncoming) != 0)
+        {
+            // Its reader is gone (StopReceiving): dropped, and the window given back as if read, until the peer stops sending.
+            packet.Dispose();
+            Consumed(length);
+            return;
+        }
+
         if (_abandoned || !queue.Writer.TryWrite(new ChannelData(this, packet, offset, length, isExtended)))
         {
             packet.Dispose();
@@ -551,6 +603,10 @@ internal sealed class SshChannel
                     break;
                 case "exit-signal":
                     ExitSignal = reader.ReadUtf8String();
+                    handled = true;
+                    break;
+                case "eow@openssh.com":
+                    Volatile.Write(ref _peerStoppedReading, 1);
                     handled = true;
                     break;
             }

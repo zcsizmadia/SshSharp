@@ -72,6 +72,7 @@ Console.WriteLine(result.StandardOutputText);
 | Keep-alive that detects a dead server (`ServerAliveCountMax`) | ✅ | ❌ (keep-alives get no reply) |
 | Round-trip ping (`client.PingAsync`, OpenSSH's `ping@openssh.com`) | ✅ | ❌ |
 | Channel idle timeouts by channel type (`ChannelTimeout`, OpenSSH 9.2+) | ✅ | ❌ |
+| Stop a program's output early without killing it (`eow@openssh.com`), refuse further sessions on a connection (`no-more-sessions@openssh.com`) | ✅ | ❌ |
 | SSH agent (`ssh-agent`, Windows OpenSSH agent, PuTTY's Pageant) | ✅ | ❌ |
 | Agent forwarding | ✅ | ❌ |
 | Agent key management (`ssh-add`: add with lifetime, confirmation or destination constraints (`-h`), remove, lock; `AddKeysToAgent`), and signing with destination-constrained keys | ✅ | ❌ |

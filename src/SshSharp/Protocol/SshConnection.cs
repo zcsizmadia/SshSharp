@@ -364,7 +364,36 @@ internal sealed class SshConnection : IAsyncDisposable
     public static readonly Action<SshChannel> RefuseResourceShortage = _ => { };
 
     /// <summary>Opens a <c>session</c> channel.</summary>
-    public Task<SshChannel> OpenSessionAsync(CancellationToken cancellationToken) => OpenChannelAsync("session", null, cancellationToken);
+    public Task<SshChannel> OpenSessionAsync(CancellationToken cancellationToken) => Volatile.Read(ref _noMoreSessions)
+        ? Task.FromException<SshChannel>(new InvalidOperationException("No more sessions: PreventNewSessionsAsync was called on this connection."))
+        : OpenChannelAsync("session", null, cancellationToken);
+
+    private bool _noMoreSessions;
+
+    /// <summary>Whether the server is OpenSSH (its identification line says so), for extensions OpenSSH sends only to OpenSSH peers.</summary>
+    internal bool PeerIsOpenSsh => _transport.ServerIdentification?.SoftwareVersion.StartsWith("OpenSSH", StringComparison.Ordinal) == true;
+
+    /// <summary>
+    /// <c>no-more-sessions@openssh.com</c> (OpenSSH PROTOCOL 2.2): from now on this connection opens no session channels, and an OpenSSH
+    /// server is told to refuse any (it then drops the connection), so a compromised process using this client cannot quietly open one.
+    /// As in OpenSSH, only OpenSSH servers are sent the request: some others abort on it. Returns whether the server was told.
+    /// </summary>
+    public async Task<bool> PreventNewSessionsAsync(CancellationToken cancellationToken)
+    {
+        Volatile.Write(ref _noMoreSessions, true);
+        if (!PeerIsOpenSsh)
+        {
+            return false;
+        }
+
+        await SendAsync(Build(w =>
+        {
+            w.WriteByte(SshMessage.GlobalRequest);
+            w.WriteString("no-more-sessions@openssh.com");
+            w.WriteBoolean(false);
+        }), cancellationToken).ConfigureAwait(false);
+        return true;
+    }
 
     /// <summary>
     /// Opens a <c>direct-tcpip</c> channel (RFC 4254 section 7.2): the server connects to <paramref name="host"/>:<paramref name="port"/>

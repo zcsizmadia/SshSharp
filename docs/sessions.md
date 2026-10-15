@@ -71,7 +71,7 @@ await shell.StandardOutput.CopyToAsync(Console.OpenStandardOutput());
 
 With a terminal the server merges stderr into stdout. Writing Ctrl-C (`0x03`) interrupts the foreground program the way a
 user would; `SendSignalAsync("TERM")` sends a signal request, which current OpenSSH delivers and other servers may
-ignore. Environment variables are only set when the server allows them (sshd's `AcceptEnv`). The terminal modes are those
+ignore. OpenSSH's `INFO@openssh.com` (SIGINFO, on BSD-derived systems) works the same way. Environment variables are only set when the server allows them (sshd's `AcceptEnv`). The terminal modes are those
 of RFC 4254 section 8, named as in POSIX `termios`.
 
 `SendBreakAsync()` sends a BREAK (RFC 4335), as OpenSSH's `~B` escape does: a console server passes it on to the serial line
@@ -79,6 +79,14 @@ it connects to (to reach a router's ROM monitor, for example), and sshd sends it
 the server performed it; without a terminal, OpenSSH declines.
 
 `StartCommandAsync(command, options)` takes the same options, for commands that need a terminal (`sudo`, `top`, editors).
+
+Disposing `StandardOutput` while the program runs on (the application has read what it needs) tells an OpenSSH server to stop
+sending output (`eow@openssh.com`, as ssh does when its own output closes), so it is not sent only to be dropped; the program
+may then get SIGPIPE when it writes, as `yes | head` does. With other servers the output is dropped on arrival.
+
+Once a connection will not need another session, `client.PreventNewSessionsAsync()` makes it refuse to open one and tells an
+OpenSSH server to refuse as well (`no-more-sessions@openssh.com`, as ssh sends when it is not multiplexing): a process that
+later gets hold of the connection cannot quietly start a session on it. Open sessions, port forwarding and tunnels carry on.
 
 ## Scripting a shell (expect)
 

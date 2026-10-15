@@ -236,6 +236,39 @@ public class SessionInteropTests
     }
 
     [Test]
+    public async Task OpenSshExtensions_EndOfWrite_AndNoMoreSessions()
+    {
+        await using var client = await ConnectAsync();
+        if (client is null || !RealServer.IsOpenSsh || RealServer.IsWindows)
+        {
+            Skip.Test("An OpenSSH server on a Unix-like system is needed (eow@openssh.com and no-more-sessions@openssh.com are OpenSSH's).");
+            return;
+        }
+
+        // Our output closed: sshd stops sending, so `yes` gets SIGPIPE and ends instead of running on.
+        await Stages.RunAsync(async stages =>
+        {
+            stages.Step("starting yes");
+            await using var yes = await client.StartCommandAsync("yes", cancellationToken: Timeout());
+            var buffer = new byte[4096];
+            await yes.StandardOutput.ReadExactlyAsync(buffer, Timeout());
+            stages.Step("disposing its output, then waiting for it to end");
+            await yes.StandardOutput.DisposeAsync();
+            await yes.WaitForExitAsync(Timeout());
+            await Assert.That(yes.ExitSignal is "PIPE" || yes.ExitStatus is not null and not 0).IsTrue();
+        });
+
+        // The other direction (sshd telling us the program closed its input) cannot be seen here: sshd sends eow@openssh.com only to
+        // clients whose identification says OpenSSH (channels.c). The unit tests cover it.
+
+        // OpenSSH takes no-more-sessions@openssh.com without dropping the connection; other channels still work.
+        await Assert.That(await client.PreventNewSessionsAsync(Timeout())).IsTrue();
+        await Assert.That(async () => await client.RunCommandAsync("true", Timeout())).Throws<InvalidOperationException>();
+        await client.PingAsync(Timeout());
+        await Assert.That(client.IsConnected).IsTrue();
+    }
+
+    [Test]
     public async Task PingAsync_MeasuresARoundTrip_WithPingsOrWithoutThem()
     {
         await using var client = await ConnectAsync();
