@@ -152,6 +152,12 @@ public sealed class SshClientOptions
     internal IReadOnlyList<string>? AuthenticationOrder { get; init; }
 
     /// <summary>
+    /// Authenticate with Kerberos (<c>gssapi-with-mic</c>) when the server offers it, before the other methods, as ssh does with
+    /// <c>GSSAPIAuthentication yes</c>. Null (the default) does not try it. Needs .NET 10 (<see cref="SshGssapiOptions.IsSupported"/>).
+    /// </summary>
+    public SshGssapiOptions? Gssapi { get; init; }
+
+    /// <summary>
     /// Keys for public-key authentication, tried in order (load them with <see cref="SshPrivateKey.LoadFileAsync"/>). The client does not
     /// dispose them. The server is asked whether it accepts each key before anything is signed.
     /// </summary>

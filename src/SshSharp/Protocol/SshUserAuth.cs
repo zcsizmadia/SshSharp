@@ -175,6 +175,176 @@ internal sealed class SshUserAuth(SshTransport transport, string userName, Func<
         return outcome.Outcome;
     }
 
+    internal const string GssapiMethod = "gssapi-with-mic";
+
+    /// <summary>Token exchanges before the client gives up on a context that never completes (Kerberos needs one or two).</summary>
+    internal const int MaxGssapiRounds = 16;
+
+    /// <summary>
+    /// The <c>gssapi-with-mic</c> method (RFC 4462 section 3) with Kerberos 5: offer the krb5 mechanism, exchange context tokens until the
+    /// context is established, then send a MIC over the session identifier and this request, which binds the Kerberos authentication to
+    /// this SSH session. Returns null when the GSS-API layer fails on this side (no ticket, for example): the attempt is abandoned and the
+    /// next method's request tells the server so.
+    /// </summary>
+    public async Task<AuthOutcome?> GssapiAsync(IGssapiContext context, CancellationToken cancellationToken)
+    {
+        await transport.SendAsync(Build(w =>
+        {
+            w.WriteByte(SshMessage.UserAuthRequest);
+            w.WriteString(userName);
+            w.WriteString(ConnectionService);
+            w.WriteString(GssapiMethod);
+            w.WriteUInt32(1);
+            w.WriteString(Gssapi.Krb5Oid);
+        }), cancellationToken).ConfigureAwait(false);
+
+        // SSH_MSG_USERAUTH_GSSAPI_RESPONSE: the mechanism the server chose, which must be the one offered; or a FAILURE.
+        var received = await ReceiveGssapiAsync(cancellationToken).ConfigureAwait(false);
+        if (received.Outcome is { } refused)
+        {
+            return refused;
+        }
+
+        if (received.Type != GssapiResponse || !received.Data.AsSpan().SequenceEqual(Gssapi.Krb5Oid))
+        {
+            throw new SshProtocolException("The server answered gssapi-with-mic with a mechanism it was not offered.");
+        }
+
+        byte[]? token;
+        bool complete;
+        try
+        {
+            token = context.Step([], out complete);
+        }
+        catch (SshException)
+        {
+            return null; // no ticket, or the service principal is unknown: not this method, then
+        }
+
+        for (var round = 0; ; round++)
+        {
+            if (token is not null)
+            {
+                await SendGssapiAsync(GssapiToken, token, cancellationToken).ConfigureAwait(false);
+            }
+
+            if (complete)
+            {
+                break;
+            }
+
+            if (round == MaxGssapiRounds)
+            {
+                throw new SshException(SshFailureReason.AuthenticationFailed, $"The GSS-API context was not established in {MaxGssapiRounds} exchanges.");
+            }
+
+            received = await ReceiveGssapiAsync(cancellationToken).ConfigureAwait(false);
+            if (received.Outcome is { } outcome)
+            {
+                return outcome; // the server gave up (its context failed): FAILURE with the methods it still accepts
+            }
+
+            if (received.Type == GssapiErrorToken)
+            {
+                // The server's context failed and it sends its error token; ours cannot go on either. The server answers with FAILURE.
+                try
+                {
+                    context.Step(received.Data, out _);
+                }
+                catch (SshException)
+                {
+                    // Expected: the token describes a failure.
+                }
+
+                var failed = await ReceiveGssapiAsync(cancellationToken).ConfigureAwait(false);
+                return failed.Outcome ?? throw new SshProtocolException("The server sent another message after a GSS-API error token.");
+            }
+
+            if (received.Type != GssapiToken)
+            {
+                throw new SshProtocolException($"Unexpected message {received.Type} during gssapi-with-mic.");
+            }
+
+            try
+            {
+                token = context.Step(received.Data, out complete);
+            }
+            catch (SshException)
+            {
+                return null;
+            }
+        }
+
+        // RFC 4462 section 3.5: the MIC covers the session identifier and this method's request.
+        var mic = context.GetMic(Build(w =>
+        {
+            w.WriteString(transport.SessionId);
+            w.WriteByte(SshMessage.UserAuthRequest);
+            w.WriteString(userName);
+            w.WriteString(ConnectionService);
+            w.WriteString(GssapiMethod);
+        }));
+        await SendGssapiAsync(GssapiMic, mic, cancellationToken).ConfigureAwait(false);
+        var final = await ReceiveGssapiAsync(cancellationToken).ConfigureAwait(false);
+        return final.Outcome ?? throw new SshProtocolException($"Unexpected message {final.Type} after the GSS-API MIC.");
+    }
+
+    // RFC 4462 section 3: the gssapi-with-mic messages (60 is SSH_MSG_USERAUTH_GSSAPI_RESPONSE for this method).
+    internal const byte GssapiResponse = 60;
+    internal const byte GssapiToken = 61;
+    internal const byte GssapiExchangeComplete = 63;
+    internal const byte GssapiError = 64;
+    internal const byte GssapiErrorToken = 65;
+    internal const byte GssapiMic = 66;
+
+    private async Task SendGssapiAsync(byte type, byte[] data, CancellationToken cancellationToken) =>
+        await transport.SendAsync(Build(w =>
+        {
+            w.WriteByte(type);
+            w.WriteString(data);
+        }), cancellationToken).ConfigureAwait(false);
+
+    private readonly record struct GssapiReceived(byte Type, byte[] Data, AuthOutcome? Outcome);
+
+    /// <summary>
+    /// The next gssapi-with-mic message: a RESPONSE, TOKEN or ERRTOK with its data, or SUCCESS/FAILURE as an outcome. Banners are shown and
+    /// SSH_MSG_USERAUTH_GSSAPI_ERROR (the server's GSS-API status, informational) is skipped.
+    /// </summary>
+    private async Task<GssapiReceived> ReceiveGssapiAsync(CancellationToken cancellationToken)
+    {
+        while (true)
+        {
+            string? bannerText = null;
+            using (var message = await transport.ReceiveAsync(cancellationToken).ConfigureAwait(false))
+            {
+                var reader = new SshReader(message.Payload.Span);
+                var type = reader.ReadByte();
+                switch (type)
+                {
+                    case SshMessage.UserAuthBanner:
+                        bannerText = reader.ReadUtf8String();
+                        break;
+                    case SshMessage.UserAuthSuccess:
+                        return new GssapiReceived(type, [], new AuthOutcome(true, [], false));
+                    case SshMessage.UserAuthFailure:
+                        var methods = reader.ReadNameList();
+                        return new GssapiReceived(type, [], new AuthOutcome(false, methods, reader.ReadBoolean()));
+                    case GssapiResponse or GssapiToken or GssapiErrorToken:
+                        return new GssapiReceived(type, reader.ReadString().ToArray(), null);
+                    case GssapiError:
+                        break; // uint32 major, uint32 minor, string message, string language: the server's diagnostics, not a decision
+                    default:
+                        throw new SshProtocolException($"Unexpected message {type} during gssapi-with-mic.");
+                }
+            }
+
+            if (bannerText is not null && banner is not null)
+            {
+                await banner(bannerText, cancellationToken).ConfigureAwait(false);
+            }
+        }
+    }
+
     /// <summary>
     /// Picks the signature algorithm for <paramref name="key"/>: the first one the key supports that the server lists in
     /// <c>server-sig-algs</c> (RFC 8308), or the key's preferred one when the server did not say.

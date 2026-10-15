@@ -93,4 +93,7 @@ public sealed class SshConfigConnectOptions
 
     /// <summary>The clock for keep-alive and rekey timing; replaceable in tests.</summary>
     internal TimeProvider TimeProvider { get; init; } = TimeProvider.System;
+
+    /// <summary>Makes the GSS-API context for <c>GSSAPIAuthentication yes</c>; replaceable in tests (host, credential, delegate).</summary>
+    internal Func<string, System.Net.NetworkCredential?, bool, SshSharp.Protocol.IGssapiContext>? GssapiContextFactory { get; init; }
 }

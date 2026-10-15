@@ -331,7 +331,7 @@ public sealed partial class SshClient : IAsyncDisposable
         {
             await transport.ConnectAsync(cancellationToken).ConfigureAwait(false);
             var acceptedKeys = new List<SshPrivateKey>();
-            await AuthenticateAsync(transport, options, logger, acceptedKeys, cancellationToken).ConfigureAwait(false);
+            await AuthenticateAsync(transport, options, logger, acceptedKeys, host, cancellationToken).ConfigureAwait(false);
             var client = CompleteConnection(transport, stream, options, leaveOpen, owner, host, port, logger, activity, started);
             client.AcceptedKeys = acceptedKeys;
             return client;
@@ -467,14 +467,14 @@ public sealed partial class SshClient : IAsyncDisposable
             publicHostKey, logger) { AgentBinding = transport.AgentBinding };
     }
 
-    /// <summary>ssh's default order, less the methods SshSharp does not implement (gssapi-with-mic, hostbased).</summary>
-    internal static readonly string[] DefaultAuthenticationOrder = ["publickey", "keyboard-interactive", "password"];
+    /// <summary>ssh's default order, less hostbased (not implemented); gssapi-with-mic is tried only with <see cref="SshClientOptions.Gssapi"/>.</summary>
+    internal static readonly string[] DefaultAuthenticationOrder = [SshUserAuth.GssapiMethod, "publickey", "keyboard-interactive", "password"];
 
     /// <summary>Walks of the method order; each one after the first needs a partial success, so this bounds a server that never finishes.</summary>
     private const int MaxAuthenticationPasses = 8;
 
     private static async Task AuthenticateAsync(SshTransport transport, SshClientOptions options, ILogger logger, List<SshPrivateKey> acceptedKeys,
-        CancellationToken cancellationToken)
+        string? host, CancellationToken cancellationToken)
     {
         var auth = new SshUserAuth(transport, options.UserName, options.AuthenticationBanner);
         await auth.RequestServiceAsync(cancellationToken).ConfigureAwait(false);
@@ -502,6 +502,30 @@ public sealed partial class SshClient : IAsyncDisposable
                 AuthOutcome? result = null;
                 switch (order[step])
                 {
+                    case SshUserAuth.GssapiMethod when options.Gssapi is { } gssapi && Gssapi.IsSupported && methods.Contains(SshUserAuth.GssapiMethod)
+                        && (gssapi.TargetHost ?? host) is { Length: > 0 } target:
+                        IGssapiContext context;
+                        try
+                        {
+                            context = gssapi.ContextFactory(target, gssapi.Credential, gssapi.DelegateCredentials);
+                        }
+                        catch (Exception ex) when (ex is PlatformNotSupportedException or DllNotFoundException or EntryPointNotFoundException
+                            or InvalidOperationException or System.ComponentModel.Win32Exception)
+                        {
+                            // No GSS-API library or provider here (libgssapi missing on Linux, say): the other methods remain.
+                            var reason = ex.GetType().Name;
+                            SshLog.GssapiUnavailable(logger, reason);
+                            break;
+                        }
+
+                        using (context)
+                        {
+                            SshLog.Authenticating(logger, SshUserAuth.GssapiMethod);
+                            result = await auth.GssapiAsync(context, cancellationToken).ConfigureAwait(false);
+                        }
+
+                        break;
+
                     case "publickey":
                         foreach (var key in options.PrivateKeys)
                         {

@@ -10,6 +10,11 @@ proxies, remote dynamic and Unix-socket forwarding, destination-constrained agen
 - **The local machine**: the process, its memory, and files the application chooses to load (private keys, `ssh_config`,
   `known_hosts`). Their *contents* are still parsed defensively; see below.
 - **The .NET runtime and OS cryptography** (AES, SHA-2, HMAC, RSA, ECDSA, ECDH, random numbers).
+- **The platform's Kerberos** (SSPI on Windows, MIT or Heimdal GSS-API elsewhere) and its KDC, when `gssapi-with-mic` is turned on:
+  the library passes tokens through and checks only the SSH framing. The server's tokens are parsed by the GSS-API library, not
+  here. Mutual authentication is required, the MIC binds the exchange to the SSH session id, and the host key is still verified
+  by the usual verifier, so a Kerberos service ticket never replaces host key checking. Delegating the ticket
+  (`DelegateCredentials`) gives the server your Kerberos identity, so it is off by default.
 
 ## Not trusted
 

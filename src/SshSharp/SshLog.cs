@@ -101,6 +101,9 @@ internal static partial class SshLog
     [LoggerMessage(EventId = 33, Level = LogLevel.Information, Message = "The server forwards a Unix socket to this machine (streamlocal-forward)")]
     public static partial void RemoteSocketForwardingStarted(ILogger logger);
 
+    [LoggerMessage(EventId = 40, Level = LogLevel.Debug, Message = "Kerberos (gssapi-with-mic) is not available here: {Reason}")]
+    public static partial void GssapiUnavailable(ILogger logger, string reason);
+
     [LoggerMessage(EventId = 34, Level = LogLevel.Information, Message = "Key {Fingerprint} was added to the agent (AddKeysToAgent)")]
     public static partial void KeyAddedToAgent(ILogger logger, string fingerprint);
 

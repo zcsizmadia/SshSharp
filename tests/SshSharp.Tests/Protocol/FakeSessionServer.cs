@@ -488,7 +488,38 @@ internal sealed class FakeSessionServer : IAsyncDisposable
                 }
 
                 _keyboardRound = -1; // a new request abandons a keyboard-interactive exchange in progress (RFC 4252 section 5)
+                _gssapiUser = null; // and a gssapi-with-mic exchange
                 bool ok;
+                if (method == SshUserAuth.GssapiMethod)
+                {
+                    var count = reader.ReadUInt32();
+                    var offered = new List<byte[]>();
+                    for (var i = 0; i < count; i++)
+                    {
+                        offered.Add(reader.ReadString().ToArray());
+                    }
+
+                    lock (GssapiMechanismsOffered)
+                    {
+                        GssapiMechanismsOffered.AddRange(offered);
+                    }
+
+                    if (Gssapi is not { } gss || user != UserName || !offered.Any(o => o.AsSpan().SequenceEqual(SshSharp.Protocol.Gssapi.Krb5Oid)))
+                    {
+                        await FinishAuthAsync(method, ok: false);
+                        break;
+                    }
+
+                    _gssapiUser = user;
+                    _gssapiServerRound = 0;
+                    await _server.SendAsync(Build(w =>
+                    {
+                        w.WriteByte(SshUserAuth.GssapiResponse);
+                        w.WriteString(gss.ChooseWrongMechanism ? [0x06, 0x01, 0x2A] : SshSharp.Protocol.Gssapi.Krb5Oid);
+                    }));
+                    break;
+                }
+
                 if (method == "keyboard-interactive")
                 {
                     reader.ReadUtf8String(); // language tag
@@ -565,6 +596,55 @@ internal sealed class FakeSessionServer : IAsyncDisposable
                 }
 
                 await FinishAuthAsync(method, ok);
+                break;
+            }
+
+            case SshUserAuth.GssapiToken when _gssapiUser is not null && Gssapi is { } gss:
+            {
+                // The fake mechanism: the client sends C0, C1, ...; the server answers S1, S2, ... until the client's last token.
+                var token = System.Text.Encoding.ASCII.GetString(reader.ReadString());
+                lock (GssapiTokensReceived)
+                {
+                    GssapiTokensReceived.Add(token);
+                }
+
+                if (gss.SendStatusMessage)
+                {
+                    // SSH_MSG_USERAUTH_GSSAPI_ERROR: the server's GSS-API status, informational.
+                    await _server.SendAsync(Build(w => { w.WriteByte(SshUserAuth.GssapiError); w.WriteUInt32(0); w.WriteUInt32(0); w.WriteString("note"); w.WriteString(""); }));
+                }
+
+                if (gss.FailWithErrorToken)
+                {
+                    await _server.SendAsync(Build(w => { w.WriteByte(SshUserAuth.GssapiErrorToken); w.WriteString("server-error"u8); }));
+                    _gssapiUser = null;
+                    await FinishAuthAsync(SshUserAuth.GssapiMethod, ok: false);
+                    break;
+                }
+
+                if (token != $"C{gss.Rounds}")
+                {
+                    _gssapiServerRound++;
+                    await _server.SendAsync(Build(w => { w.WriteByte(SshUserAuth.GssapiToken); w.WriteString(System.Text.Encoding.ASCII.GetBytes($"S{_gssapiServerRound}")); }));
+                }
+
+                break;
+            }
+
+            case SshUserAuth.GssapiMic when _gssapiUser is { } gssUser && Gssapi is { } gss:
+            {
+                var mic = reader.ReadString().ToArray();
+                var expected = FakeGssapi.Mic(Build(w =>
+                {
+                    w.WriteString(_server.SessionId!);
+                    w.WriteByte(SshMessage.UserAuthRequest);
+                    w.WriteString(gssUser);
+                    w.WriteString("ssh-connection");
+                    w.WriteString(SshUserAuth.GssapiMethod);
+                }));
+                _gssapiUser = null;
+                GssapiMicValid = mic.AsSpan().SequenceEqual(expected);
+                await FinishAuthAsync(SshUserAuth.GssapiMethod, ok: GssapiMicValid && !gss.RejectMic);
                 break;
             }
 
@@ -1079,6 +1159,18 @@ internal sealed class FakeSessionServer : IAsyncDisposable
         AuthenticationChain is { } chain ? [chain[Math.Min(_chainStep, chain.Length - 1)]]
         : RequirePasswordAfterPublicKey && _publicKeyDone ? ["password"]
         : AdvertisedMethods;
+
+    /// <summary>The server side of gssapi-with-mic with the fake mechanism (<see cref="FakeGssapi"/>); null refuses the method.</summary>
+    public FakeGssapiServer? Gssapi { get; init; }
+
+    public List<byte[]> GssapiMechanismsOffered { get; } = [];
+
+    public List<string> GssapiTokensReceived { get; } = [];
+
+    public bool GssapiMicValid { get; private set; }
+
+    private string? _gssapiUser;
+    private int _gssapiServerRound;
 
     /// <summary>Answers a finished attempt: success, a partial success when <see cref="AuthenticationChain"/> wants more, or failure.</summary>
     private async Task FinishAuthAsync(string method, bool ok)

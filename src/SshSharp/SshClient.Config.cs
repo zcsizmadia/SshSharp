@@ -133,6 +133,15 @@ public sealed partial class SshClient
                 AuthenticationBanner = options.AuthenticationBanner,
                 AuthenticationOrder = AuthenticationOrder(hostConfig),
                 ForwardAgent = hostConfig.ForwardAgent ? ResolveAgent(hostConfig, options) : null,
+                Gssapi = hostConfig.GssapiAuthentication
+                    ? new SshGssapiOptions
+                    {
+                        // The service principal is named after HostName, as ssh does with GSSAPITrustDns no.
+                        TargetHost = hostConfig.HostName,
+                        DelegateCredentials = hostConfig.GssapiDelegateCredentials,
+                        ContextFactory = options.GssapiContextFactory ?? Gssapi.Create,
+                    }
+                    : null,
                 HostKeyVerifier = options.HostKeyVerifier ?? KnownHostsVerifier.FromConfig(hostConfig, hostConfig.BatchMode ? null : options.AskHostKey,
                     hostConfig.BatchMode ? null : options.ConfirmHostKeyUpdate, options.AllowKnownHostsCommand),
                 HostKeyAlias = hostConfig.HostKeyAlias,
@@ -439,6 +448,7 @@ public sealed partial class SshClient
         var preferred = hostConfig.PreferredAuthentications.Count > 0 ? hostConfig.PreferredAuthentications : DefaultAuthenticationOrder;
         return [.. preferred.Distinct(StringComparer.Ordinal).Where(method => method switch
         {
+            SshUserAuth.GssapiMethod => hostConfig.GssapiAuthentication,
             "publickey" => hostConfig.PubkeyAuthentication,
             "keyboard-interactive" => hostConfig.KbdInteractiveAuthentication,
             "password" => hostConfig.PasswordAuthentication,

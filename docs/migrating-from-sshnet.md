@@ -37,6 +37,7 @@ Features that SSH.NET users have asked for in its issue tracker, and that SshSha
 | Sign and verify files or git commits (`ssh-keygen -Y`) | `SshSignature` and `SshAllowedSigners` (see [Signing](signing.md)) |
 | Connect from a chosen local address or interface | `SshClientOptions.LocalEndPoint`, `BindAddress` and `BindInterface` in `ssh_config` |
 | Agent keys limited to some hosts (`ssh-add -h`) | session binding and `publickey-hostbound`, automatically |
+| Kerberos / Active Directory sign-in (GSSAPI) | `SshClientOptions.Gssapi`, or `GSSAPIAuthentication yes` in `ssh_config` (.NET 10; see [Authentication](authentication.md)) |
 | Remote files as an `IFileSystem` or `IFileProvider` | the `SshSharp.IO.Abstractions` and `SshSharp.FileProviders` packages |
 | Detect a stalled connection, also while a write is blocked | keep-alive (`KeepAliveInterval`, `KeepAliveCountMax`): the probes don't wait for pending writes, so a server that stops reading is still detected |
 | RSA SHA-2 signatures with servers that announce them | `server-sig-algs` (RFC 8308) is used to pick `rsa-sha2-512` or `rsa-sha2-256` |

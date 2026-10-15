@@ -86,3 +86,25 @@ static SshSharp.SshAgentHost.operator !=(SshSharp.SshAgentHost? left, SshSharp.S
 static SshSharp.SshAgentHost.operator ==(SshSharp.SshAgentHost? left, SshSharp.SshAgentHost? right) -> bool
 static SshSharp.SshAgentHostKey.operator !=(SshSharp.SshAgentHostKey? left, SshSharp.SshAgentHostKey? right) -> bool
 static SshSharp.SshAgentHostKey.operator ==(SshSharp.SshAgentHostKey? left, SshSharp.SshAgentHostKey? right) -> bool
+override SshSharp.SshGssapiOptions.Equals(object? obj) -> bool
+override SshSharp.SshGssapiOptions.GetHashCode() -> int
+override SshSharp.SshGssapiOptions.ToString() -> string!
+SshSharp.SshClientOptions.Gssapi.get -> SshSharp.SshGssapiOptions?
+SshSharp.SshClientOptions.Gssapi.init -> void
+SshSharp.SshGssapiOptions
+SshSharp.SshGssapiOptions.<Clone>$() -> SshSharp.SshGssapiOptions!
+SshSharp.SshGssapiOptions.Credential.get -> System.Net.NetworkCredential?
+SshSharp.SshGssapiOptions.Credential.init -> void
+SshSharp.SshGssapiOptions.DelegateCredentials.get -> bool
+SshSharp.SshGssapiOptions.DelegateCredentials.init -> void
+SshSharp.SshGssapiOptions.Equals(SshSharp.SshGssapiOptions? other) -> bool
+SshSharp.SshGssapiOptions.SshGssapiOptions() -> void
+SshSharp.SshGssapiOptions.TargetHost.get -> string?
+SshSharp.SshGssapiOptions.TargetHost.init -> void
+static SshSharp.SshGssapiOptions.IsSupported.get -> bool
+static SshSharp.SshGssapiOptions.operator !=(SshSharp.SshGssapiOptions? left, SshSharp.SshGssapiOptions? right) -> bool
+static SshSharp.SshGssapiOptions.operator ==(SshSharp.SshGssapiOptions? left, SshSharp.SshGssapiOptions? right) -> bool
+SshSharp.Config.SshHostConfig.GssapiAuthentication.get -> bool
+SshSharp.Config.SshHostConfig.GssapiAuthentication.init -> void
+SshSharp.Config.SshHostConfig.GssapiDelegateCredentials.get -> bool
+SshSharp.Config.SshHostConfig.GssapiDelegateCredentials.init -> void

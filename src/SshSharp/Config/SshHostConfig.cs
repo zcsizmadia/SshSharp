@@ -148,6 +148,12 @@ public sealed class SshHostConfig
     /// <summary>Whether agent forwarding is requested.</summary>
     public bool ForwardAgent { get; init; }
 
+    /// <summary>Whether Kerberos authentication (<c>gssapi-with-mic</c>) is tried (<c>GSSAPIAuthentication</c>, off by default as in ssh).</summary>
+    public bool GssapiAuthentication { get; init; }
+
+    /// <summary>Whether the Kerberos ticket is forwarded to the server (<c>GSSAPIDelegateCredentials</c>, off by default).</summary>
+    public bool GssapiDelegateCredentials { get; init; }
+
     /// <summary>
     /// <c>AddKeysToAgent</c>: when not null, a key loaded from an identity file that the server accepts is added to the agent with these
     /// constraints (<c>yes</c>; <c>confirm</c> asks for each use; a time interval sets the lifetime). Null for <c>no</c> (the default) and
