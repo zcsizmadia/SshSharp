@@ -323,6 +323,12 @@ internal sealed class FakeSessionServer : IAsyncDisposable
 
     public int PingsReceived { get; private set; }
 
+    /// <summary>
+    /// The next ping is dropped and a key re-exchange started from the server side instead, as OpenSSH treats a PING that arrives
+    /// during its key exchange: never answered.
+    /// </summary>
+    public bool DropNextPingAndRekey { get; set; }
+
     private bool _publicKeyDone;
 
     /// <summary>
@@ -448,6 +454,13 @@ internal sealed class FakeSessionServer : IAsyncDisposable
         if (payload[0] == SshMessage.Ping)
         {
             PingsReceived++;
+            if (DropNextPingAndRekey)
+            {
+                DropNextPingAndRekey = false;
+                _ = _server.RekeyAsync(_cts.Token);
+                return;
+            }
+
             if (AnswerPings)
             {
                 var ping = new SshReader(payload);

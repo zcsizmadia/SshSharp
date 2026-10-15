@@ -51,6 +51,21 @@ internal sealed class SshConnection : IAsyncDisposable
         _logger = logger ?? NullLogger.Instance;
         _time = timeProvider ?? TimeProvider.System;
         _lastReceived = _time.GetTimestamp();
+        _transport.KeyReexchanged = ResendPings;
+    }
+
+    /// <summary>
+    /// After a key re-exchange: the pings still waiting for a pong are sent again, since OpenSSH drops a PING that arrives during a key
+    /// exchange and never answers it. They keep their numbers, so a late pong to the first one and the pong to the second complete the
+    /// same wait; the extra one is ignored.
+    /// </summary>
+    private void ResendPings()
+    {
+        foreach (var id in _pings.Keys)
+        {
+            Instrumentation.Trace($"kex: ping {id} sent again after the re-exchange");
+            Post(PingMessage(id));
+        }
     }
 
     /// <summary>How many key exchanges have completed, including the first.</summary>
@@ -188,7 +203,9 @@ internal sealed class SshConnection : IAsyncDisposable
                 throw failure;
             }
 
+            Instrumentation.Trace($"kex: ping {id} sending");
             await SendAsync(PingMessage(id), cancellationToken).ConfigureAwait(false);
+            Instrumentation.Trace($"kex: ping {id} sent");
             await pong.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
             return _time.GetElapsedTime(started);
         }
@@ -657,6 +674,7 @@ internal sealed class SshConnection : IAsyncDisposable
             case SshMessage.Pong:
             {
                 var data = reader.ReadString();
+                Instrumentation.Trace($"kex: pong ({data.Length} bytes)");
                 if (data.Length == 8 && _pings.TryGetValue(System.Buffers.Binary.BinaryPrimitives.ReadUInt64BigEndian(data), out var waiting))
                 {
                     waiting.TrySetResult();
