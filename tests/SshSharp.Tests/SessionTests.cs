@@ -303,6 +303,28 @@ public class SessionTests
     }
 
     [Test]
+    public async Task ABreak_ReachesATerminal_AndIsDeclinedWithoutOne()
+    {
+        await using var server = new FakeSessionServer { OnShell = EchoAsync };
+        await using var client = await ConnectAsync(server);
+        await using (var terminal = await client.StartShellAsync(new SshSessionOptions { Terminal = new SshTerminalOptions() }, Timeout()))
+        {
+            await Assert.That(await terminal.SendBreakAsync(cancellationToken: Timeout())).IsTrue();
+            await Assert.That(await terminal.SendBreakAsync(TimeSpan.FromMilliseconds(250), Timeout())).IsTrue();
+        }
+
+        await using (var plain = await client.StartShellAsync(cancellationToken: Timeout()))
+        {
+            await Assert.That(await plain.SendBreakAsync(cancellationToken: Timeout())).IsFalse();
+            await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => plain.SendBreakAsync(TimeSpan.FromSeconds(-1), Timeout()));
+        }
+
+        var breaks = server.Channels.SelectMany(c => { lock (c.Requests) { return c.Requests.Where(r => r.Type == "break").ToList(); } }).ToList();
+        await Assert.That(breaks.Select(b => b.Args[0])).IsEquivalentTo(new[] { "1000", "250", "1000" });
+        await Assert.That(breaks.All(b => b.WantReply)).IsTrue();
+    }
+
+    [Test]
     public async Task ResizingWithoutATerminal_OrBadSignalNames_AreRejected()
     {
         await using var server = new FakeSessionServer { OnShell = EchoAsync };

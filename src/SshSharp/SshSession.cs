@@ -96,6 +96,23 @@ public sealed class SshSession : IAsyncDisposable
         await _channel.RequestAsync("signal", false, w => w.WriteString(signal), cancellationToken).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Sends a BREAK (RFC 4335), as OpenSSH's <c>~B</c> escape does: a serial-line break, which console servers pass on to the device
+    /// they connect to (to reach a router's ROM monitor, for example), and OpenSSH's sshd sends to a session's terminal. Returns whether
+    /// the server performed it; servers that do not support it, or a session without a terminal on OpenSSH, answer false.
+    /// </summary>
+    /// <param name="length">How long the break lasts; 1 second (OpenSSH's <c>~B</c>) when null. Servers may use their own length.</param>
+    /// <param name="cancellationToken">Cancels waiting for the answer.</param>
+    public async Task<bool> SendBreakAsync(TimeSpan? length = null, CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed != 0, this);
+        var milliseconds = length is { } value
+            ? (value < TimeSpan.Zero ? throw new ArgumentOutOfRangeException(nameof(length), value, "A break length cannot be negative.")
+                : (uint)Math.Min(value.TotalMilliseconds, uint.MaxValue))
+            : 1000u;
+        return await _channel.RequestAsync("break", true, w => w.WriteUInt32(milliseconds), cancellationToken).ConfigureAwait(false);
+    }
+
     /// <summary>Closes the session. A program still running gets a hangup from the server.</summary>
     public async ValueTask DisposeAsync()
     {

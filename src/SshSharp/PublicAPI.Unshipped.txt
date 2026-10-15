@@ -21,3 +21,4 @@ SshSharp.SshAgentKeyConstraints.Lifetime.init -> void
 SshSharp.SshAgentKeyConstraints.SshAgentKeyConstraints() -> void
 static SshSharp.SshAgentKeyConstraints.operator !=(SshSharp.SshAgentKeyConstraints? left, SshSharp.SshAgentKeyConstraints? right) -> bool
 static SshSharp.SshAgentKeyConstraints.operator ==(SshSharp.SshAgentKeyConstraints? left, SshSharp.SshAgentKeyConstraints? right) -> bool
+SshSharp.SshSession.SendBreakAsync(System.TimeSpan? length = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
