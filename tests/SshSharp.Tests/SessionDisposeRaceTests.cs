@@ -12,20 +12,28 @@ public class SessionDisposeRaceTests
 {
     private static CancellationToken Timeout() => new CancellationTokenSource(TimeSpan.FromSeconds(60)).Token;
 
-    /// <summary>Output that is never zero, in small chunks like SFTP replies, until the channel closes.</summary>
+    /// <summary>Output that is never zero, in small chunks like SFTP replies, until the client closes the channel.</summary>
+    /// <remarks>
+    /// Sends after the close are dropped without an error, so the script watches for the close itself, and it yields between chunks: a
+    /// loop of sends that complete at once would keep a thread-pool thread spinning after every session (the stress run on macOS ran
+    /// out of threads that way and timed out).
+    /// </remarks>
     private static async Task StreamAsync(ExecScript script)
     {
         var chunk = Enumerable.Repeat((byte)'x', 26).ToArray();
-        try
+        var closed = DrainInputAsync(script);
+        while (!closed.IsCompleted)
         {
-            while (true)
-            {
-                await script.StdoutAsync(chunk);
-            }
+            await script.StdoutAsync(chunk);
+            await Task.Yield();
         }
-        catch (Exception)
+    }
+
+    /// <summary>Completes when the client has closed the channel (its input ends then).</summary>
+    private static async Task DrainInputAsync(ExecScript script)
+    {
+        while (await script.ReadInputAsync() is not null)
         {
-            // The client closed the channel.
         }
     }
 
