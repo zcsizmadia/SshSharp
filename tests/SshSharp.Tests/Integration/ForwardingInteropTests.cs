@@ -162,9 +162,9 @@ public class ForwardingInteropTests
     public async Task RemoteSocketForwarding_BringsConnectionsToTheServersSocketBackHere()
     {
         await using var client = await ConnectAsync();
-        if (client is null || !RealServer.IsOpenSsh || RealServer.IsWindows)
+        if (client is null || !(RealServer.IsOpenSsh || RealServer.IsAsyncSsh) || RealServer.IsWindows)
         {
-            Skip.Test("SSHSHARP_TEST_SSHD and SSHSHARP_TEST_USER with a password or key are needed, on an OpenSSH server with Unix sockets.");
+            Skip.Test("SSHSHARP_TEST_SSHD and SSHSHARP_TEST_USER with a password or key are needed, on an OpenSSH or AsyncSSH server with Unix sockets.");
             return;
         }
 

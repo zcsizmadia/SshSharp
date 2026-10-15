@@ -148,9 +148,9 @@ public class SessionInteropTests
             return;
         }
 
-        if (!RealServer.IsOpenSsh)
+        if (!RealServer.HasSftp)
         {
-            Skip.Test("Dropbear needs a separate sftp-server, which the test image does not install.");
+            Skip.Test("The server has no sftp subsystem (Dropbear needs a separate sftp-server).");
             return;
         }
 
