@@ -147,6 +147,7 @@ public sealed partial class SshClient
                 HostKeyAlias = hostConfig.HostKeyAlias,
                 KeepAliveInterval = hostConfig.ServerAliveInterval,
                 KeepAliveCountMax = hostConfig.ServerAliveCountMax,
+                ChannelTimeouts = hostConfig.ChannelTimeouts,
                 AlgorithmPreferences = AlgorithmPreferences.FromConfig(hostConfig),
                 Logger = options.Logger,
                 TimeProvider = options.TimeProvider,

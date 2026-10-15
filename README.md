@@ -71,6 +71,7 @@ Console.WriteLine(result.StandardOutputText);
 | Connect from a chosen local address or interface (`BindAddress`, `BindInterface`) | ✅ | ❌ |
 | Keep-alive that detects a dead server (`ServerAliveCountMax`) | ✅ | ❌ (keep-alives get no reply) |
 | Round-trip ping (`client.PingAsync`, OpenSSH's `ping@openssh.com`) | ✅ | ❌ |
+| Channel idle timeouts by channel type (`ChannelTimeout`, OpenSSH 9.2+) | ✅ | ❌ |
 | SSH agent (`ssh-agent`, Windows OpenSSH agent, Pageant), including destination-constrained keys (`ssh-add -h`) | ✅ | ❌ |
 | Agent forwarding | ✅ | ❌ |
 | Agent key management (`ssh-add`: add with lifetime, confirmation or destination constraints (`-h`), remove, lock; `AddKeysToAgent`) | ✅ | ❌ |

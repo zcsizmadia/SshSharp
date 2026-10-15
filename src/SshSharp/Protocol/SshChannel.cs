@@ -73,7 +73,24 @@ internal sealed class SshChannel
         _connection = connection;
         LocalId = localId;
         _isOpenForSending = () => !Volatile.Read(ref _closeSent);
+        _lastActivity = connection.Time.GetTimestamp();
     }
+
+    private long _lastActivity;
+
+    /// <summary>
+    /// The channel's type as OpenSSH's ChannelTimeout names it (<c>session</c>, <c>direct-tcpip</c>, <c>forwarded-tcpip</c>,
+    /// <c>agent-connection</c>, ...), or null while unknown; channels without one are never timed out.
+    /// </summary>
+    internal string? TimeoutType { get; set; }
+
+    /// <summary>When data last went either way on the channel (a <see cref="TimeProvider"/> timestamp), for ChannelTimeout.</summary>
+    internal long LastActivity => Interlocked.Read(ref _lastActivity);
+
+    /// <summary>Whether the channel is open and our CLOSE is still unsent.</summary>
+    internal bool IsOpenForTimeout => Volatile.Read(ref _state) == 1 && !Volatile.Read(ref _closeSent);
+
+    private void Touch() => Interlocked.Exchange(ref _lastActivity, _connection.Time.GetTimestamp());
 
     /// <summary>Whether our CLOSE is still unsent; checked under the transport's send lock (one delegate per channel, not per packet).</summary>
     private readonly Func<bool> _isOpenForSending;
@@ -225,6 +242,8 @@ internal sealed class SshChannel
                     // Closed while we were writing (the peer closed the channel): the rest cannot be sent.
                     throw new SshException(SshFailureReason.ChannelClosed, "The channel was closed while data was being sent.");
                 }
+
+                Touch();
             }
             finally
             {
@@ -411,6 +430,7 @@ internal sealed class SshChannel
 
     internal void OnData(DecodedPacket packet, int offset, int length, bool isExtended)
     {
+        Touch();
         try
         {
             Reserve(length);

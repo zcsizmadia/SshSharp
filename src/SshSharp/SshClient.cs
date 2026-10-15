@@ -448,6 +448,7 @@ public sealed partial class SshClient : IAsyncDisposable
             connection.StartKeepAlive(keepAlive, options.KeepAliveCountMax);
         }
 
+        connection.StartChannelTimeouts(options.ChannelTimeouts);
         SshTelemetry.Connections.Add(1);
         var postQuantum = SshAlgorithms.IsPostQuantum(algorithms.Kex);
         SshTelemetry.ConnectDuration.Record(Stopwatch.GetElapsedTime(started).TotalSeconds, new KeyValuePair<string, object?>("ssh.kex.post_quantum", postQuantum));

@@ -108,3 +108,18 @@ SshSharp.Config.SshHostConfig.GssapiAuthentication.get -> bool
 SshSharp.Config.SshHostConfig.GssapiAuthentication.init -> void
 SshSharp.Config.SshHostConfig.GssapiDelegateCredentials.get -> bool
 SshSharp.Config.SshHostConfig.GssapiDelegateCredentials.init -> void
+override SshSharp.SshChannelTimeout.Equals(object? obj) -> bool
+override SshSharp.SshChannelTimeout.GetHashCode() -> int
+override SshSharp.SshChannelTimeout.ToString() -> string!
+SshSharp.Config.SshHostConfig.ChannelTimeouts.get -> System.Collections.Generic.IReadOnlyList<SshSharp.SshChannelTimeout!>!
+SshSharp.Config.SshHostConfig.ChannelTimeouts.init -> void
+SshSharp.SshChannelTimeout
+SshSharp.SshChannelTimeout.<Clone>$() -> SshSharp.SshChannelTimeout!
+SshSharp.SshChannelTimeout.ChannelType.get -> string!
+SshSharp.SshChannelTimeout.Equals(SshSharp.SshChannelTimeout? other) -> bool
+SshSharp.SshChannelTimeout.SshChannelTimeout(string! channelType, System.TimeSpan timeout) -> void
+SshSharp.SshChannelTimeout.Timeout.get -> System.TimeSpan
+SshSharp.SshClientOptions.ChannelTimeouts.get -> System.Collections.Generic.IReadOnlyList<SshSharp.SshChannelTimeout!>!
+SshSharp.SshClientOptions.ChannelTimeouts.init -> void
+static SshSharp.SshChannelTimeout.operator !=(SshSharp.SshChannelTimeout? left, SshSharp.SshChannelTimeout? right) -> bool
+static SshSharp.SshChannelTimeout.operator ==(SshSharp.SshChannelTimeout? left, SshSharp.SshChannelTimeout? right) -> bool

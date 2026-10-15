@@ -38,6 +38,10 @@ internal sealed class SshConnection : IAsyncDisposable
     private readonly TimeProvider _time;
     private long _lastReceived;
     private Task? _keepAliveLoop;
+    private Task? _channelTimeoutLoop;
+
+    /// <summary>The clock for keep-alives and channel timeouts; replaceable in tests.</summary>
+    internal TimeProvider Time => _time;
 
     public SshConnection(SshTransport transport, ILogger? logger = null, TimeProvider? timeProvider = null)
     {
@@ -87,6 +91,51 @@ internal sealed class SshConnection : IAsyncDisposable
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(interval, TimeSpan.Zero);
         ArgumentOutOfRangeException.ThrowIfNegative(countMax);
         _keepAliveLoop = Task.Run(() => RunKeepAliveAsync(interval, countMax));
+    }
+
+    /// <summary>
+    /// Starts closing channels that carry no data for the timeout their type has under <paramref name="timeouts"/>, as OpenSSH's
+    /// <c>ChannelTimeout</c> does on the client. Nothing starts when no entry sets a timeout.
+    /// </summary>
+    public void StartChannelTimeouts(IReadOnlyList<SshChannelTimeout> timeouts)
+    {
+        var shortest = timeouts.Where(t => t.Timeout > TimeSpan.Zero).Select(t => t.Timeout).DefaultIfEmpty().Min();
+        if (shortest <= TimeSpan.Zero)
+        {
+            return;
+        }
+
+        // Checked four times per shortest timeout, so a channel is closed between 1 and 1.25 times its timeout after its last data.
+        var period = TimeSpan.FromTicks(Math.Max(shortest.Ticks / 4, TimeSpan.FromMilliseconds(10).Ticks));
+        _channelTimeoutLoop = Task.Run(() => RunChannelTimeoutsAsync(timeouts, period));
+    }
+
+    private async Task RunChannelTimeoutsAsync(IReadOnlyList<SshChannelTimeout> timeouts, TimeSpan period)
+    {
+        try
+        {
+            while (true)
+            {
+                await Task.Delay(period, _time, _stop.Token).ConfigureAwait(false);
+                foreach (var channel in _channels.Values)
+                {
+                    if (channel.TimeoutType is not { } type || !channel.IsOpenForTimeout || SshChannelTimeout.For(timeouts, type) is not { } limit
+                        || _time.GetElapsedTime(channel.LastActivity) < limit)
+                    {
+                        continue;
+                    }
+
+                    // As OpenSSH: an ordinary close. The peer answers with its CLOSE, which ends the channel's streams; forwarded and
+                    // tunnelled connections close their local sockets with it.
+                    SshLog.ChannelTimedOut(_logger, channel.LocalId, type, (int)limit.TotalSeconds);
+                    _ = channel.CloseAsync(CancellationToken.None).AsTask();
+                }
+            }
+        }
+        catch (OperationCanceledException) when (_stop.IsCancellationRequested)
+        {
+            // Shutting down.
+        }
     }
 
     /// <summary>
@@ -329,7 +378,7 @@ internal sealed class SshConnection : IAsyncDisposable
             throw failure;
         }
 
-        var channel = new SshChannel(this, Interlocked.Increment(ref _nextChannelId) - 1);
+        var channel = new SshChannel(this, Interlocked.Increment(ref _nextChannelId) - 1) { TimeoutType = type };
         _channels[channel.LocalId] = channel;
 
         // Fail sets _failure before it walks _channels: if it ran before the add above, it missed this channel, so check again.
@@ -391,6 +440,7 @@ internal sealed class SshConnection : IAsyncDisposable
         await WaitQuietlyAsync(_loop).ConfigureAwait(false);
         await WaitQuietlyAsync(_outboxLoop).ConfigureAwait(false);
         await WaitQuietlyAsync(_keepAliveLoop).ConfigureAwait(false);
+        await WaitQuietlyAsync(_channelTimeoutLoop).ConfigureAwait(false);
         await _transport.DisposeAsync().ConfigureAwait(false);
         _stop.Dispose();
     }
@@ -727,7 +777,11 @@ internal sealed class SshConnection : IAsyncDisposable
             return;
         }
 
-        var accepted = new SshChannel(this, Interlocked.Increment(ref _nextChannelId) - 1);
+        var accepted = new SshChannel(this, Interlocked.Increment(ref _nextChannelId) - 1)
+        {
+            // OpenSSH's ChannelTimeout calls both agent channel types (OpenSSH's and RFC 9987's) "agent-connection".
+            TimeoutType = channelType is "auth-agent@openssh.com" or "agent-connect" ? "agent-connection" : channelType,
+        };
         _channels[accepted.LocalId] = accepted;
         accepted.OnOpenConfirmed(senderChannel, window, maxPacket);
         if (accepted.TryMarkOpen())
