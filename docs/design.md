@@ -36,14 +36,19 @@ code generation.
 
 ## Scope
 
-In: transport, modern algorithms, password/publickey/keyboard-interactive authentication, certificates, agents,
-exec/shell/PTY sessions and `expect`-style scripting, port forwarding (local, remote, dynamic SOCKS 4/4a/5, remote dynamic,
-remote Unix socket), agent forwarding and destination-constrained agent keys, SCP, SFTP (experimental API), ProxyJump,
-ProxyCommand and HTTP/SOCKS proxies, `known_hosts`, host key scanning, `ssh_config`, config-driven connect, connect over any
-`Stream`, key generation, SSH signatures (SSHSIG), typed exceptions, keep-alive, FIPS mode, logging/tracing/metrics; adapters
-that expose SFTP as `IFileSystem` and `IFileProvider`.
+In: transport, modern algorithms, password/publickey/keyboard-interactive authentication, Kerberos (`gssapi-with-mic`, .NET 10
+only), `ext-info-in-auth@openssh.com`, certificates, agents (OpenSSH's agent and PuTTY's Pageant), agent key management
+(`AddKeyAsync`, `RemoveKeyAsync`, `RemoveAllKeysAsync`, `LockAsync`, `AddKeysToAgent`), exec/shell/PTY sessions, BREAK
+(`SendBreakAsync`, RFC 4335) and `expect`-style scripting, port forwarding (local, remote, dynamic SOCKS 4/4a/5, remote dynamic,
+remote Unix socket), agent forwarding and destination-constrained agent keys (`restrict-destination-v00@openssh.com`), SCP, SFTP
+(experimental API) with segmented downloads, ProxyJump, ProxyCommand and HTTP/SOCKS proxies, `known_hosts`, `KnownHostsCommand`,
+revoked host keys (`RevokedHostKeys`: OpenSSH KRLs and key lists), host key scanning, `ssh_config` (including `Match localnetwork`,
+`sessiontype` and `command`, and `RefuseConnection`), config-driven connect, connect over any `Stream`, key generation, SSH
+signatures (SSHSIG), typed exceptions, keep-alive, `ping@openssh.com` (`PingAsync`), client-side channel idle timeouts
+(`ChannelTimeout`), FIPS mode, logging/tracing/metrics following OpenTelemetry's semantic conventions; adapters that expose SFTP as
+`IFileSystem` and `IFileProvider`.
 
-Out: server-side SSH, `ControlMaster` multiplexing, GSSAPI, X11 forwarding.
+Out: server-side SSH, `ControlMaster` multiplexing, GSSAPI key exchange (`gssapi-keyex`), X11 forwarding.
 
 ## Packages
 

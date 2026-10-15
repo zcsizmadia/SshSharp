@@ -154,6 +154,7 @@ jobs:
           ssh-keygen -q -t rsa -b 2048 -N "$PHRASE" -f "$KEYS/rsa_encrypted_default"
           ssh-keygen -q -t ecdsa -b 384 -a 4 -N "$PHRASE" -f "$KEYS/ecdsa_encrypted_rounds4"
           # The same keys as PuTTY .ppk files, written by PuTTY's own puttygen: versions 2 and 3, plain and encrypted.
+          sudo apt-get update -qq > /dev/null
           sudo apt-get install -y -qq putty-tools > /dev/null
           puttygen --version
           printf '%s' "$PHRASE" > "$RUNNER_TEMP/phrase"
@@ -179,6 +180,7 @@ jobs:
       - name: A throwaway Kerberos realm, and sshd with GSSAPIAuthentication on port 2224
         run: |
           set -euo pipefail
+          sudo apt-get update -qq > /dev/null
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq krb5-kdc krb5-admin-server krb5-user > /dev/null
           cat <<EOF | sudo tee /etc/krb5.conf > /dev/null
           [libdefaults]
@@ -205,6 +207,12 @@ jobs:
           sudo kadmin.local -q "ktadd -k $RUNNER_TEMP/sshsharp.keytab sshsharp" > /dev/null
           sudo chown "$(id -u)" "$RUNNER_TEMP/sshsharp.keytab"
           sudo krb5kdc
+          # krb5kdc returns before it listens: wait (at most 30 s) for port 88.
+          for i in $(seq 1 30); do
+            if [ -n "$(ss -Hlnut 'sport = :88')" ]; then break; fi
+            sleep 1
+          done
+          [ -n "$(ss -Hlnut 'sport = :88')" ] || { echo "::error::the KDC is not listening on port 88"; exit 1; }
           export KRB5CCNAME="FILE:$RUNNER_TEMP/krb5cc"
           kinit -k -t "$RUNNER_TEMP/sshsharp.keytab" sshsharp
           klist
@@ -214,6 +222,13 @@ jobs:
           printf 'GSSAPIAuthentication yes\nGSSAPIStrictAcceptorCheck no\n' | sudo tee -a /tmp/sshd_config_gssapi > /dev/null
           sudo /usr/sbin/sshd -t -f /tmp/sshd_config_gssapi
           sudo /usr/sbin/sshd -f /tmp/sshd_config_gssapi -E /tmp/sshd_gssapi.log
+          # Wait (at most 30 s) until it answers with its banner.
+          for i in $(seq 1 30); do
+            if timeout 2 bash -c 'exec 3<>/dev/tcp/127.0.0.1/2224 && head -c 64 <&3' 2>/dev/null | grep -q '^SSH-'; then break; fi
+            sleep 1
+          done
+          timeout 2 bash -c 'exec 3<>/dev/tcp/127.0.0.1/2224 && head -c 64 <&3' 2>/dev/null | grep -q '^SSH-' \
+            || { echo "::error::the Kerberos sshd does not answer on port 2224"; exit 1; }
           echo "SSHSHARP_TEST_GSSAPI=1" >> "$GITHUB_ENV"
           echo "SSHSHARP_TEST_GSSAPI_SSHD=127.0.0.1:2224" >> "$GITHUB_ENV"
       - run: dotnet restore
@@ -309,8 +324,13 @@ jobs:
             echo "SSHSHARP_TEST_SERVER_STRICTKEX=${{ matrix.strict }}"
           } >> "$GITHUB_ENV"
           if [ "${{ matrix.server }}" = "openssh" ]; then echo "SSHSHARP_TEST_SSHD_REKEY=1" >> "$GITHUB_ENV"; fi
-          # Dropbear serves the sftp subsystem by running OpenSSH's sftp-server from /usr/libexec (the image links it there).
-          if [ "${{ matrix.server }}" = "dropbear" ] && docker exec server test -x /usr/libexec/sftp-server; then
+          # Dropbear serves the sftp subsystem by running OpenSSH's sftp-server from /usr/libexec (the image links it there). A missing
+          # binary fails the job: the SFTP tests would otherwise skip themselves and the job would pass without them.
+          if [ "${{ matrix.server }}" = "dropbear" ]; then
+            if ! docker exec server test -x /usr/libexec/sftp-server; then
+              echo "::error::the Dropbear image has no /usr/libexec/sftp-server"
+              exit 1
+            fi
             echo "SSHSHARP_TEST_DROPBEAR_SFTP=1" >> "$GITHUB_ENV"
           fi
       - run: dotnet restore
