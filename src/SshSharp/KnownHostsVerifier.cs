@@ -78,6 +78,14 @@ public sealed class KnownHostsVerifier : SshHostKeyVerifier
     public bool HashNewEntries { get; init; }
 
     /// <summary>
+    /// A file of host keys never to accept, as <c>RevokedHostKeys</c> in ssh_config: an OpenSSH Key Revocation List (<c>ssh-keygen -k</c>),
+    /// or a list of public keys, one per line. A revoked key is refused whatever known_hosts says, and so is a host certificate whose
+    /// key, authority, serial number or key id is revoked. As with ssh, a file that cannot be read or is a malformed KRL refuses every
+    /// host key: a revocation list that cannot be checked must not let a revoked key through. A KRL's signatures are not verified.
+    /// </summary>
+    public string? RevokedHostKeys { get; init; }
+
+    /// <summary>
     /// Asks the user whether to trust an unknown key in <see cref="StrictHostKeyChecking.Ask"/> mode; true trusts and records it.
     /// Without it, Ask behaves like <see cref="StrictHostKeyChecking.Yes"/>.
     /// </summary>
@@ -108,6 +116,7 @@ public sealed class KnownHostsVerifier : SshHostKeyVerifier
         {
             Policy = config.StrictHostKeyChecking,
             HashNewEntries = hash,
+            RevokedHostKeys = config.RevokedHostKeys,
             Ask = ask,
             UpdateHostKeys = update,
             ConfirmHostKeyUpdate = setting == "ask" ? confirmUpdate : null,
@@ -157,10 +166,25 @@ public sealed class KnownHostsVerifier : SshHostKeyVerifier
             files.Add(await KnownHostsFile.LoadAsync(path, cancellationToken).ConfigureAwait(false));
         }
 
+        // Like ssh, keys in the RevokedHostKeys file are never learned (and an unreadable file learns none).
+        RevokedKeyList? revokedList = null;
+        if (RevokedHostKeys is { } revokedPath)
+        {
+            try
+            {
+                revokedList = await RevokedKeyList.LoadAsync(revokedPath, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or FormatException)
+            {
+                return [];
+            }
+        }
+
         return [.. announced.Where(blob =>
         {
             var keyType = new Protocol.SshReader(blob).ReadUtf8String();
-            return !files.Any(f => f.Check(name, port, keyType, blob) is KnownHostsCheckResult.Match or KnownHostsCheckResult.Revoked);
+            return revokedList?.IsRevoked(blob, certificate: null) != true
+                && !files.Any(f => f.Check(name, port, keyType, blob) is KnownHostsCheckResult.Match or KnownHostsCheckResult.Revoked);
         })];
     }
 
@@ -243,6 +267,12 @@ public sealed class KnownHostsVerifier : SshHostKeyVerifier
         if (context.KnownHostsLookup is not var (name, port))
         {
             return SshHostKeyVerdict.Reject("There is no host name to look up in known_hosts; set SshClientOptions.HostKeyAlias when connecting over a stream.");
+        }
+
+        // As ssh's verify_host_key: the revocation file first, before anything that could trust the key.
+        if (RevokedHostKeys is { } revokedPath && await CheckRevokedAsync(revokedPath, context.HostKey, cancellationToken).ConfigureAwait(false) is { } refusal)
+        {
+            return refusal;
         }
 
         if (context.HostKey.Certificate is { } certificate
@@ -347,6 +377,27 @@ public sealed class KnownHostsVerifier : SshHostKeyVerifier
         return certificate.CheckForHost(name, Clock.GetUtcNow()) is { } problem
             ? SshHostKeyVerdict.Reject($"The host certificate (key id '{certificate.KeyId}', authority {certificate.AuthorityFingerprint}) is not acceptable: {problem}.")
             : SshHostKeyVerdict.Accept();
+    }
+
+    /// <summary>
+    /// The refusal when <paramref name="key"/> is revoked by the file, or when the file cannot be checked (ssh: "Error checking host key ...
+    /// in revoked keys file"); null when the key is not revoked.
+    /// </summary>
+    private static async ValueTask<SshHostKeyVerdict?> CheckRevokedAsync(string path, SshHostKey key, CancellationToken cancellationToken)
+    {
+        RevokedKeyList list;
+        try
+        {
+            list = await RevokedKeyList.LoadAsync(path, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or FormatException)
+        {
+            return SshHostKeyVerdict.Reject($"Error checking host key {key.KeyType} {key.Fingerprint} in revoked keys file {path}: {ex.Message}");
+        }
+
+        return list.IsRevoked(key.PublicKey.Span, key.Certificate)
+            ? SshHostKeyVerdict.Reject($"Host key {key.KeyType} {key.Fingerprint} revoked by file {path}.")
+            : null;
     }
 
     private async ValueTask<SshHostKeyVerdict> RecordAsync(string name, int port, SshHostKey key, CancellationToken cancellationToken)

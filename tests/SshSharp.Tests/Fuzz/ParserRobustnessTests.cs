@@ -109,6 +109,17 @@ public class ParserRobustnessTests
     }
 
     [Test]
+    public async Task RevokedKeysParsing_OnlyEverFailsWithAFormatError()
+    {
+        // RevokedHostKeys: a KRL written by ssh-keygen -k (fingerprints, serials, a range, key ids), and a key list.
+        var krl = File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "Fixtures", "revoked.krl"));
+        var list = Encoding.UTF8.GetBytes(string.Join('\n', PublicKeyBlobs().Select(b => $"{new SshReader(b).ReadUtf8String()} {Convert.ToBase64String(b)}")));
+        var probe = PublicKeyBlobs()[0];
+        var failures = Run([krl, list], input => RevokedKeyList.Parse(input).IsRevoked(probe, null), FormatErrors, iterations: 2000);
+        await Assert.That(failures).IsEmpty();
+    }
+
+    [Test]
     public async Task SshConfigParsingAndResolving_OnlyEverFailWithAFormatError()
     {
         var seed = File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "Fixtures", "ssh_config_sample"));

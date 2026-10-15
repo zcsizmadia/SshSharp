@@ -58,4 +58,6 @@ await KnownHostsFile.AppendAsync(path, "new.example.com", 22, client.HostKey.Key
 ```
 
 Hashed host names (`|1|salt|hash`), `[host]:port`, wildcards and negation, `@cert-authority` and `@revoked` are supported.
+`SshHostConfig.RevokedHostKeys` is the resolved `RevokedHostKeys` file (`~` and tokens expanded); `KnownHostsVerifier.FromConfig`
+checks host keys against it (see [Host keys](host-keys.md#revoked-host-keys)).
 `AppendAsync` only appends, so comments and the order of existing lines are kept.
