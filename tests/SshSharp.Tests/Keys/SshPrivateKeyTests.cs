@@ -160,6 +160,33 @@ public class SshPrivateKeyTests
     }
 
     [Test]
+    [Arguments("aes128-ctr")]
+    [Arguments("aes192-ctr")]
+    [Arguments("aes256-ctr")]
+    [Arguments("aes128-cbc")]
+    [Arguments("aes192-cbc")]
+    [Arguments("aes256-cbc")]
+    [Arguments("aes128-gcm")]
+    [Arguments("aes256-gcm")]
+    public async Task KeysEncryptedBySshKeygen_WithEachCipher_Decrypt(string cipher)
+    {
+        // Made by OpenSSH's ssh-keygen -Z (Fixtures/encrypted-keys/README.md), so the decryption is checked against another
+        // implementation's encryption, not only against this test suite's.
+        var path = Path.Combine(AppContext.BaseDirectory, "Fixtures", "encrypted-keys", "ed25519-" + cipher);
+        var pem = await File.ReadAllTextAsync(path);
+        var publicBlob = Convert.FromBase64String((await File.ReadAllTextAsync(path + ".pub")).Split(' ')[1]);
+
+        using (var key = SshPrivateKey.Parse(pem, "fixture passphrase"))
+        {
+            await AssertSignsAndVerifies(key, publicBlob);
+            await Assert.That(key.Comment).IsEqualTo("sshsharp-fixture-" + (cipher.EndsWith("-gcm", StringComparison.Ordinal) ? cipher + "@openssh.com" : cipher));
+        }
+
+        var wrong = Assert.Throws<FormatException>(() => SshPrivateKey.Parse(pem, "another passphrase"));
+        await Assert.That(wrong.Message).Contains("passphrase");
+    }
+
+    [Test]
     [Arguments(2, "ssh-ed25519", null)]
     [Arguments(2, "ecdsa-sha2-nistp256", "pw")]
     [Arguments(2, "ssh-rsa", "pw")]
