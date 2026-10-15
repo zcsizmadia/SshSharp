@@ -73,7 +73,7 @@ builder.Services.AddOpenTelemetry()
 
 | Activity | Kind | Tags |
 |---|---|---|
-| `SshSharp.Connect` | Client | `network.protocol.name` (`ssh`), `network.protocol.version` (`2.0`), `network.transport` (`tcp`) and `server.port` for TCP connections, `ssh.kex`, `ssh.kex.post_quantum`, `ssh.cipher`, `ssh.host_key.type`; on failure `error.type` |
+| `SshSharp.Connect` | Client | `network.protocol.name` (`ssh`), `network.protocol.version` (`2.0`), `network.transport` (`tcp`) and `server.port` when SshSharp makes a direct TCP connection (not through a proxy, `ProxyCommand` or `ProxyJump`, nor over your own stream), `ssh.kex`, `ssh.kex.post_quantum`, `ssh.cipher`, `ssh.host_key.type`; on failure `error.type` |
 | `SshSharp.Command` | Internal | `ssh.command.exit_status`; on failure `error.type` |
 
 | Instrument | Unit | Description |
@@ -86,7 +86,9 @@ builder.Services.AddOpenTelemetry()
 | `sshsharp.commands` | `{command}` | Commands run, tagged `result` (`success`, `failure` for a non-zero exit status, `error`) and, for errors, `error.type` |
 
 `error.type` follows OpenTelemetry's semantic conventions: an `SshException`'s `Reason` (`AuthenticationFailed`, `Timeout`,
-`HostKeyRejected`, ...), otherwise the exception's type name; failed spans also get the `Error` status. `server.address` is not
+`HostKeyRejected`, ...), otherwise the exception's type name; failed spans also get the `Error` status. The connect span and
+duration start before the network connection, so a refused connection, a DNS failure or a proxy that fails are recorded too; with
+`ProxyJump`, each jump host's connect is a span of its own inside the destination's. `server.address` is not
 recorded, because this library never records host names (see the [threat model](threat-model.md)). To have it, add it to a parent
 span of your own, or in an `ActivityListener`:
 

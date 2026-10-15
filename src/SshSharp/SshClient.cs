@@ -83,15 +83,22 @@ public sealed partial class SshClient : IAsyncDisposable
         ArgumentOutOfRangeException.ThrowIfGreaterThan(port, 65535);
         ArgumentNullException.ThrowIfNull(options);
         IReadOnlyList<System.Net.IPEndPoint>? local = options.LocalEndPoint is { } bind ? [bind] : null;
-        if (options.Proxy is { } proxy)
+        using var measurement = new ConnectMeasurement(options.Proxy is null ? port : null);
+        Stream stream;
+        try
         {
-            var proxied = await proxy.ConnectAsync(host, port, local, cancellationToken).ConfigureAwait(false);
-            return await ConnectCoreAsync(proxied, options, leaveOpen: false, owner: null, host, port, cancellationToken).ConfigureAwait(false);
+            // The host name stays out of error messages (exception text often ends up in logs); it is in the caller's hands already.
+            stream = options.Proxy is { } proxy
+                ? await proxy.ConnectAsync(host, port, local, cancellationToken).ConfigureAwait(false)
+                : await TcpConnector.ConnectAsync(host, port, local, Config.SshAddressFamily.Any, "the server", cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            measurement.Failed(ex);
+            throw;
         }
 
-        // The host name stays out of error messages (exception text often ends up in logs); it is in the caller's hands already.
-        var stream = await TcpConnector.ConnectAsync(host, port, local, Config.SshAddressFamily.Any, "the server", cancellationToken).ConfigureAwait(false);
-        return await ConnectCoreAsync(stream, options, leaveOpen: false, owner: null, host, port, cancellationToken).ConfigureAwait(false);
+        return await ConnectCoreAsync(stream, options, leaveOpen: false, owner: null, host, port, measurement, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Runs the SSH protocol over an existing stream (a socket, a WebSocket wrapper, a tunnel from another connection, ...).</summary>
@@ -100,7 +107,7 @@ public sealed partial class SshClient : IAsyncDisposable
     /// <param name="leaveOpen">Whether to leave <paramref name="stream"/> open when the client is disposed.</param>
     /// <param name="cancellationToken">Cancels the connection attempt.</param>
     public static Task<SshClient> ConnectAsync(Stream stream, SshClientOptions options, bool leaveOpen = false, CancellationToken cancellationToken = default) =>
-        ConnectCoreAsync(stream, options, leaveOpen, owner: null, host: null, port: 22, cancellationToken);
+        ConnectCoreAsync(stream, options, leaveOpen, owner: null, host: null, port: 22, measurement: null, cancellationToken);
 
     /// <summary>Runs <paramref name="command"/> on the server and collects its output and exit status.</summary>
     /// <exception cref="SshException">The server refused the command or the connection failed.</exception>
@@ -301,22 +308,25 @@ public sealed partial class SshClient : IAsyncDisposable
         }
     }
 
-    private static async Task<SshClient> ConnectCoreAsync(Stream stream, SshClientOptions options, bool leaveOpen, IAsyncDisposable? owner, string? host, int port, CancellationToken cancellationToken)
+    // measurement: the caller's, started before it made the network connection; null to measure from here.
+    private static async Task<SshClient> ConnectCoreAsync(Stream stream, SshClientOptions options, bool leaveOpen, IAsyncDisposable? owner, string? host, int port,
+        ConnectMeasurement? measurement, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(stream);
         ArgumentNullException.ThrowIfNull(options);
 
         var logger = options.Logger ?? NullLogger.Instance;
-        using var activity = SshTelemetry.StartConnect(host, port);
-        var started = Stopwatch.GetTimestamp();
+        using var own = measurement is null ? new ConnectMeasurement(tcpPort: null) : null;
+        measurement ??= own!;
 
         SshTransportOptions transportOptions;
         try
         {
             transportOptions = await TransportOptionsAsync(options, host, port, logger, cancellationToken).ConfigureAwait(false);
         }
-        catch
+        catch (Exception ex)
         {
+            measurement.Failed(ex);
             // The stream is this method's to dispose from the start, also when preparing fails (a cancellation while known_hosts is read).
             if (!leaveOpen)
             {
@@ -332,14 +342,13 @@ public sealed partial class SshClient : IAsyncDisposable
             await transport.ConnectAsync(cancellationToken).ConfigureAwait(false);
             var acceptedKeys = new List<SshPrivateKey>();
             await AuthenticateAsync(transport, options, logger, acceptedKeys, host, cancellationToken).ConfigureAwait(false);
-            var client = CompleteConnection(transport, stream, options, leaveOpen, owner, host, port, logger, activity, started);
+            var client = CompleteConnection(transport, stream, options, leaveOpen, owner, host, port, logger, measurement);
             client.AcceptedKeys = acceptedKeys;
             return client;
         }
         catch (Exception ex)
         {
-            var error = SshTelemetry.Failed(activity, ex is IOException ? SshConnection.ConnectionLost(ex) : ex);
-            SshTelemetry.ConnectDuration.Record(Stopwatch.GetElapsedTime(started).TotalSeconds, new KeyValuePair<string, object?>("error.type", error));
+            measurement.Failed(ex is IOException ? SshConnection.ConnectionLost(ex) : ex);
 
             // Cleanup must not replace the real error with one from a stream that is already broken.
             try
@@ -433,8 +442,9 @@ public sealed partial class SshClient : IAsyncDisposable
 
     /// <summary>Starts the connection layer over an authenticated transport and records the outcome.</summary>
     private static SshClient CompleteConnection(SshTransport transport, Stream stream, SshClientOptions options, bool leaveOpen, IAsyncDisposable? owner,
-        string? host, int port, ILogger logger, Activity? activity, long started)
+        string? host, int port, ILogger logger, ConnectMeasurement measurement)
     {
+        var activity = measurement.Activity;
         var hostKey = transport.HostKey!;
         var algorithms = transport.Algorithms!;
         var publicHostKey = new SshHostKey(hostKey.Algorithm, hostKey.KeyType, hostKey.Fingerprint, hostKey.Blob, hostKey.KeySizeBits) { Certificate = hostKey.Certificate };
@@ -451,7 +461,7 @@ public sealed partial class SshClient : IAsyncDisposable
         connection.StartChannelTimeouts(options.ChannelTimeouts);
         SshTelemetry.Connections.Add(1);
         var postQuantum = SshAlgorithms.IsPostQuantum(algorithms.Kex);
-        SshTelemetry.ConnectDuration.Record(Stopwatch.GetElapsedTime(started).TotalSeconds, new KeyValuePair<string, object?>("ssh.kex.post_quantum", postQuantum));
+        measurement.Succeeded(postQuantum);
         activity?.SetTag("ssh.kex", algorithms.Kex);
         activity?.SetTag("ssh.kex.post_quantum", postQuantum);
         activity?.SetTag("ssh.cipher", algorithms.CipherClientToServer);

@@ -60,6 +60,10 @@ public sealed partial class SshClient
         using var linked = timeout is null ? null : CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeout.Token);
         var token = linked?.Token ?? cancellationToken;
 
+        // Measured from here, so failures to reach the server count too; a direct TCP connection is tagged as one.
+        var direct = via is null && hostConfig.ProxyJump.Count == 0 && hostConfig.ProxyCommand is null && options.Proxy is null;
+        using var measurement = new ConnectMeasurement(direct ? hostConfig.Port : null);
+
         // Everything this connection needs released when it ends (or fails to start): keys, then the socket, process or tunnel.
         Owned? owner = new();
         try
@@ -153,7 +157,8 @@ public sealed partial class SshClient
                 TimeProvider = options.TimeProvider,
             };
 
-            var client = await ConnectCoreAsync(stream, clientOptions, leaveOpen: false, owner, hostConfig.HostName, hostConfig.Port, token).ConfigureAwait(false);
+            var client = await ConnectCoreAsync(stream, clientOptions, leaveOpen: false, owner, hostConfig.HostName, hostConfig.Port, measurement, token)
+                .ConfigureAwait(false);
             owner = null; // the client owns it now
             if (hostConfig.AddKeysToAgent is { } constraints && ResolveAgent(hostConfig, options) is { } keyAgent)
             {
@@ -178,7 +183,14 @@ public sealed partial class SshClient
         }
         catch (OperationCanceledException) when (timeout?.IsCancellationRequested == true && !cancellationToken.IsCancellationRequested)
         {
-            throw new SshException(SshFailureReason.Timeout, $"Connecting took longer than ConnectTimeout ({hostConfig.ConnectTimeout!.Value.TotalSeconds.ToString(CultureInfo.InvariantCulture)} s).");
+            var error = new SshException(SshFailureReason.Timeout, $"Connecting took longer than ConnectTimeout ({hostConfig.ConnectTimeout!.Value.TotalSeconds.ToString(CultureInfo.InvariantCulture)} s).");
+            measurement.Failed(error);
+            throw error;
+        }
+        catch (Exception ex)
+        {
+            measurement.Failed(ex); // unless the handshake already recorded its own failure
+            throw;
         }
         finally
         {

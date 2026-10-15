@@ -50,18 +50,18 @@ public static class SshTelemetry
         "sshsharp.commands", "{command}", "Remote commands run, tagged by outcome (success, failure, error).");
 
     /// <summary>
-    /// Starts the connect span as a client span with OpenTelemetry's general attributes (<c>network.protocol.name</c>, and for a TCP
-    /// connection <c>network.transport</c> and <c>server.port</c>). <c>server.address</c> is left out: host names are never recorded by
-    /// this library (see the threat model); add it in an <see cref="ActivityListener"/> or a parent span when you want it.
+    /// Starts the connect span as a client span with OpenTelemetry's general attributes (<c>network.protocol.name</c>, and when this
+    /// library makes the TCP connection itself, <c>network.transport</c> and <c>server.port</c>). <c>server.address</c> is left out: host
+    /// names are never recorded by this library (see the threat model); add it in an <see cref="ActivityListener"/> or a parent span.
     /// </summary>
-    internal static Activity? StartConnect(string? host, int port)
+    internal static Activity? StartConnect(int? tcpPort)
     {
         var activity = Activities.StartActivity("SshSharp.Connect", ActivityKind.Client);
         if (activity is not null)
         {
             activity.SetTag("network.protocol.name", "ssh");
             activity.SetTag("network.protocol.version", "2.0");
-            if (host is not null)
+            if (tcpPort is { } port)
             {
                 activity.SetTag("network.transport", "tcp");
                 activity.SetTag("server.port", port);
@@ -82,4 +82,37 @@ public static class SshTelemetry
         activity?.SetTag("error.type", errorType);
         return errorType;
     }
+}
+
+/// <summary>
+/// One connect attempt's span and duration, from before the network connection (TCP, proxy, ProxyCommand or ProxyJump) to the end of
+/// authentication; the outcome is recorded once, whichever step ends it.
+/// </summary>
+internal sealed class ConnectMeasurement(int? tcpPort) : IDisposable
+{
+    private readonly long _started = Stopwatch.GetTimestamp();
+    private bool _recorded;
+
+    public Activity? Activity { get; } = SshTelemetry.StartConnect(tcpPort);
+
+    public void Succeeded(bool postQuantum) => Record(new KeyValuePair<string, object?>("ssh.kex.post_quantum", postQuantum));
+
+    public void Failed(Exception exception)
+    {
+        if (!_recorded)
+        {
+            Record(new KeyValuePair<string, object?>("error.type", SshTelemetry.Failed(Activity, exception)));
+        }
+    }
+
+    private void Record(KeyValuePair<string, object?> tag)
+    {
+        if (!_recorded)
+        {
+            _recorded = true;
+            SshTelemetry.ConnectDuration.Record(Stopwatch.GetElapsedTime(_started).TotalSeconds, tag);
+        }
+    }
+
+    public void Dispose() => Activity?.Dispose();
 }
