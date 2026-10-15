@@ -45,6 +45,12 @@ internal sealed class SshChannelReadStream(Func<CancellationToken, ValueTask<Cha
                 _eof = true;
                 return 0;
             }
+
+            if (Volatile.Read(ref _disposed) != 0)
+            {
+                Release(); // disposed while this read waited: the chunk would otherwise never be released
+                throw new ObjectDisposedException(nameof(SshChannelReadStream));
+            }
         }
 
         var available = _current.Data.Span[_offset..];
@@ -83,8 +89,8 @@ internal sealed class SshChannelReadStream(Func<CancellationToken, ValueTask<Cha
 
     private void Release()
     {
-        _current?.Dispose();
-        _current = null;
+        // Taken atomically: disposal can race a read in progress, and each chunk must be released exactly once.
+        Interlocked.Exchange(ref _current, null)?.Dispose();
         _offset = 0;
     }
 }

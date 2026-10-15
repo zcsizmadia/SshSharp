@@ -591,11 +591,11 @@ public class SftpFileSystemTests
         var fs = rig.Fs;
 
         var started = System.Diagnostics.Stopwatch.StartNew();
-        await Assert.That(fs.File.ReadAllBytes("big.bin").SequenceEqual(data)).IsTrue();
+        await Assert.That(TestBytes.Compare(fs.File.ReadAllBytes("big.bin"), data)).IsEqualTo("equal");
         await Assert.That(started.Elapsed).IsGreaterThan(TimeSpan.FromSeconds(1.5));
-        await Assert.That((await fs.File.ReadAllBytesAsync("big.bin", Timeout())).SequenceEqual(data)).IsTrue();
+        await Assert.That(TestBytes.Compare(await fs.File.ReadAllBytesAsync("big.bin", Timeout()), data)).IsEqualTo("equal");
         fs.File.WriteAllBytes("copy.bin", data);
-        await Assert.That(rig.Files.FileData(Home + "/copy.bin")!.SequenceEqual(data)).IsTrue();
+        await Assert.That(TestBytes.Compare(rig.Files.FileData(Home + "/copy.bin")!, data)).IsEqualTo("equal");
         fs.File.AppendAllText("copy.bin", "tail");
         await Assert.That(rig.Files.FileData(Home + "/copy.bin")!.Length).IsEqualTo(data.Length + 4);
 

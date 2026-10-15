@@ -57,6 +57,11 @@ internal sealed class SshChannelStream(SshChannel channel) : Stream
 
             _current = next;
             _offset = 0;
+            if (Volatile.Read(ref _disposed) != 0)
+            {
+                ReleaseCurrent(); // disposed while this read waited: the chunk would otherwise never be released
+                throw new ObjectDisposedException(nameof(SshChannelStream));
+            }
         }
 
         var available = _current.Data.Span[_offset..];
@@ -143,8 +148,8 @@ internal sealed class SshChannelStream(SshChannel channel) : Stream
 
     private void ReleaseCurrent()
     {
-        _current?.Dispose();
-        _current = null;
+        // Taken atomically: disposal can race a read in progress, and each chunk must be released exactly once.
+        Interlocked.Exchange(ref _current, null)?.Dispose();
         _offset = 0;
     }
 }
