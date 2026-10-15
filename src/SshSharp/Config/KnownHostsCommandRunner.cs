@@ -5,7 +5,8 @@ namespace SshSharp.Config;
 
 /// <summary>
 /// Runs <c>KnownHostsCommand</c> as OpenSSH does (sshconnect.c, load_hostkeys_command): the command is split into arguments (no shell
-/// is involved, so token values cannot inject anything), each argument has its tokens expanded, and the program, which must be given
+/// is involved, so token values cannot inject anything), each argument after the program has its <c>${VAR}</c> and <c>%</c> tokens
+/// expanded (the program itself is taken as written), and the program, which must be given
 /// by absolute path, is run directly. On Windows a batch file is refused, since Windows would run it through cmd.exe. Its standard output is read as known_hosts lines. A non-zero exit status fails the connection.
 /// Unlike OpenSSH, the run is bounded: <see cref="Timeout"/> and <see cref="MaxOutput"/>.
 /// </summary>
@@ -44,7 +45,9 @@ internal static class KnownHostsCommandRunner
         List<string> arguments;
         try
         {
-            arguments = [.. Split(command).Select(context.ExpandTokens)];
+            // As sshconnect.c: the program is taken as written; each argument after it gets ${VAR} and the % tokens, in one pass.
+            var words = Split(command);
+            arguments = [.. words.Take(1), .. words.Skip(1).Select(context.ExpandTokensAndVariables)];
         }
         catch (FormatException ex)
         {
