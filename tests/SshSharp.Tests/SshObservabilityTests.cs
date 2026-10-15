@@ -200,15 +200,7 @@ public class SshObservabilityTests
     [Test]
     public async Task RecordsTraces()
     {
-        var stopped = new List<Activity>();
-        var lockObject = new object();
-        using var listener = new ActivityListener
-        {
-            ShouldListenTo = source => source.Name == SshTelemetry.SourceName,
-            Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllDataAndRecorded,
-            ActivityStopped = activity => { lock (lockObject) { stopped.Add(activity); } },
-        };
-        ActivitySource.AddActivityListener(listener);
+        SshSpans.Listen();
 
         // A root activity of our own isolates this test's spans from tests running in parallel.
         using var root = new Activity("test-root").Start();
@@ -218,22 +210,7 @@ public class SshObservabilityTests
             await client.RunCommandAsync("failing", Timeout());
         }
 
-        // The listener sees every test's activities, and tests run in parallel: snapshot under the lock before reading.
-        List<Activity> mine;
-        lock (lockObject)
-        {
-            mine = stopped.Where(a => a.TraceId == root.TraceId).ToList();
-        }
-
-        // Every span in this trace, when there is not exactly one connect: where the extra one came from.
-        if (mine.Count(a => a.OperationName == "SshSharp.Connect") != 1)
-        {
-            var spans = string.Join("\n", mine.Select(a =>
-                $"  {a.OperationName} span={a.SpanId} parent={a.ParentSpanId} start={a.StartTimeUtc:HH:mm:ss.fffffff} duration={a.Duration.TotalMilliseconds}ms status={a.Status} " +
-                string.Join(",", a.TagObjects.Select(t => $"{t.Key}={t.Value}"))));
-            Assert.Fail($"root span={root.SpanId} parent={root.ParentSpanId} ({Activity.Current?.Parent?.OperationName})\n{spans}");
-        }
-
+        var mine = SshSpans.InTrace(root.TraceId);
         var connect = mine.Single(a => a.OperationName == "SshSharp.Connect");
         await Assert.That(connect.GetTagItem("ssh.kex")).IsEqualTo("curve25519-sha256");
         await Assert.That(connect.GetTagItem("ssh.cipher")).IsEqualTo("chacha20-poly1305@openssh.com");
@@ -256,26 +233,13 @@ public class SshObservabilityTests
     [Test]
     public async Task AFailedConnectIsMarkedAsAnErrorInTheTrace()
     {
-        var stopped = new List<Activity>();
-        var lockObject = new object();
-        using var listener = new ActivityListener
-        {
-            ShouldListenTo = source => source.Name == SshTelemetry.SourceName,
-            Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllDataAndRecorded,
-            ActivityStopped = activity => { lock (lockObject) { stopped.Add(activity); } },
-        };
-        ActivitySource.AddActivityListener(listener);
-
+        SshSpans.Listen();
         using var root = new Activity("test-root-2").Start();
         await using var server = new FakeSessionServer { Password = "right" };
         _ = server.StartAsync();
         await Assert.That(async () => await SshClient.ConnectAsync(server.ClientStream, Options(password: "wrong"), true, Timeout())).Throws<SshException>();
 
-        Activity connect;
-        lock (lockObject)
-        {
-            connect = stopped.Single(a => a.TraceId == root.TraceId && a.OperationName == "SshSharp.Connect");
-        }
+        var connect = SshSpans.InTrace(root.TraceId).Single(a => a.OperationName == "SshSharp.Connect");
         await Assert.That(connect.Status).IsEqualTo(ActivityStatusCode.Error);
         await Assert.That(connect.StatusDescription).IsEqualTo(nameof(SshAuthenticationException));
         await Assert.That(connect.GetTagItem("error.type")).IsEqualTo(nameof(SshFailureReason.AuthenticationFailed));
@@ -284,15 +248,7 @@ public class SshObservabilityTests
     [Test]
     public async Task ARefusedTcpConnection_IsInTheTrace()
     {
-        var stopped = new List<Activity>();
-        var lockObject = new object();
-        using var listener = new ActivityListener
-        {
-            ShouldListenTo = source => source.Name == SshTelemetry.SourceName,
-            Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllDataAndRecorded,
-            ActivityStopped = activity => { lock (lockObject) { stopped.Add(activity); } },
-        };
-        ActivitySource.AddActivityListener(listener);
+        SshSpans.Listen();
 
         // A port nothing listens on any more: the connection is refused before any SSH happens.
         var probe = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
@@ -303,11 +259,7 @@ public class SshObservabilityTests
         using var root = new Activity("test-root-3").Start();
         await Assert.That(async () => await SshClient.ConnectAsync("127.0.0.1", port, Options(), Timeout())).Throws<Exception>();
 
-        Activity connect;
-        lock (lockObject)
-        {
-            connect = stopped.Single(a => a.TraceId == root.TraceId && a.OperationName == "SshSharp.Connect");
-        }
+        var connect = SshSpans.InTrace(root.TraceId).Single(a => a.OperationName == "SshSharp.Connect");
 
         await Assert.That(connect.Status).IsEqualTo(ActivityStatusCode.Error);
         await Assert.That(connect.GetTagItem("error.type")).IsNotNull();
