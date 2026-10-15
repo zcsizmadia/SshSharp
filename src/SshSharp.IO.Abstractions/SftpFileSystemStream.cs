@@ -149,12 +149,18 @@ internal sealed class SftpFileSystemStream : FileSystemStream
 
         private T Wait<T>(Func<CancellationToken, Task<T>> operation)
         {
-            using var cancel = new CancellationTokenSource(timeout);
+            // The timeout starts when the work does (see SftpFileSystem.RunTransfer).
+            CancellationTokenSource? cancel = null;
             try
             {
-                return Task.Run(() => operation(cancel.Token), CancellationToken.None).GetAwaiter().GetResult();
+                return Task.Run(async () =>
+                {
+                    using var started = new CancellationTokenSource(timeout);
+                    cancel = started;
+                    return await operation(started.Token).ConfigureAwait(false);
+                }, CancellationToken.None).GetAwaiter().GetResult();
             }
-            catch (Exception ex) when (SftpFileSystem.Translate(ex, path, false, cancel.IsCancellationRequested) is { } translated)
+            catch (Exception ex) when (SftpFileSystem.Translate(ex, path, false, cancel?.IsCancellationRequested == true) is { } translated)
             {
                 throw translated;
             }

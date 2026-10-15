@@ -163,12 +163,19 @@ public sealed class SftpFileSystem : IFileSystem
     /// </summary>
     internal T RunTransfer<T>(string? path, bool directory, Func<CancellationToken, IProgress<long>, Task<T>> operation, bool limited = true)
     {
-        using var deadline = new Deadline(limited ? Options.OperationTimeout : Timeout.InfiniteTimeSpan, CancellationToken.None);
+        // The deadline starts when the work does, on the thread pool: started before queueing it, a busy pool's delay would count
+        // against the server, and the operation could find its time used up before it began.
+        Deadline? deadline = null;
         try
         {
-            return Task.Run(() => operation(deadline.Token, deadline), CancellationToken.None).GetAwaiter().GetResult();
+            return Task.Run(async () =>
+            {
+                using var started = new Deadline(limited ? Options.OperationTimeout : Timeout.InfiniteTimeSpan, CancellationToken.None);
+                deadline = started;
+                return await operation(started.Token, started).ConfigureAwait(false);
+            }, CancellationToken.None).GetAwaiter().GetResult();
         }
-        catch (Exception ex) when (Translate(ex, path, directory, deadline.TimedOut) is { } translated)
+        catch (Exception ex) when (Translate(ex, path, directory, deadline?.TimedOut == true) is { } translated)
         {
             throw translated;
         }
@@ -223,7 +230,7 @@ public sealed class SftpFileSystem : IFileSystem
 
         public CancellationToken Token => _source.Token;
 
-        /// <summary>Whether the timeout, not the caller, cancelled the operation.</summary>
+        /// <summary>Whether the timeout, not the caller, cancelled the operation (still answers once disposed).</summary>
         public bool TimedOut => _source.IsCancellationRequested && !_caller.IsCancellationRequested;
 
         public void Report(long value)

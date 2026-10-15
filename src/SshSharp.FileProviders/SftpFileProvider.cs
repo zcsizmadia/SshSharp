@@ -217,12 +217,19 @@ public sealed class SftpFileProvider : IFileProvider
     /// <summary>Runs <paramref name="operation"/> as <see cref="Run{T}(Func{CancellationToken, Task{T}})"/> does, with the given timeout; a timeout is an <see cref="SshException"/> (<see cref="SshFailureReason.Timeout"/>).</summary>
     internal static T Run<T>(TimeSpan timeout, Func<CancellationToken, Task<T>> operation)
     {
-        using var cancel = new CancellationTokenSource(timeout);
+        // The timeout starts when the work does, on the thread pool: started before queueing it, a busy pool's delay would count
+        // against the server, and the operation could find its time used up before it began.
+        CancellationTokenSource? cancel = null;
         try
         {
-            return Task.Run(() => operation(cancel.Token), CancellationToken.None).GetAwaiter().GetResult();
+            return Task.Run(async () =>
+            {
+                using var started = new CancellationTokenSource(timeout);
+                cancel = started;
+                return await operation(started.Token).ConfigureAwait(false);
+            }, CancellationToken.None).GetAwaiter().GetResult();
         }
-        catch (OperationCanceledException ex) when (cancel.IsCancellationRequested)
+        catch (OperationCanceledException ex) when (cancel?.IsCancellationRequested == true)
         {
             throw new SshException(SshFailureReason.Timeout, $"The SFTP server did not answer within {timeout.TotalSeconds:0.#} s.", ex);
         }
