@@ -198,6 +198,11 @@ internal sealed class SshConfigResolver(IReadOnlyList<SshConfigDocument> documen
                         throw new FormatException($"Match criterion '{name}' needs an argument.");
                     }
 
+                    if (name == "localnetwork")
+                    {
+                        LocalNetwork.Validate(criteria[i]); // whatever the earlier criteria say, as ssh checks the list first
+                    }
+
                     value = result && EvaluateWithArgument(name, criteria[i]);
                     break;
                 case "sessiontype" or "command" when options.SessionType is not null:
