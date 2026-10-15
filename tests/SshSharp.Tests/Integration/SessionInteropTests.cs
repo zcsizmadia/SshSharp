@@ -285,8 +285,9 @@ public class SessionInteropTests
         var lastReceived = (long)typeof(SshSharp.Protocol.SshConnection).GetField("_lastReceived", Private)!.GetValue(connection)!;
         var transport = typeof(SshSharp.Protocol.SshConnection).GetField("_transport", Private)!.GetValue(connection)!;
         var rekeying = transport.GetType().GetField("_rekeying", Private)!.GetValue(transport);
-        dynamic outbox = typeof(SshSharp.Protocol.SshConnection).GetField("_outbox", Private)!.GetValue(connection)!;
-        int queued = outbox.Reader.Count;
+        var outbox = typeof(SshSharp.Protocol.SshConnection).GetField("_outbox", Private)!.GetValue(connection)!;
+        var reader = outbox.GetType().GetProperty("Reader")!.GetValue(outbox)!;
+        var queued = reader.GetType().GetProperty("CanCount")?.GetValue(reader) is true ? reader.GetType().GetProperty("Count")!.GetValue(reader) : "?";
         return $"Last packet received {connection.Time.GetElapsedTime(lastReceived).TotalSeconds:0.0} s ago; rekeying {rekeying}; {queued} messages waiting in the outbox.";
     }
 
