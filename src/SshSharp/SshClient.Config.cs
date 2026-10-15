@@ -68,7 +68,9 @@ public sealed partial class SshClient
         Owned? owner = new();
         try
         {
-            var keys = await LoadIdentitiesAsync(hostConfig, options, logger, token).ConfigureAwait(false);
+            // Resolved once per host: finding the environment's agent on Windows lists the named pipes.
+            var agent = ResolveAgent(hostConfig, options);
+            var keys = await LoadIdentitiesAsync(hostConfig, options, agent, logger, token).ConfigureAwait(false);
             owner.Add(keys);
 
             Stream stream;
@@ -136,7 +138,7 @@ public sealed partial class SshClient
                 KeyboardInteractive = hostConfig.BatchMode ? null : options.KeyboardInteractive,
                 AuthenticationBanner = options.AuthenticationBanner,
                 AuthenticationOrder = AuthenticationOrder(hostConfig),
-                ForwardAgent = hostConfig.ForwardAgent ? ResolveAgent(hostConfig, options) : null,
+                ForwardAgent = hostConfig.ForwardAgent ? agent : null,
                 Gssapi = hostConfig.GssapiAuthentication
                     ? new SshGssapiOptions
                     {
@@ -163,7 +165,7 @@ public sealed partial class SshClient
             try
             {
                 // After the connect, so ConnectTimeout no longer applies: the caller's token does.
-                if (hostConfig.AddKeysToAgent is { } constraints && ResolveAgent(hostConfig, options) is { } keyAgent)
+                if (hostConfig.AddKeysToAgent is { } constraints && agent is { } keyAgent)
                 {
                     await AddAcceptedKeysToAgentAsync(client, keys, keyAgent, constraints, logger, cancellationToken).ConfigureAwait(false);
                 }
@@ -241,12 +243,13 @@ public sealed partial class SshClient
     /// the agent's other keys (not with <c>IdentitiesOnly</c>), then the remaining identity files that exist (encrypted ones only when a
     /// passphrase is provided; missing files are skipped, as ssh does). Keys with a certificate come first, paired with it.
     /// </summary>
-    private static async Task<List<SshPrivateKey>> LoadIdentitiesAsync(SshHostConfig hostConfig, SshConfigConnectOptions options, ILogger logger, CancellationToken cancellationToken)
+    private static async Task<List<SshPrivateKey>> LoadIdentitiesAsync(SshHostConfig hostConfig, SshConfigConnectOptions options, SshAgent? agent, ILogger logger,
+        CancellationToken cancellationToken)
     {
         var keys = new List<SshPrivateKey>();
         try
         {
-            return await LoadIdentitiesAsync(keys, hostConfig, options, logger, cancellationToken).ConfigureAwait(false);
+            return await LoadIdentitiesAsync(keys, hostConfig, options, agent, logger, cancellationToken).ConfigureAwait(false);
         }
         catch
         {
@@ -261,7 +264,7 @@ public sealed partial class SshClient
     }
 
     private static async Task<List<SshPrivateKey>> LoadIdentitiesAsync(List<SshPrivateKey> keys, SshHostConfig hostConfig, SshConfigConnectOptions options,
-        ILogger logger, CancellationToken cancellationToken)
+        SshAgent? agent, ILogger logger, CancellationToken cancellationToken)
     {
         var paths = new List<string>();
         if (!hostConfig.PubkeyAuthentication)
@@ -269,7 +272,7 @@ public sealed partial class SshClient
             return keys;
         }
 
-        var agentKeys = await AgentKeysAsync(hostConfig, options, logger, cancellationToken).ConfigureAwait(false);
+        var agentKeys = await AgentKeysAsync(agent, logger, cancellationToken).ConfigureAwait(false);
         var fromAgent = new List<SshPrivateKey>();
         foreach (var path in hostConfig.IdentityFiles)
         {
@@ -401,9 +404,9 @@ public sealed partial class SshClient
     }
 
     /// <summary>The agent's keys for this host, or none: no agent configured, <c>IdentityAgent none</c>, or the agent is not running.</summary>
-    private static async Task<IReadOnlyList<SshPrivateKey>> AgentKeysAsync(SshHostConfig hostConfig, SshConfigConnectOptions options, ILogger logger, CancellationToken cancellationToken)
+    private static async Task<IReadOnlyList<SshPrivateKey>> AgentKeysAsync(SshAgent? agent, ILogger logger, CancellationToken cancellationToken)
     {
-        if (ResolveAgent(hostConfig, options) is not { } agent)
+        if (agent is null)
         {
             return [];
         }

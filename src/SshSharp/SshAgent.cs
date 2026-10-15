@@ -85,8 +85,9 @@ public sealed class SshAgent
             return FromSocketVariable(socket, windows: false);
         }
 
-        // The OpenSSH agent service first, as ssh does; Pageant only when that is not running and Pageant is.
-        return !PipeExists(WindowsPipe[PipePrefix.Length..]) && Pageant() is { } pageant ? pageant : new SshAgent(WindowsPipe);
+        // The OpenSSH agent service first, as ssh does; Pageant only when that is surely not running (a listing that takes too long
+        // proves nothing) and Pageant is.
+        return PipeListed(WindowsPipe[PipePrefix.Length..]) == false && Pageant() is { } pageant ? pageant : new SshAgent(WindowsPipe);
     }
 
     internal static SshAgent? FromSocketVariable(string? socket, bool windows) =>
@@ -97,15 +98,24 @@ public sealed class SshAgent
     /// or null when Pageant is not running or this is not Windows. Its keys work like any agent's.
     /// </summary>
     public static SshAgent? Pageant() =>
-        OperatingSystem.IsWindows() && PageantPipe.Name() is { } name && PipeExists(name) ? new SshAgent(PipePrefix + name) : null;
+        OperatingSystem.IsWindows() && PageantPipe.Name() is { } name && PipeListed(name) == true ? new SshAgent(PipePrefix + name) : null;
 
-    /// <summary>Whether a named pipe exists, by listing the pipes (opening one would take one of its instances).</summary>
-    private static bool PipeExists(string name)
+    /// <summary>
+    /// Whether a named pipe exists, by listing the pipes (opening one would take one of its instances); null when the listing took too
+    /// long to tell.
+    /// </summary>
+    private static bool? PipeListed(string name)
     {
         try
         {
             var listing = Task.Run(() => Directory.EnumerateFiles(PipePrefix, name).Any());
-            return listing.Wait(PipeListingTimeout) && listing.Result;
+            if (listing.Wait(PipeListingTimeout))
+            {
+                return listing.Result;
+            }
+
+            _ = listing.ContinueWith(static t => _ = t.Exception, CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
+            return null;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or AggregateException)
         {
@@ -357,17 +367,18 @@ public sealed class SshAgent
     /// <exception cref="SshException">The agent is not running, or the passphrase is wrong (<see cref="SshFailureReason.AgentFailed"/>).</exception>
     public Task UnlockAsync(string passphrase, CancellationToken cancellationToken = default) => LockOrUnlockAsync(Unlock, passphrase, "unlock", cancellationToken);
 
-    private Task LockOrUnlockAsync(byte type, string passphrase, string what, CancellationToken cancellationToken)
+    private async Task LockOrUnlockAsync(byte type, string passphrase, string what, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(passphrase);
         var secret = System.Text.Encoding.UTF8.GetBytes(passphrase);
         try
         {
-            return ExpectSuccessAsync(SshPrivateKey.Encode(w =>
-            {
-                w.WriteByte(type);
-                w.WriteString(secret);
-            }), what + " the agent", clear: true, cancellationToken);
+            // Built in a buffer that is wiped, as an added key is: an ordinary growing buffer would leave copies of the passphrase behind.
+            using var message = new ZeroingBufferWriter(secret.Length + 16);
+            var writer = new SshWriter(message);
+            writer.WriteByte(type);
+            writer.WriteString(secret);
+            await ExpectSuccessAsync(message.WrittenSpan.ToArray(), what + " the agent", clear: true, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
