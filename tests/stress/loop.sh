@@ -37,7 +37,9 @@ for i in $(seq 1 "$iterations"); do
       printf '%s :: %s\n' "$fw" "(exit $status, no failed test named: a crash or a hang?)" >> "$out/failed-tests.txt"
     fi
   else
-    echo "iteration $i ($fw, ${took}s): passed"
+    # The counts too: a run that skipped everything also "passes".
+    counts=$(grep -E '^\s*(succeeded|skipped):' "$log" | tr -s ' ' | tr '\n' ' ')
+    echo "iteration $i ($fw, ${took}s): passed ($counts)"
     rm -f "$log"
   fi
 done
