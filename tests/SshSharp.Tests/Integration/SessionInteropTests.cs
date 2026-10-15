@@ -245,27 +245,34 @@ public class SessionInteropTests
             return;
         }
 
-        // Our output closed: sshd stops sending, so `yes` gets SIGPIPE and ends instead of running on.
+        SshSession? yes = null;
         await Stages.RunAsync(async stages =>
         {
+            // Our output closed: sshd stops sending, so `yes` gets SIGPIPE and ends instead of running on.
             stages.Step("starting yes");
-            await using var yes = await client.StartCommandAsync("yes", cancellationToken: Timeout());
+            yes = await client.StartCommandAsync("yes", cancellationToken: Timeout());
+            stages.Step("reading some of its output");
             var buffer = new byte[4096];
             await yes.StandardOutput.ReadExactlyAsync(buffer, Timeout());
-            stages.Step("disposing its output, then waiting for it to end");
+            stages.Step("disposing its output");
             await yes.StandardOutput.DisposeAsync();
+            stages.Step("waiting for yes to end");
             await yes.WaitForExitAsync(Timeout());
             await Assert.That(yes.ExitSignal is "PIPE" || yes.ExitStatus is not null and not 0).IsTrue();
-        });
+            stages.Step("closing the session");
+            await yes.DisposeAsync();
 
-        // The other direction (sshd telling us the program closed its input) cannot be seen here: sshd sends eow@openssh.com only to
-        // clients whose identification says OpenSSH (channels.c). The unit tests cover it.
+            // The other direction (sshd telling us the program closed its input) cannot be seen here: sshd sends eow@openssh.com only
+            // to clients whose identification says OpenSSH (channels.c). The unit tests cover it.
 
-        // OpenSSH takes no-more-sessions@openssh.com without dropping the connection; other channels still work.
-        await Assert.That(await client.PreventNewSessionsAsync(Timeout())).IsTrue();
-        await Assert.That(async () => await client.RunCommandAsync("true", Timeout())).Throws<InvalidOperationException>();
-        await client.PingAsync(Timeout());
-        await Assert.That(client.IsConnected).IsTrue();
+            // OpenSSH takes no-more-sessions@openssh.com without dropping the connection; other channels still work.
+            stages.Step("sending no-more-sessions");
+            await Assert.That(await client.PreventNewSessionsAsync(Timeout())).IsTrue();
+            await Assert.That(async () => await client.RunCommandAsync("true", Timeout())).Throws<InvalidOperationException>();
+            stages.Step("pinging after no-more-sessions");
+            await client.PingAsync(Timeout());
+            await Assert.That(client.IsConnected).IsTrue();
+        }, () => $"yes: exit status {yes?.ExitStatus?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "none"}, signal {yes?.ExitSignal ?? "none"}; connected {client.IsConnected}, error {client.ConnectionError?.Message ?? "none"}.");
     }
 
     [Test]
