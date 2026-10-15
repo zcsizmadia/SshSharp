@@ -112,6 +112,7 @@ public sealed partial class SshClient : IAsyncDisposable
 
         using var activity = SshTelemetry.Activities.StartActivity("SshSharp.Command");
         var outcome = "error";
+        string? errorType = null;
         var channel = await _connection.OpenSessionAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -148,12 +149,18 @@ public sealed partial class SshClient : IAsyncDisposable
         }
         catch (Exception ex)
         {
-            activity?.SetStatus(ActivityStatusCode.Error, ex.GetType().Name);
+            errorType = SshTelemetry.Failed(activity, ex);
             throw;
         }
         finally
         {
-            SshTelemetry.Commands.Add(1, new KeyValuePair<string, object?>("result", outcome));
+            var tags = new TagList { { "result", outcome } };
+            if (errorType is not null)
+            {
+                tags.Add("error.type", errorType);
+            }
+
+            SshTelemetry.Commands.Add(1, tags);
             await channel.CloseAsync(CancellationToken.None).ConfigureAwait(false);
 
             // Output left unread (the limit was exceeded, or the call cancelled) goes back to the buffer pool.
@@ -300,7 +307,7 @@ public sealed partial class SshClient : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(options);
 
         var logger = options.Logger ?? NullLogger.Instance;
-        using var activity = SshTelemetry.Activities.StartActivity("SshSharp.Connect");
+        using var activity = SshTelemetry.StartConnect(host, port);
         var started = Stopwatch.GetTimestamp();
 
         SshTransportOptions transportOptions;
@@ -331,7 +338,8 @@ public sealed partial class SshClient : IAsyncDisposable
         }
         catch (Exception ex)
         {
-            activity?.SetStatus(ActivityStatusCode.Error, ex.GetType().Name);
+            var error = SshTelemetry.Failed(activity, ex is IOException ? SshConnection.ConnectionLost(ex) : ex);
+            SshTelemetry.ConnectDuration.Record(Stopwatch.GetElapsedTime(started).TotalSeconds, new KeyValuePair<string, object?>("error.type", error));
 
             // Cleanup must not replace the real error with one from a stream that is already broken.
             try

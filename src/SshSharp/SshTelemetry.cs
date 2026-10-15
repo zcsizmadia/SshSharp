@@ -10,9 +10,12 @@ namespace SshSharp;
 /// Nothing is recorded unless something listens, and no secrets (passwords, keys, command text) are ever recorded.
 /// </summary>
 /// <remarks>
-/// Activities: <c>SshSharp.Connect</c> (tags <c>ssh.kex</c>, <c>ssh.cipher</c>, <c>ssh.host_key.type</c>) and <c>SshSharp.Command</c> (tag
-/// <c>ssh.command.exit_status</c>). Instruments: <c>sshsharp.connections</c>, <c>sshsharp.connect.duration</c> (s), <c>sshsharp.bytes.sent</c>,
-/// <c>sshsharp.bytes.received</c>, <c>sshsharp.key_exchanges</c>, <c>sshsharp.channels</c>, <c>sshsharp.commands</c>.
+/// Activities: <c>SshSharp.Connect</c> (a client span; tags <c>network.protocol.name</c>, <c>network.protocol.version</c>,
+/// <c>network.transport</c>, <c>server.port</c>, <c>ssh.kex</c>, <c>ssh.kex.post_quantum</c>, <c>ssh.cipher</c>, <c>ssh.host_key.type</c>, and
+/// <c>error.type</c> on failure) and <c>SshSharp.Command</c> (<c>ssh.command.exit_status</c>, <c>error.type</c>). Instruments:
+/// <c>sshsharp.connections</c>, <c>sshsharp.connect.duration</c> (s; successful and failed connects, the failed ones tagged
+/// <c>error.type</c>), <c>sshsharp.bytes.sent</c>, <c>sshsharp.bytes.received</c>, <c>sshsharp.key_exchanges</c>, <c>sshsharp.channels</c>,
+/// <c>sshsharp.commands</c> (tagged <c>result</c> and, for errors, <c>error.type</c>).
 /// </remarks>
 public static class SshTelemetry
 {
@@ -45,4 +48,38 @@ public static class SshTelemetry
 
     internal static readonly Counter<long> Commands = Instruments.CreateCounter<long>(
         "sshsharp.commands", "{command}", "Remote commands run, tagged by outcome (success, failure, error).");
+
+    /// <summary>
+    /// Starts the connect span as a client span with OpenTelemetry's general attributes (<c>network.protocol.name</c>, and for a TCP
+    /// connection <c>network.transport</c> and <c>server.port</c>). <c>server.address</c> is left out: host names are never recorded by
+    /// this library (see the threat model); add it in an <see cref="ActivityListener"/> or a parent span when you want it.
+    /// </summary>
+    internal static Activity? StartConnect(string? host, int port)
+    {
+        var activity = Activities.StartActivity("SshSharp.Connect", ActivityKind.Client);
+        if (activity is not null)
+        {
+            activity.SetTag("network.protocol.name", "ssh");
+            activity.SetTag("network.protocol.version", "2.0");
+            if (host is not null)
+            {
+                activity.SetTag("network.transport", "tcp");
+                activity.SetTag("server.port", port);
+            }
+        }
+
+        return activity;
+    }
+
+    /// <summary>
+    /// Marks a span as failed with OpenTelemetry's <c>error.type</c>: an <see cref="SshException"/>'s <see cref="SshException.Reason"/>
+    /// (<c>AuthenticationFailed</c>, <c>Timeout</c>, ...), otherwise the exception's type name. Returns the value, for metrics.
+    /// </summary>
+    internal static string Failed(Activity? activity, Exception exception)
+    {
+        var errorType = exception is SshException ssh ? ssh.Reason.ToString() : exception.GetType().FullName ?? "Exception";
+        activity?.SetStatus(ActivityStatusCode.Error, exception.GetType().Name); // as before error.type existed
+        activity?.SetTag("error.type", errorType);
+        return errorType;
+    }
 }
