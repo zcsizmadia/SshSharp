@@ -547,7 +547,9 @@ public sealed partial class SftpClient : IAsyncDisposable
                     tasks[i] = DownloadSegmentAsync(clients[i], i == 0 ? handle : null, start, stop);
                 }
 
-                await ((Task)Task.WhenAll(tasks)).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+                // As a plain Task: Task<T>'s own ConfigureAwait does not take SuppressThrowing.
+                Task all = Task.WhenAll(tasks);
+                await all.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
                 if (Volatile.Read(ref firstFailure) is { } first)
                 {
                     // Report the failure that stopped the others, not what it caused in them (cancellations, or a session closing).
