@@ -102,7 +102,9 @@ internal sealed class KeystrokeTimingObfuscator
     {
         if (now >= _next)
         {
-            _next += _interval * (((now - _next).Ticks / _interval.Ticks) + 1);
+            // Whole intervals, in ticks: the division drops the part of an interval that has gone by, on purpose.
+            var missed = (now - _next).Ticks / _interval.Ticks;
+            _next += TimeSpan.FromTicks(_interval.Ticks * (missed + 1));
         }
     }
 
