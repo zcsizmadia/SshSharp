@@ -84,7 +84,7 @@ Console.WriteLine(result.StandardOutputText);
 | Strict key exchange (Terrapin fix) | ✅ | ✅ |
 | Legacy algorithms (CBC, 3DES, SHA-1, `ssh-rsa`, DH group 1, zlib) | — (by design) | ✅ |
 | Commands, shells with a terminal, `expect`-style scripting | ✅ | ✅ |
-| Signals to a running command | ✅ | ❌ |
+| Signals and BREAK (RFC 4335, for serial consoles) to a running session | ✅ | ❌ |
 | Any subsystem (`ssh -s`) | ✅ | ❌ (SFTP and NETCONF only) |
 | Local, remote and dynamic port forwarding | ✅ (also started from `ssh_config`) | ✅ |
 | Remote dynamic forwarding (`ssh -R port`, a SOCKS proxy on the client side) | ✅ | ❌ |

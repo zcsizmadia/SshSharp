@@ -65,6 +65,25 @@ public class SessionInteropTests
     }
 
     [Test]
+    public async Task ABreak_IsAnswered_AndTheSessionCarriesOn()
+    {
+        await using var client = await ConnectAsync();
+        if (client is null)
+        {
+            Skip.Test("SSHSHARP_TEST_SSHD, SSHSHARP_TEST_USER and SSHSHARP_TEST_PASSWORD are needed.");
+            return;
+        }
+
+        // Whether the break is performed depends on the server and its pty (sshd answers with tcsendbreak's result, Dropbear
+        // declines), so only the answer and the session's health are checked.
+        await using var session = await client.StartShellAsync(new SshSessionOptions { Terminal = new SshTerminalOptions { TerminalType = "dumb" } }, Timeout());
+        _ = await session.SendBreakAsync(TimeSpan.FromMilliseconds(100), Timeout());
+        await session.StandardInput.WriteAsync("echo after-$((40+2)); exit\n"u8.ToArray(), Timeout());
+        var output = await ReadAllAsync(session.StandardOutput);
+        await Assert.That(output).Contains("after-42");
+    }
+
+    [Test]
     public async Task Expect_DrivesARealShell()
     {
         await using var client = await ConnectAsync();

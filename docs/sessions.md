@@ -74,6 +74,10 @@ user would; `SendSignalAsync("TERM")` sends a signal request, which current Open
 ignore. Environment variables are only set when the server allows them (sshd's `AcceptEnv`). The terminal modes are those
 of RFC 4254 section 8, named as in POSIX `termios`.
 
+`SendBreakAsync()` sends a BREAK (RFC 4335), as OpenSSH's `~B` escape does: a console server passes it on to the serial line
+it connects to (to reach a router's ROM monitor, for example), and sshd sends it to the session's terminal. It returns whether
+the server performed it; without a terminal, OpenSSH declines.
+
 `StartCommandAsync(command, options)` takes the same options, for commands that need a terminal (`sudo`, `top`, editors).
 
 ## Scripting a shell (expect)

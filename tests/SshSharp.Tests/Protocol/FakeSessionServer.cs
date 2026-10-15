@@ -896,6 +896,9 @@ internal sealed class FakeSessionServer : IAsyncDisposable
                         args.Add(reader.ReadUtf8String());
                         args.Add(reader.ReadUtf8String());
                         break;
+                    case "break":
+                        args.Add(reader.ReadUInt32().ToString(System.Globalization.CultureInfo.InvariantCulture));
+                        break;
                     case "pty-req" or "window-change":
                         if (requestType == "pty-req")
                         {
@@ -924,6 +927,7 @@ internal sealed class FakeSessionServer : IAsyncDisposable
                     "pty-req" => !RefusePty,
                     "env" => AcceptEnv.Contains(record.Args[0]),
                     "window-change" or "signal" => true,
+                    "break" => !RefusePty && channel.Requests.Any(r => r.Type == "pty-req"), // as sshd: only to a terminal
                     "subsystem" => Subsystems.ContainsKey(record.Args[0]),
                     _ => false,
                 };
