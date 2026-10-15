@@ -163,10 +163,17 @@ public class SessionInteropTests
             return;
         }
 
-        await using var session = await client.StartCommandAsync("echo to-err 1>&2; tr a-z A-Z; exit 4", cancellationToken: Timeout());
+        // OpenSSH for Windows deadlocks when a command's output backs up while its input is being closed (#86): its pipe close
+        // (contrib/win32/win32compat/fileio.c, fileio_close) blocks the whole sshd until the last input write into the command's stdin
+        // completes, but the command (tr) is itself blocked writing output that only that sshd drains. All the input and our EOF reach
+        // sshd (its log shows rcvd eof, obuf empty, chan_shutdown_write), and then nothing more. So against Windows the output is
+        // counted on the server (tr | wc -c): the same input, window and EOF, with only a few bytes back through sshd's stdout pipe.
+        var windows = RealServer.IsWindows;
+        var command = windows ? "echo to-err 1>&2; tr a-z A-Z | wc -c; exit 4" : "echo to-err 1>&2; tr a-z A-Z; exit 4";
+        await using var session = await client.StartCommandAsync(command, cancellationToken: Timeout());
         await Assert.That(session.HasTerminal).IsFalse();
 
-        // Where it stands, for the failure message: this has hung intermittently against OpenSSH for Windows, and the step matters.
+        // Where it stands, for the failure message: a hang should say which step it is stuck in and how far the data got.
         var stage = "writing";
         long written = 0, outRead = 0, errRead = 0;
         async Task<string> CountAsync(Stream stream, Action<int> counted)
@@ -207,8 +214,16 @@ public class SessionInteropTests
             stage = "waiting for the exit status";
             await session.WaitForExitAsync(Timeout());
 
-            await Assert.That(stdout.Length).IsEqualTo(input.Length);
-            await Assert.That(stdout.All(c => c is 'X' or '\n')).IsTrue();
+            if (windows)
+            {
+                await Assert.That(stdout.Trim()).IsEqualTo(input.Length.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            }
+            else
+            {
+                await Assert.That(stdout.Length).IsEqualTo(input.Length);
+                await Assert.That(stdout.All(c => c is 'X' or '\n')).IsTrue();
+            }
+
             await Assert.That(stderr.Trim()).IsEqualTo("to-err");
             await Assert.That(session.ExitStatus).IsEqualTo(4);
         }
