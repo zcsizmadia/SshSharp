@@ -53,7 +53,7 @@ What is taken from the configuration: `HostName`, `Port`, `User`, `IdentityFile`
 `PreferredAuthentications`, `PubkeyAuthentication`, `PasswordAuthentication`, `KbdInteractiveAuthentication`, `BatchMode`,
 `ProxyJump`, `ProxyCommand`, `ServerAliveInterval`, `ServerAliveCountMax`, `ConnectTimeout`, `AddressFamily`,
 `BindAddress`, `BindInterface`, `ForwardAgent`, `AddKeysToAgent`, `GSSAPIAuthentication`, `GSSAPIDelegateCredentials`,
-`RefuseConnection` and `KnownHostsCommand` (with `AllowKnownHostsCommand`); with `StartForwardings`, also `LocalForward`, `RemoteForward`,
+`ChannelTimeout`, `RefuseConnection` and `KnownHostsCommand` (with `AllowKnownHostsCommand`); with `StartForwardings`, also `LocalForward`, `RemoteForward`,
 `DynamicForward`, `GatewayPorts`, `ExitOnForwardFailure` and `ClearAllForwardings`.
 `Match` (including `Match exec`, which needs an opt-in) and `Include` work as in OpenSSH.
 
@@ -275,6 +275,30 @@ Console.WriteLine($"{roundTrip.TotalMilliseconds:F1} ms");
 > connection then ends after `KeepAliveCountMax` intervals, as it does with OpenSSH's own `ssh -o ServerAliveInterval`. It announces
 > `ping@openssh.com`, so SshSharp probes it with pings, but those go unanswered at times too: the server stops sending on the
 > connection. Against it, leave `KeepAliveInterval` unset or use a long interval with a generous `KeepAliveCountMax`.
+
+## Channel idle timeouts
+
+`ChannelTimeouts` closes channels that carry no data for a while, by channel type, as OpenSSH's `ChannelTimeout` (9.2 and later)
+does on the client side. The first entry whose type pattern matches applies; a zero timeout means none for that type:
+
+```csharp
+var options = new SshClientOptions
+{
+    // ...
+    ChannelTimeouts =
+    [
+        new SshChannelTimeout("session", TimeSpan.Zero),            // shells and commands: never
+        new SshChannelTimeout("direct-*", TimeSpan.FromMinutes(10)), // local forwardings and tunnels
+        new SshChannelTimeout("*", TimeSpan.FromHours(1)),           // everything else
+    ],
+};
+```
+
+The types are `session`, `direct-tcpip`, `direct-streamlocal@openssh.com`, `forwarded-tcpip`, `forwarded-streamlocal@openssh.com`,
+`agent-connection`, `x11-connection` and `tun-connection` (patterns such as `direct-*` and `*` work; names are case-sensitive).
+Data sent or received in either direction resets a channel's clock. An idle channel is closed with an ordinary channel close: the
+connection stays up, a session's output streams end, and a forwarded connection's local socket is closed. In `ssh_config`, write
+`ChannelTimeout session=0 direct-*=10m *=1h` (`none` turns it off); connecting by alias applies it.
 
 ## Algorithms
 

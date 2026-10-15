@@ -212,6 +212,15 @@ public sealed class SshClientOptions
     private readonly int _maxForwardedConnections = 1000;
 
     /// <summary>
+    /// Idle timeouts by channel type, as OpenSSH's <c>ChannelTimeout</c> (9.2+) sets them on the client: a channel that carries no data in
+    /// either direction for its type's timeout is closed, with an ordinary <c>CLOSE</c>. Its streams then end as when the server closes
+    /// it, and a forwarded or tunnelled connection's local socket is closed. Empty by default (no timeouts). For example
+    /// <c>[new("direct-tcpip", TimeSpan.FromMinutes(10)), new("session", TimeSpan.Zero), new("*", TimeSpan.FromHours(1))]</c>: the first
+    /// entry whose type pattern matches applies (see <see cref="SshChannelTimeout"/>).
+    /// </summary>
+    public IReadOnlyList<SshChannelTimeout> ChannelTimeouts { get; init; } = [];
+
+    /// <summary>
     /// Negotiate new keys after this many bytes have been transferred under the current ones. Default 1 GiB (RFC 4253 section 9).
     /// Values above 64 GiB (2^32 cipher blocks, the limit OpenSSH applies) are capped, and keys are also renewed every 2^31 packets.
     /// </summary>

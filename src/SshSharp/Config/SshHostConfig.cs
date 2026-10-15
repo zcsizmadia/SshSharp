@@ -161,6 +161,12 @@ public sealed class SshHostConfig
     /// </summary>
     public SshAgentKeyConstraints? AddKeysToAgent { get; init; }
 
+    /// <summary>
+    /// <c>ChannelTimeout type=interval ...</c>: idle timeouts by channel type, in the order given (the first matching type applies). Empty
+    /// for <c>none</c> or when unset. Entries that do not parse are left out.
+    /// </summary>
+    public IReadOnlyList<SshChannelTimeout> ChannelTimeouts { get; init; } = [];
+
     /// <summary>The TTY request mode.</summary>
     public RequestTty RequestTty { get; init; }
 

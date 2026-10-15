@@ -250,6 +250,7 @@ public sealed class SshConfig
             GssapiAuthentication = Bool(First("gssapiauthentication"), false),
             GssapiDelegateCredentials = Bool(First("gssapidelegatecredentials"), false),
             AddKeysToAgent = ParseAddKeysToAgent(All("addkeystoagent") is { Count: > 0 } addKeys ? string.Join(' ', addKeys) : null),
+            ChannelTimeouts = ParseChannelTimeouts(All("channeltimeout")),
             RequestTty = ParseTty(First("requesttty")),
             PreferredAuthentications = [.. All("preferredauthentications").SelectMany(v => v.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))],
             PubkeyAuthentication = Bool(First("pubkeyauthentication"), true),
@@ -313,6 +314,32 @@ public sealed class SshConfig
     private static bool IsNo(string value) => value.ToLowerInvariant() is "no" or "false" or "off";
 
     private static bool Bool(string? value, bool fallback) => value is null ? fallback : !IsNo(value);
+
+    /// <summary>
+    /// <c>ChannelTimeout type=interval [type=interval ...]</c> (OpenSSH 9.2+), or <c>none</c>: each type a pattern of channel type names,
+    /// each interval an ssh time (<c>30s</c>, <c>10m</c>, <c>0</c> for none). Entries that do not parse are left out.
+    /// </summary>
+    internal static IReadOnlyList<SshChannelTimeout> ParseChannelTimeouts(IReadOnlyList<string> arguments)
+    {
+        if (arguments.Count == 0 || (arguments.Count == 1 && arguments[0].Equals("none", StringComparison.OrdinalIgnoreCase)))
+        {
+            return [];
+        }
+
+        var timeouts = new List<SshChannelTimeout>();
+        foreach (var argument in arguments)
+        {
+            var equals = argument.IndexOf('=', StringComparison.Ordinal);
+            if (equals <= 0 || !SshTime.TryParse(argument[(equals + 1)..], out var interval) || interval < TimeSpan.Zero)
+            {
+                continue;
+            }
+
+            timeouts.Add(new SshChannelTimeout(argument[..equals], interval));
+        }
+
+        return timeouts;
+    }
 
     /// <summary>
     /// <c>AddKeysToAgent yes|confirm|ask|no [time]</c>, or just a time (meaning yes), as ssh_config(5) has it. <c>ask</c>, and anything

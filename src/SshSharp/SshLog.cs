@@ -107,6 +107,9 @@ internal static partial class SshLog
     [LoggerMessage(EventId = 34, Level = LogLevel.Information, Message = "Key {Fingerprint} was added to the agent (AddKeysToAgent)")]
     public static partial void KeyAddedToAgent(ILogger logger, string fingerprint);
 
+    [LoggerMessage(EventId = 41, Level = LogLevel.Information, Message = "Channel {Id} ({Type}) carried no data for {Seconds} s and was closed (ChannelTimeout)")]
+    public static partial void ChannelTimedOut(ILogger logger, uint id, string type, int seconds);
+
     [LoggerMessage(EventId = 32, Level = LogLevel.Warning, Message = "A connection through remote dynamic forwarding on port {RemotePort} was not made: {Reason}")]
     public static partial void RemoteDynamicConnectFailed(ILogger logger, int remotePort, string reason);
 }
