@@ -42,12 +42,14 @@ public sealed partial class SftpClient : IAsyncDisposable
 
     /// <summary>
     /// Whether the server takes SSH_FXP_SYMLINK in the draft's order (link path, then target). OpenSSH's sftp-server reverses it
-    /// (PROTOCOL 4.1), and most servers follow OpenSSH (Dropbear runs OpenSSH's sftp-server; Go's pkg/sftp copies it). AsyncSSH keeps
-    /// the draft's order with clients that are not OpenSSH or paramiko, which it knows to reverse, so it gets the draft's order.
+    /// (PROTOCOL 4.1), and most servers follow OpenSSH (Dropbear runs OpenSSH's sftp-server; Go's pkg/sftp and Apache MINA SSHD take
+    /// the same order). AsyncSSH keeps the draft's order with clients that are not OpenSSH or paramiko, which it knows to reverse, and
+    /// Erlang/OTP's ssh_sftpd always keeps it, so both get the draft's order.
     /// </summary>
-    /// <param name="serverSoftware">The software part of the server's identification (<c>AsyncSSH_2.21.0</c>), as the transport parsed it.</param>
+    /// <param name="serverSoftware">The software part of the server's identification (<c>AsyncSSH_2.21.0</c>, <c>Erlang/5.3.3</c>), as the transport parsed it.</param>
     internal static bool TakesSymlinkInDraftOrder(string? serverSoftware) =>
-        serverSoftware?.StartsWith("AsyncSSH_", StringComparison.Ordinal) == true;
+        serverSoftware is not null
+        && (serverSoftware.StartsWith("AsyncSSH_", StringComparison.Ordinal) || serverSoftware.StartsWith("Erlang/", StringComparison.Ordinal));
 
     /// <summary>The protocol version the server speaks (3 for OpenSSH).</summary>
     public int ProtocolVersion => (int)_channel.Version;

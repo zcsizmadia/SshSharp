@@ -276,12 +276,15 @@ public sealed class SftpTests : IDisposable
 
     [Test]
     [Arguments("SSH-2.0-AsyncSSH_2.21.0", true)]
+    [Arguments("SSH-2.0-Erlang/5.3.3", true)]
     [Arguments("SSH-2.0-OpenSSH_9.9", false)]
     [Arguments("SSH-2.0-dropbear_2025.88", false)]
     [Arguments("SSH-2.0-Go", false)]
+    [Arguments("SSH-2.0-APACHE-SSHD-2.20.0", false)]
     public async Task SymbolicLinks_UseTheArgumentOrderTheServerExpects(string identification, bool draftOrder)
     {
-        // OpenSSH reverses SSH_FXP_SYMLINK's arguments and most servers follow it; AsyncSSH keeps the draft's order with this client.
+        // OpenSSH reverses SSH_FXP_SYMLINK's arguments and most servers follow it; AsyncSSH keeps the draft's order with this client,
+        // and Erlang/OTP's ssh_sftpd always does.
         // Sent the other way round, the link would be created at the target's path.
         await using var rig = await Rig.StartAsync(files => files.SymlinkInDraftOrder = draftOrder, identification);
         await rig.Sftp.CreateSymbolicLinkAsync("soft", "target", Timeout());
