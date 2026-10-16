@@ -267,9 +267,9 @@ public class SftpInteropTests
                 {
                     await sftp.CreateSymbolicLinkAsync(root + "/link", "blob", Timeout());
                 }
-                catch (SftpException) when (OperatingSystem.IsWindows())
+                catch (SftpException) when (RealServer.IsMsys)
                 {
-                    // A server on this machine's Windows, without the privilege to create links: nothing to check here.
+                    // An MSYS2 or Cygwin server without the privilege to create links: nothing to check here.
                 }
 
                 // The link itself, not what it points to: Go's pkg/sftp stores a relative target as a path under its working directory
@@ -286,9 +286,13 @@ public class SftpInteropTests
 
                 if (link is null)
                 {
-                    // Not created (above), which only a server on this machine's Windows may do. Anywhere else the link must be there: a
-                    // server that took the arguments in the other order would have created it at the target's path instead.
-                    await Assert.That(OperatingSystem.IsWindows()).IsTrue();
+                    // Not created (above), which only an MSYS2 or Cygwin server may do. Anywhere else the link must be there: a server that
+                    // took the arguments in the other order would have created it at the target's path instead.
+                    if (!RealServer.IsMsys)
+                    {
+                        Assert.Fail("The symbolic link is missing: the server may take SSH_FXP_SYMLINK's arguments in the other order (see "
+                            + "SftpClient.TakesSymlinkInDraftOrder). For an MSYS2 or Cygwin server, set SSHSHARP_TEST_SERVER_OS=msys.");
+                    }
                 }
                 else if (link.IsSymbolicLink)
                 {
@@ -306,12 +310,13 @@ public class SftpInteropTests
                 else
                 {
                     // MSYS2 and Cygwin servers on Windows make a copy instead of a link unless told otherwise (winsymlinks).
-                    await Assert.That(OperatingSystem.IsWindows()).IsTrue();
+                    await Assert.That(RealServer.IsMsys).IsTrue();
                 }
+
                 await sftp.SetAttributesAsync(root + "/blob", new SftpFileAttributes { Permissions = UnixFileMode.UserRead | UnixFileMode.UserWrite }, Timeout());
-                if (!OperatingSystem.IsWindows())
+                if (!RealServer.IsMsys)
                 {
-                    // (An MSYS2 server on this machine's NTFS keeps the group and other bits.)
+                    // (An MSYS2 or Cygwin server on NTFS keeps the group and other bits.)
                     await Assert.That((await sftp.GetAttributesAsync(root + "/blob", cancellationToken: Timeout())).Permissions)
                         .IsEqualTo(UnixFileMode.UserRead | UnixFileMode.UserWrite);
                 }

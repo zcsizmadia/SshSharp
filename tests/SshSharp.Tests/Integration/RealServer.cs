@@ -108,6 +108,15 @@ internal static class RealServer
     /// <summary>Whether the server runs on Windows (SSHSHARP_TEST_SERVER_OS=windows): no signals, and a pseudo-terminal through ConPTY.</summary>
     public static bool IsWindows => string.Equals(Environment.GetEnvironmentVariable("SSHSHARP_TEST_SERVER_OS"), "windows", StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// Whether the server is an MSYS2 or Cygwin sshd on Windows (SSHSHARP_TEST_SERVER_OS=msys or cygwin), as on a developer's machine:
+    /// creating a link may need a privilege it lacks, a link may be made as a copy (winsymlinks), and NTFS keeps the group and other
+    /// permission bits. Not inferred from this machine being Windows: a Linux server reached from Windows (WSL, a container) has none
+    /// of these, and allowing them there hid an interop bug.
+    /// </summary>
+    public static bool IsMsys => Environment.GetEnvironmentVariable("SSHSHARP_TEST_SERVER_OS") is { } os
+        && (os.Equals("msys", StringComparison.OrdinalIgnoreCase) || os.Equals("cygwin", StringComparison.OrdinalIgnoreCase));
+
     /// <summary>Whether the server supports strict KEX (OpenSSH 9.6+, Dropbear 2024.84+); SSHSHARP_TEST_SERVER_STRICTKEX=0 for older ones.</summary>
     public static bool SupportsStrictKex => Environment.GetEnvironmentVariable("SSHSHARP_TEST_SERVER_STRICTKEX") != "0";
 }
