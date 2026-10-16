@@ -20,7 +20,7 @@ internal sealed class ExternalKey : SshPrivateKey
     {
         _signer = signer;
         _publicKey = SshPublicKey.Parse(signer.PublicKey.Span);
-        var supported = signer.KeyType == "ssh-rsa" ? [SshAlgorithms.RsaSha2_512, SshAlgorithms.RsaSha2_256] : [signer.KeyType];
+        string[] supported = signer.KeyType == "ssh-rsa" ? [SshAlgorithms.RsaSha2_512, SshAlgorithms.RsaSha2_256] : [signer.KeyType];
         var offered = signer.SignatureAlgorithms;
         if (offered is null || offered.Count == 0 || offered.Any(a => !supported.Contains(a, StringComparer.Ordinal)))
         {
