@@ -26,7 +26,10 @@ public sealed class RemoteSocketForwardingTests : IDisposable
         }, leaveOpen: true, Timeout());
     }
 
-    /// <summary>A service that answers what it reads in upper case, on TCP or on a Unix socket.</summary>
+    /// <summary>
+    /// A service that answers what it reads in upper case, on TCP or on a Unix socket: at the end of the stream, or at once when what it
+    /// read ends with a newline (a framed request, which needs no end of stream; see <see cref="ExchangeAsync"/>).
+    /// </summary>
     private sealed class UpperCaseService : IDisposable
     {
         private readonly Socket _listener;
@@ -66,9 +69,13 @@ public sealed class RemoteSocketForwardingTests : IDisposable
                                 {
                                     received.Write(buffer, 0, read);
                                     Note($"#{n} received {read} bytes");
+                                    if (buffer[read - 1] == (byte)'\n')
+                                    {
+                                        break;
+                                    }
                                 }
 
-                                Note($"#{n} end of stream after {received.Length} bytes; answering");
+                                Note($"#{n} end of the request after {received.Length} bytes; answering");
                                 var sent = await socket.SendAsync(Encoding.ASCII.GetBytes(Encoding.ASCII.GetString(received.ToArray()).ToUpperInvariant()), SocketFlags.None);
                                 socket.Shutdown(SocketShutdown.Send);
                                 Note($"#{n} sent {sent} bytes and shut down its sending side");
@@ -95,15 +102,40 @@ public sealed class RemoteSocketForwardingTests : IDisposable
 
     /// <summary>
     /// Writes <paramref name="request"/>, ends the input, and reads the answer to its end. A hang reports how far it got, what the service
-    /// did and (in the instrumented build) the relay's trace: this has hung once on a Windows runner (#188).
+    /// did and (in the instrumented build) the relay's trace.
     /// </summary>
-    private static async Task<string> ExchangeAsync(Stream remote, string request, UpperCaseService? service = null, string? relayEndPoint = null)
+    /// <remarks>
+    /// <paramref name="framed"/> ends the request with a newline instead, and reads the answer up to its newline, so neither side needs
+    /// the other's end of stream. On Windows, a Unix socket sometimes never delivers the end of stream after a send and a shutdown of
+    /// the sending side: about one exchange in a thousand, with plain sockets, no SSH, on .NET 8 and 10, with ReceiveAsync or a blocking
+    /// Receive. That was the Unix-socket hang in #188. The relay's half-close is checked over TCP, where it is reliable.
+    /// </remarks>
+    private static async Task<string> ExchangeAsync(
+        Stream remote, string request, UpperCaseService? service = null, string? relayEndPoint = null, bool framed = false)
     {
         var stage = "writing the request";
         using var buffer = new MemoryStream();
         try
         {
-            await remote.WriteAsync(Encoding.ASCII.GetBytes(request), Timeout());
+            await remote.WriteAsync(Encoding.ASCII.GetBytes(framed ? request + "\n" : request), Timeout());
+            if (framed)
+            {
+                stage = "reading the answer up to its newline";
+                var chunk = new byte[256];
+                while (buffer.Length == 0 || buffer.GetBuffer()[buffer.Length - 1] != (byte)'\n')
+                {
+                    var read = await remote.ReadAsync(chunk, Timeout());
+                    if (read == 0)
+                    {
+                        break;
+                    }
+
+                    buffer.Write(chunk, 0, read);
+                }
+
+                return Encoding.ASCII.GetString(buffer.ToArray()).TrimEnd('\n');
+            }
+
             stage = "ending the input (EOF)";
             ((DuplexStream)remote).CloseWrite();
             stage = "reading the answer";
@@ -161,7 +193,7 @@ public sealed class RemoteSocketForwardingTests : IDisposable
 
         await Assert.That(forwarder.LocalSocketPath).IsEqualTo(local);
         await using var remote = (await server.ConnectForwardedSocketAsync("/home/tester/.gnupg/S.gpg-agent"))!;
-        await Assert.That(await ExchangeAsync(remote, "sign this", service, local)).IsEqualTo("SIGN THIS");
+        await Assert.That(await ExchangeAsync(remote, "sign this", service, local, framed: true)).IsEqualTo("SIGN THIS");
     }
 
     [Test]
