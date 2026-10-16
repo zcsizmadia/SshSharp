@@ -63,7 +63,7 @@ The interop tests run against real servers on every pull request. Each server ca
 | **OpenSSH for Windows** | ConPTY terminals, Windows paths, and the Windows server's own behaviour |
 | **Dropbear** (two releases) | A second C implementation, with its own limits and quirks |
 | **AsyncSSH** | An independent implementation in Python. It found that SFTP symbolic links were sent in the wrong argument order for servers that follow the SFTP draft |
-| **Apache MINA SSHD** | An independent implementation in Java, the server inside Jenkins, Gerrit and Eclipse. It answers keep-alive requests, reports a killed command as an exit status, has no pseudo-terminal, and re-keys only after a message from the client |
+| **Apache MINA SSHD** | An independent implementation in Java, the server inside Jenkins, Gerrit and Eclipse. It answers keep-alive requests, reports a killed command as an exit status, and has no pseudo-terminal. It re-keys only when the client does: with a small limit of its own, MINA 2.20.0 sometimes failed sessions while both sides re-keyed |
 | **atmoz/sftp** and a **Go `pkg/sftp`** server | Chrooted, SFTP-only servers, the kind behind many hosted file-transfer services |
 
 A key-exchange volume test can run thousands of handshakes per host key type against a server. It is off by default and turned on
