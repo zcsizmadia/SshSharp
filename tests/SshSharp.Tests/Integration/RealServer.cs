@@ -37,27 +37,37 @@ internal static class RealServer
     /// Client options for the test account (SSHSHARP_TEST_USER with SSHSHARP_TEST_PASSWORD or the ed25519 key in SSHSHARP_TEST_KEYDIR),
     /// or null when no server or account is configured.
     /// </summary>
-    public static async Task<SshClientOptions?> OptionsAsync(SshHostKeyVerifier? verifier = null, TimeSpan? keepAlive = null, int keepAliveCountMax = 3)
+    public static async Task<SshClientOptions?> OptionsAsync(
+        SshHostKeyVerifier? verifier = null, TimeSpan? keepAlive = null, int keepAliveCountMax = 3, long? rekeyAfterBytes = null)
     {
-        var user = Environment.GetEnvironmentVariable("SSHSHARP_TEST_USER");
-        var password = Environment.GetEnvironmentVariable("SSHSHARP_TEST_PASSWORD");
-        var keyFile = Environment.GetEnvironmentVariable("SSHSHARP_TEST_KEYDIR") is { Length: > 0 } dir ? Path.Combine(dir, "ed25519") : null;
-        if (Endpoint is null || string.IsNullOrEmpty(user) || (string.IsNullOrEmpty(password) && keyFile is null))
+        if (!HasAccount)
         {
             return null;
         }
 
-        var key = keyFile is not null && File.Exists(keyFile) ? await SshPrivateKey.LoadFileAsync(keyFile) : null;
+        var key = KeyFile is { } keyFile && File.Exists(keyFile) ? await SshPrivateKey.LoadFileAsync(keyFile) : null;
         return new SshClientOptions
         {
-            UserName = user,
-            Password = password,
+            UserName = Environment.GetEnvironmentVariable("SSHSHARP_TEST_USER")!,
+            Password = Password,
             PrivateKeys = key is null ? [] : [key],
             HostKeyVerifier = verifier ?? SshHostKeyVerifier.FromDelegate((_, _) => ValueTask.FromResult(true)),
             KeepAliveInterval = keepAlive,
             KeepAliveCountMax = keepAliveCountMax,
+            RekeyAfterBytes = rekeyAfterBytes ?? 1L << 30, // SshClientOptions' default
         };
     }
+
+    /// <summary>Whether a server and a test account (a password, or the ed25519 key in SSHSHARP_TEST_KEYDIR) are configured.</summary>
+    public static bool HasAccount =>
+        Endpoint is not null
+        && !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("SSHSHARP_TEST_USER"))
+        && (Password is not null || KeyFile is not null);
+
+    /// <summary>The test account's password (SSHSHARP_TEST_PASSWORD), or null when the server takes only keys.</summary>
+    public static string? Password => Environment.GetEnvironmentVariable("SSHSHARP_TEST_PASSWORD") is { Length: > 0 } password ? password : null;
+
+    private static string? KeyFile => Environment.GetEnvironmentVariable("SSHSHARP_TEST_KEYDIR") is { Length: > 0 } dir ? Path.Combine(dir, "ed25519") : null;
 
     /// <summary>The server software (SSHSHARP_TEST_SERVER, default OpenSSH), for expectations that differ, such as Dropbear's.</summary>
     public static string Software => Environment.GetEnvironmentVariable("SSHSHARP_TEST_SERVER") is { Length: > 0 } name ? name : "OpenSSH";

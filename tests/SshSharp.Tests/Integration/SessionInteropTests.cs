@@ -2,7 +2,7 @@ using System.Text;
 
 namespace SshSharp.Tests.Integration;
 
-/// <summary>Shells and streamed commands against a real server. Needs SSHSHARP_TEST_SSHD, SSHSHARP_TEST_USER and SSHSHARP_TEST_PASSWORD.</summary>
+/// <summary>Shells and streamed commands against a real server. Needs SSHSHARP_TEST_SSHD and SSHSHARP_TEST_USER with SSHSHARP_TEST_PASSWORD or SSHSHARP_TEST_KEYDIR.</summary>
 public class SessionInteropTests
 {
     private static CancellationToken Timeout() => new CancellationTokenSource(TimeSpan.FromSeconds(60)).Token;
@@ -74,7 +74,7 @@ public class SessionInteropTests
         await using var client = await ConnectAsync();
         if (client is null)
         {
-            Skip.Test("SSHSHARP_TEST_SSHD, SSHSHARP_TEST_USER and SSHSHARP_TEST_PASSWORD are needed.");
+            Skip.Test("SSHSHARP_TEST_SSHD and SSHSHARP_TEST_USER with SSHSHARP_TEST_PASSWORD or SSHSHARP_TEST_KEYDIR are needed.");
             return;
         }
 
@@ -108,7 +108,7 @@ public class SessionInteropTests
         await using var client = await ConnectAsync(TimeSpan.FromMilliseconds(20));
         if (client is null)
         {
-            Skip.Test("SSHSHARP_TEST_SSHD, SSHSHARP_TEST_USER and SSHSHARP_TEST_PASSWORD are needed.");
+            Skip.Test("SSHSHARP_TEST_SSHD and SSHSHARP_TEST_USER with SSHSHARP_TEST_PASSWORD or SSHSHARP_TEST_KEYDIR are needed.");
             return;
         }
 
@@ -138,7 +138,7 @@ public class SessionInteropTests
         await using var client = await ConnectAsync();
         if (client is null)
         {
-            Skip.Test("SSHSHARP_TEST_SSHD, SSHSHARP_TEST_USER and SSHSHARP_TEST_PASSWORD are needed.");
+            Skip.Test("SSHSHARP_TEST_SSHD and SSHSHARP_TEST_USER with SSHSHARP_TEST_PASSWORD or SSHSHARP_TEST_KEYDIR are needed.");
             return;
         }
 
@@ -158,7 +158,7 @@ public class SessionInteropTests
         await using var client = await ConnectAsync();
         if (client is null)
         {
-            Skip.Test("SSHSHARP_TEST_SSHD, SSHSHARP_TEST_USER and SSHSHARP_TEST_PASSWORD are needed.");
+            Skip.Test("SSHSHARP_TEST_SSHD and SSHSHARP_TEST_USER with SSHSHARP_TEST_PASSWORD or SSHSHARP_TEST_KEYDIR are needed.");
             return;
         }
 
@@ -183,7 +183,7 @@ public class SessionInteropTests
         await using var client = await ConnectAsync();
         if (client is null)
         {
-            Skip.Test("SSHSHARP_TEST_SSHD, SSHSHARP_TEST_USER and SSHSHARP_TEST_PASSWORD are needed.");
+            Skip.Test("SSHSHARP_TEST_SSHD and SSHSHARP_TEST_USER with SSHSHARP_TEST_PASSWORD or SSHSHARP_TEST_KEYDIR are needed.");
             return;
         }
 
@@ -213,7 +213,7 @@ public class SessionInteropTests
         await using var client = await ConnectAsync();
         if (client is null)
         {
-            Skip.Test("SSHSHARP_TEST_SSHD, SSHSHARP_TEST_USER and SSHSHARP_TEST_PASSWORD are needed.");
+            Skip.Test("SSHSHARP_TEST_SSHD and SSHSHARP_TEST_USER with SSHSHARP_TEST_PASSWORD or SSHSHARP_TEST_KEYDIR are needed.");
             return;
         }
 
@@ -235,7 +235,7 @@ public class SessionInteropTests
         await using var client = await ConnectAsync();
         if (client is null)
         {
-            Skip.Test("SSHSHARP_TEST_SSHD, SSHSHARP_TEST_USER and SSHSHARP_TEST_PASSWORD are needed.");
+            Skip.Test("SSHSHARP_TEST_SSHD and SSHSHARP_TEST_USER with SSHSHARP_TEST_PASSWORD or SSHSHARP_TEST_KEYDIR are needed.");
             return;
         }
 
@@ -380,7 +380,7 @@ public class SessionInteropTests
         await using var client = await ConnectAsync();
         if (client is null)
         {
-            Skip.Test("SSHSHARP_TEST_SSHD, SSHSHARP_TEST_USER and SSHSHARP_TEST_PASSWORD are needed.");
+            Skip.Test("SSHSHARP_TEST_SSHD and SSHSHARP_TEST_USER with SSHSHARP_TEST_PASSWORD or SSHSHARP_TEST_KEYDIR are needed.");
             return;
         }
 
