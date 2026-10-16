@@ -1,0 +1,2 @@
+# ssh-audit for the client audit job in CI (#218), pinned by hash. It has no dependencies.
+ssh-audit==3.9.0 --hash=sha256:3dad48d4678e0de31f6332cc7674f9d7dd1805f86babf3796f41c2fd879cb812

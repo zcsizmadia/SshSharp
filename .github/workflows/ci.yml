@@ -532,3 +532,53 @@ jobs:
           name: sshd-log-windows
           path: ${{ runner.temp }}/sshd.log
           if-no-files-found: ignore
+
+  # ssh-audit in client mode (#218): it listens as a server, records the algorithms SshSharp offers (default options and FIPS mode),
+  # and rates them. tests/ssh-audit/check_client_audit.py fails the job on any rating it does not explain, a CVE, a missing strict
+  # key exchange, a default list that does not start with a post-quantum hybrid, or a non-FIPS algorithm in FIPS mode. ssh-audit's own
+  # exit code is not used: it fails on its opinion of the NIST curves alone.
+  ssh-audit:
+    name: ssh-audit (client)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+          dotnet-version: 8.0.x
+          cache: true
+          cache-dependency-path: '**/Directory.Packages.props'
+      - name: Install ssh-audit (pinned by hash)
+        run: |
+          python3 -m venv "$RUNNER_TEMP/ssh-audit"
+          "$RUNNER_TEMP/ssh-audit/bin/pip" install --quiet --require-hashes -r tests/ssh-audit/requirements.txt
+      - run: dotnet restore
+      - run: dotnet build -c Release --no-restore
+      - name: Audit the client
+        run: |
+          set -euo pipefail
+          AUDIT="$RUNNER_TEMP/ssh-audit/bin/ssh-audit"
+          # One listener per mode; each takes one connection. -t is also how long it waits for the client (5 s by default).
+          "$AUDIT" -t 60 -j -c -p 2300 > "$RUNNER_TEMP/default.json" & DEFAULT=$!
+          "$AUDIT" -t 60 -j -c -p 2301 > "$RUNNER_TEMP/fips.json" & FIPS=$!
+          for i in $(seq 1 30); do
+            if [ "$(ss -ltn | grep -cE ':230[01] ')" -ge 2 ]; then break; fi
+            sleep 1
+          done
+          SSHSHARP_TEST_SSHAUDIT=2300 SSHSHARP_TEST_SSHAUDIT_FIPS=2301 \
+            dotnet test --project tests/SshSharp.Tests -c Release -f net10.0 --no-build --treenode-filter "/*/*/SshAuditClientTests/*"
+          wait "$DEFAULT" || true  # exit code 3 on the NIST curves; the reports are judged below
+          wait "$FIPS" || true
+          STATUS=0
+          python3 tests/ssh-audit/check_client_audit.py "$RUNNER_TEMP/default.json" "default options" --post-quantum-first >> "$GITHUB_STEP_SUMMARY" || STATUS=1
+          python3 tests/ssh-audit/check_client_audit.py "$RUNNER_TEMP/fips.json" "FIPS mode" --fips >> "$GITHUB_STEP_SUMMARY" || STATUS=1
+          exit "$STATUS"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: ssh-audit-reports
+          path: ${{ runner.temp }}/*.json
+          if-no-files-found: ignore

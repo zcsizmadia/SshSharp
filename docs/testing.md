@@ -8,13 +8,14 @@ does. This page describes what is tested, against what, how intermittent failure
 | What | How |
 |---|---|
 | Unit tests | About 1,300 per target framework, with no network: scripted fake servers and agents over in-memory streams, and a fake clock |
-| Known-answer vectors | RFC and reference vectors, OpenSSL's Curve25519 vectors, the sntrup761 KAT, and 2,631 [Project Wycheproof](https://github.com/C2SP/wycheproof) edge cases |
+| Known-answer vectors | RFC and reference vectors, OpenSSL's Curve25519 vectors, the sntrup761 KAT, and about 6,400 [Project Wycheproof](https://github.com/C2SP/wycheproof) edge cases |
 | Real servers | OpenSSH (from 7.x to current, Linux and Windows), Dropbear, AsyncSSH, and two SFTP-only servers, on every pull request |
 | Network faults | A proxy that cuts, stalls, slows down and fragments connections to real servers, at any point |
 | Fuzzing | Coverage-guided fuzzing of the parsers that read untrusted input, nightly; mutation fuzzing in every test run |
 | Mutation testing | Stryker.NET over the cryptography, the packet codec and the configuration parsers |
 | Stress | The whole suite in a loop on every platform, with an instrumented build that checks buffer ownership and received data |
 | Platforms | Linux (x64, Arm64), Windows (x64, Arm64), macOS (Arm64), each on .NET 8 and .NET 10, plus a Native AOT smoke test |
+| Algorithm audit | [ssh-audit](https://github.com/jtesta/ssh-audit) rates what the client offers, by default and in FIPS mode, on every pull request |
 | Static analysis | CodeQL, the .NET analyzers at their recommended level with warnings as errors, and tracked public API |
 
 ## Unit tests
@@ -66,6 +67,19 @@ The interop tests run against real servers on every pull request. Each server ca
 
 A key-exchange volume test can run thousands of handshakes per host key type against a server. It is off by default and turned on
 with `SSHSHARP_TEST_HANDSHAKES`.
+
+**[ssh-audit](https://github.com/jtesta/ssh-audit)** checks what the client offers. In client mode it listens as a server, records
+the key exchanges, host keys, ciphers and MACs in SshSharp's first message, and rates each one. A CI job runs it on every pull
+request, once with the default options and once in FIPS mode. The job fails if:
+- any rating is not one of the few explained in
+  [the checker](https://github.com/zcsizmadia/SshSharp/blob/main/tests/ssh-audit/check_client_audit.py), such as ssh-audit's
+  opinion of the NIST curves, which OpenSSH's client also offers;
+- ssh-audit lists a CVE;
+- strict key exchange (the Terrapin countermeasure) is missing;
+- the default list does not start with a post-quantum hybrid;
+- FIPS mode offers anything outside FIPS.
+
+A weakened default list therefore fails at once.
 
 ## Network faults
 
@@ -127,7 +141,7 @@ runs, the instrumented build and the fault tests are what found them.
 - **An independent review of the managed cryptography,** planned before 1.0. Until then, it is checked against the reference
   vectors, Wycheproof and the timing test.
 - **Interop coverage** in the coverage figure.
-- **More independent servers and auditors:** Apache MINA SSHD, Erlang/OTP `ssh`, and an `ssh-audit` client check are planned
+- **More independent servers:** Apache MINA SSHD and Erlang/OTP `ssh` are planned
   ([#218](https://github.com/zcsizmadia/SshSharp/issues/218)).
 - **Commercial negative-testing suites** (thousands of malformed messages against the client). Fuzzing covers the parsers, but not
   every message sequence.
