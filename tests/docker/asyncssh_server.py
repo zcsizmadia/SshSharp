@@ -7,9 +7,12 @@ re-keys every 32 KiB, as the OpenSSH container does. Never used outside CI.
 
 Sessions copy data between the channel and the child process themselves rather than with SSHServerProcess.redirect, which ended
 channels (and connections) with "read() called while another coroutine is already waiting for incoming data" under load.
+
+Each connection signs with its own copy of the host keys (see choose_server_host_key below).
 """
 
 import asyncio
+import copy
 import fcntl
 import logging
 import os
@@ -48,6 +51,22 @@ class Server(asyncssh.SSHServer):
 
     def unix_server_requested(self, listen_path):
         return True
+
+
+# AsyncSSH 2.21.0 races when connections choose different RSA signature algorithms at once. choose_server_host_key calls
+# set_sig_algorithm on the keypair from options.server_host_keys, which every connection shares, so a connection that negotiated
+# rsa-sha2-512 can sign its exchange hash with rsa-sha2-256 because another connection chose that in between. The client then
+# correctly refuses the signature ("signature over the exchange hash is invalid"; #188). A shallow copy per connection is enough:
+# set_sig_algorithm only sets attributes on the keypair.
+_choose_server_host_key = asyncssh.connection.SSHServerConnection.choose_server_host_key
+
+
+def choose_server_host_key(self, peer_host_key_algs):
+    self._server_host_keys = {alg: copy.copy(keypair) for alg, keypair in self._server_host_keys.items()}
+    return _choose_server_host_key(self, peer_host_key_algs)
+
+
+asyncssh.connection.SSHServerConnection.choose_server_host_key = choose_server_host_key
 
 
 def child_environment(process):
