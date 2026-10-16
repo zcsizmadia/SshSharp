@@ -93,9 +93,14 @@ public class SshConnectionTests
         await using var server = new FakeSessionServer { HoldChannelOpen = hold.Task };
         await using var client = await ConnectAsync(server);
 
-        using (var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(200)))
+        // Cancelled once the open is on the server, which holds its answer. (A fixed delay could cancel before the open was even sent
+        // when the machine was busy, and then no channel ever existed to close: the stress run caught that.)
+        using (var cts = new CancellationTokenSource())
         {
-            await Assert.That(async () => await client.Connection.OpenSessionAsync(cts.Token)).Throws<OperationCanceledException>();
+            var open = client.Connection.OpenSessionAsync(cts.Token);
+            await WaitUntilAsync(() => server.ChannelOpensReceived == 1);
+            await cts.CancelAsync();
+            await Assert.That(async () => await open).Throws<OperationCanceledException>();
         }
 
         // The confirmation arrives after the caller gave up: the client recognises the channel and closes it.
