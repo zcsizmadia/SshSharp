@@ -30,10 +30,29 @@ public sealed partial class SftpClient : IAsyncDisposable
 
     private readonly SftpChannel _channel;
 
-    private SftpClient(SftpChannel channel, SftpLimits limits)
+    private SftpClient(SftpChannel channel, SftpLimits limits, bool symlinkInDraftOrder)
     {
         _channel = channel;
         Limits = limits;
+        _symlinkInDraftOrder = symlinkInDraftOrder;
+    }
+
+    // SSH_FXP_SYMLINK's argument order: the draft's (link, then target) for servers that follow it, otherwise OpenSSH's reversed one.
+    private readonly bool _symlinkInDraftOrder;
+
+    /// <summary>
+    /// Whether the server takes SSH_FXP_SYMLINK in the draft's order (link path, then target). OpenSSH's sftp-server reverses it
+    /// (PROTOCOL 4.1), and most servers follow OpenSSH (Dropbear runs OpenSSH's sftp-server; Go's pkg/sftp copies it). AsyncSSH keeps
+    /// the draft's order with clients that are not OpenSSH or paramiko, which it knows to reverse, so it gets the draft's order.
+    /// </summary>
+    internal static bool TakesSymlinkInDraftOrder(string? serverIdentification) =>
+        serverIdentification is not null && SshIdentificationSoftware(serverIdentification).StartsWith("AsyncSSH_", StringComparison.Ordinal);
+
+    /// <summary>The software part of an identification line (<c>SSH-2.0-AsyncSSH_2.21.0 comment</c> gives <c>AsyncSSH_2.21.0</c>).</summary>
+    private static string SshIdentificationSoftware(string line)
+    {
+        var dash = line.IndexOf('-', 4); // after "SSH-" and the protocol version
+        return dash < 0 ? string.Empty : line[(dash + 1)..];
     }
 
     /// <summary>The protocol version the server speaks (3 for OpenSSH).</summary>
@@ -48,7 +67,7 @@ public sealed partial class SftpClient : IAsyncDisposable
     /// <summary>Opens another SFTP session on the same connection (for <see cref="SftpTransferOptions.Segments"/>); null when unknown.</summary>
     internal Func<CancellationToken, Task<SftpClient>>? OpenSibling { get; set; }
 
-    internal static async Task<SftpClient> StartAsync(SshSession session, CancellationToken cancellationToken)
+    internal static async Task<SftpClient> StartAsync(SshSession session, string? serverIdentification, CancellationToken cancellationToken)
     {
         var channel = await SftpChannel.OpenAsync(session, cancellationToken).ConfigureAwait(false);
         try
@@ -63,7 +82,7 @@ public sealed partial class SftpClient : IAsyncDisposable
                 }
             }
 
-            return new SftpClient(channel, limits);
+            return new SftpClient(channel, limits, TakesSymlinkInDraftOrder(serverIdentification));
         }
         catch
         {
@@ -334,11 +353,13 @@ public sealed partial class SftpClient : IAsyncDisposable
         CheckPath(linkPath);
         CheckPath(targetPath);
 
-        // OpenSSH's sftp-server takes the arguments in the reverse of the draft's order (PROTOCOL 4.1), and other servers follow it.
+        // OpenSSH's sftp-server takes the arguments in the reverse of the draft's order (PROTOCOL 4.1), and most servers follow it; a
+        // server that keeps the draft's order would otherwise create the link at the target's path (see TakesSymlinkInDraftOrder).
+        var (first, second) = _symlinkInDraftOrder ? (linkPath, targetPath) : (targetPath, linkPath);
         var reply = await _channel.RequestAsync(SftpProtocol.Symlink, w =>
         {
-            w.WriteString(targetPath);
-            w.WriteString(linkPath);
+            w.WriteString(first);
+            w.WriteString(second);
         }, cancellationToken).ConfigureAwait(false);
         ExpectOk(reply, "Creating the link", linkPath);
     }

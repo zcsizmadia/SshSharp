@@ -18,7 +18,7 @@ public sealed class SftpTests : IDisposable
 
     private sealed class Rig : IAsyncDisposable
     {
-        public FakeSessionServer Ssh { get; } = new();
+        public FakeSessionServer Ssh { get; private init; } = new();
 
         public FakeSftpServer Files { get; } = new();
 
@@ -26,9 +26,9 @@ public sealed class SftpTests : IDisposable
 
         public SftpClient Sftp { get; private set; } = null!;
 
-        public static async Task<Rig> StartAsync(Action<FakeSftpServer>? setup = null)
+        public static async Task<Rig> StartAsync(Action<FakeSftpServer>? setup = null, string? identification = null)
         {
-            var rig = new Rig();
+            var rig = identification is null ? new Rig() : new Rig { Ssh = new FakeSessionServer(new FakeServerOptions { Identification = identification }) };
             setup?.Invoke(rig.Files);
             rig.Files.Install(rig.Ssh);
             _ = rig.Ssh.StartAsync();
@@ -272,6 +272,21 @@ public sealed class SftpTests : IDisposable
 
         await rig.Sftp.CreateHardLinkAsync("hard", "target", Timeout());
         await Assert.That(rig.Files.FileData(Home + "/hard").AsSpan().SequenceEqual("t"u8.ToArray())).IsTrue();
+    }
+
+    [Test]
+    [Arguments("SSH-2.0-AsyncSSH_2.21.0", true)]
+    [Arguments("SSH-2.0-OpenSSH_9.9", false)]
+    [Arguments("SSH-2.0-dropbear_2025.88", false)]
+    [Arguments("SSH-2.0-Go", false)]
+    public async Task SymbolicLinks_UseTheArgumentOrderTheServerExpects(string identification, bool draftOrder)
+    {
+        // OpenSSH reverses SSH_FXP_SYMLINK's arguments and most servers follow it; AsyncSSH keeps the draft's order with this client.
+        // Sent the other way round, the link would be created at the target's path.
+        await using var rig = await Rig.StartAsync(files => files.SymlinkInDraftOrder = draftOrder, identification);
+        await rig.Sftp.CreateSymbolicLinkAsync("soft", "target", Timeout());
+
+        await Assert.That(await rig.Sftp.ReadSymbolicLinkAsync("soft", Timeout())).IsEqualTo("target");
     }
 
     // ---- streams ----

@@ -66,6 +66,9 @@ internal sealed class FakeSftpServer
     /// <summary>Answer reads with at most half the bytes asked for (the draft allows short reads).</summary>
     public bool ShortReads { get; set; }
 
+    /// <summary>Take SSH_FXP_SYMLINK in the draft's order (link, then target), as AsyncSSH does with clients that are not OpenSSH.</summary>
+    public bool SymlinkInDraftOrder { get; set; }
+
     /// <summary>Hold each reply back until the next request arrives, answering them in reverse pairs (replies may come in any order).</summary>
     public bool ReorderReplies { get; set; }
 
@@ -710,10 +713,11 @@ internal sealed class FakeSftpServer
                     : Status(id, 2, "No such file");
             }
 
-            case 20: // SYMLINK, in OpenSSH's order: target, then link
+            case 20: // SYMLINK, in OpenSSH's order (target, then link) unless SymlinkInDraftOrder
             {
-                var target = r.ReadUtf8String();
-                var link = Resolve(r.ReadUtf8String());
+                var first = r.ReadUtf8String();
+                var second = r.ReadUtf8String();
+                var (target, link) = SymlinkInDraftOrder ? (second, Resolve(first)) : (first, Resolve(second));
                 if (_nodes.ContainsKey(link))
                 {
                     return Status(id, 4, "File exists");
