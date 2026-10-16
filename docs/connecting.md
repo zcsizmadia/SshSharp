@@ -221,6 +221,12 @@ sshd creates the socket readable only by the user, and does not replace a file t
 `client.RemoteSocketForwardings` lists the ones started from `ssh_config`. A server with `AllowStreamLocalForwarding no`
 refuses the request, and the call throws an `SshException`.
 
+**Known issue on Windows:** when the target is a local Unix socket, Windows sometimes fails to deliver the end of stream to the
+local program after SshSharp shuts down its sending side. A program that is waiting in a receive at that moment may never see it
+(about 1 exchange in 10,000 with plain Winsock, more often through .NET's sockets). A protocol that half-closes and then waits for
+the answer can stall in that case. SshSharp can do nothing about it once it has shut down its side. Protocols that frame their
+messages (a length or a delimiter) are not affected, and neither are TCP targets.
+
 ### Forwardings from `ssh_config`
 
 `LocalForward`, `RemoteForward` and `DynamicForward` are started when connecting by alias with
