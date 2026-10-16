@@ -35,13 +35,33 @@ public class SshConfigHardeningTests
     }
 
     [Test]
-    public async Task UserNamesThatWouldBeShellSyntax_AreRefused_OrdinaryNamesWork()
+    [Arguments("bob;rm -rf ~")]
+    [Arguments("$(id)")]        // '$' and '\': what OpenSSH 10.6 refuses in a user name from its command line (#217)
+    [Arguments("a$HOME")]
+    [Arguments("a\\b")]
+    [Arguments("a\nb")]         // control characters: OpenSSH 10.1
+    [Arguments("a\u0007b")]
+    [Arguments("-oProxyCommand=evil")]
+    public async Task UserNamesThatWouldBeShellSyntax_AreRefused(string user)
     {
-        var bad = new SshConfigResolveOptions { LocalUser = "l", HomeDirectory = "/h", User = "bob;rm -rf ~" };
-        await Assert.That(() => Resolve("Host *\n Port 2\n", "a", bad)).Throws<ArgumentException>();
+        // The user name from the caller goes into Match exec and ProxyCommand (%r), which run in a shell. A user name from the config
+        // file itself is trusted as written, as OpenSSH trusts it.
+        const string config = "Match exec \"test %r\"\n Port 5\nProxyCommand nc %h %p %r\n";
+        var ran = new List<string>();
+        var options = new SshConfigResolveOptions { LocalUser = "l", HomeDirectory = "/h", User = user, ExecMatcher = c => { ran.Add(c); return false; } };
+        await Assert.That(() => Resolve(config, "a", options)).Throws<ArgumentException>();
+        await Assert.That(ran).IsEmpty();
+    }
 
+    [Test]
+    public async Task OrdinaryUserNamesWork_AndAConfigFileUserIsTrustedAsWritten()
+    {
         var good = new SshConfigResolveOptions { LocalUser = "l", HomeDirectory = "/h", User = "first.last@corp" };
         await Assert.That(Resolve("Host *\n Port 2\n", "web-01.example.com", good).User).IsEqualTo("first.last@corp");
+
+        // A Windows account name with a space, and a DOMAIN\user name, written in the config file.
+        await Assert.That(Resolve("Host *\n User \"Jane Doe\"\n", "a").User).IsEqualTo("Jane Doe");
+        await Assert.That(Resolve("Host *\n User CORP\\jane\n", "a").User).IsEqualTo("CORP\\jane");
     }
 
     [Test]
