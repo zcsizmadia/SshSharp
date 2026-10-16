@@ -37,6 +37,37 @@ public class SessionInteropTests
         return Encoding.UTF8.GetString(buffer.ToArray());
     }
 
+    /// <summary>
+    /// Reads until the shell shows a prompt (output ending in "$ ", "# " or "> ", escape sequences aside), or for at most 10 s, and
+    /// returns what was read. Typing before then can be lost: a login that clears the terminal's pending input as it starts discards
+    /// it (a shell against Dropbear in CI echoed the line, then never ran it).
+    /// </summary>
+    private static async Task<string> WaitForPromptAsync(Stream output)
+    {
+        var seen = new StringBuilder();
+        using var wait = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var buffer = new byte[4096];
+        try
+        {
+            while (!LooksLikeAPrompt(seen.ToString()) && await output.ReadAsync(buffer, wait.Token) is var read and > 0)
+            {
+                seen.Append(Encoding.UTF8.GetString(buffer, 0, read));
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // No prompt recognised in time (an unusual PS1): type anyway, as before.
+        }
+
+        return seen.ToString();
+    }
+
+    private static bool LooksLikeAPrompt(string text)
+    {
+        var plain = System.Text.RegularExpressions.Regex.Replace(text, @"\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07]*\x07", string.Empty).TrimEnd('\r', '\n');
+        return plain.EndsWith("$ ", StringComparison.Ordinal) || plain.EndsWith("# ", StringComparison.Ordinal) || plain.EndsWith("> ", StringComparison.Ordinal);
+    }
+
     [Test]
     public async Task AShellWithATerminal_RunsWhatIsTyped()
     {
@@ -50,10 +81,11 @@ public class SessionInteropTests
         var terminal = new SshTerminalOptions { TerminalType = "dumb", Columns = 132, Rows = 50 };
         await using var session = await client.StartShellAsync(new SshSessionOptions { Terminal = terminal }, Timeout());
         await Assert.That(session.HasTerminal).IsTrue();
+        var before = await WaitForPromptAsync(session.StandardOutput);
 
         // The terminal reports its size to programs; "exit 7" ends the shell with that status.
         await session.StandardInput.WriteAsync("stty size; echo marker-$((6*7)); exit 7\n"u8.ToArray(), Timeout());
-        var output = await ReadAllAsync(session.StandardOutput);
+        var output = before + await ReadAllAsync(session.StandardOutput);
         await session.WaitForExitAsync(Timeout());
 
         await Assert.That(output).Contains("50 132");
@@ -78,6 +110,7 @@ public class SessionInteropTests
         // Each key is its own write, sent on the 20 ms grid; the pause fills ticks with chaff pings, which the server answers (if it
         // has ping@openssh.com) or never sees (if it does not), and the session goes on either way.
         await using var session = await client.StartShellAsync(new SshSessionOptions { Terminal = new SshTerminalOptions { TerminalType = "dumb" } }, Timeout());
+        var before = await WaitForPromptAsync(session.StandardOutput);
         foreach (var key in "echo typed-$((6*7))"u8.ToArray())
         {
             await session.StandardInput.WriteAsync(new[] { key }, Timeout());
@@ -89,7 +122,7 @@ public class SessionInteropTests
             await session.StandardInput.WriteAsync(new[] { key }, Timeout());
         }
 
-        var output = await ReadAllAsync(session.StandardOutput);
+        var output = before + await ReadAllAsync(session.StandardOutput);
         await Assert.That(output).Contains("typed-42");
         await Assert.That(client.IsConnected).IsTrue();
     }
@@ -107,9 +140,10 @@ public class SessionInteropTests
         // Whether the break is performed depends on the server and its pty (sshd answers with tcsendbreak's result, Dropbear
         // declines), so only the answer and the session's health are checked.
         await using var session = await client.StartShellAsync(new SshSessionOptions { Terminal = new SshTerminalOptions { TerminalType = "dumb" } }, Timeout());
+        var before = await WaitForPromptAsync(session.StandardOutput);
         _ = await session.SendBreakAsync(TimeSpan.FromMilliseconds(100), Timeout());
         await session.StandardInput.WriteAsync("echo after-$((40+2)); exit\n"u8.ToArray(), Timeout());
-        var output = await ReadAllAsync(session.StandardOutput);
+        var output = before + await ReadAllAsync(session.StandardOutput);
         await Assert.That(output).Contains("after-42");
     }
 
