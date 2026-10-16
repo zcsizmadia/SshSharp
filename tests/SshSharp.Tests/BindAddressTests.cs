@@ -185,12 +185,11 @@ public sealed class BindAddressTests : IDisposable
     [Test]
     public async Task ARefusedConnection_WithABind_IsAConnectFailure()
     {
-        // A port held by a socket that is bound but not listening, so connections to it are refused. Held for the whole test: a port that
-        // was merely free a moment ago can be taken by another test's listener, or be the very port the client's own bind gets, so that
-        // the socket connects to itself (both happened as a successful connect on Windows).
-        using var probe = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-        probe.Bind(new IPEndPoint(IPAddress.Loopback, 0));
-        var port = ((IPEndPoint)probe.LocalEndPoint!).Port;
+        // Port 1 (tcpmux), where nothing listens, so the connection is refused at once. Not a port that was merely free a moment ago:
+        // that can be taken by another test's listener, or be the very port the client's own bind gets, so that the socket connects to
+        // itself (a Windows stress run connected). Port 1 is outside every ephemeral range, so neither can happen. Nor a port held by a
+        // bound socket that does not listen: Windows and Linux refuse a connection to it, but macOS lets it time out.
+        const int port = 1;
 
         var ex = await Assert.That(async () => await TcpConnector.ConnectAsync("127.0.0.1", port, [new IPEndPoint(IPAddress.Loopback, 0)], SshAddressFamily.Inet, "the server", Timeout()))
             .Throws<SshException>();
