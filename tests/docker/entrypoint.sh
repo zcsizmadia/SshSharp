@@ -11,6 +11,11 @@ if [ "$SSH_SERVER" = "asyncssh" ]; then
   cd /home/sshsharp
   exec su-exec sshsharp env HOME=/home/sshsharp USER=sshsharp PORT=2222 python3 /asyncssh_server.py
 fi
+# MINA SSHD too: as the test account, on port 2222, checking the password itself.
+if [ "$SSH_SERVER" = "mina" ]; then
+  cd /home/sshsharp
+  exec su-exec sshsharp env HOME=/home/sshsharp USER=sshsharp PORT=2222 java -cp '/mina/*' /MinaServer.java
+fi
 ssh-keygen -A
 # sshd takes the first value of each keyword, and Alpine's default file turns forwarding off: drop those lines before appending. Its
 # Subsystem line names an sftp-server binary that may not be installed, and a second definition would be fatal: use internal-sftp.

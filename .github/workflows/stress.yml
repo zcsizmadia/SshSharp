@@ -87,6 +87,12 @@ jobs:
             software: AsyncSSH
             strict: '1'
             port: '2222'
+          - name: Apache MINA SSHD
+            image: alpine@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8
+            server: mina
+            software: APACHE-SSHD
+            strict: '1'
+            port: '2222'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -118,8 +124,8 @@ jobs:
             echo "SSHSHARP_TEST_SERVER=${{ matrix.software }}"
             echo "SSHSHARP_TEST_SERVER_STRICTKEX=${{ matrix.strict }}"
           } >> "$GITHUB_ENV"
-          # OpenSSH (RekeyLimit) and AsyncSSH (rekey_bytes) re-key every 32 KiB.
-          if [ "${{ matrix.server }}" != "dropbear" ]; then echo "SSHSHARP_TEST_SSHD_REKEY=1" >> "$GITHUB_ENV"; fi
+          # OpenSSH (RekeyLimit) and AsyncSSH (rekey_bytes) re-key every 32 KiB; MINA has no fixed interval (see ci.yml).
+          if [ "${{ matrix.server }}" != "dropbear" ] && [ "${{ matrix.server }}" != "mina" ]; then echo "SSHSHARP_TEST_SSHD_REKEY=1" >> "$GITHUB_ENV"; fi
           if [ "${{ matrix.server }}" = "dropbear" ]; then echo "SSHSHARP_TEST_DROPBEAR_SFTP=1" >> "$GITHUB_ENV"; fi
       - run: dotnet restore
       - run: dotnet build -c Release --no-restore -p:SshSharpInstrument=true
