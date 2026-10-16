@@ -250,6 +250,10 @@ public class SshTransportTests
         await Assert.That(error).IsTypeOf<SshException>();
         await Assert.That(((SshException)error).Reason).IsEqualTo(SshFailureReason.HostKeyRejected);
         await Assert.That(error.Message).Contains("signature");
+
+        // What the signature says about itself, for a failure that only shows up in CI: never the bytes.
+        await Assert.That(error.Message).Contains("a ssh-ed25519 signature of 64 bytes");
+        await Assert.That(error.Message).Contains("256-bit ssh-ed25519 key");
     }
 
     [Test]

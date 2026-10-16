@@ -732,6 +732,22 @@ internal sealed class SshTransport : IAsyncDisposable
         }
     }
 
+    /// <summary>What a signature blob says about itself (its algorithm and length), for a failed check: never the signature's bytes.</summary>
+    private static string DescribeSignature(ReadOnlySpan<byte> blob)
+    {
+        try
+        {
+            var reader = new SshReader(blob);
+            var algorithm = reader.ReadUtf8String();
+            var signature = reader.ReadString();
+            return $"a {algorithm} signature of {signature.Length} bytes{(reader.IsEmpty ? string.Empty : ", with trailing data")}";
+        }
+        catch (SshProtocolException)
+        {
+            return $"a malformed signature blob of {blob.Length} bytes";
+        }
+    }
+
     private async ValueTask VerifyHostKeyAsync(NegotiatedAlgorithms negotiated, KexResult result, bool initial, CancellationToken cancellationToken)
     {
         // A certificate host key (PROTOCOL.certkeys): the server proves possession of the certified key, signing with the base algorithm.
@@ -770,7 +786,8 @@ internal sealed class SshTransport : IAsyncDisposable
 
         if (!key.VerifySignature(signatureAlgorithm, result.Signature, result.ExchangeHash))
         {
-            throw new SshHostKeyException("The server's signature over the exchange hash is invalid.");
+            throw new SshHostKeyException(
+                $"The server's signature over the exchange hash is invalid ({DescribeSignature(result.Signature)}, {signatureAlgorithm} with a {key.KeySizeBits}-bit {key.KeyType} key, {negotiated.Kex}).");
         }
 
         if (!initial)
