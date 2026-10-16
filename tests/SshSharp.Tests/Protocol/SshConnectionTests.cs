@@ -87,6 +87,25 @@ public class SshConnectionTests
     }
 
     [Test]
+    public async Task DisposingWhileAWriteIsStalled_FinishesPromptly_EvenWhenTheStreamHonoursCancellation()
+    {
+        await using var server = new FakeSessionServer();
+        var gated = new GatedStream(server.ClientStream);
+        var client = await ConnectAsync(server, gated);
+
+        // A write is stuck half-way (the peer stopped reading), and this stream does honour cancellation: disposal cancels the flush,
+        // which leaves the rest of the packet buffered. Completing the writer must not then wait to flush it into the same stalled stream.
+        gated.Stall();
+        using (var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(200)))
+        {
+            await Assert.That(async () => await client.Connection.OpenSessionAsync(cts.Token)).Throws<OperationCanceledException>();
+        }
+
+        await client.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(15));
+        gated.Resume();
+    }
+
+    [Test]
     public async Task CancellingAChannelOpen_KeepsTheConnection_AndClosesTheChannelWhenItIsConfirmed()
     {
         var hold = new TaskCompletionSource();

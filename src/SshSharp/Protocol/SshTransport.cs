@@ -288,7 +288,10 @@ internal sealed class SshTransport : IAsyncDisposable
         var locked = await _sendLock.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
         try
         {
-            await _writer.CompleteAsync().ConfigureAwait(false);
+            // Completed with an exception, so nothing still buffered is written: the goodbye was sent already (or given up on), and what
+            // is left is the rest of a packet whose flush Abort cancelled. Writing it would wait on a peer that has stopped reading, for
+            // ever: disposal hung that way when the stream honoured the cancellation and kept the unwritten bytes.
+            await _writer.CompleteAsync(closed).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is IOException or ObjectDisposedException or OperationCanceledException)
         {
