@@ -28,6 +28,8 @@
   items:
     - name: Design notes
       href: design.md
+    - name: Testing and validation
+      href: testing.md
     - name: Threat model
       href: threat-model.md
     - name: Cryptography review
