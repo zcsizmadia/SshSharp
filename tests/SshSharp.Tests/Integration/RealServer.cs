@@ -68,6 +68,12 @@ internal static class RealServer
     public static bool IsAsyncSsh => Software == "AsyncSSH";
 
     /// <summary>
+    /// Whether the server is the CI matrix's Apache MINA SSHD container (tests/docker/MinaServer.java), which identifies itself as
+    /// APACHE-SSHD. It runs shells and commands as plain processes: no pseudo-terminal, and a killed process ends with an exit status.
+    /// </summary>
+    public static bool IsMina => Software == "APACHE-SSHD";
+
+    /// <summary>
     /// Whether the server has an sftp subsystem: every one tested, and Dropbear when its image has OpenSSH's sftp-server where Dropbear
     /// runs it (SSHSHARP_TEST_DROPBEAR_SFTP=1, set by CI after checking).
     /// </summary>

@@ -88,7 +88,12 @@ public class SessionInteropTests
         var output = before + await ReadAllAsync(session.StandardOutput);
         await session.WaitForExitAsync(Timeout());
 
-        await Assert.That(output).Contains("50 132");
+        if (!RealServer.IsMina)
+        {
+            // MINA accepts the terminal request but runs the shell on pipes, with no pseudo-terminal to report a size.
+            await Assert.That(output).Contains("50 132");
+        }
+
         await Assert.That(output).Contains("marker-42");
         if (!RealServer.IsWindows)
         {

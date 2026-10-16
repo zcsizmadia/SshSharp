@@ -298,6 +298,14 @@ jobs:
             software: AsyncSSH
             strict: '1'
             port: '2222'
+          # Another independent implementation (Java), the server inside Jenkins, Gerrit and Eclipse (tests/docker/MinaServer.java);
+          # also the test account on an unprivileged port. It identifies itself as APACHE-SSHD.
+          - name: Apache MINA SSHD
+            image: alpine@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8
+            server: mina
+            software: APACHE-SSHD
+            strict: '1'
+            port: '2222'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -330,8 +338,9 @@ jobs:
             echo "SSHSHARP_TEST_SERVER=${{ matrix.software }}"
             echo "SSHSHARP_TEST_SERVER_STRICTKEX=${{ matrix.strict }}"
           } >> "$GITHUB_ENV"
-          # OpenSSH (RekeyLimit) and AsyncSSH (rekey_bytes) re-key every 32 KiB.
-          if [ "${{ matrix.server }}" != "dropbear" ]; then echo "SSHSHARP_TEST_SSHD_REKEY=1" >> "$GITHUB_ENV"; fi
+          # OpenSSH (RekeyLimit) and AsyncSSH (rekey_bytes) re-key every 32 KiB. MINA is set to as well, but checks its limit only
+          # after a message from the client, so while it mostly sends it re-keys about once per window adjustment: no fixed interval.
+          if [ "${{ matrix.server }}" != "dropbear" ] && [ "${{ matrix.server }}" != "mina" ]; then echo "SSHSHARP_TEST_SSHD_REKEY=1" >> "$GITHUB_ENV"; fi
           # Dropbear serves the sftp subsystem by running OpenSSH's sftp-server from /usr/libexec (the image links it there). A missing
           # binary fails the job: the SFTP tests would otherwise skip themselves and the job would pass without them.
           if [ "${{ matrix.server }}" = "dropbear" ]; then

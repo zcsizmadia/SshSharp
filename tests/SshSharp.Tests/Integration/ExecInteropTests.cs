@@ -57,9 +57,9 @@ public class ExecInteropTests
         else
         {
             // The claim itself, without timing: the server answers keepalive@openssh.com. OpenSSH and Dropbear answer with a failure
-            // (still an answer); AsyncSSH knows the request and answers with a success.
+            // (still an answer); AsyncSSH and MINA SSHD know the request and answer with a success.
             var reply = await client.Connection.SendGlobalRequestAsync("keepalive@openssh.com", wantReply: true, null, Timeout());
-            await Assert.That(reply.Success).IsEqualTo(RealServer.IsAsyncSsh);
+            await Assert.That(reply.Success).IsEqualTo(RealServer.IsAsyncSsh || RealServer.IsMina);
         }
 
         // And an idle connection with keep-alives running stays up. The margins are generous: the interop tests run in parallel on
@@ -119,6 +119,15 @@ public class ExecInteropTests
         await using var client = await ConnectAsync(Timeout());
         // The login shell kills itself: busybox ash does not exec a nested shell's last command, so 'sh -c kill' would exit 137 instead.
         var result = await client.RunCommandAsync("kill -9 $$", Timeout());
+        if (RealServer.IsMina)
+        {
+            // MINA runs commands through Java's Process, which gives a killed process 128 + the signal number, and sends that as an
+            // exit status: SshSharp must report it as one, with no signal.
+            await Assert.That(result.ExitStatus).IsEqualTo(137);
+            await Assert.That(result.ExitSignal).IsNull();
+            return;
+        }
+
         await Assert.That(result.ExitStatus).IsNull();
         await Assert.That(result.ExitSignal).IsEqualTo("KILL");
     }
