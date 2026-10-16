@@ -287,4 +287,44 @@ public class FaultInteropTests
             await AssertBase64OfZerosAsync(await client.RunCommandAsync("head -c 1000000 /dev/zero | base64", Timeout()), 1_000_000);
         }
     }
+
+    [Test]
+    public async Task TheServerKillingTheSession_FailsTheCommand_AndOtherConnectionsCarryOn()
+    {
+        // The session's own sshd process is killed (as an administrator would, or the OOM killer): its socket closes in the middle of
+        // the session, with no CHANNEL_CLOSE or DISCONNECT. Only on OpenSSH on Unix: the shell's parent there is the user's own
+        // per-connection sshd process, which the same user may kill. Dropbear's runs as root, AsyncSSH serves every connection from
+        // one process, and Windows has no $PPID.
+        if (!RealServer.IsOpenSsh || RealServer.IsWindows || RealServer.Endpoint is not var (host, port) || await RealServer.OptionsAsync() is not { } options)
+        {
+            Skip.Test("An OpenSSH server on Unix and an account are needed.");
+            return;
+        }
+
+        await using var victim = await SshClient.ConnectAsync(host, port, options, Timeout());
+        await using var session = await victim.StartCommandAsync("echo $PPID; exec sleep 60", cancellationToken: Timeout());
+        var line = new List<byte>();
+        var one = new byte[1];
+        while (await session.StandardOutput.ReadAsync(one, Timeout()) == 1 && one[0] != (byte)'\n')
+        {
+            line.Add(one[0]);
+        }
+
+        var pid = System.Text.Encoding.ASCII.GetString([.. line]).Trim();
+        await Assert.That(int.TryParse(pid, out _)).IsTrue();
+
+        await using var admin = await SshClient.ConnectAsync(host, port, options, Timeout());
+        var watch = Stopwatch.StartNew();
+        var kill = await admin.RunCommandAsync($"kill -9 {pid}", Timeout());
+        if (kill.ExitStatus != 0)
+        {
+            Assert.Fail($"kill -9 {pid} failed ({kill.ExitStatus}): {kill.StandardErrorText}");
+        }
+
+        var error = await Assert.ThrowsAsync<SshException>(() => session.WaitForExitAsync(Timeout()));
+        await Assert.That(error!.Reason).IsEqualTo(SshFailureReason.ConnectionClosed);
+        await Assert.That(watch.Elapsed).IsLessThan(TimeSpan.FromSeconds(10));
+        await Assert.That(victim.IsConnected).IsFalse();
+        await Assert.That((await admin.RunCommandAsync("echo still-here", Timeout())).StandardOutputText).IsEqualTo("still-here\n");
+    }
 }
