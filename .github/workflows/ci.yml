@@ -281,6 +281,7 @@ jobs:
             server: openssh
             software: OpenSSH
             strict: '1'
+            handshakes: '1000'
           - name: Dropbear, Alpine 3.13
             image: alpine@sha256:469b6e04ee185740477efa44ed5bdd64a07bbdd6c7e5f5d169e540889597b911
             server: dropbear
@@ -298,6 +299,7 @@ jobs:
             software: AsyncSSH
             strict: '1'
             port: '2222'
+            handshakes: '1000'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -329,6 +331,8 @@ jobs:
             echo "SSHSHARP_TEST_PASSWORD=$PASSWORD"
             echo "SSHSHARP_TEST_SERVER=${{ matrix.software }}"
             echo "SSHSHARP_TEST_SERVER_STRICTKEX=${{ matrix.strict }}"
+            # For #188: many key exchanges per host key type against AsyncSSH, and against OpenSSH as the control (temporary).
+            echo "SSHSHARP_TEST_HANDSHAKES=${{ matrix.handshakes || '0' }}"
           } >> "$GITHUB_ENV"
           # OpenSSH (RekeyLimit) and AsyncSSH (rekey_bytes) re-key every 32 KiB.
           if [ "${{ matrix.server }}" != "dropbear" ]; then echo "SSHSHARP_TEST_SSHD_REKEY=1" >> "$GITHUB_ENV"; fi
