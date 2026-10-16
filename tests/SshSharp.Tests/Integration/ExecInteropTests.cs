@@ -1,27 +1,18 @@
 namespace SshSharp.Tests.Integration;
 
 /// <summary>
-/// Runs commands against a real OpenSSH server over TCP. Needs SSHSHARP_TEST_SSHD (host:port) plus SSHSHARP_TEST_USER and
-/// SSHSHARP_TEST_PASSWORD for an account on that server; skipped when any is missing. CI creates a throwaway account and password.
+/// Runs commands against a real OpenSSH server over TCP. Needs SSHSHARP_TEST_SSHD (host:port) plus SSHSHARP_TEST_USER with
+/// SSHSHARP_TEST_PASSWORD or SSHSHARP_TEST_KEYDIR for an account on that server; skipped when any is missing. CI creates a throwaway
+/// account and password.
 /// </summary>
 public class ExecInteropTests
 {
-    private static SshClientOptions Options(string? password = null) => new()
-    {
-        UserName = Environment.GetEnvironmentVariable("SSHSHARP_TEST_USER")!,
-        Password = password ?? Environment.GetEnvironmentVariable("SSHSHARP_TEST_PASSWORD"),
-        HostKeyVerifier = SshHostKeyVerifier.FromDelegate((_, _) => ValueTask.FromResult(true)),
-    };
-
-    private static bool Configured =>
-        RealServer.IsAvailable
-        && !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("SSHSHARP_TEST_USER"))
-        && !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("SSHSHARP_TEST_PASSWORD"));
+    private static bool Configured => RealServer.HasAccount;
 
     private static async Task<SshClient> ConnectAsync(CancellationToken token)
     {
         var (host, port) = RealServer.Endpoint!.Value;
-        return await SshClient.ConnectAsync(host, port, Options(), token);
+        return await SshClient.ConnectAsync(host, port, (await RealServer.OptionsAsync())!, token);
     }
 
     private static CancellationToken Timeout() => new CancellationTokenSource(TimeSpan.FromSeconds(90)).Token;
@@ -35,14 +26,8 @@ public class ExecInteropTests
         }
 
         var (host, port) = RealServer.Endpoint!.Value;
-        var options = new SshClientOptions
-        {
-            UserName = Environment.GetEnvironmentVariable("SSHSHARP_TEST_USER")!,
-            Password = Environment.GetEnvironmentVariable("SSHSHARP_TEST_PASSWORD"),
-            HostKeyVerifier = SshHostKeyVerifier.FromDelegate((_, _) => ValueTask.FromResult(true)),
-            KeepAliveInterval = TimeSpan.FromSeconds(2),
-            KeepAliveCountMax = 10, // 20 s of silence: a busy runner can stall the test process for seconds
-        };
+        // 20 s of silence: a busy runner can stall the test process for seconds.
+        var options = (await RealServer.OptionsAsync(keepAlive: TimeSpan.FromSeconds(2), keepAliveCountMax: 10))!;
         await using var client = await SshClient.ConnectAsync(host, port, options, Timeout());
 
         if (RealServer.IsWindows)
@@ -169,13 +154,19 @@ public class ExecInteropTests
     [Test]
     public async Task WrongPasswordIsRejected()
     {
-        if (!Configured)
+        if (!Configured || RealServer.Password is null)
         {
-            Skip.Test("No real server account configured.");
+            Skip.Test("No real server account with a password configured.");
         }
 
         var (host, port) = RealServer.Endpoint!.Value;
-        var ex = await Assert.ThrowsAsync<SshException>(async () => await SshClient.ConnectAsync(host, port, Options("definitely-wrong"), Timeout()));
+        var options = new SshClientOptions
+        {
+            UserName = Environment.GetEnvironmentVariable("SSHSHARP_TEST_USER")!,
+            Password = "definitely-wrong",
+            HostKeyVerifier = SshHostKeyVerifier.FromDelegate((_, _) => ValueTask.FromResult(true)),
+        };
+        var ex = await Assert.ThrowsAsync<SshException>(async () => await SshClient.ConnectAsync(host, port, options, Timeout()));
         await Assert.That(ex!.Reason).IsEqualTo(SshFailureReason.AuthenticationFailed);
         await Assert.That(ex.Message).Contains("password");
     }
@@ -189,7 +180,7 @@ public class ExecInteropTests
         }
 
         await using var stream = await RealServer.ConnectAsync();
-        await using var client = await SshClient.ConnectAsync(stream, Options(), leaveOpen: true, Timeout());
+        await using var client = await SshClient.ConnectAsync(stream, (await RealServer.OptionsAsync())!, leaveOpen: true, Timeout());
         var result = await client.RunCommandAsync("echo via-stream", Timeout());
         await Assert.That(result.StandardOutputText).IsEqualTo("via-stream\n");
     }

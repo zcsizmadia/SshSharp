@@ -2,7 +2,7 @@ namespace SshSharp.Tests.Integration;
 
 /// <summary>
 /// Key re-exchange against a real OpenSSH server while channel data is in flight. OpenSSH only handles a re-exchange once the user has
-/// authenticated, so these run real commands. They need the exec interop account (see <see cref="ExecInteropTests"/>); the server-initiated
+/// authenticated, so these run real commands. They need the interop account (see <see cref="ExecInteropTests"/>); the server-initiated
 /// ones also need sshd configured with a small RekeyLimit (for example "RekeyLimit 32K") and SSHSHARP_TEST_SSHD_REKEY=1. CI sets all of it.
 /// </summary>
 public class RekeyInteropTests
@@ -11,10 +11,7 @@ public class RekeyInteropTests
 
     private static string BulkOutputCommand(int bytes = BulkOutputBytes) => $"head -c {bytes} /dev/zero | base64";
 
-    private static bool Configured =>
-        RealServer.IsAvailable
-        && !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("SSHSHARP_TEST_USER"))
-        && !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("SSHSHARP_TEST_PASSWORD"));
+    private static bool Configured => RealServer.HasAccount;
 
     private static bool ServerRekeys => Configured && Environment.GetEnvironmentVariable("SSHSHARP_TEST_SSHD_REKEY") == "1";
 
@@ -23,13 +20,7 @@ public class RekeyInteropTests
     private static async Task<SshClient> ConnectAsync(long rekeyAfterBytes)
     {
         var (host, port) = RealServer.Endpoint!.Value;
-        return await SshClient.ConnectAsync(host, port, new SshClientOptions
-        {
-            UserName = Environment.GetEnvironmentVariable("SSHSHARP_TEST_USER")!,
-            Password = Environment.GetEnvironmentVariable("SSHSHARP_TEST_PASSWORD"),
-            HostKeyVerifier = SshHostKeyVerifier.FromDelegate((_, _) => ValueTask.FromResult(true)),
-            RekeyAfterBytes = rekeyAfterBytes,
-        }, Timeout());
+        return await SshClient.ConnectAsync(host, port, (await RealServer.OptionsAsync(rekeyAfterBytes: rekeyAfterBytes))!, Timeout());
     }
 
     /// <summary>Base64 of zero bytes is all 'A': any corruption or reordering around a re-exchange shows up in the text.</summary>
