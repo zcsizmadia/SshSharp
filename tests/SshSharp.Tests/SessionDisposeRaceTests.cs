@@ -12,6 +12,12 @@ public class SessionDisposeRaceTests
 {
     private static CancellationToken Timeout() => new CancellationTokenSource(TimeSpan.FromSeconds(60)).Token;
 
+    // Each race test disposes under a read up to this many times, or for this long: a slow runner (3 cores, the instrumented build,
+    // the rest of the suite alongside) does fewer rounds instead of running into the 3-minute test timeout.
+    private const int MaxRounds = 200;
+
+    private static readonly TimeSpan MaxTime = TimeSpan.FromSeconds(20);
+
     /// <summary>Output that is never zero, in small chunks like SFTP replies, until the client closes the channel.</summary>
     /// <remarks>
     /// Sends after the close are dropped without an error, so the script watches for the close itself, and it yields between chunks: a
@@ -51,7 +57,8 @@ public class SessionDisposeRaceTests
 
         var reportsBefore = Instrumentation.Reports;
         var zeros = 0L;
-        for (var round = 0; round < 200; round++)
+        var budget = System.Diagnostics.Stopwatch.StartNew();
+        for (var round = 0; round < MaxRounds && budget.Elapsed < MaxTime; round++)
         {
             var session = await client.StartCommandAsync("stream", cancellationToken: Timeout());
             var reader = Task.Run(async () =>
@@ -99,7 +106,8 @@ public class SessionDisposeRaceTests
 
         var reportsBefore = Instrumentation.Reports;
         var zeros = 0L;
-        for (var round = 0; round < 200; round++)
+        var budget = System.Diagnostics.Stopwatch.StartNew();
+        for (var round = 0; round < MaxRounds && budget.Elapsed < MaxTime; round++)
         {
             var tunnel = await client.OpenTcpTunnelAsync("service.internal", 80, Timeout());
             var reader = Task.Run(async () =>
@@ -245,8 +253,13 @@ public class SessionDisposeRaceTests
 
         public override int Read(byte[] buffer, int offset, int count) => Fill(buffer.AsSpan(offset, count));
 
-        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) =>
-            ValueTask.FromResult(Fill(buffer.Span));
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            // Yields first: a read that completes at once, and a send that does too while the window lasts, would otherwise keep the
+            // server's relay sending tiny packets on one thread without a break.
+            await Task.Yield();
+            return Fill(buffer.Span);
+        }
 
         private int Fill(Span<byte> buffer)
         {

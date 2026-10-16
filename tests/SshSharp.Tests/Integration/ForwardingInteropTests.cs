@@ -47,6 +47,27 @@ public class ForwardingInteropTests
         return line.ToString().TrimEnd('\r');
     }
 
+    /// <summary>
+    /// Asks the server to listen on a random port from <paramref name="first"/> up, trying another one when it refuses: the port can be
+    /// in use there, for example as the ephemeral port of another connection (Linux hands those out from 32768 to 60999).
+    /// </summary>
+    private static async Task<T> OnSomeHighPortAsync<T>(int first, Action<string> step, string what, Func<int, Task<T>> forward)
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            var port = first + Random.Shared.Next(2000);
+            step($"asking the server to listen on localhost:{port}{what}");
+            try
+            {
+                return await forward(port);
+            }
+            catch (SshException) when (attempt < 5)
+            {
+                // Refused: most likely taken. Another port.
+            }
+        }
+    }
+
     [Test]
     public async Task ATcpTunnel_ReachesTheServersOwnSshd()
     {
@@ -88,9 +109,8 @@ public class ForwardingInteropTests
         await Stages.RunAsync(async stages =>
         {
             // A fixed high port rather than 0: not every server reports the port it picked.
-            var port = 41000 + Random.Shared.Next(2000);
-            stages.Step($"asking the server to listen on localhost:{port}");
-            await using var forwarder = await client.ForwardRemotePortAsync("localhost", port, "127.0.0.1", ((IPEndPoint)service.LocalEndPoint!).Port, Timeout());
+            await using var forwarder = await OnSomeHighPortAsync(41000, stages.Step, "",
+                port => client.ForwardRemotePortAsync("localhost", port, "127.0.0.1", ((IPEndPoint)service.LocalEndPoint!).Port, Timeout()));
 
             // Reach the forwarded port from the server's side through a tunnel: here -> server -> its forwarded port -> back here.
             // "localhost", not 127.0.0.1: when another process holds that port on 127.0.0.1, sshd may have bound only ::1 for "localhost".
@@ -130,9 +150,8 @@ public class ForwardingInteropTests
 
         await Stages.RunAsync(async stages =>
         {
-            var port = 43000 + Random.Shared.Next(2000);
-            stages.Step($"asking the server to listen on localhost:{port} (dynamic)");
-            await using var forwarder = await client.ForwardRemoteDynamicPortAsync("localhost", port, cancellationToken: Timeout());
+            await using var forwarder = await OnSomeHighPortAsync(43000, stages.Step, " (dynamic)",
+                port => client.ForwardRemoteDynamicPortAsync("localhost", port, cancellationToken: Timeout()));
 
             // Play the server-side application through a tunnel: here -> server -> its forwarded port -> back here, as SOCKS.
             // "localhost", not 127.0.0.1: when another process holds that port on 127.0.0.1, sshd may have bound only ::1 for "localhost".
