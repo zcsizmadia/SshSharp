@@ -109,6 +109,7 @@ Console.WriteLine(result.StandardOutputText);
 | Native AOT | ✅ (an AOT-compiled binary connects to a real server in CI) | ✅ (AOT-compatible; an AOT publish is checked in CI) |
 | Diagnostics | `ILogger`, `ActivitySource` tracing, `Meter` metrics (OpenTelemetry semantic conventions) | `ILogger` |
 | Fuzzing | ✅ (coverage-guided, nightly; every parser in each test run) | ❌ |
+| Fault-injection tests against real servers (cuts at any byte, either way; silent or one-way stalled networks; latency, tiny segments, low bandwidth; sessions killed on the server) | ✅ | Partial (sessions killed on the server) |
 | Mutation testing | ✅ (Stryker.NET, weekly) | ❌ |
 | Maturity | New, pre-1.0; managed crypto awaiting an outside review | More than a decade of production use |
 
