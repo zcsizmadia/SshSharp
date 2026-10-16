@@ -28,6 +28,7 @@ concurrency:
 
 jobs:
   unit:
+    if: false # EXPERIMENT (#240): MINA only
     name: unit (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 240
@@ -70,23 +71,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: OpenSSH, Alpine 3.22
-            image: alpine@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8
-            server: openssh
-            software: OpenSSH
-            strict: '1'
-          - name: Dropbear, Alpine 3.22
-            image: alpine@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8
-            server: dropbear
-            software: dropbear
-            strict: '1'
-          # Runs as the test account on an unprivileged port, as in CI.
-          - name: AsyncSSH
-            image: alpine@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8
-            server: asyncssh
-            software: AsyncSSH
-            strict: '1'
-            port: '2222'
           - name: Apache MINA SSHD
             image: alpine@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8
             server: mina
@@ -125,13 +109,13 @@ jobs:
             echo "SSHSHARP_TEST_SERVER_STRICTKEX=${{ matrix.strict }}"
           } >> "$GITHUB_ENV"
           # OpenSSH (RekeyLimit) and AsyncSSH (rekey_bytes) re-key every 32 KiB; MINA keeps its default limit (see MinaServer.java).
-          if [ "${{ matrix.server }}" != "dropbear" ] && [ "${{ matrix.server }}" != "mina" ]; then echo "SSHSHARP_TEST_SSHD_REKEY=1" >> "$GITHUB_ENV"; fi
+          if [ "${{ matrix.server }}" != "dropbear" ]; then echo "SSHSHARP_TEST_SSHD_REKEY=1" >> "$GITHUB_ENV"; fi # EXPERIMENT (#240): MINA too
           if [ "${{ matrix.server }}" = "dropbear" ]; then echo "SSHSHARP_TEST_DROPBEAR_SFTP=1" >> "$GITHUB_ENV"; fi
       - run: dotnet restore
       - run: dotnet build -c Release --no-restore -p:SshSharpInstrument=true
       - name: Loop
         # Few tests at a time, as in CI: Dropbear limits unauthenticated connections per address.
-        run: tests/stress/loop.sh "$ITERATIONS" "$RUNNER_TEMP/stress" net10.0,net8.0 "/*/*/*InteropTests/*" --maximum-parallel-tests 4
+        run: tests/stress/loop.sh "$ITERATIONS" "$RUNNER_TEMP/stress" net10.0,net8.0 "/*/*/RekeyInteropTests/*" --maximum-parallel-tests 4 # EXPERIMENT (#240)
       - name: Summary and server log
         if: always()
         run: |
@@ -146,6 +130,7 @@ jobs:
 
   # OpenSSH for Windows as in CI (password only, Git Bash as the shell, sshd at DEBUG2 for channel events).
   interop-windows:
+    if: false # EXPERIMENT (#240): MINA only
     name: interop (OpenSSH for Windows)
     runs-on: windows-latest
     timeout-minutes: 240

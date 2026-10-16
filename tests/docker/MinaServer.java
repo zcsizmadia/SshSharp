@@ -25,6 +25,7 @@ import java.util.List;
 
 import org.apache.sshd.common.config.keys.KeyUtils;
 import org.apache.sshd.common.keyprovider.KeyPairProvider;
+import org.apache.sshd.core.CoreModuleProperties;
 import org.apache.sshd.scp.server.ScpCommandFactory;
 import org.apache.sshd.server.Environment;
 import org.apache.sshd.server.ExitCallback;
@@ -58,6 +59,8 @@ public final class MinaServer {
         // SFTP and SCP see the real file system, as with sshd; relative paths start in the home directory, where the server runs.
         sshd.setSubsystemFactories(List.of(new SftpSubsystemFactory()));
         sshd.setForwardingFilter(AcceptAllForwardingFilter.INSTANCE);
+        // EXPERIMENT (#240): the 32 KiB limit back on, to catch the "Not initialized" key agreement error with a trace.
+        CoreModuleProperties.REKEY_BYTES_LIMIT.set(sshd, 32L * 1024);
         sshd.start();
         System.err.println("MINA SSHD listening on port " + port);
         Thread.currentThread().join();
