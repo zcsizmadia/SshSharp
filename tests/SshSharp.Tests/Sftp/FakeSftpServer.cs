@@ -49,7 +49,16 @@ internal sealed class FakeSftpServer
         ["fsync@openssh.com"] = "1",
         ["statvfs@openssh.com"] = "2",
         ["copy-data"] = "1",
+        ["expand-path@openssh.com"] = "1",
+        ["lsetstat@openssh.com"] = "1",
+        ["users-groups-by-id@openssh.com"] = "1",
     };
+
+    /// <summary>The user and group names users-groups-by-id@openssh.com knows (uid and gid 1000, the files' owner); other ids are unknown.</summary>
+    public Dictionary<uint, string> UserNames { get; } = new() { [1000] = "tester" };
+
+    /// <inheritdoc cref="UserNames"/>
+    public Dictionary<uint, string> GroupNames { get; } = new() { [1000] = "testers" };
 
     /// <summary>Answer home-directory for the empty user name with Failure, as OpenSSH 9.x does.</summary>
     public bool HomeDirectoryFailsForEmptyUser { get; set; }
@@ -391,6 +400,30 @@ internal sealed class FakeSftpServer
         w.WriteUInt32(type | node.Mode);
         w.WriteUInt32(node.AccessTime);
         w.WriteUInt32(node.ModifyTime);
+    }
+
+    private static uint[] ReadIds(ReadOnlySpan<byte> packed)
+    {
+        var ids = new uint[packed.Length / 4];
+        for (var i = 0; i < ids.Length; i++)
+        {
+            ids[i] = System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(packed[(i * 4)..]);
+        }
+
+        return ids;
+    }
+
+    /// <summary>One string per id, in order; an empty string for an id with no name, as OpenSSH answers.</summary>
+    private static byte[] Names(uint[] ids, Dictionary<uint, string> known)
+    {
+        var buffer = new System.Buffers.ArrayBufferWriter<byte>();
+        var w = new SshWriter(buffer);
+        foreach (var id in ids)
+        {
+            w.WriteString(known.TryGetValue(id, out var name) ? name : string.Empty);
+        }
+
+        return buffer.WrittenSpan.ToArray();
     }
 
     private static void ApplyAttributes(ref SshReader r, Node node)
@@ -813,6 +846,47 @@ internal sealed class FakeSftpServer
                         }
 
                         return Status(id, 0);
+                    }
+
+                    case "expand-path@openssh.com":
+                    {
+                        // ~ and ~/... start at the home directory, ~user/... at /home/user; the rest resolves as REALPATH does.
+                        var requested = r.ReadUtf8String();
+                        if (requested.StartsWith('~'))
+                        {
+                            var slash = requested.IndexOf('/', StringComparison.Ordinal);
+                            var user = slash < 0 ? requested[1..] : requested[1..slash];
+                            var rest = slash < 0 ? string.Empty : requested[slash..];
+                            requested = (user.Length == 0 ? Home : "/home/" + user) + rest;
+                        }
+
+                        var path = Canonical(Resolve(requested));
+                        return Build(w => { w.WriteByte(104); w.WriteUInt32(id); w.WriteUInt32(1); w.WriteString(path); w.WriteString(path); w.WriteUInt32(0); });
+                    }
+
+                    case "lsetstat@openssh.com":
+                    {
+                        // The link itself, not what it points to.
+                        if (!_nodes.TryGetValue(Resolve(r.ReadUtf8String()), out var node))
+                        {
+                            return Status(id, 2, "No such file");
+                        }
+
+                        ApplyAttributes(ref r, node);
+                        return Status(id, 0);
+                    }
+
+                    case "users-groups-by-id@openssh.com":
+                    {
+                        var users = ReadIds(r.ReadString());
+                        var groups = ReadIds(r.ReadString());
+                        return Build(w =>
+                        {
+                            w.WriteByte(201);
+                            w.WriteUInt32(id);
+                            w.WriteString(Names(users, UserNames));
+                            w.WriteString(Names(groups, GroupNames));
+                        });
                     }
 
                     case "home-directory" when HomeDirectoryFailsForEmptyUser && r.ReadUtf8String().Length == 0:

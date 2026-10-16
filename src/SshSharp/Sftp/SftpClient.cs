@@ -165,8 +165,23 @@ public sealed partial class SftpClient : IAsyncDisposable
     }
 
     /// <summary>Changes the attributes that are set in <paramref name="attributes"/> (size, owner, permissions, times).</summary>
-    public async Task SetAttributesAsync(string path, SftpFileAttributes attributes, CancellationToken cancellationToken = default)
+    public Task SetAttributesAsync(string path, SftpFileAttributes attributes, CancellationToken cancellationToken = default) =>
+        SetAttributesAsync(path, attributes, followSymbolicLinks: true, cancellationToken);
+
+    /// <summary>
+    /// Changes the attributes that are set in <paramref name="attributes"/>; of a symbolic link itself when
+    /// <paramref name="followSymbolicLinks"/> is false (<c>lsetstat@openssh.com</c>, OpenSSH 8.0+: owner, permissions and times; a
+    /// server may refuse a size).
+    /// </summary>
+    /// <exception cref="NotSupportedException">Not following links, and the server lacks <c>lsetstat@openssh.com</c>.</exception>
+    public async Task SetAttributesAsync(string path, SftpFileAttributes attributes, bool followSymbolicLinks, CancellationToken cancellationToken = default)
     {
+        if (!followSymbolicLinks)
+        {
+            await SetLinkAttributesAsync(path, attributes, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
         CheckPath(path);
         ArgumentNullException.ThrowIfNull(attributes);
         var reply = await _channel.RequestAsync(SftpProtocol.SetStat, w =>

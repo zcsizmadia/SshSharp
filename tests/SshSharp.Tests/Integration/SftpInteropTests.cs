@@ -203,6 +203,26 @@ public class SftpInteropTests
         await sftp.CreateDirectoryAsync(root, cancellationToken: Timeout());
         try
         {
+            // OpenSSH's path and owner extensions, where the server has them: ~ is the home directory, ~/x resolves under it, and the
+            // owner of a new file has a name, except on a chrooted SFTP-only server, which has no user database to name it from (the
+            // name is then left out).
+            if (sftp.Extensions.ContainsKey("expand-path@openssh.com"))
+            {
+                var home = await sftp.ExpandPathAsync("~", Timeout());
+                await Assert.That(await sftp.ExpandPathAsync("~/" + root, Timeout())).IsEqualTo(home.TrimEnd('/') + "/" + root);
+            }
+
+            if (sftp.Extensions.ContainsKey("users-groups-by-id@openssh.com")
+                && await sftp.GetAttributesAsync(root, cancellationToken: Timeout()) is { UserId: { } uid, GroupId: { } gid })
+            {
+                var (users, groups) = await sftp.GetOwnerNamesAsync([uid], [gid], Timeout());
+                if (!RealServer.SftpOnly)
+                {
+                    await Assert.That(users[uid]).IsNotEmpty();
+                    await Assert.That(groups[gid]).IsNotEmpty();
+                }
+            }
+
             // A few MiB both ways, pipelined; the bytes must come back identical.
             var data = RandomNumberGenerator.GetBytes(3 * 1024 * 1024 + 17);
             var uploaded = await sftp.UploadAsync(new MemoryStream(data), root + "/blob", cancellationToken: Timeout());
@@ -273,6 +293,15 @@ public class SftpInteropTests
                 else if (link.IsSymbolicLink)
                 {
                     await Assert.That((await sftp.ReadSymbolicLinkAsync(root + "/link", Timeout())).EndsWith("blob", StringComparison.Ordinal)).IsTrue();
+                    if (sftp.Extensions.ContainsKey("lsetstat@openssh.com"))
+                    {
+                        // The link's own times (Linux cannot change a link's permissions, so OpenSSH refuses those); the file keeps its own.
+                        var linkTime = new DateTimeOffset(2001, 2, 3, 4, 5, 6, TimeSpan.Zero);
+                        await sftp.SetAttributesAsync(root + "/link", new SftpFileAttributes { LastAccessTime = linkTime, LastWriteTime = linkTime },
+                            followSymbolicLinks: false, Timeout());
+                        await Assert.That((await sftp.GetAttributesAsync(root + "/link", followSymbolicLinks: false, Timeout())).LastWriteTime).IsEqualTo(linkTime);
+                        await Assert.That((await sftp.GetAttributesAsync(root + "/blob", cancellationToken: Timeout())).LastWriteTime).IsNotEqualTo(linkTime);
+                    }
                 }
                 else
                 {

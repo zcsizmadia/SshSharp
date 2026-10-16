@@ -104,7 +104,8 @@ files, `DownloadAsync` is much faster. `Length` is the size when the stream open
 | Method | Does |
 |---|---|
 | `GetAttributesAsync(path, followSymbolicLinks)` | Size, owner, permissions, times, file type (`IsDirectory`, `IsRegularFile`, `IsSymbolicLink`). |
-| `SetAttributesAsync(path, attributes)` | Changes the attributes that are set: `Size`, `Permissions`, `LastWriteTime`, ... |
+| `SetAttributesAsync(path, attributes, followSymbolicLinks)` | Changes the attributes that are set: `Size`, `Permissions`, `LastWriteTime`, ... With `followSymbolicLinks: false`, those of a link itself (`lsetstat@openssh.com`; Linux keeps a link's permissions, but its times change). |
+| `GetOwnerNamesAsync(userIds, groupIds)` | User and group names for owner ids, as `ls -l` shows them (`users-groups-by-id@openssh.com`). |
 | `ExistsAsync(path)` | Whether the path exists. |
 | `ListDirectoryAsync(path)` | The entries, as `IAsyncEnumerable<SftpFileInfo>`, without `.` and `..`. A name that is not valid UTF-8 is listed with replacement characters (and cannot be opened by that name); a listing stops with an error after 1,000,000 entries. |
 | `CreateDirectoryAsync`, `DeleteDirectoryAsync` | One directory (deleting needs it empty). |
@@ -113,6 +114,7 @@ files, `DownloadAsync` is much faster. `Length` is the size when the stream open
 | `CreateSymbolicLinkAsync`, `ReadSymbolicLinkAsync` | Symbolic links. |
 | `CreateHardLinkAsync` | Hard links (`hardlink@openssh.com`). |
 | `GetFullPathAsync`, `GetHomeDirectoryAsync` | Resolve a path; the login directory. |
+| `ExpandPathAsync(path)` | Resolve a path with `~`, `~/dir` or `~user/dir` in it, as `sftp` does (`expand-path@openssh.com`; without it, only your own `~`). |
 | `CopyFileAsync(source, destination, overwrite)` | Copy on the server, without the data passing through this machine (`copy-data`). Copying a file onto itself is refused. |
 | `GetFileSystemInfoAsync(path)` | Size and free space of the file system, as `df` shows them (`statvfs@openssh.com`). |
 

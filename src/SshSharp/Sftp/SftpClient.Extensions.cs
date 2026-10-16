@@ -136,6 +136,115 @@ public sealed partial class SftpClient
         return true;
     }
 
+    /// <summary>
+    /// <paramref name="path"/> with a leading <c>~</c> or <c>~user</c> expanded and made canonical, as <c>sftp</c> does for
+    /// <c>cd ~/dir</c> (<c>expand-path@openssh.com</c>, OpenSSH 8.7+). Without the extension, <c>~</c> and <c>~/...</c> start at
+    /// <see cref="GetHomeDirectoryAsync"/>, and a path without a tilde resolves as <see cref="GetFullPathAsync"/> does.
+    /// </summary>
+    /// <exception cref="NotSupportedException">The path starts with <c>~user</c> and the server lacks <c>expand-path@openssh.com</c>.</exception>
+    /// <exception cref="SftpException">The path cannot be resolved, or the user is unknown.</exception>
+    public async Task<string> ExpandPathAsync(string path, CancellationToken cancellationToken = default)
+    {
+        CheckPath(path);
+        if (Extensions.ContainsKey(SftpProtocol.ExpandPathExtension))
+        {
+            var reply = await _channel.RequestAsync(SftpProtocol.Extended, w =>
+            {
+                w.WriteString(SftpProtocol.ExpandPathExtension);
+                w.WriteString(path);
+            }, cancellationToken).ConfigureAwait(false);
+            return SingleName(reply, "Expanding", path);
+        }
+
+        if (!path.StartsWith('~'))
+        {
+            return await GetFullPathAsync(path, cancellationToken).ConfigureAwait(false);
+        }
+
+        if (path != "~" && !path.StartsWith("~/", StringComparison.Ordinal))
+        {
+            Require(SftpProtocol.ExpandPathExtension, "expand another user's home directory");
+        }
+
+        var home = await GetHomeDirectoryAsync(cancellationToken).ConfigureAwait(false);
+        return path.Length <= 2 ? home : await GetFullPathAsync(home.TrimEnd('/') + "/" + path[2..], cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>The names of user and group ids, as <c>ls -l</c> shows them (<c>users-groups-by-id@openssh.com</c>, OpenSSH 9.1+).</summary>
+    /// <returns>The names the server knows; an id it cannot name is left out.</returns>
+    /// <exception cref="NotSupportedException">The server lacks <c>users-groups-by-id@openssh.com</c>.</exception>
+    public async Task<(IReadOnlyDictionary<uint, string> UserNames, IReadOnlyDictionary<uint, string> GroupNames)> GetOwnerNamesAsync(
+        IEnumerable<uint> userIds, IEnumerable<uint> groupIds, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(userIds);
+        ArgumentNullException.ThrowIfNull(groupIds);
+        Require(SftpProtocol.UsersGroupsByIdExtension, "name user and group ids");
+        var users = userIds.Distinct().ToArray();
+        var groups = groupIds.Distinct().ToArray();
+        var reply = await _channel.RequestAsync(SftpProtocol.Extended, w =>
+        {
+            w.WriteString(SftpProtocol.UsersGroupsByIdExtension);
+            WriteIds(w, users);
+            WriteIds(w, groups);
+        }, cancellationToken).ConfigureAwait(false);
+        if (reply.Type != SftpProtocol.ExtendedReply)
+        {
+            ThrowStatus(reply, "Naming user and group ids", null);
+        }
+
+        // The user names come first in the reply, then the group names.
+        return Parse<(IReadOnlyDictionary<uint, string>, IReadOnlyDictionary<uint, string>)>(reply, (ref SshReader r) =>
+            (ReadNames(r.ReadString(), users), ReadNames(r.ReadString(), groups)));
+    }
+
+    /// <summary>The ids as one string of uint32 values, as <c>users-groups-by-id@openssh.com</c> takes them.</summary>
+    private static void WriteIds(SshWriter w, uint[] ids)
+    {
+        var bytes = new byte[ids.Length * 4];
+        for (var i = 0; i < ids.Length; i++)
+        {
+            System.Buffers.Binary.BinaryPrimitives.WriteUInt32BigEndian(bytes.AsSpan(i * 4), ids[i]);
+        }
+
+        w.WriteString(bytes);
+    }
+
+    /// <summary>One name per id, in the request's order; an empty name (unknown id) is left out.</summary>
+    private static Dictionary<uint, string> ReadNames(ReadOnlySpan<byte> names, uint[] ids)
+    {
+        var reader = new SshReader(names);
+        var result = new Dictionary<uint, string>();
+        foreach (var id in ids)
+        {
+            if (reader.ReadUtf8String() is { Length: > 0 } name)
+            {
+                result[id] = name;
+            }
+        }
+
+        if (!reader.IsEmpty)
+        {
+            throw new SshProtocolException("More names than ids in the users-groups-by-id@openssh.com reply.");
+        }
+
+        return result;
+    }
+
+    /// <summary>setstat on the link itself (<c>lsetstat@openssh.com</c>).</summary>
+    private async Task SetLinkAttributesAsync(string path, SftpFileAttributes attributes, CancellationToken cancellationToken)
+    {
+        CheckPath(path);
+        ArgumentNullException.ThrowIfNull(attributes);
+        Require(SftpProtocol.LSetStatExtension, "set the attributes of a symbolic link itself");
+        var reply = await _channel.RequestAsync(SftpProtocol.Extended, w =>
+        {
+            w.WriteString(SftpProtocol.LSetStatExtension);
+            w.WriteString(path);
+            attributes.Write(w);
+        }, cancellationToken).ConfigureAwait(false);
+        ExpectOk(reply, "Setting the link's attributes", path);
+    }
+
     private void Require(string extension, string what)
     {
         if (!Extensions.ContainsKey(extension))
