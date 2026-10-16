@@ -8,11 +8,11 @@ namespace SshSharp;
 /// <see cref="LocalEndPoint"/> are relayed through the server to <see cref="RemoteHost"/>:<see cref="RemotePort"/>. Dispose it to stop
 /// listening and close the forwarded connections.
 /// </summary>
-public sealed class SshPortForwarder : IAsyncDisposable
+public sealed class SshLocalPortForwarder : IAsyncDisposable
 {
     private readonly LocalListener _listener;
 
-    internal SshPortForwarder(LocalListener listener, string remoteHost, int remotePort)
+    internal SshLocalPortForwarder(LocalListener listener, string remoteHost, int remotePort)
     {
         _listener = listener;
         RemoteHost = remoteHost;
@@ -42,11 +42,11 @@ public sealed class SshPortForwarder : IAsyncDisposable
 /// <see cref="LocalEndPoint"/> as a SOCKS 4, 4a or 5 proxy (CONNECT, no authentication), and each connection is made by the server to
 /// the address the application asked for. Dispose it to stop listening and close the connections.
 /// </summary>
-public sealed class SshSocksProxy : IAsyncDisposable
+public sealed class SshDynamicPortForwarder : IAsyncDisposable
 {
     private readonly LocalListener _listener;
 
-    internal SshSocksProxy(LocalListener listener) => _listener = listener;
+    internal SshDynamicPortForwarder(LocalListener listener) => _listener = listener;
 
     /// <summary>The local address and port being listened on (with the actual port when 0 was asked for).</summary>
     public IPEndPoint LocalEndPoint => _listener.LocalEndPoint;

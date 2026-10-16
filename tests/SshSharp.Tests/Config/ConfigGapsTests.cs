@@ -223,12 +223,12 @@ public sealed class ConfigGapsTests : IDisposable
         using var hostKey = SshPrivateKey.Generate(SshKeyType.Ed25519);
         using var authority = SshPrivateKey.Generate(SshKeyType.Ed25519);
         var certificate = SshCertificate.FromBlob(TestKeys.Certificate(authority, hostKey.PublicKey.ToArray(), SshCertificateType.Host, ["h"]));
-        var presented = new SshHostKey(certificate.CertificateType, hostKey.KeyType, hostKey.Fingerprint, hostKey.PublicKey, 256) { Certificate = certificate };
+        var presented = new SshHostKey(certificate.Algorithm, hostKey.KeyType, hostKey.Fingerprint, hostKey.PublicKey, 256) { Certificate = certificate };
         var tokens = new SshTokenContext("h", "h", 22, "user", "local", _dir, "localhost", _ => null);
 
         foreach (var (asCertificate, type, blob) in new[]
         {
-            (true, certificate.CertificateType, certificate.Blob.ToArray()),
+            (true, certificate.Algorithm, certificate.Blob.ToArray()),
             (false, hostKey.KeyType, hostKey.PublicKey.ToArray()),
         })
         {

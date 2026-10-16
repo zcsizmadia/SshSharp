@@ -67,7 +67,7 @@ public sealed class AgentKeyManagementTests : IDisposable
 
         // PROTOCOL.certkeys: string certificate, then only the private fields (Ed25519: ENC(A) and k || ENC(A); ECDSA: d; RSA: d, iqmp, p, q).
         var added = fake.AddRequests.Single();
-        await Assert.That(added.KeyType).IsEqualTo(certificate.CertificateType);
+        await Assert.That(added.KeyType).IsEqualTo(certificate.Algorithm);
         static (bool CertificateFirst, bool NothingLeft) Layout(byte[] fields, byte[] certificateBlob, int count)
         {
             var reader = new SshReader(fields);

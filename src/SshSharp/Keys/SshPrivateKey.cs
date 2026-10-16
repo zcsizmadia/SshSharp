@@ -319,7 +319,7 @@ public abstract class SshPrivateKey : IDisposable
         private readonly SshPrivateKey _key;
 
         public CertifiedKey(SshPrivateKey key, SshCertificate certificate)
-            : base(certificate.CertificateType, certificate.Blob.ToArray(), key.Comment)
+            : base(certificate.Algorithm, certificate.Blob.ToArray(), key.Comment)
         {
             _key = key;
             Certificate = certificate;

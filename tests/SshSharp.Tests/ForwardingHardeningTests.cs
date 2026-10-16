@@ -114,7 +114,7 @@ public class ForwardingHardeningTests
             return host is not ("127.0.0.1" or "::1");
         }, Timeout());
 
-        await using var remote = (await server.ConnectForwardedAsync(forwarder.Port))!;
+        await using var remote = (await server.ConnectForwardedAsync(forwarder.RemotePort))!;
         await remote.WriteAsync(Socks5ConnectByName(spelling, service.Port), Timeout());
 
         await Assert.That(await SocksReplyAsync(remote)).IsEqualTo((byte)5); // refused
@@ -146,7 +146,7 @@ public class ForwardingHardeningTests
             return host is "localhost" or "127.0.0.1"; // the name, and its IPv4 address (the service listens there)
         }, Timeout());
 
-        await using var remote = (await server.ConnectForwardedAsync(forwarder.Port))!;
+        await using var remote = (await server.ConnectForwardedAsync(forwarder.RemotePort))!;
         await remote.WriteAsync(Socks5ConnectByName("localhost", service.Port), Timeout());
 
         await Assert.That(await SocksReplyAsync(remote)).IsEqualTo((byte)0);
@@ -169,7 +169,7 @@ public class ForwardingHardeningTests
         var forwarder = await client.ForwardRemoteDynamicPortAsync("localhost", 0,
             (_, _) => throw new InvalidOperationException("filter bug"), Timeout());
 
-        await using var remote = (await server.ConnectForwardedAsync(forwarder.Port))!;
+        await using var remote = (await server.ConnectForwardedAsync(forwarder.RemotePort))!;
         await remote.WriteAsync(Socks5ConnectByName("127.0.0.1", service.Port), Timeout());
 
         await Assert.That(await SocksReplyAsync(remote)).IsEqualTo((byte)5);
@@ -186,9 +186,9 @@ public class ForwardingHardeningTests
         await using var client = await ConnectAsync(server, maxForwarded: 2);
         await using var forwarder = await client.ForwardRemotePortAsync("localhost", 0, "127.0.0.1", service.Port, Timeout());
 
-        var first = (await server.ConnectForwardedAsync(forwarder.Port))!;
-        await using var second = (await server.ConnectForwardedAsync(forwarder.Port))!;
-        await Assert.That(await server.ConnectForwardedAsync(forwarder.Port)).IsNull(); // the third is refused
+        var first = (await server.ConnectForwardedAsync(forwarder.RemotePort))!;
+        await using var second = (await server.ConnectForwardedAsync(forwarder.RemotePort))!;
+        await Assert.That(await server.ConnectForwardedAsync(forwarder.RemotePort)).IsNull(); // the third is refused
 
         // Ending one frees its slot.
         await first.DisposeAsync();
@@ -198,7 +198,7 @@ public class ForwardingHardeningTests
             await Task.Delay(20);
         }
 
-        await using var third = await server.ConnectForwardedAsync(forwarder.Port);
+        await using var third = await server.ConnectForwardedAsync(forwarder.RemotePort);
         await Assert.That(third).IsNotNull();
         await Assert.That(() => new SshClientOptions { UserName = "u", HostKeyVerifier = SshHostKeyVerifier.Pinned("SHA256:x"), MaxForwardedConnections = 0 })
             .Throws<ArgumentOutOfRangeException>();

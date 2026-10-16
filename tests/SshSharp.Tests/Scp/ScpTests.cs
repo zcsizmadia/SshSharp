@@ -176,7 +176,7 @@ public sealed class ScpTests : IDisposable
 
         var unseekable = new UnseekableStream(Text("x"));
         await Assert.That(() => client.UploadAsync(unseekable, "/tmp/x", cancellationToken: Timeout())).Throws<ArgumentException>();
-        await client.UploadAsync(unseekable, "/tmp/x", length: 1, new SshScpOptions { FileMode = Convert.ToInt32("600", 8) }, Timeout());
+        await client.UploadAsync(unseekable, "/tmp/x", length: 1, new SshScpOptions { FileMode = UnixFileMode.UserRead | UnixFileMode.UserWrite }, Timeout());
         await Assert.That(received.Last()).IsEqualTo("C0600 1 x");
 
         // A stream shorter than it claimed fails rather than sending a short file.
@@ -196,7 +196,7 @@ public sealed class ScpTests : IDisposable
         await System.IO.File.WriteAllTextAsync(Path.Combine(root.FullName, "css", "site.css"), "body{}");
         Directory.CreateDirectory(Path.Combine(root.FullName, "empty"));
 
-        await client.UploadDirectoryAsync(root.FullName, "/var/www", new SshScpOptions { PreserveTimes = true }, Timeout());
+        await client.UploadDirectoryAsync(root.FullName, "/var/www", new SshScpOptions { Preserve = true }, Timeout());
 
         await Assert.That(server.Commands.Single()).IsEqualTo("scp -r -t -p -- '/var/www'");
         await Assert.That(received.Where(l => l[0] != 'T')).IsEquivalentTo(new[] { "D0755 0 site", "C0644 11 index.html", "D0755 0 css", "C0644 6 site.css", "E", "D0755 0 empty", "E", "E" }, TUnit.Assertions.Enums.CollectionOrdering.Matching);
@@ -249,7 +249,7 @@ public sealed class ScpTests : IDisposable
         };
         await using var client = await ConnectAsync(server);
         var target = Path.Combine(_dir, "fresh"); // does not exist: becomes the directory
-        await client.DownloadDirectoryAsync("/var/log/app", target, new SshScpOptions { PreserveTimes = true }, Timeout());
+        await client.DownloadDirectoryAsync("/var/log/app", target, new SshScpOptions { Preserve = true }, Timeout());
 
         await Assert.That(await System.IO.File.ReadAllTextAsync(Path.Combine(target, "app.log"))).IsEqualTo("started\n");
         await Assert.That(await System.IO.File.ReadAllTextAsync(Path.Combine(target, "old", "app.1.log"))).IsEqualTo("before\n");

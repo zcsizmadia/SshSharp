@@ -38,7 +38,7 @@ public sealed class CertificateTests : IDisposable
         var blob = TestKeys.Certificate(_authority, key.Blob, SshCertificateType.Host, [Host, "10.0.0.5"], after, before, keyId: "web-1", serial: 42);
         var certificate = SshCertificate.Parse(TestKeys.CertificateLine(blob));
 
-        await Assert.That(certificate.CertificateType).IsEqualTo("ssh-ed25519-cert-v01@openssh.com");
+        await Assert.That(certificate.Algorithm).IsEqualTo("ssh-ed25519-cert-v01@openssh.com");
         await Assert.That(certificate.KeyType).IsEqualTo("ssh-ed25519");
         await Assert.That(certificate.PublicKey.ToArray()).IsEquivalentTo(key.Blob);
         await Assert.That(certificate.Fingerprint).IsEqualTo(key.Fingerprint);

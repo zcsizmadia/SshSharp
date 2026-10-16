@@ -3,17 +3,27 @@ namespace SshSharp.Scp;
 /// <summary>Options for the SCP transfers in <see cref="SshScpExtensions"/>.</summary>
 public sealed class SshScpOptions
 {
-    /// <summary>Keep modification and access times (<c>scp -p</c>), and for downloads the permission bits on Unix. Default false.</summary>
-    public bool PreserveTimes { get; init; }
+    /// <summary>
+    /// Keep the source's modification and access times and its permission bits, as <c>scp -p</c> does: on uploads the server gets
+    /// them, and on downloads the local file gets them (the permission bits on Unix only). Default false.
+    /// </summary>
+    public bool Preserve { get; init; }
+
+    /// <summary>Keep times and permission bits: <see cref="Preserve"/>, which is what this always did.</summary>
+    [Obsolete("Use Preserve: it keeps the permission bits too, as scp -p does (#88).")]
+    public bool PreserveTimes { get => Preserve; init => Preserve = value; }
 
     /// <summary>Receives progress per file: its path, the bytes done so far, and its size.</summary>
     public IProgress<SshScpProgress>? Progress { get; init; }
 
     /// <summary>The permission bits for uploaded files when they are not preserved from the source. Default 0644.</summary>
-    public int FileMode { get; init; } = Convert.ToInt32("644", 8);
+    public UnixFileMode FileMode { get; init; } =
+        UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead | UnixFileMode.OtherRead;
 
     /// <summary>The permission bits for directories created by recursive uploads. Default 0755.</summary>
-    public int DirectoryMode { get; init; } = Convert.ToInt32("755", 8);
+    public UnixFileMode DirectoryMode { get; init; } =
+        UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute | UnixFileMode.GroupRead | UnixFileMode.GroupExecute
+        | UnixFileMode.OtherRead | UnixFileMode.OtherExecute;
 
     /// <summary>The server's scp program. Default <c>scp</c>.</summary>
     public string ScpCommand { get; init; } = "scp";

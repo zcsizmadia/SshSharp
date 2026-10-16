@@ -131,7 +131,7 @@ public sealed class SshHostConfig
     /// <summary>The name to look up in known_hosts instead of the host (<c>HostKeyAlias</c>).</summary>
     public string? HostKeyAlias { get; init; }
 
-    /// <summary>Raw <c>HostKeyAlgorithms</c> specification (apply with <see cref="SshAlgorithmList.Apply"/>), or null.</summary>
+    /// <summary>Raw <c>HostKeyAlgorithms</c> specification (a list, or <c>+</c>, <c>-</c> or <c>^</c> applied to the defaults, as in OpenSSH), or null.</summary>
     public string? HostKeyAlgorithms { get; init; }
 
     /// <summary>Raw <c>KexAlgorithms</c> specification, or null.</summary>

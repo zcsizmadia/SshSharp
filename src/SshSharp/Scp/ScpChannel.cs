@@ -27,7 +27,7 @@ internal sealed class ScpChannel : IAsyncDisposable
     /// <summary>Starts <c>scp {flags} -- {path}</c> on the server, with the path quoted for its shell.</summary>
     public static async Task<ScpChannel> StartAsync(SshClient client, SshScpOptions options, string flags, string path, CancellationToken cancellationToken)
     {
-        var command = $"{options.ScpCommand} {flags}{(options.PreserveTimes ? " -p" : "")} -- {QuoteForShell(path)}";
+        var command = $"{options.ScpCommand} {flags}{(options.Preserve ? " -p" : "")} -- {QuoteForShell(path)}";
         var session = await client.StartCommandAsync(command, cancellationToken: cancellationToken).ConfigureAwait(false);
         return new ScpChannel(session);
     }

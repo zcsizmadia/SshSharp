@@ -117,9 +117,9 @@ public class RemoteDynamicForwardingTests
         await Assert.That(forwarder.IsDynamic).IsTrue();
         await Assert.That(forwarder.LocalHost).IsEqualTo(string.Empty);
         await Assert.That(forwarder.LocalPort).IsEqualTo(0);
-        await Assert.That(server.RemoteForwards[forwarder.Port]).IsEqualTo("localhost");
+        await Assert.That(server.RemoteForwards[forwarder.RemotePort]).IsEqualTo("localhost");
 
-        await using var remote = (await server.ConnectForwardedAsync(forwarder.Port))!;
+        await using var remote = (await server.ConnectForwardedAsync(forwarder.RemotePort))!;
         await remote.WriteAsync(Socks5Greeting, Timeout());
         await Assert.That(await ReadExactlyAsync(remote, 2)).IsEquivalentTo(new byte[] { 5, 0 });
         await remote.WriteAsync(Socks5Connect("localhost", service.Port), Timeout());
@@ -161,7 +161,7 @@ public class RemoteDynamicForwardingTests
         await using var client = await ConnectAsync(server);
         await using var forwarder = await client.ForwardRemoteDynamicPortAsync("localhost", 0, cancellationToken: Timeout());
 
-        await using var remote = (await server.ConnectForwardedAsync(forwarder.Port))!;
+        await using var remote = (await server.ConnectForwardedAsync(forwarder.RemotePort))!;
         await remote.WriteAsync((byte[])[.. Socks5Greeting, .. Socks5Connect("127.0.0.1", service.Port), .. "early data"u8], Timeout());
         ((DuplexStream)remote).CloseWrite();
 
@@ -187,7 +187,7 @@ public class RemoteDynamicForwardingTests
             return host == "allowed.example";
         }, Timeout());
 
-        await using var remote = (await server.ConnectForwardedAsync(forwarder.Port))!;
+        await using var remote = (await server.ConnectForwardedAsync(forwarder.RemotePort))!;
         await remote.WriteAsync((byte[])[.. Socks5Greeting, .. Socks5Connect("localhost", service.Port)], Timeout());
 
         await Assert.That(await ReadExactlyAsync(remote, 2)).IsEquivalentTo(new byte[] { 5, 0 });
@@ -211,7 +211,7 @@ public class RemoteDynamicForwardingTests
         await using var client = await ConnectAsync(server);
         await using var forwarder = await client.ForwardRemoteDynamicPortAsync("localhost", 0, cancellationToken: Timeout());
 
-        await using var remote = (await server.ConnectForwardedAsync(forwarder.Port))!;
+        await using var remote = (await server.ConnectForwardedAsync(forwarder.RemotePort))!;
         await remote.WriteAsync((byte[])[.. Socks5Greeting, .. Socks5Connect("127.0.0.1", unused)], Timeout());
 
         await Assert.That(await ReadExactlyAsync(remote, 2)).IsEquivalentTo(new byte[] { 5, 0 });
@@ -226,7 +226,7 @@ public class RemoteDynamicForwardingTests
         await using var client = await ConnectAsync(server);
         await using var forwarder = await client.ForwardRemoteDynamicPortAsync("localhost", 0, cancellationToken: Timeout());
 
-        await using var remote = (await server.ConnectForwardedAsync(forwarder.Port))!;
+        await using var remote = (await server.ConnectForwardedAsync(forwarder.RemotePort))!;
         await remote.WriteAsync("GET / HTTP/1.1\r\n\r\n"u8.ToArray(), Timeout());
 
         await Assert.That(await ReadToEndAsync(remote)).IsEqualTo(string.Empty);
@@ -271,7 +271,7 @@ public class RemoteDynamicForwardingTests
 
                 await Assert.That(client.RemoteForwardings.Count).IsEqualTo(2);
                 await Assert.That(client.RemoteForwardings[0].IsDynamic).IsTrue();
-                await Assert.That(client.RemoteForwardings[0].Port).IsEqualTo(1080);
+                await Assert.That(client.RemoteForwardings[0].RemotePort).IsEqualTo(1080);
                 await Assert.That(server.RemoteForwards[1080]).IsEqualTo("localhost");
                 await Assert.That(client.RemoteForwardings[1].IsDynamic).IsFalse();
             }

@@ -7,7 +7,7 @@ namespace SshSharp;
 
 /// <summary>
 /// A remote port forwarding (<c>ssh -R</c>) started by <see cref="SshClient.ForwardRemotePortAsync"/>: the server listens on
-/// <see cref="BindAddress"/>:<see cref="Port"/>, and each connection made to it is relayed to <see cref="LocalHost"/>:<see cref="LocalPort"/>
+/// <see cref="BindAddress"/>:<see cref="RemotePort"/>, and each connection made to it is relayed to <see cref="LocalHost"/>:<see cref="LocalPort"/>
 /// as reached from this machine. A remote dynamic forwarding (<see cref="SshClient.ForwardRemoteDynamicPortAsync"/>,
 /// <see cref="IsDynamic"/>) instead answers each connection as a SOCKS proxy and connects where it asks. Dispose it to cancel the
 /// forwarding on the server and close the forwarded connections.
@@ -26,7 +26,7 @@ public sealed class SshRemotePortForwarder : IAsyncDisposable
         Func<SshRemotePortForwarder, CancellationToken, Task> cancel, CancellationToken connectionClosed)
     {
         BindAddress = bindAddress;
-        Port = port;
+        RemotePort = port;
         LocalHost = localHost;
         LocalPort = localPort;
         _logger = logger;
@@ -53,7 +53,11 @@ public sealed class SshRemotePortForwarder : IAsyncDisposable
     public string BindAddress { get; }
 
     /// <summary>The port the server listens on (the one it picked when 0 was asked for).</summary>
-    public int Port { get; }
+    public int RemotePort { get; }
+
+    /// <summary>The port the server listens on: <see cref="RemotePort"/>.</summary>
+    [Obsolete("Use RemotePort, named as on SshLocalPortForwarder (#88).")]
+    public int Port => RemotePort;
 
     /// <summary>Where each forwarded connection goes, as reached from this machine.</summary>
     public string LocalHost { get; }
@@ -105,7 +109,7 @@ public sealed class SshRemotePortForwarder : IAsyncDisposable
         }
         catch (Exception ex)
         {
-            SshLog.RemoteForwardingConnectFailed(_logger, IsDynamic ? Port : LocalPort, ex.GetType().Name);
+            SshLog.RemoteForwardingConnectFailed(_logger, IsDynamic ? RemotePort : LocalPort, ex.GetType().Name);
             await CloseQuietlyAsync(channel).ConfigureAwait(false);
         }
         finally
@@ -301,7 +305,7 @@ public sealed class SshRemotePortForwarder : IAsyncDisposable
     private async Task RefuseAsync(SshChannelStream stream, SocksRequest target, string reason)
     {
         // The destination stays out of the log: host names are not logged (see SshLog).
-        SshLog.RemoteDynamicConnectFailed(_logger, Port, reason);
+        SshLog.RemoteDynamicConnectFailed(_logger, RemotePort, reason);
         try
         {
             await SocksHandshake.ReplyAsync(stream, target, success: false, _stop.Token).ConfigureAwait(false);

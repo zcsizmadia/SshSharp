@@ -4,7 +4,7 @@ namespace SshSharp.Config;
 /// Applies an OpenSSH algorithm list specification (<c>Ciphers</c>, <c>KexAlgorithms</c>, ...) to a default list:
 /// a plain list replaces it, <c>+</c> appends, <c>-</c> removes (wildcards allowed), <c>^</c> puts the algorithms first.
 /// </summary>
-public static class SshAlgorithmList
+internal static class SshAlgorithmList
 {
     /// <summary>Applies <paramref name="specification"/> to <paramref name="defaults"/>.</summary>
     /// <param name="specification">The comma-separated value from the config, possibly starting with <c>+</c>, <c>-</c> or <c>^</c>.</param>

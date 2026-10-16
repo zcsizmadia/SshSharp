@@ -94,14 +94,17 @@ public class RemoteForwardingTests
         await using var forwarder = await client.ForwardRemotePortAsync("localhost", 0, "127.0.0.1", service.Port, Timeout());
 
         // Port 0: the server picked one and said which.
-        await Assert.That(forwarder.Port).IsEqualTo(40000);
+        await Assert.That(forwarder.RemotePort).IsEqualTo(40000);
+#pragma warning disable CS0618 // the 0.6.0 name still works (#88)
+        await Assert.That(forwarder.Port).IsEqualTo(forwarder.RemotePort);
+#pragma warning restore CS0618
         await Assert.That(forwarder.BindAddress).IsEqualTo("localhost");
         await Assert.That(forwarder.LocalPort).IsEqualTo(service.Port);
         await Assert.That(server.RemoteForwards[40000]).IsEqualTo("localhost");
 
         var answers = await Task.WhenAll(Enumerable.Range(0, 3).Select(async i =>
         {
-            var remote = await server.ConnectForwardedAsync(forwarder.Port);
+            var remote = await server.ConnectForwardedAsync(forwarder.RemotePort);
             await using (remote!)
             {
                 return await ExchangeAsync(remote!, $"hello {i}");
@@ -117,7 +120,7 @@ public class RemoteForwardingTests
         await using var server = new FakeSessionServer();
         await using var client = await ConnectAsync(server);
         await using var forwarder = await client.ForwardRemotePortAsync("", 8080, "localhost", service.Port, Timeout());
-        await Assert.That(forwarder.Port).IsEqualTo(8080);
+        await Assert.That(forwarder.RemotePort).IsEqualTo(8080);
         var remote = await server.ConnectForwardedAsync(8080, connectedAddress: "0.0.0.0");
         await Assert.That(await ExchangeAsync(remote!, "x")).IsEqualTo("X");
     }
@@ -142,7 +145,7 @@ public class RemoteForwardingTests
         await Assert.That(await server.ConnectForwardedAsync(9999)).IsNull();
         using var service = new UpperCaseListener();
         await using var forwarder = await client.ForwardRemotePortAsync("localhost", 0, "127.0.0.1", service.Port, Timeout());
-        await Assert.That(await server.ConnectForwardedAsync(forwarder.Port + 1)).IsNull();
+        await Assert.That(await server.ConnectForwardedAsync(forwarder.RemotePort + 1)).IsNull();
         await Assert.That(client.IsConnected).IsTrue();
     }
 
@@ -159,7 +162,7 @@ public class RemoteForwardingTests
         await using var server = new FakeSessionServer();
         await using var client = await ConnectAsync(server);
         await using var forwarder = await client.ForwardRemotePortAsync("localhost", 0, "127.0.0.1", unusedPort, Timeout());
-        var remote = await server.ConnectForwardedAsync(forwarder.Port);
+        var remote = await server.ConnectForwardedAsync(forwarder.RemotePort);
         using var buffer = new MemoryStream();
         await remote!.CopyToAsync(buffer, Timeout()); // ends: the client closed the channel
         await Assert.That(buffer.Length).IsEqualTo(0);
@@ -173,7 +176,7 @@ public class RemoteForwardingTests
         await using var server = new FakeSessionServer();
         await using var client = await ConnectAsync(server);
         var forwarder = await client.ForwardRemotePortAsync("localhost", 0, "127.0.0.1", service.Port, Timeout());
-        var port = forwarder.Port;
+        var port = forwarder.RemotePort;
         await forwarder.DisposeAsync();
         await forwarder.DisposeAsync(); // twice is harmless
 
@@ -183,7 +186,7 @@ public class RemoteForwardingTests
 
         // The same port can be forwarded again.
         await using var again = await client.ForwardRemotePortAsync("localhost", port, "127.0.0.1", service.Port, Timeout());
-        await Assert.That(again.Port).IsEqualTo(port);
+        await Assert.That(again.RemotePort).IsEqualTo(port);
     }
 
     [Test]
