@@ -47,9 +47,9 @@ internal sealed class RevokedKeyList
     /// Parsed files by full path, with the SHA-256 of the bytes they were parsed from. The file is still read on every check (it is
     /// security configuration: an edit must take effect at once, whatever the file times say), but parsed again only when it changed.
     /// </summary>
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (byte[] Hash, RevokedKeyList List)> Parsed = new();
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (byte[] Hash, RevokedKeyList List, long LastUsed)> Parsed = new();
 
-    /// <summary>How many parsed files <see cref="Parsed"/> keeps before it starts over.</summary>
+    /// <summary>How many parsed files <see cref="Parsed"/> keeps; past that, the least recently used one goes.</summary>
     internal const int MaxCachedFiles = 32;
 
     private RevokedKeyList(bool isKrl) => IsKrl = isKrl;
@@ -148,17 +148,23 @@ internal sealed class RevokedKeyList
         var hash = SHA256.HashData(data);
         if (Parsed.TryGetValue(key, out var cached) && cached.Hash.AsSpan().SequenceEqual(hash))
         {
+            Parsed[key] = cached with { LastUsed = Environment.TickCount64 };
             return cached.List;
         }
 
         var list = Parse(data);
         if (Parsed.Count >= MaxCachedFiles && !Parsed.ContainsKey(key))
         {
-            // RevokedHostKeys can name a file per host (%h): keep the cache bounded rather than one entry per host ever seen.
-            Parsed.Clear();
+            // RevokedHostKeys can name a file per host (%h): bounded, by dropping the file used longest ago (clearing everything would
+            // parse nearly every file again once more hosts than that are in use).
+            var oldest = Parsed.MinBy(entry => entry.Value.LastUsed).Key;
+            if (oldest is not null)
+            {
+                Parsed.TryRemove(oldest, out _);
+            }
         }
 
-        Parsed[key] = (hash, list);
+        Parsed[key] = (hash, list, Environment.TickCount64);
         return list;
     }
 

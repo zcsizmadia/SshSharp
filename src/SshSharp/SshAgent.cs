@@ -128,10 +128,12 @@ public sealed class SshAgent
             _ = listing.ContinueWith(static t => _ = t.Exception, CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
             return null;
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+#pragma warning disable CA1031 // any failure to list (a pipe name that is not a valid pattern, a platform without the listing) means "not listed", as before
+        catch (Exception)
         {
             return false;
         }
+#pragma warning restore CA1031
     }
 
     /// <summary>

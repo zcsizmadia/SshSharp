@@ -290,8 +290,14 @@ internal sealed class SshTransport : IAsyncDisposable
         {
             // Completed with an exception, so nothing still buffered is written: the goodbye was sent already (or given up on), and what
             // is left is the rest of a packet whose flush Abort cancelled. Writing it would wait on a peer that has stopped reading, for
-            // ever: disposal hung that way when the stream honoured the cancellation and kept the unwritten bytes.
-            await _writer.CompleteAsync(closed).ConfigureAwait(false);
+            // ever: disposal hung that way when the stream honoured the cancellation and kept the unwritten bytes. Only under the lock:
+            // a sender still holding it (its write stuck in a stream that ignores cancellation) may be using the writer's buffers, and
+            // completing would return them to the pool under that write. Then the writer is left as it is, and the stream's owner
+            // disposing the stream ends that write.
+            if (locked)
+            {
+                await _writer.CompleteAsync(closed).ConfigureAwait(false);
+            }
         }
         catch (Exception ex) when (ex is IOException or ObjectDisposedException or OperationCanceledException)
         {
@@ -741,7 +747,9 @@ internal sealed class SshTransport : IAsyncDisposable
         try
         {
             var reader = new SshReader(blob);
-            var algorithm = reader.ReadUtf8String();
+            // The name comes from the server and goes into a message that applications log: at most 64 printable ASCII characters.
+            var name = reader.ReadUtf8String();
+            var algorithm = new string([.. name.Take(64).Select(c => c is >= ' ' and <= '~' ? c : '?')]) + (name.Length > 64 ? "..." : string.Empty);
             var signature = reader.ReadString();
             return $"a {algorithm} signature of {signature.Length} bytes{(reader.IsEmpty ? string.Empty : ", with trailing data")}";
         }

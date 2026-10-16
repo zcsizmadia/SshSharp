@@ -45,15 +45,9 @@ public sealed partial class SftpClient : IAsyncDisposable
     /// (PROTOCOL 4.1), and most servers follow OpenSSH (Dropbear runs OpenSSH's sftp-server; Go's pkg/sftp copies it). AsyncSSH keeps
     /// the draft's order with clients that are not OpenSSH or paramiko, which it knows to reverse, so it gets the draft's order.
     /// </summary>
-    internal static bool TakesSymlinkInDraftOrder(string? serverIdentification) =>
-        serverIdentification is not null && SshIdentificationSoftware(serverIdentification).StartsWith("AsyncSSH_", StringComparison.Ordinal);
-
-    /// <summary>The software part of an identification line (<c>SSH-2.0-AsyncSSH_2.21.0 comment</c> gives <c>AsyncSSH_2.21.0</c>).</summary>
-    private static string SshIdentificationSoftware(string line)
-    {
-        var dash = line.IndexOf('-', 4); // after "SSH-" and the protocol version
-        return dash < 0 ? string.Empty : line[(dash + 1)..];
-    }
+    /// <param name="serverSoftware">The software part of the server's identification (<c>AsyncSSH_2.21.0</c>), as the transport parsed it.</param>
+    internal static bool TakesSymlinkInDraftOrder(string? serverSoftware) =>
+        serverSoftware?.StartsWith("AsyncSSH_", StringComparison.Ordinal) == true;
 
     /// <summary>The protocol version the server speaks (3 for OpenSSH).</summary>
     public int ProtocolVersion => (int)_channel.Version;
@@ -67,7 +61,7 @@ public sealed partial class SftpClient : IAsyncDisposable
     /// <summary>Opens another SFTP session on the same connection (for <see cref="SftpTransferOptions.Segments"/>); null when unknown.</summary>
     internal Func<CancellationToken, Task<SftpClient>>? OpenSibling { get; set; }
 
-    internal static async Task<SftpClient> StartAsync(SshSession session, string? serverIdentification, CancellationToken cancellationToken)
+    internal static async Task<SftpClient> StartAsync(SshSession session, string? serverSoftware, CancellationToken cancellationToken)
     {
         var channel = await SftpChannel.OpenAsync(session, cancellationToken).ConfigureAwait(false);
         try
@@ -82,7 +76,7 @@ public sealed partial class SftpClient : IAsyncDisposable
                 }
             }
 
-            return new SftpClient(channel, limits, TakesSymlinkInDraftOrder(serverIdentification));
+            return new SftpClient(channel, limits, TakesSymlinkInDraftOrder(serverSoftware));
         }
         catch
         {
@@ -545,7 +539,7 @@ public sealed partial class SftpClient : IAsyncDisposable
                 {
                     break; // no more sessions: the ones open share the file
                 }
-                catch (InvalidOperationException)
+                catch (NoMoreSessionsException)
                 {
                     break; // the connection refuses new sessions (PreventNewSessionsAsync): this session downloads alone
                 }

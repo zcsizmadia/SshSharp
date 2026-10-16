@@ -388,10 +388,13 @@ internal sealed class SshConnection : IAsyncDisposable
 
     /// <summary>Opens a <c>session</c> channel.</summary>
     public Task<SshChannel> OpenSessionAsync(CancellationToken cancellationToken) => Volatile.Read(ref _noMoreSessions)
-        ? Task.FromException<SshChannel>(new InvalidOperationException("No more sessions: PreventNewSessionsAsync was called on this connection."))
+        ? Task.FromException<SshChannel>(new NoMoreSessionsException())
         : OpenChannelAsync("session", null, cancellationToken);
 
     private bool _noMoreSessions;
+
+    /// <summary>The software part of the server's identification line (<c>OpenSSH_9.9</c>, <c>AsyncSSH_2.21.0</c>), for quirks by server.</summary>
+    internal string? ServerSoftware => _transport.ServerIdentification?.SoftwareVersion;
 
     /// <summary>Whether the server is OpenSSH (its identification line says so), for extensions OpenSSH sends only to OpenSSH peers.</summary>
     internal bool PeerIsOpenSsh => _transport.ServerIdentification?.SoftwareVersion.StartsWith("OpenSSH", StringComparison.Ordinal) == true;
@@ -915,6 +918,14 @@ internal sealed class SshConnection : IAsyncDisposable
     private SshChannel Find(uint id) =>
         _channels.TryGetValue(id, out var channel) ? channel : throw new SshProtocolException($"Message for unknown channel {id}.");
 }
+
+/// <summary>
+/// The refusal to open a session after <see cref="SshConnection.PreventNewSessionsAsync"/>: an <see cref="InvalidOperationException"/>, as
+/// documented, of its own type so that code which falls back (a segmented download) tells it from other failures.
+/// </summary>
+#pragma warning disable CA1064 // callers see an InvalidOperationException; the type only lets the library tell this refusal apart
+internal sealed class NoMoreSessionsException() : InvalidOperationException("No more sessions: PreventNewSessionsAsync was called on this connection.");
+#pragma warning restore CA1064
 
 /// <summary>The server's answer to a global request: success or failure, and any request-specific data (for example a bound port).</summary>
 internal sealed record GlobalReply(bool Success, byte[] Data);
