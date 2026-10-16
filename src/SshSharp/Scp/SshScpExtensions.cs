@@ -43,7 +43,7 @@ public static class SshScpExtensions
         var name = RemoteFileName(remotePath);
         await using var scp = await ScpChannel.StartAsync(client, options, "-t", remotePath, cancellationToken).ConfigureAwait(false);
         await scp.ReadAckAsync(cancellationToken).ConfigureAwait(false);
-        await SendFileAsync(scp, name, source, size, options.FileMode, null, remotePath, options, cancellationToken).ConfigureAwait(false);
+        await SendFileAsync(scp, name, source, size, (int)options.FileMode, null, remotePath, options, cancellationToken).ConfigureAwait(false);
         await scp.FinishAsync(cancellationToken).ConfigureAwait(false);
     }
 
@@ -72,13 +72,13 @@ public static class SshScpExtensions
 
     private static async Task SendDirectoryAsync(ScpChannel scp, DirectoryInfo directory, string relative, SshScpOptions options, CancellationToken cancellationToken)
     {
-        if (options.PreserveTimes)
+        if (options.Preserve)
         {
             await scp.SendLineAsync(TimesLine(directory.LastWriteTimeUtc, directory.LastAccessTimeUtc), cancellationToken).ConfigureAwait(false);
             await scp.ReadAckAsync(cancellationToken).ConfigureAwait(false);
         }
 
-        await scp.SendLineAsync($"D{Octal(options.DirectoryMode)} 0 {CheckName(directory.Name)}", cancellationToken).ConfigureAwait(false);
+        await scp.SendLineAsync($"D{Octal((int)options.DirectoryMode)} 0 {CheckName(directory.Name)}", cancellationToken).ConfigureAwait(false);
         await scp.ReadAckAsync(cancellationToken).ConfigureAwait(false);
         foreach (var file in directory.EnumerateFiles().OrderBy(f => f.Name, StringComparer.Ordinal))
         {
@@ -103,7 +103,7 @@ public static class SshScpExtensions
     private static async Task SendFileAsync(ScpChannel scp, string name, Stream source, long length, int mode, (DateTime Modified, DateTime Accessed)? times,
         string reportedPath, SshScpOptions options, CancellationToken cancellationToken)
     {
-        if (options.PreserveTimes && times is { } t)
+        if (options.Preserve && times is { } t)
         {
             await scp.SendLineAsync(TimesLine(t.Modified, t.Accessed), cancellationToken).ConfigureAwait(false);
             await scp.ReadAckAsync(cancellationToken).ConfigureAwait(false);
@@ -376,7 +376,7 @@ public static class SshScpExtensions
 
         private void Apply(string path, int mode, (DateTime Modified, DateTime Accessed)? times, bool isDirectory)
         {
-            if (!options.PreserveTimes)
+            if (!options.Preserve)
             {
                 return;
             }
@@ -478,7 +478,7 @@ public static class SshScpExtensions
 
     /// <summary>The source file's permission bits when they are preserved on a system that has them, otherwise the configured mode.</summary>
     private static int FileModeOf(FileInfo file, SshScpOptions options) =>
-        options.PreserveTimes && !OperatingSystem.IsWindows() ? (int)file.UnixFileMode & 0x1FF : options.FileMode;
+        options.Preserve && !OperatingSystem.IsWindows() ? (int)file.UnixFileMode & 0x1FF : (int)options.FileMode;
 
     /// <summary>The name to send for a stream upload: the last component of the remote path.</summary>
     private static string RemoteFileName(string remotePath)

@@ -30,7 +30,7 @@ await client.DownloadAsync("/etc/os-release", memory);
 
 ```csharp
 // Like scp -r: the directory becomes the target when that does not exist, or goes inside it when it does.
-await client.UploadDirectoryAsync("site", "/var/www/site", new SshScpOptions { PreserveTimes = true });
+await client.UploadDirectoryAsync("site", "/var/www/site", new SshScpOptions { Preserve = true });
 await client.DownloadDirectoryAsync("/var/log/app", "logs");
 ```
 
@@ -39,8 +39,8 @@ await client.DownloadDirectoryAsync("/var/log/app", "logs");
 ```csharp
 var options = new SshScpOptions
 {
-    PreserveTimes = true,                            // scp -p: modification times, and permission bits on Unix
-    FileMode = Convert.ToInt32("600", 8),            // for uploads whose mode is not preserved
+    Preserve = true,                                 // scp -p: modification and access times, and permission bits
+    FileMode = UnixFileMode.UserRead | UnixFileMode.UserWrite, // 0600, for uploads whose mode is not preserved
     Progress = new Progress<SshScpProgress>(p => Console.Write($"\r{p.Path}: {p.BytesTransferred}/{p.TotalBytes}")),
 };
 await client.UploadFileAsync("secrets.env", "/etc/app/secrets.env", options, cancellationToken);
@@ -54,4 +54,4 @@ A failed transfer (a missing file, permission denied, a server without `scp`) th
 Remote paths are passed to the server's shell as one single-quoted word, so spaces and special characters are safe with a POSIX shell (`sh`, `bash`); a Windows server whose default shell is `cmd.exe` or PowerShell does not read single quotes that way. When
 downloading, every name the server sends must be a single path component (no `/`, `\`, `:`, `.`, `..` or control characters),
 and a single-file download accepts exactly one file: a hostile server cannot write outside the target or slip in extra files
-(CVE-2019-6111). Permission bits from the server are applied without set-id or sticky bits, and only with `PreserveTimes`.
+(CVE-2019-6111). Permission bits from the server are applied without set-id or sticky bits, and only with `Preserve`.

@@ -62,7 +62,7 @@ public sealed class SshConfigConnectOptions
     /// </summary>
     public SshHostKeyVerifier? HostKeyVerifier { get; init; }
 
-    /// <summary>Answers <c>StrictHostKeyChecking ask</c> for an unknown host key (see <see cref="KnownHostsVerifier.Ask"/>). Not called in <c>BatchMode</c>.</summary>
+    /// <summary>Answers <c>StrictHostKeyChecking ask</c> for an unknown host key (see <see cref="KnownHostsVerifier.AskHostKey"/>). Not called in <c>BatchMode</c>.</summary>
     public Func<SshHostKeyPrompt, CancellationToken, ValueTask<bool>>? AskHostKey { get; init; }
 
     /// <summary>Confirms known_hosts changes under <c>UpdateHostKeys ask</c> (see <see cref="KnownHostsVerifier.ConfirmHostKeyUpdate"/>). Without it, <c>ask</c> leaves known_hosts alone. Not called in <c>BatchMode</c>.</summary>

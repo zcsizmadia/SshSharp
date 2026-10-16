@@ -123,7 +123,7 @@ public sealed class ConfigForwardingTests : IDisposable
             }
 
             // ssh's default for RemoteForward without a bind address is the server's loopback.
-            await Assert.That(server.RemoteForwards[client.RemoteForwardings[0].Port]).IsEqualTo("localhost");
+            await Assert.That(server.RemoteForwards[client.RemoteForwardings[0].RemotePort]).IsEqualTo("localhost");
 
             await client.DisposeAsync();
             await Assert.That(local.IsListening).IsFalse();

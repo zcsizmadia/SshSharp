@@ -123,7 +123,7 @@ A man in the middle can read, change, drop and inject bytes. The server itself m
   control characters (the CVE-2019-6111 pattern). On Windows, device names (`CON`, `NUL`, `COM1`, ...) and names ending
   in a dot or space are refused too.
 - A single-file download refuses a second file or a directory.
-- File modes from the server apply only with `PreserveTimes`, and only the permission bits, never set-id or sticky.
+- File modes from the server apply only with `Preserve`, and only the permission bits, never set-id or sticky.
 - Remote paths are passed to the server's shell quoted as one word.
 - Total size, file count and directory depth are not limited: a server can fill the target's disk.
 

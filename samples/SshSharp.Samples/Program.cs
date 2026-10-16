@@ -102,7 +102,7 @@ switch (args[0])
     case "upload" when args.Length == 4:
         var progress = new SshScpOptions
         {
-            PreserveTimes = true,
+            Preserve = true,
             Progress = new Progress<SshScpProgress>(p => Console.Write($"\r{p.Path}: {p.BytesTransferred:N0} of {p.TotalBytes:N0} bytes")),
         };
         if (Directory.Exists(args[2]))
@@ -118,7 +118,7 @@ switch (args[0])
         return 0;
 
     case "download" when args.Length == 4:
-        await client.DownloadFileAsync(args[2], args[3], new SshScpOptions { PreserveTimes = true }, stop.Token);
+        await client.DownloadFileAsync(args[2], args[3], new SshScpOptions { Preserve = true }, stop.Token);
         return 0;
 
     default:

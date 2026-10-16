@@ -50,7 +50,7 @@ public sealed class SshHostKeyPrompt
 /// <list type="bullet">
 /// <item>A recorded key that matches is trusted; one listed as <c>@revoked</c> is always refused.</item>
 /// <item>A different key of a recorded type ("the host key has changed") is refused, except with <see cref="StrictHostKeyChecking.No"/>.</item>
-/// <item>An unknown key is refused (<see cref="StrictHostKeyChecking.Yes"/>), offered to <see cref="Ask"/>, or recorded and trusted
+/// <item>An unknown key is refused (<see cref="StrictHostKeyChecking.Yes"/>), offered to <see cref="AskHostKey"/>, or recorded and trusted
 /// (<see cref="StrictHostKeyChecking.AcceptNew"/>, <see cref="StrictHostKeyChecking.No"/>). AcceptNew refuses it when keys of other types
 /// are already recorded for the host, so a man in the middle cannot get a weaker key type accepted silently.</item>
 /// </list>
@@ -89,7 +89,11 @@ public sealed class KnownHostsVerifier : SshHostKeyVerifier
     /// Asks the user whether to trust an unknown key in <see cref="StrictHostKeyChecking.Ask"/> mode; true trusts and records it.
     /// Without it, Ask behaves like <see cref="StrictHostKeyChecking.Yes"/>.
     /// </summary>
-    public Func<SshHostKeyPrompt, CancellationToken, ValueTask<bool>>? Ask { get; init; }
+    public Func<SshHostKeyPrompt, CancellationToken, ValueTask<bool>>? AskHostKey { get; init; }
+
+    /// <summary>The prompt for an unknown key: <see cref="AskHostKey"/>.</summary>
+    [Obsolete("Use AskHostKey, named as on SshConfigConnectOptions (#88).")]
+    public Func<SshHostKeyPrompt, CancellationToken, ValueTask<bool>>? Ask { get => AskHostKey; init => AskHostKey = value; }
 
     /// <summary>The user's <c>~/.ssh/known_hosts</c> and <c>known_hosts2</c>, plus the system-wide files, as <c>ssh</c> uses by default.</summary>
     public static KnownHostsVerifier ForCurrentUser(StrictHostKeyChecking policy = StrictHostKeyChecking.Ask)
@@ -113,7 +117,7 @@ public sealed class KnownHostsVerifier : SshHostKeyVerifier
             Policy = config.StrictHostKeyChecking,
             HashNewEntries = config.HashKnownHosts,
             RevokedHostKeys = config.RevokedHostKeys,
-            Ask = ask,
+            AskHostKey = ask,
             UpdateHostKeys = update,
             ConfirmHostKeyUpdate = config.UpdateHostKeys == Config.UpdateHostKeys.Ask ? confirmUpdate : null,
             Command = allowKnownHostsCommand && config.KnownHostsCommand is { } command && config.Tokens is { } tokens
@@ -334,7 +338,7 @@ public sealed class KnownHostsVerifier : SshHostKeyVerifier
                     + "for it. AcceptNew does not record a new key type for a known host.");
 
             case StrictHostKeyChecking.Ask:
-                if (Ask is null || !await Ask(new SshHostKeyPrompt(context, otherTypes), cancellationToken).ConfigureAwait(false))
+                if (AskHostKey is null || !await AskHostKey(new SshHostKeyPrompt(context, otherTypes), cancellationToken).ConfigureAwait(false))
                 {
                     return SshHostKeyVerdict.Reject($"The host key {key.Fingerprint} is not in known_hosts and was not accepted.");
                 }

@@ -38,7 +38,7 @@ internal static class KnownHostsCommandRunner
                 ['K'] = certificate is not null ? Convert.ToBase64String(certificate.Blob.Span)
                     : key is null ? "NONE" : Convert.ToBase64String(key.PublicKey.Span),
                 ['f'] = key?.Fingerprint ?? "NONE",
-                ['t'] = certificate?.CertificateType ?? key?.KeyType ?? "NONE",
+                ['t'] = certificate?.Algorithm ?? key?.KeyType ?? "NONE",
             },
         };
 

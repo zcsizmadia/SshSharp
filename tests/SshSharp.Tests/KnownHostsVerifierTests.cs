@@ -53,7 +53,7 @@ public sealed class KnownHostsVerifierTests : IDisposable
         $"{marker}{host} {key.KeyType} {Convert.ToBase64String(key.PublicKey.Span)}\n";
 
     private KnownHostsVerifier Verifier(StrictHostKeyChecking policy, Func<SshHostKeyPrompt, CancellationToken, ValueTask<bool>>? ask = null, string? global = null) =>
-        new([UserFile], global is null ? [] : [global]) { Policy = policy, Ask = ask };
+        new([UserFile], global is null ? [] : [global]) { Policy = policy, AskHostKey = ask };
 
     [Test]
     public async Task AMatchingKeyIsTrusted_UnderEveryPolicy()

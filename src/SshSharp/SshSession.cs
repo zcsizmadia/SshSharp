@@ -68,7 +68,7 @@ public sealed class SshSession : IAsyncDisposable
     public Task WaitForExitAsync(CancellationToken cancellationToken = default) => _channel.WaitClosedAsync(cancellationToken);
 
     /// <summary>Sends end-of-file on <see cref="StandardInput"/>: the program sees the end of its input (a shell exits).</summary>
-    public ValueTask CloseInputAsync(CancellationToken cancellationToken = default) => _input.CloseAsync(cancellationToken);
+    public Task CloseInputAsync(CancellationToken cancellationToken = default) => _input.CloseAsync(cancellationToken).AsTask();
 
     /// <summary>Tells the server the terminal's new size (<c>window-change</c>), so full-screen programs redraw for it.</summary>
     /// <exception cref="InvalidOperationException">The session has no terminal.</exception>

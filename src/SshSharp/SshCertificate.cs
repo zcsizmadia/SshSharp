@@ -27,7 +27,7 @@ public sealed class SshCertificate
         string keyId, IReadOnlyList<string> principals, ulong validAfter, ulong validBefore, IReadOnlyDictionary<string, string> criticalOptions,
         IReadOnlyList<string> extensions, byte[] authorityKey, byte[] signedData, byte[] signature)
     {
-        CertificateType = certificateType;
+        Algorithm = certificateType;
         Blob = blob;
         Key = key;
         PublicKey = publicKeyBlob;
@@ -45,7 +45,11 @@ public sealed class SshCertificate
     }
 
     /// <summary>The certificate's type name, for example <c>ssh-ed25519-cert-v01@openssh.com</c>.</summary>
-    public string CertificateType { get; }
+    public string Algorithm { get; }
+
+    /// <summary>The certificate's key type: <see cref="Algorithm"/>.</summary>
+    [Obsolete("Use Algorithm (#88).")]
+    public string CertificateType => Algorithm;
 
     /// <summary>The certified key's type, for example <c>ssh-ed25519</c>.</summary>
     public string KeyType => Key.KeyType;
@@ -113,7 +117,7 @@ public sealed class SshCertificate
         try
         {
             var certificate = FromBlob(Convert.FromBase64String(fields[1]));
-            return certificate.CertificateType == fields[0]
+            return certificate.Algorithm == fields[0]
                 ? certificate
                 : throw new FormatException("The certificate's type does not match the line's type field.");
         }

@@ -59,11 +59,11 @@ public sealed partial class SshClient
     /// <summary>
     /// Local port forwarding (<c>ssh -L</c>): listens on <paramref name="localEndPoint"/> and forwards every connection made to it through
     /// the server to <paramref name="remoteHost"/>:<paramref name="remotePort"/>. Use a loopback address unless other machines should be
-    /// able to use the tunnel, and port 0 to let the system pick a free port (see <see cref="SshPortForwarder.LocalEndPoint"/>).
+    /// able to use the tunnel, and port 0 to let the system pick a free port (see <see cref="SshLocalPortForwarder.LocalEndPoint"/>).
     /// Forwarding stops when the forwarder or the client is disposed, or the connection ends.
     /// </summary>
     /// <exception cref="SocketException">The local endpoint could not be bound (for example the port is in use).</exception>
-    public Task<SshPortForwarder> ForwardLocalPortAsync(IPEndPoint localEndPoint, string remoteHost, int remotePort, CancellationToken cancellationToken = default)
+    public Task<SshLocalPortForwarder> ForwardLocalPortAsync(IPEndPoint localEndPoint, string remoteHost, int remotePort, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(localEndPoint);
         ValidateDestination(remoteHost, remotePort);
@@ -73,7 +73,7 @@ public sealed partial class SshClient
         var listener = LocalListener.Start(localEndPoint, (socket, ct) => OpenForwardedAsync(socket, remoteHost, remotePort, ct), _connection.Closed);
         var bound = listener.LocalEndPoint.ToString();
         SshLog.ForwardingStarted(_logger, bound, remotePort);
-        return Task.FromResult(new SshPortForwarder(listener, remoteHost, remotePort));
+        return Task.FromResult(new SshLocalPortForwarder(listener, remoteHost, remotePort));
     }
 
     /// <summary>
@@ -83,7 +83,7 @@ public sealed partial class SshClient
     /// server's network.
     /// </summary>
     /// <exception cref="SocketException">The local endpoint could not be bound (for example the port is in use).</exception>
-    public Task<SshSocksProxy> ForwardDynamicPortAsync(IPEndPoint localEndPoint, CancellationToken cancellationToken = default)
+    public Task<SshDynamicPortForwarder> ForwardDynamicPortAsync(IPEndPoint localEndPoint, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(localEndPoint);
         ObjectDisposedException.ThrowIf(_disposed != 0, this);
@@ -92,7 +92,7 @@ public sealed partial class SshClient
         var listener = LocalListener.Start(localEndPoint, OpenSocksAsync, _connection.Closed);
         var bound = listener.LocalEndPoint.ToString();
         SshLog.ForwardingStarted(_logger, bound, 0);
-        return Task.FromResult(new SshSocksProxy(listener));
+        return Task.FromResult(new SshDynamicPortForwarder(listener));
     }
 
     /// <summary>
@@ -163,7 +163,7 @@ public sealed partial class SshClient
     /// relays every connection made to it to <paramref name="localHost"/>:<paramref name="localPort"/>, as reached from this machine.
     /// The bind address is <c>localhost</c> for the server's loopback only (what ssh uses by default), an address, or empty for every
     /// address; sshd's <c>GatewayPorts</c> decides whether it honours anything but loopback. Port 0 lets the server pick one
-    /// (see <see cref="SshRemotePortForwarder.Port"/>).
+    /// (see <see cref="SshRemotePortForwarder.RemotePort"/>).
     /// </summary>
     /// <exception cref="SshException">The server refused (sshd's <c>AllowTcpForwarding</c>, or the port is in use).</exception>
     public Task<SshRemotePortForwarder> ForwardRemotePortAsync(string bindAddress, int remotePort, string localHost, int localPort, CancellationToken cancellationToken = default)
@@ -183,7 +183,7 @@ public sealed partial class SshClient
     /// </summary>
     /// <param name="bindAddress">Where the server listens: <c>localhost</c> for its loopback only (what ssh uses by default), an address, or
     /// empty for every address (subject to sshd's <c>GatewayPorts</c>).</param>
-    /// <param name="remotePort">The port the server listens on; 0 lets it pick one (see <see cref="SshRemotePortForwarder.Port"/>).</param>
+    /// <param name="remotePort">The port the server listens on; 0 lets it pick one (see <see cref="SshRemotePortForwarder.RemotePort"/>).</param>
     /// <param name="allowDestination">
     /// Decides whether to connect to a requested host and port. The destinations are chosen on the server's side, so whoever can reach
     /// the forwarded port there can use this machine's network: like ssh, everything is allowed when this is null. An address is passed
@@ -375,13 +375,13 @@ public sealed partial class SshClient
     private async Task CancelRemoteForwardAsync(SshRemotePortForwarder forwarder, CancellationToken cancellationToken)
     {
         // Stop accepting this port's channels first: anything the server opens from now on is refused.
-        _remoteForwards.TryRemove(new KeyValuePair<int, SshRemotePortForwarder>(forwarder.Port, forwarder));
+        _remoteForwards.TryRemove(new KeyValuePair<int, SshRemotePortForwarder>(forwarder.RemotePort, forwarder));
         if (_disposed == 0)
         {
             await _connection.SendGlobalRequestAsync("cancel-tcpip-forward", true, w =>
             {
                 w.WriteString(forwarder.BindAddress);
-                w.WriteUInt32((uint)forwarder.Port);
+                w.WriteUInt32((uint)forwarder.RemotePort);
             }, cancellationToken).ConfigureAwait(false);
         }
     }
@@ -479,12 +479,12 @@ public sealed partial class SshClient
         }
     }
 
-    private readonly List<SshPortForwarder> _localForwardings = [];
+    private readonly List<SshLocalPortForwarder> _localForwardings = [];
     private readonly List<SshRemotePortForwarder> _remoteForwardings = [];
-    private readonly List<SshSocksProxy> _dynamicForwardings = [];
+    private readonly List<SshDynamicPortForwarder> _dynamicForwardings = [];
 
     /// <summary>The <c>LocalForward</c> forwardings started from ssh_config (<see cref="SshConfigConnectOptions.StartForwardings"/>); disposed with the client.</summary>
-    public IReadOnlyList<SshPortForwarder> LocalForwardings => _localForwardings.AsReadOnly();
+    public IReadOnlyList<SshLocalPortForwarder> LocalForwardings => _localForwardings.AsReadOnly();
 
     /// <summary>The <c>RemoteForward</c> forwardings started from ssh_config; disposed with the client.</summary>
     public IReadOnlyList<SshRemotePortForwarder> RemoteForwardings => _remoteForwardings.AsReadOnly();
@@ -497,7 +497,7 @@ public sealed partial class SshClient
     public IReadOnlyList<SshRemoteSocketForwarder> RemoteSocketForwardings => _remoteSocketForwardings.AsReadOnly();
 
     /// <summary>The <c>DynamicForward</c> SOCKS proxies started from ssh_config; disposed with the client.</summary>
-    public IReadOnlyList<SshSocksProxy> DynamicForwardings => _dynamicForwardings.AsReadOnly();
+    public IReadOnlyList<SshDynamicPortForwarder> DynamicForwardings => _dynamicForwardings.AsReadOnly();
 
     /// <summary>
     /// Starts the forwardings ssh_config names for this host. One that cannot be set up (a port in use, refused by the server, a form

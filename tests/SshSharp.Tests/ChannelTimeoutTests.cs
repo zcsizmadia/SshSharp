@@ -112,7 +112,7 @@ public class ChannelTimeoutTests
         await using var server = new FakeSessionServer();
         await using var client = await ConnectAsync(server, time, new SshChannelTimeout("forwarded-tcpip", Limit));
         await using var forwarder = await client.ForwardRemotePortAsync("localhost", 8080, "127.0.0.1", ((IPEndPoint)service.LocalEndPoint!).Port, Timeout());
-        await using var remote = (await server.ConnectForwardedAsync(forwarder.Port))!;
+        await using var remote = (await server.ConnectForwardedAsync(forwarder.RemotePort))!;
         using var local = await accepted.WaitAsync(Timeout());
 
         await AdvanceAsync(time, Limit * 3, () => server.Channels.Any(c => c.CloseReceived));

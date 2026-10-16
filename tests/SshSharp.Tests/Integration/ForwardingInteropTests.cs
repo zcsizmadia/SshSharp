@@ -114,8 +114,8 @@ public class ForwardingInteropTests
 
             // Reach the forwarded port from the server's side through a tunnel: here -> server -> its forwarded port -> back here.
             // "localhost", not 127.0.0.1: when another process holds that port on 127.0.0.1, sshd may have bound only ::1 for "localhost".
-            stages.Step($"opening a tunnel to the server's localhost:{forwarder.Port}");
-            await using var tunnel = await client.OpenTcpTunnelAsync("localhost", forwarder.Port, Timeout());
+            stages.Step($"opening a tunnel to the server's localhost:{forwarder.RemotePort}");
+            await using var tunnel = await client.OpenTcpTunnelAsync("localhost", forwarder.RemotePort, Timeout());
             stages.Step("reading the line the local service sends back through the forwarding");
             var line = await ReadLineAsync(buffer => tunnel.ReadAsync(buffer, Timeout()));
             await Assert.That(line).IsEqualTo("hello from here");
@@ -155,8 +155,8 @@ public class ForwardingInteropTests
 
             // Play the server-side application through a tunnel: here -> server -> its forwarded port -> back here, as SOCKS.
             // "localhost", not 127.0.0.1: when another process holds that port on 127.0.0.1, sshd may have bound only ::1 for "localhost".
-            stages.Step($"opening a tunnel to the server's localhost:{forwarder.Port}");
-            await using var tunnel = await client.OpenTcpTunnelAsync("localhost", forwarder.Port, Timeout());
+            stages.Step($"opening a tunnel to the server's localhost:{forwarder.RemotePort}");
+            await using var tunnel = await client.OpenTcpTunnelAsync("localhost", forwarder.RemotePort, Timeout());
             stages.Step("SOCKS greeting");
             await tunnel.WriteAsync(new byte[] { 5, 1, 0 }, Timeout());
             var choice = new byte[2];

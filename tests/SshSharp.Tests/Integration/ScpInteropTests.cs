@@ -79,11 +79,11 @@ public sealed class ScpInteropTests : IDisposable
             await File.WriteAllTextAsync(Path.Combine(tree.FullName, "sub", "b.txt"), "B");
             var stamp = new DateTime(2023, 3, 4, 5, 6, 7, DateTimeKind.Utc);
             File.SetLastWriteTimeUtc(Path.Combine(tree.FullName, "sub", "b.txt"), stamp);
-            await client.UploadDirectoryAsync(tree.FullName, $"{remote}/up", new SshScpOptions { PreserveTimes = true }, Timeout());
+            await client.UploadDirectoryAsync(tree.FullName, $"{remote}/up", new SshScpOptions { Preserve = true }, Timeout());
             await Assert.That((await client.RunCommandAsync($"cat '{remote}/up/sub/b.txt'", Timeout())).StandardOutputText).IsEqualTo("B");
 
             var down = Path.Combine(_dir, "down");
-            await client.DownloadDirectoryAsync($"{remote}/up", down, new SshScpOptions { PreserveTimes = true }, Timeout());
+            await client.DownloadDirectoryAsync($"{remote}/up", down, new SshScpOptions { Preserve = true }, Timeout());
             await Assert.That(await File.ReadAllTextAsync(Path.Combine(down, "a.txt"))).IsEqualTo("A");
             await Assert.That(await File.ReadAllTextAsync(Path.Combine(down, "sub", "b.txt"))).IsEqualTo("B");
             await Assert.That(File.GetLastWriteTimeUtc(Path.Combine(down, "sub", "b.txt"))).IsEqualTo(stamp);

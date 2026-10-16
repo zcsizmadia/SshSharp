@@ -777,9 +777,9 @@ internal sealed class SshTransport : IAsyncDisposable
                 throw new SshHostKeyException("The server's host certificate is malformed: " + ex.Message);
             }
 
-            if (certificate.CertificateType != SshCertificate.CertificateKeyType(negotiated.HostKey))
+            if (certificate.Algorithm != SshCertificate.CertificateKeyType(negotiated.HostKey))
             {
-                throw new SshHostKeyException($"The server sent a {certificate.CertificateType} certificate but negotiated {negotiated.HostKey}.");
+                throw new SshHostKeyException($"The server sent a {certificate.Algorithm} certificate but negotiated {negotiated.HostKey}.");
             }
 
             key = certificate.Key;

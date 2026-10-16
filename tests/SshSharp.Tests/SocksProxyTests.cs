@@ -11,7 +11,7 @@ public class SocksProxyTests
 {
     private static CancellationToken Timeout() => new CancellationTokenSource(TimeSpan.FromSeconds(60)).Token;
 
-    private static async Task<(FakeSessionServer Server, SshClient Client, SshSocksProxy Proxy)> StartAsync(Func<string, int, Stream?> route)
+    private static async Task<(FakeSessionServer Server, SshClient Client, SshDynamicPortForwarder Proxy)> StartAsync(Func<string, int, Stream?> route)
     {
         var server = new FakeSessionServer { DirectTcpIp = route };
         _ = server.StartAsync();
@@ -39,7 +39,7 @@ public class SocksProxyTests
         return near;
     }
 
-    private static async Task<Socket> OpenAsync(SshSocksProxy proxy)
+    private static async Task<Socket> OpenAsync(SshDynamicPortForwarder proxy)
     {
         var socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
         await socket.ConnectAsync(proxy.LocalEndPoint, Timeout());
