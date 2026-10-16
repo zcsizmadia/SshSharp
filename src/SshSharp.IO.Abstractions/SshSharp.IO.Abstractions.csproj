@@ -10,6 +10,7 @@
     <Description>An IFileSystem (System.IO.Abstractions) over SFTP (SshSharp): code written against IFileSystem reads and writes a directory on an SSH server, with nothing mounted.</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageIcon>icon.png</PackageIcon>
     <PackageProjectUrl>https://zcsizmadia.github.io/SshSharp/</PackageProjectUrl>
     <PackageTags>ssh;sftp;system.io.abstractions;ifilesystem;testableio;virtual-file-system</PackageTags>
     <PackageReleaseNotes>https://github.com/zcsizmadia/SshSharp/releases</PackageReleaseNotes>
@@ -33,5 +34,6 @@
     <PackageReference Include="TestableIO.System.IO.Abstractions" />
     <ProjectReference Include="../SshSharp/SshSharp.csproj" />
     <None Include="README.md" Pack="true" PackagePath="/" />
+    <None Include="../../assets/logo/sshsharp-128.png" Pack="true" PackagePath="/icon.png" Visible="false" />
   </ItemGroup>
 </Project>

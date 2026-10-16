@@ -19,6 +19,9 @@
       { "files": [ "api/**.yml", "api/index.md" ] },
       { "files": [ "*.md", "toc.yml" ], "exclude": [ "README.md" ] }
     ],
+    "resource": [
+      { "files": [ "images/**" ] }
+    ],
     "output": "_site",
     "sitemap": { "baseUrl": "https://zcsizmadia.github.io/SshSharp/" },
     "template": [ "default", "modern" ],
@@ -26,6 +29,8 @@
       "_appName": "SshSharp",
       "_appTitle": "SshSharp",
       "_appFooter": "SshSharp: managed SSH for .NET. MIT license.",
+      "_appLogoPath": "images/sshsharp.svg",
+      "_appFaviconPath": "images/sshsharp.svg",
       "_enableSearch": true
     },
     "warningsAsErrors": true

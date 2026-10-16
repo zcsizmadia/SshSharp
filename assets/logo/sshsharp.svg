@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128" role="img" aria-label="SshSharp">
+  <title>SshSharp</title>
+  <rect width="128" height="128" rx="26" fill="#102A43"/>
+  <polyline points="20,38 46,64 20,90" fill="none" stroke="#3EE6A8" stroke-width="14" stroke-linecap="square" stroke-linejoin="miter"/>
+  <g fill="#FFFFFF" transform="translate(13.6 0) skewX(-12)">
+    <rect x="68" y="30" width="12" height="68"/>
+    <rect x="92" y="30" width="12" height="68"/>
+    <rect x="58" y="46" width="56" height="12"/>
+    <rect x="58" y="70" width="56" height="12"/>
+  </g>
+</svg>
