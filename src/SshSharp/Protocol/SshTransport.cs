@@ -437,6 +437,7 @@ internal sealed class SshTransport : IAsyncDisposable
         try
         {
             PacketCodec.Encode(_writer, new[] { SshMessage.NewKeys }, _sendProtector, _sendSequence++);
+            TraceKexMessage("sent", SshMessage.NewKeys, _sendSequence - 1);
             await _writer.FlushAsync(_lifetime.Token).ConfigureAwait(false);
             _sendProtector.Dispose();
             _sendProtector = newSend;
@@ -566,6 +567,7 @@ internal sealed class SshTransport : IAsyncDisposable
         _pendingClientInit = clientInit;
         _pendingClientInitPayload = payload;
         PacketCodec.Encode(_writer, payload, _sendProtector, _sendSequence++);
+        TraceKexMessage("sent", payload[0], _sendSequence - 1);
         await _writer.FlushAsync(_lifetime.Token).ConfigureAwait(false);
     }
 
@@ -614,6 +616,7 @@ internal sealed class SshTransport : IAsyncDisposable
                     }
 
                     PacketCodec.Encode(_writer, payload.Span, _sendProtector, _sendSequence++);
+                    TraceKexMessage("sent", payload.Span[0], _sendSequence - 1);
                     onCommitted?.Invoke();
                     Interlocked.Add(ref _bytesSinceKex, payload.Length);
                     Interlocked.Increment(ref _packetsSentSinceKex);
@@ -677,6 +680,19 @@ internal sealed class SshTransport : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// Traces key exchange messages (20 to 49) and DISCONNECT, with the transport and the sequence number, in the instrumented build
+    /// only, so a failed re-exchange shows the order of the messages (<see cref="Instrumentation.RecentTrace"/>).
+    /// </summary>
+    [System.Diagnostics.Conditional("SSHSHARP_INSTRUMENT")]
+    private void TraceKexMessage(string direction, byte type, uint sequence)
+    {
+        if (type is SshMessage.Disconnect or (>= 20 and <= 49))
+        {
+            Instrumentation.Trace($"kex: transport {System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(this):x8} {direction} message {type}, sequence {sequence}");
+        }
+    }
+
     private void FailRekeyWaiters(Exception exception)
     {
         _rekeyDone.TrySetException(exception);
@@ -701,6 +717,7 @@ internal sealed class SshTransport : IAsyncDisposable
                     throw new SshProtocolException("Received an empty packet.");
                 }
 
+                TraceKexMessage("received", packet.Payload.Span[0], _receiveSequence - 1);
                 Interlocked.Add(ref _bytesSinceKex, packet.Payload.Length);
                 Interlocked.Increment(ref _packetsReceivedSinceKex);
                 SshTelemetry.BytesReceived.Add(packet.Payload.Length);

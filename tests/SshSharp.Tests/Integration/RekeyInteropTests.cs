@@ -23,6 +23,23 @@ public class RekeyInteropTests
         return await SshClient.ConnectAsync(host, port, (await RealServer.OptionsAsync(rekeyAfterBytes: rekeyAfterBytes))!, Timeout());
     }
 
+    /// <summary>
+    /// Runs a test's body. In the instrumented build (the stress workflow), a failure also carries the recent key exchange trace: the
+    /// messages each transport sent and received, in order, to compare with the server's log.
+    /// </summary>
+    private static async Task WithKexTraceAsync(Func<Task> body)
+    {
+        try
+        {
+            await body();
+        }
+        catch (Exception ex) when (SshSharp.Protocol.Instrumentation.Enabled)
+        {
+            throw new InvalidOperationException(
+                $"{ex.Message}{Environment.NewLine}Recent key exchange trace:{Environment.NewLine}{SshSharp.Protocol.Instrumentation.RecentTrace("kex:", max: 400)}", ex);
+        }
+    }
+
     /// <summary>Base64 of zero bytes is all 'A': any corruption or reordering around a re-exchange shows up in the text.</summary>
     private static async Task AssertIntactBulkOutputAsync(SshCommandResult result, int bytes = BulkOutputBytes)
     {
@@ -41,19 +58,22 @@ public class RekeyInteropTests
             Skip.Test("No real server account configured.");
         }
 
-        // How many re-exchanges happen depends on timing: the server keeps sending until it reads our KEXINIT, up to the whole channel
-        // window (RFC 4253 section 9). What is certain is one completed re-exchange per threshold plus window of output: the server can
-        // send no more before it answers, and our window adjustments wait for the exchange to end. About 16.2 MB of output at
-        // 100 KB + 2 MiB per round is at least six completed re-exchanges, so five always hold. With 4 MB, one stress run saw only four.
-        const int bytes = 12_000_000;
-        await using var client = await ConnectAsync(rekeyAfterBytes: 100_000);
-        var result = await client.RunCommandAsync(BulkOutputCommand(bytes), Timeout());
-        await AssertIntactBulkOutputAsync(result, bytes);
-        await Assert.That(client.Connection.KeyExchangeCount).IsGreaterThanOrEqualTo(5);
+        await WithKexTraceAsync(async () =>
+        {
+            // How many re-exchanges happen depends on timing: the server keeps sending until it reads our KEXINIT, up to the whole channel
+            // window (RFC 4253 section 9). What is certain is one completed re-exchange per threshold plus window of output: the server can
+            // send no more before it answers, and our window adjustments wait for the exchange to end. About 16.2 MB of output at
+            // 100 KB + 2 MiB per round is at least six completed re-exchanges, so five always hold. With 4 MB, one stress run saw only four.
+            const int bytes = 12_000_000;
+            await using var client = await ConnectAsync(rekeyAfterBytes: 100_000);
+            var result = await client.RunCommandAsync(BulkOutputCommand(bytes), Timeout());
+            await AssertIntactBulkOutputAsync(result, bytes);
+            await Assert.That(client.Connection.KeyExchangeCount).IsGreaterThanOrEqualTo(5);
 
-        // And the connection is still good afterwards.
-        var after = await client.RunCommandAsync("echo still-here", Timeout());
-        await Assert.That(after.StandardOutputText).IsEqualTo("still-here\n");
+            // And the connection is still good afterwards.
+            var after = await client.RunCommandAsync("echo still-here", Timeout());
+            await Assert.That(after.StandardOutputText).IsEqualTo("still-here\n");
+        });
     }
 
     [Test]
@@ -64,11 +84,14 @@ public class RekeyInteropTests
             Skip.Test("The test server is not configured with a small RekeyLimit.");
         }
 
-        // The client's own threshold is the default (1 GiB), so every re-exchange here was started by sshd.
-        await using var client = await ConnectAsync(rekeyAfterBytes: 1L << 30);
-        var result = await client.RunCommandAsync(BulkOutputCommand(), Timeout());
-        await AssertIntactBulkOutputAsync(result);
-        await Assert.That(client.Connection.KeyExchangeCount).IsGreaterThanOrEqualTo(3);
+        await WithKexTraceAsync(async () =>
+        {
+            // The client's own threshold is the default (1 GiB), so every re-exchange here was started by sshd.
+            await using var client = await ConnectAsync(rekeyAfterBytes: 1L << 30);
+            var result = await client.RunCommandAsync(BulkOutputCommand(), Timeout());
+            await AssertIntactBulkOutputAsync(result);
+            await Assert.That(client.Connection.KeyExchangeCount).IsGreaterThanOrEqualTo(3);
+        });
     }
 
     [Test]
@@ -79,14 +102,17 @@ public class RekeyInteropTests
             Skip.Test("The test server is not configured with a small RekeyLimit.");
         }
 
-        await using var client = await ConnectAsync(rekeyAfterBytes: 60_000);
-        var tasks = Enumerable.Range(0, 4).Select(_ => client.RunCommandAsync(BulkOutputCommand(), Timeout())).ToArray();
-        var results = await Task.WhenAll(tasks);
-        foreach (var result in results)
+        await WithKexTraceAsync(async () =>
         {
-            await AssertIntactBulkOutputAsync(result);
-        }
+            await using var client = await ConnectAsync(rekeyAfterBytes: 60_000);
+            var tasks = Enumerable.Range(0, 4).Select(_ => client.RunCommandAsync(BulkOutputCommand(), Timeout())).ToArray();
+            var results = await Task.WhenAll(tasks);
+            foreach (var result in results)
+            {
+                await AssertIntactBulkOutputAsync(result);
+            }
 
-        await Assert.That(client.Connection.KeyExchangeCount).IsGreaterThanOrEqualTo(8);
+            await Assert.That(client.Connection.KeyExchangeCount).IsGreaterThanOrEqualTo(8);
+        });
     }
 }
