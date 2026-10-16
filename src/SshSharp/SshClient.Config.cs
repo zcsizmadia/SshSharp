@@ -156,6 +156,7 @@ public sealed partial class SshClient
                 ChannelTimeouts = hostConfig.ChannelTimeouts,
                 ObscureKeystrokeTiming = hostConfig.ObscureKeystrokeTiming,
                 AlgorithmPreferences = AlgorithmPreferences.FromConfig(hostConfig),
+                MinimumRsaBits = hostConfig.RequiredRsaSize ?? SshClientOptions.DefaultMinimumRsaBits,
                 Logger = options.Logger,
                 TimeProvider = options.TimeProvider,
             };

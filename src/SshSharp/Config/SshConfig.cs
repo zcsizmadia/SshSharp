@@ -252,6 +252,9 @@ public sealed class SshConfig
             AddKeysToAgent = ParseAddKeysToAgent(All("addkeystoagent") is { Count: > 0 } addKeys ? string.Join(' ', addKeys) : null),
             ChannelTimeouts = ParseChannelTimeouts(All("channeltimeout")),
             ObscureKeystrokeTiming = ParseObscureKeystrokeTiming(First("obscurekeystroketiming")),
+            RequiredRsaSize = int.TryParse(First("requiredrsasize"), NumberStyles.None, CultureInfo.InvariantCulture, out var rsaBits) && rsaBits >= 1024
+                ? rsaBits
+                : null,
             RequestTty = ParseTty(First("requesttty")),
             PreferredAuthentications = [.. All("preferredauthentications").SelectMany(v => v.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))],
             PubkeyAuthentication = Bool(First("pubkeyauthentication"), true),
