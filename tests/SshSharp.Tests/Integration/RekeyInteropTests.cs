@@ -7,7 +7,9 @@ namespace SshSharp.Tests.Integration;
 /// </summary>
 public class RekeyInteropTests
 {
-    private const string BulkOutputCommand = "head -c 3000000 /dev/zero | base64";
+    private const int BulkOutputBytes = 3_000_000;
+
+    private static string BulkOutputCommand(int bytes = BulkOutputBytes) => $"head -c {bytes} /dev/zero | base64";
 
     private static bool Configured =>
         RealServer.IsAvailable
@@ -31,12 +33,12 @@ public class RekeyInteropTests
     }
 
     /// <summary>Base64 of zero bytes is all 'A': any corruption or reordering around a re-exchange shows up in the text.</summary>
-    private static async Task AssertIntactBulkOutputAsync(SshCommandResult result)
+    private static async Task AssertIntactBulkOutputAsync(SshCommandResult result, int bytes = BulkOutputBytes)
     {
         var text = result.StandardOutputText;
         var lines = text.Split('\n', StringSplitOptions.RemoveEmptyEntries);
         await Assert.That(result.ExitStatus).IsEqualTo(0);
-        await Assert.That(lines.Length).IsEqualTo((3_000_000 * 4 / 3 / 76) + 1);
+        await Assert.That(lines.Length).IsEqualTo((bytes * 4 / 3 / 76) + 1);
         await Assert.That(lines.Take(lines.Length - 1).All(l => l.Length == 76 && l.All(c => c == 'A'))).IsTrue();
     }
 
@@ -48,9 +50,14 @@ public class RekeyInteropTests
             Skip.Test("No real server account configured.");
         }
 
+        // How many re-exchanges happen depends on timing: the server keeps sending until it reads our KEXINIT, up to the whole channel
+        // window (RFC 4253 section 9). What is certain is one completed re-exchange per threshold plus window of output: the server can
+        // send no more before it answers, and our window adjustments wait for the exchange to end. About 16.2 MB of output at
+        // 100 KB + 2 MiB per round is at least six completed re-exchanges, so five always hold. With 4 MB, one stress run saw only four.
+        const int bytes = 12_000_000;
         await using var client = await ConnectAsync(rekeyAfterBytes: 100_000);
-        var result = await client.RunCommandAsync(BulkOutputCommand, Timeout());
-        await AssertIntactBulkOutputAsync(result);
+        var result = await client.RunCommandAsync(BulkOutputCommand(bytes), Timeout());
+        await AssertIntactBulkOutputAsync(result, bytes);
         await Assert.That(client.Connection.KeyExchangeCount).IsGreaterThanOrEqualTo(5);
 
         // And the connection is still good afterwards.
@@ -68,7 +75,7 @@ public class RekeyInteropTests
 
         // The client's own threshold is the default (1 GiB), so every re-exchange here was started by sshd.
         await using var client = await ConnectAsync(rekeyAfterBytes: 1L << 30);
-        var result = await client.RunCommandAsync(BulkOutputCommand, Timeout());
+        var result = await client.RunCommandAsync(BulkOutputCommand(), Timeout());
         await AssertIntactBulkOutputAsync(result);
         await Assert.That(client.Connection.KeyExchangeCount).IsGreaterThanOrEqualTo(3);
     }
@@ -82,7 +89,7 @@ public class RekeyInteropTests
         }
 
         await using var client = await ConnectAsync(rekeyAfterBytes: 60_000);
-        var tasks = Enumerable.Range(0, 4).Select(_ => client.RunCommandAsync(BulkOutputCommand, Timeout())).ToArray();
+        var tasks = Enumerable.Range(0, 4).Select(_ => client.RunCommandAsync(BulkOutputCommand(), Timeout())).ToArray();
         var results = await Task.WhenAll(tasks);
         foreach (var result in results)
         {
