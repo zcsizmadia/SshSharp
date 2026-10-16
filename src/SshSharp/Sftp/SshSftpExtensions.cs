@@ -17,7 +17,7 @@ public static class SshSftpExtensions
         var session = await client.StartSubsystemAsync("sftp", cancellationToken: cancellationToken).ConfigureAwait(false);
         try
         {
-            var sftp = await SftpClient.StartAsync(session, client.ServerIdentification, cancellationToken).ConfigureAwait(false);
+            var sftp = await SftpClient.StartAsync(session, client.Connection.ServerSoftware, cancellationToken).ConfigureAwait(false);
             sftp.OpenSibling = token => client.OpenSftpAsync(token); // more sessions on this connection, for segmented downloads
             return sftp;
         }

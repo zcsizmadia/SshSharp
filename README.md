@@ -26,8 +26,8 @@ Console.WriteLine(result.StandardOutputText);
 - **OpenSSH configuration:** `ssh_config` (`Host`, `Match`, `Include`, tokens) and `known_hosts` (hashed hosts,
   `@cert-authority`, `@revoked`), resolved like `ssh -G`.
 - **Authentication:** password, public keys (OpenSSH, PKCS#8, PKCS#1/SEC1 and PuTTY `.ppk` formats, encrypted too),
-  OpenSSH user certificates, ssh-agent (Unix sockets and the Windows OpenSSH agent) and agent forwarding,
-  keyboard-interactive (one-time codes, PAM), and multi-factor chains. Key generation, saved as `ssh-keygen` does; signing and verifying
+  OpenSSH user certificates, ssh-agent (Unix sockets, the Windows OpenSSH agent and PuTTY's Pageant), FIDO security keys
+  held by the agent, agent forwarding, keyboard-interactive (one-time codes, PAM), and multi-factor chains. Key generation, saved as `ssh-keygen` does; signing and verifying
   files and git commits with SSH keys (`ssh-keygen -Y`).
 - **Host verification:** `StrictHostKeyChecking` policies, host certificates, `UpdateHostKeys`, key pinning, or your own
   verifier. There is no "accept anything" default. Host key scanning, as `ssh-keyscan` does it.
@@ -76,6 +76,7 @@ Console.WriteLine(result.StandardOutputText);
 | Stop a program's output early without killing it (`eow@openssh.com`), refuse further sessions on a connection (`no-more-sessions@openssh.com`) | ✅ | ❌ |
 | SSH agent (`ssh-agent`, Windows OpenSSH agent, PuTTY's Pageant) | ✅ | ❌ |
 | Agent forwarding | ✅ | ❌ |
+| FIDO security keys through the agent (`sk-ssh-ed25519@openssh.com`, `sk-ecdsa-sha2-nistp256@openssh.com`, and their certificates) | ✅ | ❌ |
 | Agent key management (`ssh-add`: add with lifetime, confirmation or destination constraints (`-h`), remove, lock; `AddKeysToAgent`), and signing with destination-constrained keys | ✅ | ❌ |
 | Password, public key, keyboard-interactive, multi-factor | ✅ | ✅ |
 | Kerberos (GSSAPI, `gssapi-with-mic`; .NET 10) | ✅ | ❌ |
@@ -102,6 +103,7 @@ Console.WriteLine(result.StandardOutputText);
 | SCP | ✅ | ✅ |
 | SFTP | ✅ (version 3 with OpenSSH extensions, pipelined transfers; experimental API) | ✅ |
 | Segmented SFTP downloads (one file in parallel ranges over several sessions) | ✅ | ❌ |
+| SFTP `fsync@openssh.com` (durable uploads), `hardlink@openssh.com` and `limits@openssh.com` | ✅ | ❌ |
 | Remote files as an `IFileSystem` (System.IO.Abstractions: `File`, `Directory`, `Path`, streams) | ✅ (`SshSharp.IO.Abstractions`) | ❌ |
 | Remote files as an `IFileProvider` (ASP.NET Core static files, Razor, configuration) | ✅ (`SshSharp.FileProviders`) | ❌ |
 | Native AOT | ✅ (an AOT-compiled binary connects to a real server in CI) | ✅ (AOT-compatible; an AOT publish is checked in CI) |

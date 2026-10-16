@@ -74,10 +74,11 @@ public class TransportInteropTests
             await Parallel.ForAsync(0, count, new ParallelOptions { MaxDegreeOfParallelism = 8 }, async (_, ct) =>
             {
                 using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-                await using var stream = await RealServer.ConnectAsync();
-                await using var transport = new SshTransport(stream, Options(SshAlgorithms.Curve25519Sha256, "chacha20-poly1305@openssh.com", hostKey, []));
                 try
                 {
+                    // The TCP connect too: one that fails is counted, not the end of the run (and of its report).
+                    await using var stream = await RealServer.ConnectAsync().WaitAsync(timeout.Token);
+                    await using var transport = new SshTransport(stream, Options(SshAlgorithms.Curve25519Sha256, "chacha20-poly1305@openssh.com", hostKey, []));
                     await transport.ConnectAsync(timeout.Token);
                     Interlocked.Increment(ref done);
                 }
