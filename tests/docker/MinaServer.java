@@ -2,8 +2,13 @@
 // and AsyncSSH (#218). MINA SSHD is the server inside Jenkins, Gerrit and Eclipse.
 //
 // It runs as the test account, in its home directory, and serves shells, commands, SCP, SFTP and TCP forwarding in both directions.
-// The account's password comes from TEST_PASSWORD. Its re-key limit is 32 KiB, as in the OpenSSH container, but MINA checks it only
-// after a message from the client, so a session that mostly sends re-keys about once per window adjustment. Never used outside CI.
+// The account's password comes from TEST_PASSWORD. Never used outside CI.
+//
+// Its re-key limit stays at MINA's default (1 GB), so the server starts no re-key in the tests; the client's re-keys still run. With
+// a 32 KiB limit, as in the OpenSSH container, MINA 2.20.0 sometimes failed a session in CI while both sides re-keyed: its own key
+// agreement threw "IllegalStateException: Not initialized" (XDHKeyAgreement) and it closed the connection. MINA checks the limit only
+// after a message from the client or a write, so it has no fixed interval to test anyway; colliding re-keys are covered against
+// OpenSSH and AsyncSSH, which re-key every 32 KiB.
 //
 // Shells and commands run as processes with their streams copied by ProcessCommand below, not by MINA's ProcessShellFactory: its
 // wrapper copies all three streams on one thread, so a command that reads a lot of input while writing output (tr, cat) deadlocks
@@ -20,7 +25,6 @@ import java.util.List;
 
 import org.apache.sshd.common.config.keys.KeyUtils;
 import org.apache.sshd.common.keyprovider.KeyPairProvider;
-import org.apache.sshd.core.CoreModuleProperties;
 import org.apache.sshd.scp.server.ScpCommandFactory;
 import org.apache.sshd.server.Environment;
 import org.apache.sshd.server.ExitCallback;
@@ -54,7 +58,6 @@ public final class MinaServer {
         // SFTP and SCP see the real file system, as with sshd; relative paths start in the home directory, where the server runs.
         sshd.setSubsystemFactories(List.of(new SftpSubsystemFactory()));
         sshd.setForwardingFilter(AcceptAllForwardingFilter.INSTANCE);
-        CoreModuleProperties.REKEY_BYTES_LIMIT.set(sshd, 32L * 1024);
         sshd.start();
         System.err.println("MINA SSHD listening on port " + port);
         Thread.currentThread().join();

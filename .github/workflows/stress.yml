@@ -124,7 +124,7 @@ jobs:
             echo "SSHSHARP_TEST_SERVER=${{ matrix.software }}"
             echo "SSHSHARP_TEST_SERVER_STRICTKEX=${{ matrix.strict }}"
           } >> "$GITHUB_ENV"
-          # OpenSSH (RekeyLimit) and AsyncSSH (rekey_bytes) re-key every 32 KiB; MINA has no fixed interval (see ci.yml).
+          # OpenSSH (RekeyLimit) and AsyncSSH (rekey_bytes) re-key every 32 KiB; MINA keeps its default limit (see MinaServer.java).
           if [ "${{ matrix.server }}" != "dropbear" ] && [ "${{ matrix.server }}" != "mina" ]; then echo "SSHSHARP_TEST_SSHD_REKEY=1" >> "$GITHUB_ENV"; fi
           if [ "${{ matrix.server }}" = "dropbear" ]; then echo "SSHSHARP_TEST_DROPBEAR_SFTP=1" >> "$GITHUB_ENV"; fi
       - run: dotnet restore
