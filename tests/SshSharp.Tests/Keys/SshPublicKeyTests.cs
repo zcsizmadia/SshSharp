@@ -396,4 +396,31 @@ public class SshPublicKeyTests
         });
         await Assert.That(() => SshPublicKey.Parse(noExponent)).Throws<SshProtocolException>();
     }
+
+    [Test]
+    public async Task AnRsaSignatureNotReducedModuloN_IsRefused()
+    {
+        // s + n verifies like s (RFC 8017's RSAVP1 refuses it: s must be below n). .NET on macOS accepted it where Linux and Windows
+        // did not (Wycheproof's "signature is not reduced"), so SshSharp checks it itself.
+        using var rsa = RSA.Create(2048);
+        var p = rsa.ExportParameters(false);
+        var key = SshPublicKey.Parse(Blob(w => { w.WriteString("ssh-rsa"); w.WriteMpint(p.Exponent); w.WriteMpint(p.Modulus); }));
+        var n = new BigInteger(p.Modulus, isUnsigned: true, isBigEndian: true);
+        for (var attempt = 0; attempt < 500; attempt++)
+        {
+            var data = RandomNumberGenerator.GetBytes(32);
+            var signature = rsa.SignData(data, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+            var unreduced = (new BigInteger(signature, isUnsigned: true, isBigEndian: true) + n).ToByteArray(isUnsigned: true, isBigEndian: true);
+            if (unreduced.Length > p.Modulus!.Length)
+            {
+                continue; // s + n needs a longer encoding, which the length check refuses anyway: try another signature
+            }
+
+            await Assert.That(key.VerifySignature("rsa-sha2-256", Blob(w => { w.WriteString("rsa-sha2-256"); w.WriteString(signature); }), data)).IsTrue();
+            await Assert.That(key.VerifySignature("rsa-sha2-256", Blob(w => { w.WriteString("rsa-sha2-256"); w.WriteString(unreduced); }), data)).IsFalse();
+            return;
+        }
+
+        Skip.Test("No signature of this key had s + n within the modulus's length (n is too close to 2^2048).");
+    }
 }

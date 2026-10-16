@@ -205,6 +205,14 @@ internal abstract class SshPublicKey
                 toVerify = padded;
             }
 
+            // The signature must be less than the modulus (RFC 8017, RSAVP1). A value one modulus larger gives the same result, and the
+            // platforms disagree on it: .NET on macOS accepted such a malleable signature where Linux and Windows refuse it (Wycheproof).
+            // Both are big-endian and of the modulus's length here, so comparing the bytes compares the numbers.
+            if (toVerify.SequenceCompareTo(parameters.Modulus) >= 0)
+            {
+                return false;
+            }
+
             using var rsa = RSA.Create();
             rsa.ImportParameters(parameters);
             var hash = algorithm == SshAlgorithms.RsaSha2_256 ? HashAlgorithmName.SHA256 : HashAlgorithmName.SHA512;
