@@ -106,20 +106,16 @@ public sealed class KnownHostsVerifier : SshHostKeyVerifier
         Func<SshHostKeyUpdate, CancellationToken, ValueTask<bool>>? confirmUpdate, bool allowKnownHostsCommand = false)
     {
         ArgumentNullException.ThrowIfNull(config);
-        var hash = config.Options.TryGetValue("hashknownhosts", out var value) && value.Count > 0
-            && value[0].ToLowerInvariant() is "yes" or "true";
-
         // UpdateHostKeys "ask" needs someone to confirm: it is on only when there is a callback to ask.
-        var setting = config.Options.TryGetValue("updatehostkeys", out var updateValue) && updateValue.Count > 0 ? updateValue[0].ToLowerInvariant() : "no";
-        var update = setting is "yes" or "true" || (setting == "ask" && confirmUpdate is not null);
+        var update = config.UpdateHostKeys == Config.UpdateHostKeys.Yes || (config.UpdateHostKeys == Config.UpdateHostKeys.Ask && confirmUpdate is not null);
         return new KnownHostsVerifier(config.UserKnownHostsFiles, config.GlobalKnownHostsFiles)
         {
             Policy = config.StrictHostKeyChecking,
-            HashNewEntries = hash,
+            HashNewEntries = config.HashKnownHosts,
             RevokedHostKeys = config.RevokedHostKeys,
             Ask = ask,
             UpdateHostKeys = update,
-            ConfirmHostKeyUpdate = setting == "ask" ? confirmUpdate : null,
+            ConfirmHostKeyUpdate = config.UpdateHostKeys == Config.UpdateHostKeys.Ask ? confirmUpdate : null,
             Command = allowKnownHostsCommand && config.KnownHostsCommand is { } command && config.Tokens is { } tokens
                 ? (name, port, reason, key, asCertificate, ct) => KnownHostsCommandRunner.RunAsync(command, tokens, name, port, reason, key, asCertificate, ct)
                 : null,

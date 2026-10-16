@@ -295,4 +295,17 @@ public class SshConfigTests
         var c = SshConfig.Parse("").Resolve("h");
         await Assert.That(c.User).IsEqualTo(Environment.UserName);
     }
+
+    [Test]
+    [Arguments("", false, UpdateHostKeys.No)]
+    [Arguments(" HashKnownHosts yes\n UpdateHostKeys yes\n", true, UpdateHostKeys.Yes)]
+    [Arguments(" HashKnownHosts true\n UpdateHostKeys ask\n", true, UpdateHostKeys.Ask)]
+    [Arguments(" HashKnownHosts no\n UpdateHostKeys no\n", false, UpdateHostKeys.No)]
+    [Arguments(" HashKnownHosts maybe\n UpdateHostKeys sometimes\n", false, UpdateHostKeys.No)]
+    public async Task HashKnownHostsAndUpdateHostKeys_AreTyped(string settings, bool hash, UpdateHostKeys update)
+    {
+        var c = SshConfig.Parse("Host *\n" + settings).Resolve("h", Options);
+        await Assert.That(c.HashKnownHosts).IsEqualTo(hash);
+        await Assert.That(c.UpdateHostKeys).IsEqualTo(update);
+    }
 }

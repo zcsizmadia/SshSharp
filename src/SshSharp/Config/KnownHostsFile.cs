@@ -95,6 +95,9 @@ public sealed class KnownHostsFile
     public IEnumerable<KnownHostsEntry> FindCertificateAuthorities(string host, int port = 22) =>
         Find(host, port).Where(e => e.Marker == KnownHostsMarker.CertAuthority);
 
+    /// <summary>Checks a presented host key on port 22, as <see cref="Check(string, int, string, ReadOnlySpan{byte})"/> does.</summary>
+    public KnownHostsCheckResult Check(string host, string keyType, ReadOnlySpan<byte> publicKey) => Check(host, 22, keyType, publicKey);
+
     /// <summary>Checks a presented host key. <c>@revoked</c> wins over everything; a matching key wins over a changed one.</summary>
     public KnownHostsCheckResult Check(string host, int port, string keyType, ReadOnlySpan<byte> publicKey)
     {
@@ -282,14 +285,32 @@ public sealed class KnownHostsFile
     /// new host key. Other processes appending at the same time do not lose their lines, unlike a load-modify-save.
     /// </summary>
     /// <returns>The entry that was written.</returns>
+    public static Task<KnownHostsEntry> AppendAsync(string path, string host, int port, string keyType, ReadOnlyMemory<byte> publicKey,
+        bool hash = false, CancellationToken cancellationToken = default) =>
+        AppendAsync(path, host, port, keyType, publicKey, hash, comment: null, KnownHostsMarker.None, cancellationToken);
+
+    /// <summary>
+    /// Appends one entry to a file without rewriting it, as <see cref="AppendAsync(string, string, int, string, ReadOnlyMemory{byte}, bool, CancellationToken)"/>
+    /// does, with a comment and a marker, as <see cref="Add"/> takes them.
+    /// </summary>
+    /// <param name="path">The known_hosts file.</param>
+    /// <param name="host">The host name or address.</param>
+    /// <param name="port">The port.</param>
+    /// <param name="keyType">The key type, for example <c>ssh-ed25519</c>.</param>
+    /// <param name="publicKey">The public key blob.</param>
+    /// <param name="hash">Whether to store the host hashed (<c>HashKnownHosts</c>).</param>
+    /// <param name="comment">A comment for the line, or null.</param>
+    /// <param name="marker">A marker (<c>@cert-authority</c>, <c>@revoked</c>), or none.</param>
+    /// <param name="cancellationToken">Cancels the write.</param>
+    /// <returns>The entry that was written.</returns>
     public static async Task<KnownHostsEntry> AppendAsync(string path, string host, int port, string keyType, ReadOnlyMemory<byte> publicKey,
-        bool hash = false, CancellationToken cancellationToken = default)
+        bool hash, string? comment, KnownHostsMarker marker = KnownHostsMarker.None, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
         ArgumentException.ThrowIfNullOrWhiteSpace(host);
         KnownHostsEntry.RequireSingleField(host);
         var field = hash ? KnownHostsEntry.HashHost(host, port) : KnownHostsEntry.FormatHost(host, port);
-        var entry = new KnownHostsEntry(field, keyType, publicKey.ToArray());
+        var entry = new KnownHostsEntry(field, keyType, publicKey.ToArray(), marker, comment);
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
 
         // Start on a new line if the file does not end with one (a hand-edited file).

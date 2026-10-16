@@ -63,6 +63,14 @@ public sealed class SshProtocolException : SshException
         : base(SshFailureReason.ProtocolError, message)
     {
     }
+
+    /// <summary>Creates an exception with the one that caused it.</summary>
+    /// <param name="message">A description.</param>
+    /// <param name="innerException">The exception that caused this one.</param>
+    public SshProtocolException(string message, Exception? innerException)
+        : base(SshFailureReason.ProtocolError, message, innerException)
+    {
+    }
 }
 /// <summary>The server's host key was not trusted, changed, or revoked, or the server could not prove it holds the key.</summary>
 public sealed class SshHostKeyException : SshException

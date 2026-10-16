@@ -125,6 +125,15 @@ Agent keys that match an `IdentityFile` (by the `.pub` file next to it) come fir
 all, and
 `IdentitiesOnly yes` leaves the agent's other keys out. `UseAgent = false` turns it off.
 
+Which agent setting to use:
+
+| You want to | Set |
+|---|---|
+| Authenticate with an agent's keys, connecting with `SshClientOptions` | `PrivateKeys = await agent.GetKeysAsync()` |
+| Authenticate with an agent's keys, connecting by alias | nothing (the default agent), `SshConfigConnectOptions.Agent` for another one, or `UseAgent = false` for none |
+| Forward an agent to the server, connecting with `SshClientOptions` | `SshClientOptions.ForwardAgent = agent` |
+| Forward an agent, connecting by alias | `ForwardAgent yes` in `ssh_config` (read as `SshHostConfig.ForwardAgent`); the agent forwarded is the one used for authentication |
+
 ### Agent forwarding
 
 `ForwardAgent` (`ssh -A`) offers your agent to the server, so programs there (`ssh`, `git`) can authenticate onward with your
