@@ -50,6 +50,74 @@ public class TransportInteropTests
         },
     };
 
+    /// <summary>
+    /// Many key exchanges per host key type (SSHSHARP_TEST_HANDSHAKES, default off): a host key signature that fails once in a few
+    /// thousand handshakes (#188, against AsyncSSH with rsa-sha2-512) shows how often, and whether only one key type is affected. Only
+    /// the key exchange runs; each failure is reported with the signature's own description.
+    /// </summary>
+    [Test]
+    public async Task ManyKeyExchanges_PerHostKey_AllVerify()
+    {
+        if (!RealServer.IsAvailable || !int.TryParse(Environment.GetEnvironmentVariable("SSHSHARP_TEST_HANDSHAKES"), out var count) || count <= 0)
+        {
+            Skip.Test("SSHSHARP_TEST_SSHD and SSHSHARP_TEST_HANDSHAKES (handshakes per host key) are needed.");
+            return;
+        }
+
+        string[] hostKeys = [SshAlgorithms.SshEd25519, SshAlgorithms.EcdsaNistp256, SshAlgorithms.RsaSha2_512, SshAlgorithms.RsaSha2_256];
+        var report = new System.Text.StringBuilder();
+        var failed = 0;
+        foreach (var hostKey in hostKeys)
+        {
+            var failures = new System.Collections.Concurrent.ConcurrentQueue<string>();
+            var done = 0;
+            await Parallel.ForAsync(0, count, new ParallelOptions { MaxDegreeOfParallelism = 8 }, async (_, ct) =>
+            {
+                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+                await using var stream = await RealServer.ConnectAsync();
+                await using var transport = new SshTransport(stream, Options(SshAlgorithms.Curve25519Sha256, "chacha20-poly1305@openssh.com", hostKey, []));
+                try
+                {
+                    await transport.ConnectAsync(timeout.Token);
+                    Interlocked.Increment(ref done);
+                }
+                catch (SshException ex) when (ex.Message.StartsWith("No matching", StringComparison.Ordinal))
+                {
+                    failures.Enqueue("not offered");
+                }
+                catch (Exception ex)
+                {
+                    failures.Enqueue($"{ex.GetType().Name}: {ex.Message}");
+                }
+            });
+
+            if (failures.All(f => f == "not offered") && done == 0)
+            {
+                report.AppendLine(System.Globalization.CultureInfo.InvariantCulture, $"{hostKey}: not offered by {RealServer.Software}");
+                continue;
+            }
+
+            failed += failures.Count;
+            report.AppendLine(System.Globalization.CultureInfo.InvariantCulture, $"{hostKey}: {done} of {count} verified, {failures.Count} failed");
+            foreach (var group in failures.GroupBy(f => f).Take(5))
+            {
+                report.AppendLine(System.Globalization.CultureInfo.InvariantCulture, $"  {group.Count()} x {group.Key}");
+            }
+        }
+
+        Console.WriteLine(report);
+        if (Environment.GetEnvironmentVariable("GITHUB_STEP_SUMMARY") is { Length: > 0 } summary)
+        {
+            // Shown on the CI run's page whether the test passes or fails.
+            await File.AppendAllTextAsync(summary, $"### Key exchanges per host key ({RealServer.Software}, {Environment.Version})\n```\n{report}```\n");
+        }
+
+        if (failed > 0)
+        {
+            Assert.Fail(report.ToString());
+        }
+    }
+
     [Test]
     [MethodDataSource(nameof(Combinations))]
     public async Task HandshakeAndEncryptedRoundTrip(string kex, string cipher, string hostKey)
