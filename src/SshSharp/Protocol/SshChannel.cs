@@ -476,10 +476,7 @@ internal sealed class SshChannel
             return;
         }
 
-        while (_incoming.Reader.TryRead(out var item))
-        {
-            item.Dispose();
-        }
+        DrainIncoming();
 
         if (_connection.PeerIsOpenSsh)
         {
@@ -490,6 +487,15 @@ internal sealed class SshChannel
                 w.WriteString("eow@openssh.com");
                 w.WriteBoolean(false);
             }), _isOpenForSending);
+        }
+    }
+
+    /// <summary>Releases what is queued for a reader that is gone, giving its window back.</summary>
+    private void DrainIncoming()
+    {
+        while (_incoming.Reader.TryRead(out var item))
+        {
+            item.Dispose();
         }
     }
 
@@ -533,6 +539,12 @@ internal sealed class SshChannel
         if (_abandoned || !queue.Writer.TryWrite(new ChannelData(this, packet, offset, length, isExtended)))
         {
             packet.Dispose();
+        }
+        else if (queue == _incoming && Volatile.Read(ref _discardIncoming) != 0)
+        {
+            // StopReceiving ran between the check above and the write, and drained before this chunk was queued: drop it too, or it would
+            // hold its buffer and its share of the window until the channel closes.
+            DrainIncoming();
         }
     }
 

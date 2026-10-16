@@ -49,6 +49,9 @@ internal sealed class RevokedKeyList
     /// </summary>
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (byte[] Hash, RevokedKeyList List)> Parsed = new();
 
+    /// <summary>How many parsed files <see cref="Parsed"/> keeps before it starts over.</summary>
+    internal const int MaxCachedFiles = 32;
+
     private RevokedKeyList(bool isKrl) => IsKrl = isKrl;
 
     /// <summary>Whether the file was a KRL (otherwise a list of public keys).</summary>
@@ -149,6 +152,12 @@ internal sealed class RevokedKeyList
         }
 
         var list = Parse(data);
+        if (Parsed.Count >= MaxCachedFiles && !Parsed.ContainsKey(key))
+        {
+            // RevokedHostKeys can name a file per host (%h): keep the cache bounded rather than one entry per host ever seen.
+            Parsed.Clear();
+        }
+
         Parsed[key] = (hash, list);
         return list;
     }

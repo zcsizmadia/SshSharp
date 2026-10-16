@@ -77,7 +77,13 @@ public sealed class SshAgent
     /// PuTTY's Pageant (0.75 and later) when only Pageant is running. Null when there is none to try. Whether an agent is actually running
     /// shows on the first request.
     /// </summary>
-    public static SshAgent? FromEnvironment()
+    public static SshAgent? FromEnvironment() => FromEnvironmentAsync().AsTask().GetAwaiter().GetResult();
+
+    /// <summary>
+    /// <see cref="FromEnvironment"/> without blocking a thread while Windows lists its pipes (up to <see cref="PipeListingTimeout"/>
+    /// each), for the asynchronous connect path.
+    /// </summary>
+    internal static async ValueTask<SshAgent?> FromEnvironmentAsync()
     {
         var socket = Environment.GetEnvironmentVariable("SSH_AUTH_SOCK");
         if (!string.IsNullOrEmpty(socket) || !OperatingSystem.IsWindows())
@@ -87,7 +93,9 @@ public sealed class SshAgent
 
         // The OpenSSH agent service first, as ssh does; Pageant only when that is surely not running (a listing that takes too long
         // proves nothing) and Pageant is.
-        return PipeListed(WindowsPipe[PipePrefix.Length..]) == false && Pageant() is { } pageant ? pageant : new SshAgent(WindowsPipe);
+        return await PipeListedAsync(WindowsPipe[PipePrefix.Length..]).ConfigureAwait(false) == false && await PageantAsync().ConfigureAwait(false) is { } pageant
+            ? pageant
+            : new SshAgent(WindowsPipe);
     }
 
     internal static SshAgent? FromSocketVariable(string? socket, bool windows) =>
@@ -97,27 +105,30 @@ public sealed class SshAgent
     /// PuTTY's Pageant (0.75 and later), on the named pipe it creates for the current user (<c>\\.\pipe\pageant.&lt;user&gt;.&lt;hash&gt;</c>),
     /// or null when Pageant is not running or this is not Windows. Its keys work like any agent's.
     /// </summary>
-    public static SshAgent? Pageant() =>
-        OperatingSystem.IsWindows() && PageantPipe.Name() is { } name && PipeListed(name) == true ? new SshAgent(PipePrefix + name) : null;
+    public static SshAgent? Pageant() => PageantAsync().AsTask().GetAwaiter().GetResult();
+
+    private static async ValueTask<SshAgent?> PageantAsync() =>
+        OperatingSystem.IsWindows() && PageantPipe.Name() is { } name && await PipeListedAsync(name).ConfigureAwait(false) == true
+            ? new SshAgent(PipePrefix + name)
+            : null;
 
     /// <summary>
     /// Whether a named pipe exists, by listing the pipes (opening one would take one of its instances); null when the listing took too
-    /// long to tell.
+    /// long to tell. The listing runs on the thread pool and is awaited, not waited for.
     /// </summary>
-    private static bool? PipeListed(string name)
+    private static async ValueTask<bool?> PipeListedAsync(string name)
     {
+        var listing = Task.Run(() => Directory.EnumerateFiles(PipePrefix, name).Any());
         try
         {
-            var listing = Task.Run(() => Directory.EnumerateFiles(PipePrefix, name).Any());
-            if (listing.Wait(PipeListingTimeout))
-            {
-                return listing.Result;
-            }
-
+            return await listing.WaitAsync(PipeListingTimeout).ConfigureAwait(false);
+        }
+        catch (TimeoutException)
+        {
             _ = listing.ContinueWith(static t => _ = t.Exception, CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
             return null;
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or AggregateException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             return false;
         }
