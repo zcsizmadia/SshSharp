@@ -579,20 +579,20 @@ public class SftpFileSystemTests
     [Test]
     public async Task WholeFileTransfers_AreTimedOnlyWithoutProgress_ButASilentServerStillTimesOut()
     {
-        // Every answer with data (and to every WRITE) takes 150 ms and they come one after another, so a whole-file transfer takes far
-        // longer than the 1.5 s timeout: it must still succeed, as each answer comes well within it (a tenth of it, so a loaded runner
-        // stalling the test for a moment does not look like a silent server).
-        var data = RandomNumberGenerator.GetBytes(1024 * 1024); // 16 READs of 64 KiB, so about 2.4 s in all
+        // Every answer with data (and to every WRITE) takes 50 ms and they come one after another, so a whole-file transfer takes longer
+        // than the 3 s timeout: it must still succeed, as each answer comes well within it. The margin is a sixtieth: with a tenth, a
+        // macOS runner running the whole suite (a starved thread pool, as the synchronous API blocks a thread) still stalled for 1.35 s.
+        var data = RandomNumberGenerator.GetBytes(4 * 1024 * 1024); // 64 READs of 64 KiB, so about 3.2 s in all
         await using var rig = await Rig.StartAsync(f =>
         {
             f.AddFile(Home + "/big.bin", data);
-            f.ReplyDelay = (request, reply) => (request, reply) is (5, 103) or (6, _) ? TimeSpan.FromMilliseconds(150) : TimeSpan.Zero;
-        }, new SftpFileSystemOptions { OperationTimeout = TimeSpan.FromSeconds(1.5) });
+            f.ReplyDelay = (request, reply) => (request, reply) is (5, 103) or (6, _) ? TimeSpan.FromMilliseconds(50) : TimeSpan.Zero;
+        }, new SftpFileSystemOptions { OperationTimeout = TimeSpan.FromSeconds(3) });
         var fs = rig.Fs;
 
         var started = System.Diagnostics.Stopwatch.StartNew();
         await Assert.That(TestBytes.Compare(fs.File.ReadAllBytes("big.bin"), data)).IsEqualTo("equal");
-        await Assert.That(started.Elapsed).IsGreaterThan(TimeSpan.FromSeconds(1.5));
+        await Assert.That(started.Elapsed).IsGreaterThan(TimeSpan.FromSeconds(3));
         await Assert.That(TestBytes.Compare(await fs.File.ReadAllBytesAsync("big.bin", Timeout()), data)).IsEqualTo("equal");
         fs.File.WriteAllBytes("copy.bin", data);
         await Assert.That(TestBytes.Compare(rig.Files.FileData(Home + "/copy.bin")!, data)).IsEqualTo("equal");

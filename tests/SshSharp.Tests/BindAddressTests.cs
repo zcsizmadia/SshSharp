@@ -185,13 +185,12 @@ public sealed class BindAddressTests : IDisposable
     [Test]
     public async Task ARefusedConnection_WithABind_IsAConnectFailure()
     {
-        // A port that was just free: nothing listens there.
-        int port;
-        using (var probe = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp))
-        {
-            probe.Bind(new IPEndPoint(IPAddress.Loopback, 0));
-            port = ((IPEndPoint)probe.LocalEndPoint!).Port;
-        }
+        // A port held by a socket that is bound but not listening, so connections to it are refused. Held for the whole test: a port that
+        // was merely free a moment ago can be taken by another test's listener, or be the very port the client's own bind gets, so that
+        // the socket connects to itself (both happened as a successful connect on Windows).
+        using var probe = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+        probe.Bind(new IPEndPoint(IPAddress.Loopback, 0));
+        var port = ((IPEndPoint)probe.LocalEndPoint!).Port;
 
         var ex = await Assert.That(async () => await TcpConnector.ConnectAsync("127.0.0.1", port, [new IPEndPoint(IPAddress.Loopback, 0)], SshAddressFamily.Inet, "the server", Timeout()))
             .Throws<SshException>();
