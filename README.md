@@ -199,7 +199,7 @@ latest release.
 
 Every pull request runs about 1,300 unit tests on Linux, Windows and macOS (x64 and Arm64), each on .NET 8 and .NET 10, and the
 interop tests against real servers: OpenSSH old and new on Linux and Windows, Dropbear, AsyncSSH, and SFTP-only servers.
-The managed cryptography is checked against reference vectors and 2,631 Project Wycheproof edge cases. A fault-injection
+The cryptography is checked against reference vectors and about 6,400 Project Wycheproof edge cases. A fault-injection
 proxy cuts, stalls and slows connections at any point, the parsers are fuzzed nightly, and stress runs loop the whole suite
 with an instrumented build that catches buffer misuse. [Testing and validation](https://github.com/zcsizmadia/SshSharp/blob/main/docs/testing.md)
 has the details, what the testing found, and what is not covered yet.

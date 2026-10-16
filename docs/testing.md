@@ -37,10 +37,18 @@ SshSharp uses the .NET libraries for every primitive they provide on both target
 ChaCha20, Poly1305, AES-CTR and sntrup761 itself. Those implementations are checked against:
 
 - **Reference vectors:** the RFCs' test vectors, OpenSSL's Curve25519 vectors, and the sntrup761 known-answer tests.
-- **[Project Wycheproof](https://github.com/C2SP/wycheproof):** 2,631 edge cases, each of which broke a real implementation
-  somewhere. They cover X25519 (low-order and non-canonical points), Ed25519 (non-canonical encodings, malleable signatures),
-  ChaCha20 and Poly1305 (through RFC 8439's construction), and ECDSA and RSA signature verification through the SSH signature
-  path. Every vector gives the expected answer.
+- **[Project Wycheproof](https://github.com/C2SP/wycheproof):** about 6,400 edge cases, each of which broke a real implementation
+  somewhere. They cover:
+  - X25519 (low-order and non-canonical points) and Ed25519 (non-canonical encodings, malleable signatures)
+  - ChaCha20 and Poly1305, through RFC 8439's construction
+  - ECDH on P-256, P-384 and P-521 (invalid-curve attacks, points on the wrong curve), through the key exchange's own point check
+  - ECDSA and RSA signature verification through the SSH signature path, RSA from 2048 to 8192 bits
+  - RSA signing (rsa-sha2-256 and rsa-sha2-512), from a PEM key to the signature
+  - AES-GCM, ML-KEM-768 and ML-KEM-1024 decapsulation, and HMAC-SHA-256/512, with the parameters SSH uses
+
+  Every vector gives the expected answer. Wycheproof keeps adding vectors as new bugs are found, so the copies in the repository are
+  checked for updates from time to time and before each release; the
+  [fixtures' README](https://github.com/zcsizmadia/SshSharp/blob/main/tests/SshSharp.Tests/Fixtures/wycheproof/README.md) says how.
 - **Constant-time review and a timing test:** see the [cryptography review](crypto-review.md).
 
 ## Real servers
