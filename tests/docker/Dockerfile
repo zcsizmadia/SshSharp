@@ -1,5 +1,5 @@
-# Throwaway SSH servers for the CI interop matrix: OpenSSH, Dropbear, AsyncSSH or Apache MINA SSHD on a digest-pinned Alpine image
-# (BASE, set by the workflow). Never published or used outside CI.
+# Throwaway SSH servers for the CI interop matrix: OpenSSH, Dropbear, AsyncSSH, Apache MINA SSHD or Erlang/OTP ssh on a digest-pinned
+# Alpine image (BASE, set by the workflow). Never published or used outside CI.
 ARG BASE
 FROM ${BASE}
 ARG SERVER=openssh
@@ -9,13 +9,16 @@ ENV SSH_SERVER=${SERVER}
 # built with (/usr/libexec/sftp-server); Alpine's OpenSSH package installs one in /usr/lib/ssh. AsyncSSH is a pinned release from
 # PyPI, on Alpine's Python and cryptography; su-exec runs it as the test account, and the scp program lets the SCP tests find it
 # (AsyncSSH serves scp commands itself). MINA SSHD is a pinned release from Maven Central, each jar checked against its SHA-256,
-# run from source by Alpine's JDK (MINA serves scp commands itself too).
+# run from source by Alpine's JDK (MINA serves scp commands itself too). Erlang/OTP is Alpine's erlang28 package, with ssh-keygen
+# for its host keys.
 RUN if [ "$SERVER" = "dropbear" ]; then \
       apk add --no-cache dropbear dropbear-scp openssh-sftp-server \
       && mkdir -p /usr/libexec && ln -sf /usr/lib/ssh/sftp-server /usr/libexec/sftp-server; \
     elif [ "$SERVER" = "asyncssh" ]; then \
       apk add --no-cache python3 py3-pip py3-cryptography su-exec openssh-client \
       && pip install --no-cache-dir --break-system-packages asyncssh==2.21.0; \
+    elif [ "$SERVER" = "erlang" ]; then \
+      apk add --no-cache erlang28 openssh-keygen su-exec; \
     elif [ "$SERVER" = "mina" ]; then \
       apk add --no-cache openjdk21-jdk su-exec openssh-client \
       && mkdir /mina && cd /mina \
@@ -38,6 +41,7 @@ RUN if [ "$SERVER" = "dropbear" ]; then \
 COPY entrypoint.sh /entrypoint.sh
 COPY asyncssh_server.py /asyncssh_server.py
 COPY MinaServer.java /MinaServer.java
+COPY erlang_server.escript /erlang_server.escript
 RUN chmod +x /entrypoint.sh
 EXPOSE 22 2222
 ENTRYPOINT ["/entrypoint.sh"]
