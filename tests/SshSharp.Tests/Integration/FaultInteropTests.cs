@@ -24,6 +24,8 @@ public class FaultInteropTests
     [Test]
     public async Task ACutConnection_FailsTheRunningCommand_AndTheClientKnows()
     {
+        RealServer.SkipUnlessItRunsCommands();
+
         if (await SetUpAsync() is not var (proxy, options))
         {
             Skip.Test("SSHSHARP_TEST_SSHD and an account are needed.");
@@ -121,6 +123,8 @@ public class FaultInteropTests
     [Test]
     public async Task Latency_SlowsThingsDown_ButEverythingWorks()
     {
+        RealServer.SkipUnlessItRunsCommands();
+
         if (await SetUpAsync() is not var (proxy, options))
         {
             Skip.Test("SSHSHARP_TEST_SSHD and an account are needed.");
@@ -257,6 +261,8 @@ public class FaultInteropTests
     [Test]
     public async Task DataInTinySlices_ArrivesWhole()
     {
+        RealServer.SkipUnlessItRunsCommands();
+
         if (await SetUpAsync() is not var (proxy, options))
         {
             Skip.Test("SSHSHARP_TEST_SSHD and an account are needed.");
@@ -274,6 +280,8 @@ public class FaultInteropTests
     [Test]
     public async Task ASlowLink_CarriesALargeOutputWhole()
     {
+        RealServer.SkipUnlessItRunsCommands();
+
         if (await SetUpAsync() is not var (proxy, options))
         {
             Skip.Test("SSHSHARP_TEST_SSHD and an account are needed.");

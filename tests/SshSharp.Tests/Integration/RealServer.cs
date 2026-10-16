@@ -74,6 +74,21 @@ internal static class RealServer
     public static bool IsMina => Software == "APACHE-SSHD";
 
     /// <summary>
+    /// Whether the server is the CI job's Erlang/OTP ssh container (tests/docker/erlang_server.escript): transport, authentication and
+    /// SFTP only, no shells or commands.
+    /// </summary>
+    public static bool IsErlang => Software == "Erlang";
+
+    /// <summary>Skips a test that needs to run a command, against a server that runs none (the Erlang/OTP container).</summary>
+    public static void SkipUnlessItRunsCommands()
+    {
+        if (IsErlang)
+        {
+            Skip.Test("The server runs no commands (Erlang/OTP's ssh, with shells and commands turned off).");
+        }
+    }
+
+    /// <summary>
     /// Whether the server has an sftp subsystem: every one tested, and Dropbear when its image has OpenSSH's sftp-server where Dropbear
     /// runs it (SSHSHARP_TEST_DROPBEAR_SFTP=1, set by CI after checking).
     /// </summary>

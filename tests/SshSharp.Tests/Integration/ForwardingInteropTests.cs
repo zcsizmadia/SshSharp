@@ -220,6 +220,8 @@ public class ForwardingInteropTests
     [Arguments(SshProxyType.Socks4)]
     public async Task AClientBehindASocksProxy_ConnectsThroughIt(SshProxyType type)
     {
+        RealServer.SkipUnlessItRunsCommands();
+
         // The proxy is SshSharp's own ssh -D on a first connection; the second connection goes through it to the server's sshd, by name.
         await using var first = await ConnectAsync();
         if (first is null || await RealServer.OptionsAsync() is not { } options)

@@ -9,7 +9,7 @@ does. This page describes what is tested, against what, how intermittent failure
 |---|---|
 | Unit tests | About 1,300 per target framework, with no network: scripted fake servers and agents over in-memory streams, and a fake clock |
 | Known-answer vectors | RFC and reference vectors, OpenSSL's Curve25519 vectors, the sntrup761 KAT, and about 6,400 [Project Wycheproof](https://github.com/C2SP/wycheproof) edge cases |
-| Real servers | OpenSSH (from 7.x to current, Linux and Windows), Dropbear, AsyncSSH, Apache MINA SSHD, and two SFTP-only servers, on every pull request |
+| Real servers | OpenSSH (from 7.x to current, Linux and Windows), Dropbear, AsyncSSH, Apache MINA SSHD, Erlang/OTP `ssh`, and two SFTP-only servers, on every pull request |
 | Network faults | A proxy that cuts, stalls, slows down and fragments connections to real servers, at any point |
 | Fuzzing | Coverage-guided fuzzing of the parsers that read untrusted input, nightly; mutation fuzzing in every test run |
 | Mutation testing | Stryker.NET over the cryptography, the packet codec and the configuration parsers |
@@ -64,6 +64,7 @@ The interop tests run against real servers on every pull request. Each server ca
 | **Dropbear** (two releases) | A second C implementation, with its own limits and quirks |
 | **AsyncSSH** | An independent implementation in Python. It found that SFTP symbolic links were sent in the wrong argument order for servers that follow the SFTP draft |
 | **Apache MINA SSHD** | An independent implementation in Java, the server inside Jenkins, Gerrit and Eclipse. It answers keep-alive requests, reports a killed command as an exit status, and has no pseudo-terminal. It re-keys only when the client does: with a small limit of its own, MINA 2.20.0 sometimes failed sessions while both sides re-keyed |
+| **Erlang/OTP `ssh`** | An implementation known for following the RFCs strictly: the transport with every algorithm it offers, host keys, SFTP, forwarding and network faults (no shells or commands, which run Erlang there). Its SFTP server ignores a new file size and still answers OK |
 | **atmoz/sftp** and a **Go `pkg/sftp`** server | Chrooted, SFTP-only servers, the kind behind many hosted file-transfer services |
 
 A key-exchange volume test can run thousands of handshakes per host key type against a server. It is off by default and turned on
@@ -142,8 +143,6 @@ runs, the instrumented build and the fault tests are what found them.
 - **An independent review of the managed cryptography,** planned before 1.0. Until then, it is checked against the reference
   vectors, Wycheproof and the timing test.
 - **Interop coverage** in the coverage figure.
-- **More independent servers:** Erlang/OTP `ssh` is planned
-  ([#218](https://github.com/zcsizmadia/SshSharp/issues/218)).
 - **Commercial negative-testing suites** (thousands of malformed messages against the client). Fuzzing covers the parsers, but not
   every message sequence.
 

@@ -16,6 +16,13 @@ if [ "$SSH_SERVER" = "mina" ]; then
   cd /home/sshsharp
   exec su-exec sshsharp env HOME=/home/sshsharp USER=sshsharp PORT=2222 java -cp '/mina/*' /MinaServer.java
 fi
+# Erlang/OTP ssh too, with host keys of each type made for it in a directory the account owns.
+if [ "$SSH_SERVER" = "erlang" ]; then
+  cd /home/sshsharp
+  KEYS=/home/sshsharp/hostkeys
+  su-exec sshsharp sh -c "mkdir -p $KEYS && for t in ed25519 ecdsa rsa; do ssh-keygen -q -N '' -t \$t -f $KEYS/ssh_host_\${t}_key; done"
+  exec su-exec sshsharp env HOME=/home/sshsharp USER=sshsharp PORT=2222 HOSTKEY_DIR=$KEYS escript /erlang_server.escript
+fi
 ssh-keygen -A
 # sshd takes the first value of each keyword, and Alpine's default file turns forwarding off: drop those lines before appending. Its
 # Subsystem line names an sftp-server binary that may not be installed, and a second definition would be fatal: use internal-sftp.

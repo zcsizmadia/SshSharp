@@ -226,7 +226,12 @@ public class SftpInteropTests
                 stream.SetLength(5);
             }
 
-            await Assert.That((await sftp.GetAttributesAsync(root + "/text", cancellationToken: Timeout())).Size).IsEqualTo(5L);
+            if (!RealServer.IsErlang)
+            {
+                // Erlang/OTP's ssh_sftpd applies SETSTAT and FSETSTAT through file:write_file_info, which ignores the size, and still
+                // answers OK: the file keeps its length there.
+                await Assert.That((await sftp.GetAttributesAsync(root + "/text", cancellationToken: Timeout())).Size).IsEqualTo(5L);
+            }
 
             // Renames, links, times, permissions.
             await sftp.RenameAsync(root + "/text", root + "/renamed", cancellationToken: Timeout());

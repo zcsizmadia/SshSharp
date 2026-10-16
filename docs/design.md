@@ -89,8 +89,9 @@ docs/                      # guides, design notes, the API reference site (DocFX
   (`FakeSshServer`, `FakeSessionServer`, `FakeSftpServer`) and a fake agent, so unit tests need no network. Time comes from
   `TimeProvider`; filesystem, environment and `Match exec` sit behind small delegates.
 - **Validation in depth:** reference and Wycheproof vectors, real-server interop (OpenSSH old and new on Linux and Windows,
-  Dropbear, AsyncSSH, Apache MINA SSHD, SFTP-only servers), network fault injection, coverage-guided fuzzing, mutation testing, and stress runs
-  with an instrumented build. [Testing and validation](testing.md) describes each, what it found, and what is not covered yet.
+  Dropbear, AsyncSSH, Apache MINA SSHD, Erlang/OTP, SFTP-only servers), network fault injection, coverage-guided fuzzing,
+  mutation testing, and stress runs with an instrumented build. [Testing and validation](testing.md) describes each, what it
+  found, and what is not covered yet.
 - **Rules:** no code merges without tests. Timing-dependent tests use the fake clock or wait on a signal, not real sleeps.
   Flaky tests are fixed or tracked, not hidden.
 

@@ -306,6 +306,16 @@ jobs:
             software: APACHE-SSHD
             strict: '1'
             port: '2222'
+          # Erlang/OTP ssh, known for following the RFCs strictly (tests/docker/erlang_server.escript). Its shells and commands run
+          # Erlang, not a POSIX shell, so they are turned off and only the classes that need no command run: the transport (every
+          # algorithm it offers), host keys, SFTP, forwarding and network faults; the tests there that need a command skip themselves.
+          - name: Erlang/OTP ssh
+            image: alpine@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8
+            server: erlang
+            software: Erlang
+            strict: '1'
+            port: '2222'
+            filter: /*/*/(TransportInteropTests)|(HostKeyInteropTests)|(HostKeyScanInteropTests)|(SftpInteropTests)|(ForwardingInteropTests)|(FaultInteropTests)/*
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -339,7 +349,7 @@ jobs:
             echo "SSHSHARP_TEST_SERVER_STRICTKEX=${{ matrix.strict }}"
           } >> "$GITHUB_ENV"
           # OpenSSH (RekeyLimit) and AsyncSSH (rekey_bytes) re-key every 32 KiB. MINA keeps its default limit (see MinaServer.java).
-          if [ "${{ matrix.server }}" != "dropbear" ] && [ "${{ matrix.server }}" != "mina" ]; then echo "SSHSHARP_TEST_SSHD_REKEY=1" >> "$GITHUB_ENV"; fi
+          if [ "${{ matrix.server }}" != "dropbear" ] && [ "${{ matrix.server }}" != "mina" ] && [ "${{ matrix.server }}" != "erlang" ]; then echo "SSHSHARP_TEST_SSHD_REKEY=1" >> "$GITHUB_ENV"; fi
           # Dropbear serves the sftp subsystem by running OpenSSH's sftp-server from /usr/libexec (the image links it there). A missing
           # binary fails the job: the SFTP tests would otherwise skip themselves and the job would pass without them.
           if [ "${{ matrix.server }}" = "dropbear" ]; then
@@ -353,7 +363,7 @@ jobs:
       - run: dotnet build -c Release --no-restore
       - name: Interop tests against the container
         # Few tests at a time: Dropbear limits unauthenticated connections per address (a compile-time setting).
-        run: dotnet test --project tests/SshSharp.Tests -c Release -f net10.0 --no-build --treenode-filter "/*/*/*InteropTests/*" --maximum-parallel-tests 4
+        run: dotnet test --project tests/SshSharp.Tests -c Release -f net10.0 --no-build --treenode-filter "${{ matrix.filter || '/*/*/*InteropTests/*' }}" --maximum-parallel-tests 4
       - name: Server log
         if: failure()
         # Without the rekey test's per-packet lines, which would fill the tail.
