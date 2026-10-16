@@ -287,10 +287,16 @@ public sealed class SshClientOptions
     internal const int DefaultMinimumRsaBits = 2048;
 }
 
+/// <summary>The signal that ended a remote program, from the server's <c>exit-signal</c> (RFC 4254 section 6.10).</summary>
+/// <param name="Name">The signal name without the <c>SIG</c> prefix, for example <c>KILL</c> or <c>TERM</c>.</param>
+/// <param name="CoreDumped">Whether the program dumped core.</param>
+/// <param name="ErrorMessage">The server's description, as it sent it; null when it sent none.</param>
+public sealed record SshExitSignal(string Name, bool CoreDumped, string? ErrorMessage);
+
 /// <summary>The outcome of a remote command.</summary>
 public sealed class SshCommandResult
 {
-    internal SshCommandResult(int? exitStatus, string? exitSignal, ReadOnlyMemory<byte> standardOutput, ReadOnlyMemory<byte> standardError)
+    internal SshCommandResult(int? exitStatus, SshExitSignal? exitSignal, ReadOnlyMemory<byte> standardOutput, ReadOnlyMemory<byte> standardError)
     {
         ExitStatus = exitStatus;
         ExitSignal = exitSignal;
@@ -301,8 +307,8 @@ public sealed class SshCommandResult
     /// <summary>The exit status, or null if the command ended without one (for example, killed by a signal).</summary>
     public int? ExitStatus { get; }
 
-    /// <summary>The name of the signal that ended the command, if any.</summary>
-    public string? ExitSignal { get; }
+    /// <summary>The signal that ended the command, if any.</summary>
+    public SshExitSignal? ExitSignal { get; }
 
     /// <summary>Everything the command wrote to standard output.</summary>
     public ReadOnlyMemory<byte> StandardOutput { get; }

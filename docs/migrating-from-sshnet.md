@@ -156,7 +156,7 @@ Console.WriteLine($"exit {result.ExitStatus}: {result.StandardOutputText}");
 |---|---|
 | `client.RunCommand(text)`, `command.ExecuteAsync(ct)` | `await client.RunCommandAsync(text, ct)` |
 | `command.Result`, `command.Error` | `result.StandardOutputText`, `result.StandardErrorText` (or the raw bytes: `StandardOutput`, `StandardError`) |
-| `command.ExitStatus`, `command.ExitSignal` | `result.ExitStatus`, `result.ExitSignal` |
+| `command.ExitStatus`, `command.ExitSignal` | `result.ExitStatus`, `result.ExitSignal?.Name` |
 | `command.OutputStream`, `ExtendedOutputStream`, `CreateInputStream()` | `await client.StartCommandAsync(text)`, then `session.StandardOutput`, `StandardError`, `StandardInput` |
 | `command.CancelAsync()` | cancel the token, or `session.SendSignalAsync("TERM")` |
 | `command.CommandTimeout` | a `CancellationToken` |

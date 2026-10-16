@@ -27,8 +27,13 @@ public sealed class SshHostKeyContext
     /// The name and port to look the key up under in <c>known_hosts</c>, as <c>ssh</c> does: the alias (with the default port) when set,
     /// otherwise the host and port. Null when neither is known.
     /// </summary>
-    public (string Name, int Port)? KnownHostsLookup => HostKeyAlias is { } alias ? (alias, 22) : Host is { } host ? (host, Port) : null;
+    public SshKnownHostsLookup? KnownHostsLookup => HostKeyAlias is { } alias ? new(alias, 22) : Host is { } host ? new(host, Port) : null;
 }
+
+/// <summary>The name and port a host key is looked up under in <c>known_hosts</c> (see <see cref="SshHostKeyContext.KnownHostsLookup"/>).</summary>
+/// <param name="Name">The host name, address or <see cref="SshClientOptions.HostKeyAlias"/>.</param>
+/// <param name="Port">The port; <c>known_hosts</c> writes a port other than 22 as <c>[name]:port</c>.</param>
+public sealed record SshKnownHostsLookup(string Name, int Port);
 
 /// <summary>A verifier's decision about a host key.</summary>
 public readonly record struct SshHostKeyVerdict

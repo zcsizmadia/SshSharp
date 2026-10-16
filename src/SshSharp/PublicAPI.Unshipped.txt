@@ -65,3 +65,45 @@ SshSharp.SshSession.CloseInputAsync(System.Threading.CancellationToken cancellat
 *REMOVED*SshSharp.SshSocksProxy.DisposeAsync() -> System.Threading.Tasks.ValueTask
 *REMOVED*SshSharp.SshSocksProxy.LocalEndPoint.get -> System.Net.IPEndPoint!
 *REMOVED*static SshSharp.Config.SshAlgorithmList.Apply(string! specification, System.Collections.Generic.IReadOnlyList<string!>! defaults) -> System.Collections.Generic.IReadOnlyList<string!>!
+SshSharp.Config.SshConfig.ResolveAsync(string! host, SshSharp.Config.SshConfigResolveOptions? options = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SshSharp.Config.SshHostConfig!>!
+SshSharp.Config.SshConfigResolveOptions.ExecMatcher.get -> System.Func<string!, System.Threading.CancellationToken, System.Threading.Tasks.Task<bool>!>?
+SshSharp.Config.SshConfigResolveOptions.HostCanonicalizer.get -> System.Func<string!, System.Collections.Generic.IReadOnlyList<string!>!, System.Threading.CancellationToken, System.Threading.Tasks.Task<string?>!>?
+static SshSharp.Config.SshExecMatcher.RunShellAsync(string! command, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
+*REMOVED*SshSharp.Config.SshConfigResolveOptions.ExecMatcher.get -> System.Func<string!, bool>?
+*REMOVED*SshSharp.Config.SshConfigResolveOptions.HostCanonicalizer.get -> System.Func<string!, System.Collections.Generic.IReadOnlyList<string!>!, string?>?
+override SshSharp.SshExitSignal.Equals(object? obj) -> bool
+override SshSharp.SshExitSignal.GetHashCode() -> int
+override SshSharp.SshExitSignal.ToString() -> string!
+override SshSharp.SshKnownHostsLookup.Equals(object? obj) -> bool
+override SshSharp.SshKnownHostsLookup.GetHashCode() -> int
+override SshSharp.SshKnownHostsLookup.ToString() -> string!
+SshSharp.SshCommandResult.ExitSignal.get -> SshSharp.SshExitSignal?
+SshSharp.SshExitSignal
+SshSharp.SshExitSignal.<Clone>$() -> SshSharp.SshExitSignal!
+SshSharp.SshExitSignal.CoreDumped.get -> bool
+SshSharp.SshExitSignal.CoreDumped.init -> void
+SshSharp.SshExitSignal.Deconstruct(out string! Name, out bool CoreDumped, out string? ErrorMessage) -> void
+SshSharp.SshExitSignal.Equals(SshSharp.SshExitSignal? other) -> bool
+SshSharp.SshExitSignal.ErrorMessage.get -> string?
+SshSharp.SshExitSignal.ErrorMessage.init -> void
+SshSharp.SshExitSignal.Name.get -> string!
+SshSharp.SshExitSignal.Name.init -> void
+SshSharp.SshExitSignal.SshExitSignal(string! Name, bool CoreDumped, string? ErrorMessage) -> void
+SshSharp.SshHostKeyContext.KnownHostsLookup.get -> SshSharp.SshKnownHostsLookup?
+SshSharp.SshKnownHostsLookup
+SshSharp.SshKnownHostsLookup.<Clone>$() -> SshSharp.SshKnownHostsLookup!
+SshSharp.SshKnownHostsLookup.Deconstruct(out string! Name, out int Port) -> void
+SshSharp.SshKnownHostsLookup.Equals(SshSharp.SshKnownHostsLookup? other) -> bool
+SshSharp.SshKnownHostsLookup.Name.get -> string!
+SshSharp.SshKnownHostsLookup.Name.init -> void
+SshSharp.SshKnownHostsLookup.Port.get -> int
+SshSharp.SshKnownHostsLookup.Port.init -> void
+SshSharp.SshKnownHostsLookup.SshKnownHostsLookup(string! Name, int Port) -> void
+SshSharp.SshSession.ExitSignal.get -> SshSharp.SshExitSignal?
+static SshSharp.SshExitSignal.operator !=(SshSharp.SshExitSignal? left, SshSharp.SshExitSignal? right) -> bool
+static SshSharp.SshExitSignal.operator ==(SshSharp.SshExitSignal? left, SshSharp.SshExitSignal? right) -> bool
+static SshSharp.SshKnownHostsLookup.operator !=(SshSharp.SshKnownHostsLookup? left, SshSharp.SshKnownHostsLookup? right) -> bool
+static SshSharp.SshKnownHostsLookup.operator ==(SshSharp.SshKnownHostsLookup? left, SshSharp.SshKnownHostsLookup? right) -> bool
+*REMOVED*SshSharp.SshCommandResult.ExitSignal.get -> string?
+*REMOVED*SshSharp.SshHostKeyContext.KnownHostsLookup.get -> (string! Name, int Port)?
+*REMOVED*SshSharp.SshSession.ExitSignal.get -> string?

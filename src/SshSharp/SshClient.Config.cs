@@ -43,7 +43,7 @@ public sealed partial class SshClient
         }
 
         var resolveOptions = (options.ResolveOptions ?? new SshConfigResolveOptions()).With(user, port, jumpHost: depth > 0);
-        var hostConfig = config.Resolve(host, resolveOptions);
+        var hostConfig = await config.ResolveAsync(host, resolveOptions, cancellationToken).ConfigureAwait(false);
         var logger = options.Logger ?? NullLogger.Instance;
         if (hostConfig.RefuseConnection)
         {

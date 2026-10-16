@@ -7,7 +7,8 @@ namespace SshSharp.Config;
 /// blocks are evaluated in order against the state collected so far, <c>Include</c> is a closed scope, and a second
 /// ("final") pass runs after canonicalization or when a <c>Match final</c> was seen.
 /// </summary>
-internal sealed class SshConfigResolver(IReadOnlyList<SshConfigDocument> documents, string originalHost, SshConfigResolveOptions options)
+internal sealed class SshConfigResolver(IReadOnlyList<SshConfigDocument> documents, string originalHost, SshConfigResolveOptions options,
+    SshConfigCallbackAnswers answers)
 {
     private const int MaxIncludeDepth = 16;
 
@@ -245,7 +246,7 @@ internal sealed class SshConfigResolver(IReadOnlyList<SshConfigDocument> documen
         "user" => Glob.IsMatchList(argument, CurrentUser()),
         "localuser" => Glob.IsMatchList(argument, options.LocalUser),
         "tagged" => CurrentTag() is { } tag && Glob.IsMatchList(argument, tag),
-        "exec" => options.ExecMatcher is { } run && run(Context().ExpandTokens(argument)),
+        "exec" => options.ExecMatcher is not null && answers.Exec(Context().ExpandTokens(argument)),
         "localnetwork" => LocalNetwork.AnyInside(LocalAddresses(), argument),
         _ => false,
     };
@@ -257,7 +258,7 @@ internal sealed class SshConfigResolver(IReadOnlyList<SshConfigDocument> documen
 
     private string? TryCanonicalize()
     {
-        if (options.HostCanonicalizer is not { } canonicalizer || !_values.TryGetValue("canonicalizehostname", out var setting) || setting.Count == 0)
+        if (options.HostCanonicalizer is null || !_values.TryGetValue("canonicalizehostname", out var setting) || setting.Count == 0)
         {
             return null;
         }
@@ -279,7 +280,7 @@ internal sealed class SshConfigResolver(IReadOnlyList<SshConfigDocument> documen
         }
 
         var domains = _values.TryGetValue("canonicaldomains", out var list) ? list : [];
-        var canonical = canonicalizer(host, domains);
+        var canonical = answers.Canonical(host, domains);
         if (canonical is null && _values.TryGetValue("canonicalizefallbacklocal", out var fallback) && fallback.Count > 0
             && fallback[0].ToLowerInvariant() is "no" or "false")
         {
@@ -288,4 +289,36 @@ internal sealed class SshConfigResolver(IReadOnlyList<SshConfigDocument> documen
 
         return canonical;
     }
+}
+/// <summary>
+/// The answers of the asynchronous callbacks (<see cref="SshConfigResolveOptions.ExecMatcher"/>, <see cref="SshConfigResolveOptions.HostCanonicalizer"/>)
+/// for one resolution. The resolver is synchronous: an answer it does not have yet raises <see cref="SshConfigCallbackNeeded"/>, and
+/// <see cref="SshConfig.ResolveAsync"/> awaits the callback, records the answer and resolves again. Resolution is deterministic, so
+/// each pass gets further, once per distinct callback.
+/// </summary>
+internal sealed class SshConfigCallbackAnswers
+{
+    private readonly Dictionary<string, bool> _exec = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string?> _canonical = new(StringComparer.Ordinal);
+
+    public bool Exec(string command) =>
+        _exec.TryGetValue(command, out var matched) ? matched : throw new SshConfigCallbackNeeded(command, null);
+
+    public string? Canonical(string host, IReadOnlyList<string> domains) =>
+        _canonical.TryGetValue(Key(host, domains), out var name) ? name : throw new SshConfigCallbackNeeded(host, domains);
+
+    public void RecordExec(string command, bool matched) => _exec[command] = matched;
+
+    public void RecordCanonical(string host, IReadOnlyList<string> domains, string? name) => _canonical[Key(host, domains)] = name;
+
+    private static string Key(string host, IReadOnlyList<string> domains) => host + "\0" + string.Join("\0", domains);
+}
+
+/// <summary>A callback answer the resolver needs and does not have yet: an exec command, or a host and its canonical domains.</summary>
+internal sealed class SshConfigCallbackNeeded(string argument, IReadOnlyList<string>? domains) : Exception
+{
+    public string Argument { get; } = argument;
+
+    /// <summary>The canonical domains, for a host to canonicalize; null for an exec command.</summary>
+    public IReadOnlyList<string>? Domains { get; } = domains;
 }

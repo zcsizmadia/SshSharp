@@ -175,7 +175,7 @@ public class SessionTests
         await using var session = await client.StartCommandAsync("sleep 100", cancellationToken: Timeout());
         await session.WaitForExitAsync(Timeout());
         await Assert.That(session.ExitStatus).IsNull();
-        await Assert.That(session.ExitSignal).IsEqualTo("KILL");
+        await Assert.That(session.ExitSignal).IsEqualTo(new SshExitSignal("KILL", false, null));
     }
 
     [Test]

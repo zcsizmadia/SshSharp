@@ -20,11 +20,11 @@ internal sealed class ExecScript(FakeSessionServer server, FakeSessionServer.Ser
     /// <summary>OpenSSH's <c>eow@openssh.com</c>: the program closed its input, so the client should stop sending it.</summary>
     public Task EndOfWriteAsync() => server.SendRequestAsync(channel, "eow@openssh.com", _ => { }, fromScript: true);
 
-    public Task ExitSignalAsync(string signal) => server.SendRequestAsync(channel, "exit-signal", w =>
+    public Task ExitSignalAsync(string signal, bool coreDumped = false, string message = "") => server.SendRequestAsync(channel, "exit-signal", w =>
     {
         w.WriteString(signal);
-        w.WriteBoolean(false);
-        w.WriteString(string.Empty);
+        w.WriteBoolean(coreDumped);
+        w.WriteString(message);
         w.WriteString(string.Empty);
     }, fromScript: true);
 

@@ -57,8 +57,8 @@ public sealed class SshSession : IAsyncDisposable
     /// <summary>The program's exit status, once the server has reported it; null before that, or if it ended by a signal.</summary>
     public int? ExitStatus => _channel.ExitStatus is { } status ? (int)status : null;
 
-    /// <summary>The name of the signal that ended the program (for example <c>KILL</c>), if any.</summary>
-    public string? ExitSignal => _channel.ExitSignal;
+    /// <summary>The signal that ended the program (for example <c>KILL</c>), if any.</summary>
+    public SshExitSignal? ExitSignal => _channel.ExitSignal;
 
     /// <summary>
     /// Completes when the server closes the session, after the program has ended and its output has been sent. Output that is never read
@@ -141,6 +141,6 @@ public sealed class SshSession : IAsyncDisposable
         await _output.DisposeAsync().ConfigureAwait(false);
         await _error.DisposeAsync().ConfigureAwait(false);
         _channel.DiscardUnread();
-        SshLog.SessionClosed(_logger, _channel.LocalId, ExitStatus, ExitSignal);
+        SshLog.SessionClosed(_logger, _channel.LocalId, ExitStatus, ExitSignal?.Name);
     }
 }

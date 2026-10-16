@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <!-- https://learn.microsoft.com/dotnet/fundamentals/package-validation/diagnostic-ids -->
 <Suppressions xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
   <Suppression>
@@ -45,6 +45,20 @@
   </Suppression>
   <Suppression>
     <DiagnosticId>CP0002</DiagnosticId>
+    <Target>M:SshSharp.Config.SshConfigResolveOptions.get_ExecMatcher</Target>
+    <Left>lib/net10.0/SshSharp.dll</Left>
+    <Right>lib/net10.0/SshSharp.dll</Right>
+    <IsBaselineSuppression>true</IsBaselineSuppression>
+  </Suppression>
+  <Suppression>
+    <DiagnosticId>CP0002</DiagnosticId>
+    <Target>M:SshSharp.Config.SshConfigResolveOptions.get_HostCanonicalizer</Target>
+    <Left>lib/net10.0/SshSharp.dll</Left>
+    <Right>lib/net10.0/SshSharp.dll</Right>
+    <IsBaselineSuppression>true</IsBaselineSuppression>
+  </Suppression>
+  <Suppression>
+    <DiagnosticId>CP0002</DiagnosticId>
     <Target>M:SshSharp.Scp.SshScpOptions.get_DirectoryMode</Target>
     <Left>lib/net10.0/SshSharp.dll</Left>
     <Right>lib/net10.0/SshSharp.dll</Right>
@@ -87,9 +101,44 @@
   </Suppression>
   <Suppression>
     <DiagnosticId>CP0002</DiagnosticId>
+    <Target>M:SshSharp.SshCommandResult.get_ExitSignal</Target>
+    <Left>lib/net10.0/SshSharp.dll</Left>
+    <Right>lib/net10.0/SshSharp.dll</Right>
+    <IsBaselineSuppression>true</IsBaselineSuppression>
+  </Suppression>
+  <Suppression>
+    <DiagnosticId>CP0002</DiagnosticId>
+    <Target>M:SshSharp.SshHostKeyContext.get_KnownHostsLookup</Target>
+    <Left>lib/net10.0/SshSharp.dll</Left>
+    <Right>lib/net10.0/SshSharp.dll</Right>
+    <IsBaselineSuppression>true</IsBaselineSuppression>
+  </Suppression>
+  <Suppression>
+    <DiagnosticId>CP0002</DiagnosticId>
     <Target>M:SshSharp.SshSession.CloseInputAsync(System.Threading.CancellationToken)</Target>
     <Left>lib/net10.0/SshSharp.dll</Left>
     <Right>lib/net10.0/SshSharp.dll</Right>
+    <IsBaselineSuppression>true</IsBaselineSuppression>
+  </Suppression>
+  <Suppression>
+    <DiagnosticId>CP0002</DiagnosticId>
+    <Target>M:SshSharp.SshSession.get_ExitSignal</Target>
+    <Left>lib/net10.0/SshSharp.dll</Left>
+    <Right>lib/net10.0/SshSharp.dll</Right>
+    <IsBaselineSuppression>true</IsBaselineSuppression>
+  </Suppression>
+  <Suppression>
+    <DiagnosticId>CP0002</DiagnosticId>
+    <Target>M:SshSharp.Config.SshConfigResolveOptions.get_ExecMatcher</Target>
+    <Left>lib/net8.0/SshSharp.dll</Left>
+    <Right>lib/net8.0/SshSharp.dll</Right>
+    <IsBaselineSuppression>true</IsBaselineSuppression>
+  </Suppression>
+  <Suppression>
+    <DiagnosticId>CP0002</DiagnosticId>
+    <Target>M:SshSharp.Config.SshConfigResolveOptions.get_HostCanonicalizer</Target>
+    <Left>lib/net8.0/SshSharp.dll</Left>
+    <Right>lib/net8.0/SshSharp.dll</Right>
     <IsBaselineSuppression>true</IsBaselineSuppression>
   </Suppression>
   <Suppression>
@@ -136,7 +185,28 @@
   </Suppression>
   <Suppression>
     <DiagnosticId>CP0002</DiagnosticId>
+    <Target>M:SshSharp.SshCommandResult.get_ExitSignal</Target>
+    <Left>lib/net8.0/SshSharp.dll</Left>
+    <Right>lib/net8.0/SshSharp.dll</Right>
+    <IsBaselineSuppression>true</IsBaselineSuppression>
+  </Suppression>
+  <Suppression>
+    <DiagnosticId>CP0002</DiagnosticId>
+    <Target>M:SshSharp.SshHostKeyContext.get_KnownHostsLookup</Target>
+    <Left>lib/net8.0/SshSharp.dll</Left>
+    <Right>lib/net8.0/SshSharp.dll</Right>
+    <IsBaselineSuppression>true</IsBaselineSuppression>
+  </Suppression>
+  <Suppression>
+    <DiagnosticId>CP0002</DiagnosticId>
     <Target>M:SshSharp.SshSession.CloseInputAsync(System.Threading.CancellationToken)</Target>
+    <Left>lib/net8.0/SshSharp.dll</Left>
+    <Right>lib/net8.0/SshSharp.dll</Right>
+    <IsBaselineSuppression>true</IsBaselineSuppression>
+  </Suppression>
+  <Suppression>
+    <DiagnosticId>CP0002</DiagnosticId>
+    <Target>M:SshSharp.SshSession.get_ExitSignal</Target>
     <Left>lib/net8.0/SshSharp.dll</Left>
     <Right>lib/net8.0/SshSharp.dll</Right>
     <IsBaselineSuppression>true</IsBaselineSuppression>
