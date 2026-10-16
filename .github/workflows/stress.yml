@@ -115,7 +115,7 @@ jobs:
       - run: dotnet build -c Release --no-restore -p:SshSharpInstrument=true
       - name: Loop
         # Few tests at a time, as in CI: Dropbear limits unauthenticated connections per address.
-        run: tests/stress/loop.sh "$ITERATIONS" "$RUNNER_TEMP/stress" net10.0,net8.0 "/*/*/RekeyInteropTests/*" --maximum-parallel-tests 4 # EXPERIMENT (#240)
+        run: tests/stress/loop.sh "$ITERATIONS" "$RUNNER_TEMP/stress" net10.0,net8.0 "/*/*/*InteropTests/*" --maximum-parallel-tests 4 # EXPERIMENT (#240): the whole suite, for load
       - name: Summary and server log
         if: always()
         run: |
