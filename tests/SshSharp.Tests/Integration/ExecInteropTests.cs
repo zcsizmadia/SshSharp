@@ -152,6 +152,26 @@ public class ExecInteropTests
     }
 
     [Test]
+    public async Task PasswordAlone_Authenticates()
+    {
+        // The other tests also offer the key where there is one, and keys go first: this keeps password authentication covered.
+        if (!Configured || RealServer.Password is null)
+        {
+            Skip.Test("No real server account with a password configured.");
+        }
+
+        var (host, port) = RealServer.Endpoint!.Value;
+        var options = new SshClientOptions
+        {
+            UserName = Environment.GetEnvironmentVariable("SSHSHARP_TEST_USER")!,
+            Password = RealServer.Password,
+            HostKeyVerifier = SshHostKeyVerifier.FromDelegate((_, _) => ValueTask.FromResult(true)),
+        };
+        await using var client = await SshClient.ConnectAsync(host, port, options, Timeout());
+        await Assert.That((await client.RunCommandAsync("echo by-password", Timeout())).StandardOutputText).IsEqualTo("by-password\n");
+    }
+
+    [Test]
     public async Task WrongPasswordIsRejected()
     {
         if (!Configured || RealServer.Password is null)
