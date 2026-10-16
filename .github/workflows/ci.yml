@@ -508,7 +508,10 @@ jobs:
       - run: dotnet restore
       - run: dotnet build -c Release --no-restore
       - name: Interop tests against OpenSSH for Windows
-        run: dotnet test --project tests/SshSharp.Tests -c Release -f net10.0 --no-build --treenode-filter "/*/*/*InteropTests/*"
+        # Few tests at a time: under a burst of connections, OpenSSH for Windows' listener fails some accepts ("error: accept:
+        # Connection reset" in its log) and leaves the connection unserved, so a test forwarding to the server's own sshd waits for an
+        # identification line that never comes (#188).
+        run: dotnet test --project tests/SshSharp.Tests -c Release -f net10.0 --no-build --treenode-filter "/*/*/*InteropTests/*" --maximum-parallel-tests 4
       - name: Server log
         if: failure()
         shell: pwsh

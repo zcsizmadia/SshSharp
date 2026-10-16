@@ -197,7 +197,8 @@ jobs:
       - run: dotnet build -c Release --no-restore -p:SshSharpInstrument=true
       - name: Loop
         shell: bash
-        run: tests/stress/loop.sh "$ITERATIONS" "$RUNNER_TEMP/stress" net10.0,net8.0 "/*/*/*InteropTests/*"
+        # Few tests at a time, as in CI: OpenSSH for Windows fails some accepts under a burst of connections (#188).
+        run: tests/stress/loop.sh "$ITERATIONS" "$RUNNER_TEMP/stress" net10.0,net8.0 "/*/*/*InteropTests/*" --maximum-parallel-tests 4
       - name: Summary and server log
         if: always()
         shell: pwsh
