@@ -234,6 +234,8 @@ public sealed class SshConfig
                 ? ctx.ExpandPath(ctx.ExpandTokens(revoked))
                 : null,
             StrictHostKeyChecking = ParseStrict(First("stricthostkeychecking")),
+            HashKnownHosts = First("hashknownhosts")?.ToLowerInvariant() is "yes" or "true",
+            UpdateHostKeys = ParseUpdateHostKeys(First("updatehostkeys")),
             HostKeyAlias = hostKeyAlias, // not token-expanded (ssh_config(5) does not list it)
             HostKeyAlgorithms = First("hostkeyalgorithms"),
             KexAlgorithms = First("kexalgorithms"),
@@ -416,6 +418,13 @@ public sealed class SshConfig
         "no" or "false" or "off" => StrictHostKeyChecking.No,
         "accept-new" => StrictHostKeyChecking.AcceptNew,
         _ => StrictHostKeyChecking.Ask,
+    };
+
+    private static UpdateHostKeys ParseUpdateHostKeys(string? value) => value?.ToLowerInvariant() switch
+    {
+        "yes" or "true" => UpdateHostKeys.Yes,
+        "ask" => UpdateHostKeys.Ask,
+        _ => UpdateHostKeys.No,
     };
 
     private static SshAddressFamily ParseFamily(string? value) => value?.ToLowerInvariant() switch

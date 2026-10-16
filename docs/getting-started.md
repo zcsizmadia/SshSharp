@@ -52,6 +52,29 @@ await using var client = await SshClient.ConnectAsync("example.com", 22, new Ssh
 });
 ```
 
+## Testing code that uses SshSharp
+
+`SshClient`, `SshSession` and the other types are sealed, and SshSharp has no interfaces for them: an interface can be added later
+without breaking anyone, but changing one after it ships breaks everyone who implements it. To substitute SSH in your tests, put
+the few operations your code needs behind an interface of your own, and implement it once with SshSharp:
+
+```csharp
+public interface IRemoteRunner
+{
+    Task<string> RunAsync(string command, CancellationToken cancellationToken);
+}
+
+public sealed class SshRunner(SshClient client) : IRemoteRunner
+{
+    public async Task<string> RunAsync(string command, CancellationToken cancellationToken) =>
+        (await client.RunCommandAsync(command, cancellationToken)).StandardOutputText;
+}
+```
+
+Your tests then use a fake `IRemoteRunner`. For integration tests, `SshClient.ConnectAsync` also takes any `Stream`, so a test can
+connect to a server it runs in the same process; a package with such an in-memory test server is planned
+([#240](https://github.com/zcsizmadia/SshSharp/issues/240)).
+
 ## Where next
 
 - [Connecting](connecting.md): TCP, any `Stream`, `ssh_config` aliases, ProxyJump and ProxyCommand, keep-alive.

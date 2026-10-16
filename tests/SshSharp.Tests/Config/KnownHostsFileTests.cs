@@ -10,6 +10,45 @@ public class KnownHostsFileTests
     private const string KeyAText = "AQIDBA==";
 
     [Test]
+    public async Task AppendAsync_WritesACommentAndAMarker_AsAddDoes()
+    {
+        var path = Path.Combine(Directory.CreateTempSubdirectory("kh").FullName, "known_hosts");
+        try
+        {
+            await KnownHostsFile.AppendAsync(path, "*.example.com", 22, "ssh-ed25519", KeyA, hash: false, "corp CA", KnownHostsMarker.CertAuthority);
+            await KnownHostsFile.AppendAsync(path, "plain.example.com", 2222, "ssh-ed25519", KeyB); // the old overload: no comment, no marker
+            await Assert.That(await File.ReadAllTextAsync(path)).IsEqualTo(
+                $"@cert-authority *.example.com ssh-ed25519 {KeyAText} corp CA\n[plain.example.com]:2222 ssh-ed25519 CQkJCQ==\n");
+
+            var entry = KnownHostsFile.Load(path).Entries[0];
+            await Assert.That(entry.Marker).IsEqualTo(KnownHostsMarker.CertAuthority);
+            await Assert.That(entry.Comment).IsEqualTo("corp CA");
+        }
+        finally
+        {
+            Directory.Delete(Path.GetDirectoryName(path)!, recursive: true);
+        }
+    }
+
+    [Test]
+    public async Task AProtocolException_CanCarryItsCause()
+    {
+        var cause = new FormatException("bad field");
+        var ex = new SshProtocolException("The reply is malformed.", cause);
+        await Assert.That(ex.InnerException).IsSameReferenceAs(cause);
+        await Assert.That(ex.Reason).IsEqualTo(SshFailureReason.ProtocolError);
+    }
+
+    [Test]
+    public async Task Check_WithoutAPort_IsPort22()
+    {
+        var file = KnownHostsFile.Parse($"example.com ssh-ed25519 {KeyAText}\n[example.com]:2222 ssh-ed25519 CQkJCQ==\n");
+        await Assert.That(file.Check("example.com", "ssh-ed25519", KeyA)).IsEqualTo(file.Check("example.com", 22, "ssh-ed25519", KeyA));
+        await Assert.That(file.Check("example.com", "ssh-ed25519", KeyA)).IsEqualTo(KnownHostsCheckResult.Match);
+        await Assert.That(file.Check("example.com", "ssh-ed25519", KeyB)).IsNotEqualTo(KnownHostsCheckResult.Match);
+    }
+
+    [Test]
     public async Task Parse_EmptyText()
     {
         var file = KnownHostsFile.Parse("");

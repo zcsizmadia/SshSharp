@@ -12,3 +12,14 @@ virtual SshSharp.SshKeySigner.SignatureAlgorithms.get -> System.Collections.Gene
 static SshSharp.SshPrivateKey.FromECDsa(System.Security.Cryptography.ECDsa! ecdsa, string? comment = null) -> SshSharp.SshPrivateKey!
 static SshSharp.SshPrivateKey.FromRsa(System.Security.Cryptography.RSA! rsa, string? comment = null) -> SshSharp.SshPrivateKey!
 static SshSharp.SshPrivateKey.FromSigner(SshSharp.SshKeySigner! signer, string? comment = null) -> SshSharp.SshPrivateKey!
+SshSharp.Config.KnownHostsFile.Check(string! host, string! keyType, System.ReadOnlySpan<byte> publicKey) -> SshSharp.Config.KnownHostsCheckResult
+SshSharp.Config.SshHostConfig.HashKnownHosts.get -> bool
+SshSharp.Config.SshHostConfig.HashKnownHosts.init -> void
+SshSharp.Config.SshHostConfig.UpdateHostKeys.get -> SshSharp.Config.UpdateHostKeys
+SshSharp.Config.SshHostConfig.UpdateHostKeys.init -> void
+SshSharp.Config.UpdateHostKeys
+SshSharp.Config.UpdateHostKeys.Ask = 2 -> SshSharp.Config.UpdateHostKeys
+SshSharp.Config.UpdateHostKeys.No = 0 -> SshSharp.Config.UpdateHostKeys
+SshSharp.Config.UpdateHostKeys.Yes = 1 -> SshSharp.Config.UpdateHostKeys
+SshSharp.SshProtocolException.SshProtocolException(string! message, System.Exception? innerException) -> void
+static SshSharp.Config.KnownHostsFile.AppendAsync(string! path, string! host, int port, string! keyType, System.ReadOnlyMemory<byte> publicKey, bool hash, string? comment, SshSharp.Config.KnownHostsMarker marker = SshSharp.Config.KnownHostsMarker.None, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SshSharp.Config.KnownHostsEntry!>!

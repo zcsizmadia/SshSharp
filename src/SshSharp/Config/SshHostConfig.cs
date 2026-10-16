@@ -16,6 +16,19 @@ public enum StrictHostKeyChecking
     No,
 }
 
+/// <summary>The <c>UpdateHostKeys</c> setting: whether known_hosts follows the host keys a server announces after login.</summary>
+public enum UpdateHostKeys
+{
+    /// <summary>Leave known_hosts as it is (also when the setting is absent).</summary>
+    No,
+
+    /// <summary>Add the server's new keys and remove the ones it no longer has.</summary>
+    Yes,
+
+    /// <summary>Ask before changing known_hosts; without a way to ask, leave it.</summary>
+    Ask,
+}
+
 /// <summary>The <c>AddressFamily</c> setting.</summary>
 public enum SshAddressFamily
 {
@@ -108,6 +121,12 @@ public sealed class SshHostConfig
 
     /// <summary>The host key checking policy.</summary>
     public StrictHostKeyChecking StrictHostKeyChecking { get; init; } = StrictHostKeyChecking.Ask;
+
+    /// <summary>Whether new known_hosts entries are written hashed (<c>HashKnownHosts</c>).</summary>
+    public bool HashKnownHosts { get; init; }
+
+    /// <summary>Whether known_hosts follows the host keys the server announces after login (<c>UpdateHostKeys</c>).</summary>
+    public UpdateHostKeys UpdateHostKeys { get; init; } = UpdateHostKeys.No;
 
     /// <summary>The name to look up in known_hosts instead of the host (<c>HostKeyAlias</c>).</summary>
     public string? HostKeyAlias { get; init; }
