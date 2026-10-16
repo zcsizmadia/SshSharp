@@ -11,6 +11,7 @@
     <Description>Managed-only, async-first SSH client library for .NET with known_hosts and ssh_config support.</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageIcon>icon.png</PackageIcon>
     <PackageProjectUrl>https://zcsizmadia.github.io/SshSharp/</PackageProjectUrl>
     <PackageTags>ssh;ssh-client;openssh;scp;port-forwarding;known_hosts;ssh_config;ssh-agent;proxyjump;async</PackageTags>
     <PackageReleaseNotes>https://github.com/zcsizmadia/SshSharp/releases</PackageReleaseNotes>
@@ -43,5 +44,6 @@
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" VersionOverride="8.0.0" Condition="'$(TargetFramework)' == 'net8.0'" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Condition="'$(TargetFramework)' != 'net8.0'" />
     <None Include="../../README.md" Pack="true" PackagePath="/" />
+    <None Include="../../assets/logo/sshsharp-128.png" Pack="true" PackagePath="/icon.png" Visible="false" />
   </ItemGroup>
 </Project>

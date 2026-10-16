@@ -1,3 +1,5 @@
+<img src="https://raw.githubusercontent.com/zcsizmadia/SshSharp/main/assets/logo/sshsharp-512.png" alt="SshSharp logo" width="96">
+
 # SshSharp
 
 [![CI](https://github.com/zcsizmadia/SshSharp/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/zcsizmadia/SshSharp/actions/workflows/ci.yml)

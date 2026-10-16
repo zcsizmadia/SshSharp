@@ -10,6 +10,7 @@
     <Description>An IFileProvider over SFTP (SshSharp): serve files from an SSH server to ASP.NET Core static files, Razor, configuration and anything else that reads through Microsoft.Extensions.FileProviders.</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageIcon>icon.png</PackageIcon>
     <PackageProjectUrl>https://zcsizmadia.github.io/SshSharp/</PackageProjectUrl>
     <PackageTags>ssh;sftp;fileprovider;ifileprovider;aspnetcore;staticfiles;virtual-file-system</PackageTags>
     <PackageReleaseNotes>https://github.com/zcsizmadia/SshSharp/releases</PackageReleaseNotes>
@@ -35,5 +36,6 @@
     <PackageReference Include="Microsoft.Extensions.FileProviders.Abstractions" Condition="'$(TargetFramework)' != 'net8.0'" />
     <ProjectReference Include="../SshSharp/SshSharp.csproj" />
     <None Include="README.md" Pack="true" PackagePath="/" />
+    <None Include="../../assets/logo/sshsharp-128.png" Pack="true" PackagePath="/icon.png" Visible="false" />
   </ItemGroup>
 </Project>
