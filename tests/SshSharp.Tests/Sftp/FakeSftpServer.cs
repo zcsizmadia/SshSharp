@@ -254,8 +254,8 @@ internal sealed class FakeSftpServer
             if (RawFrame?.Invoke(packet) is { } raw)
             {
                 // A hostile or broken server: these bytes instead of the framed reply, and optionally the end of the session after them.
-                await script.StdoutAsync(raw);
                 Interlocked.Decrement(ref unanswered);
+                await script.StdoutAsync(raw);
                 if (EndSessionAfterRawFrame)
                 {
                     endedEarly = true;
@@ -268,15 +268,17 @@ internal sealed class FakeSftpServer
             if (ReorderReplies && packet[0] != 1 && queue.Reader.TryRead(out var next))
             {
                 var nextReply = HandleLocked(next);
+                Interlocked.Add(ref unanswered, -2);
                 await script.StdoutAsync(Frame(nextReply!));
                 await script.StdoutAsync(Frame(reply!));
                 ReorderedPairs++;
-                Interlocked.Add(ref unanswered, -2);
                 continue;
             }
 
-            await script.StdoutAsync(Frame(reply!));
+            // Answered once its reply starts out, not once the send returns: the client can read the reply and send its next request
+            // before then, and counting that one first made a single request in flight look like two (the stress run on arm64 saw it).
             Interlocked.Decrement(ref unanswered);
+            await script.StdoutAsync(Frame(reply!));
         }
 
         if (!endedEarly)
