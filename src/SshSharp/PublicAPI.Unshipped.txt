@@ -2,3 +2,13 @@
 [SSHSHARP001]SshSharp.Sftp.SftpClient.ExpandPathAsync(string! path, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<string!>!
 [SSHSHARP001]SshSharp.Sftp.SftpClient.GetOwnerNamesAsync(System.Collections.Generic.IEnumerable<uint>! userIds, System.Collections.Generic.IEnumerable<uint>! groupIds, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<(System.Collections.Generic.IReadOnlyDictionary<uint, string!>! UserNames, System.Collections.Generic.IReadOnlyDictionary<uint, string!>! GroupNames)>!
 [SSHSHARP001]SshSharp.Sftp.SftpClient.SetAttributesAsync(string! path, SshSharp.Sftp.SftpFileAttributes! attributes, bool followSymbolicLinks, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+SshSharp.SshKeySigner
+SshSharp.SshKeySigner.KeyType.get -> string!
+SshSharp.SshKeySigner.PublicKey.get -> System.ReadOnlyMemory<byte>
+SshSharp.SshKeySigner.SshKeySigner(System.ReadOnlyMemory<byte> publicKey) -> void
+abstract SshSharp.SshKeySigner.SignAsync(string! algorithm, System.ReadOnlyMemory<byte> data, System.Threading.CancellationToken cancellationToken) -> System.Threading.Tasks.ValueTask<byte[]!>
+virtual SshSharp.SshKeySigner.EcdsaSignatureFormat.get -> System.Security.Cryptography.DSASignatureFormat
+virtual SshSharp.SshKeySigner.SignatureAlgorithms.get -> System.Collections.Generic.IReadOnlyList<string!>!
+static SshSharp.SshPrivateKey.FromECDsa(System.Security.Cryptography.ECDsa! ecdsa, string? comment = null) -> SshSharp.SshPrivateKey!
+static SshSharp.SshPrivateKey.FromRsa(System.Security.Cryptography.RSA! rsa, string? comment = null) -> SshSharp.SshPrivateKey!
+static SshSharp.SshPrivateKey.FromSigner(SshSharp.SshKeySigner! signer, string? comment = null) -> SshSharp.SshPrivateKey!

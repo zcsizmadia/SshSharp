@@ -17,7 +17,7 @@ internal sealed class AgentKey : SshPrivateKey
 
     internal override IReadOnlyList<string> SignatureAlgorithms { get; }
 
-    internal override bool HeldByAgent => true;
+    internal override bool HasLocalPrivateMaterial => false;
 
     /// <summary>A key for <paramref name="blob"/>, or null when its type is one SshSharp cannot authenticate with.</summary>
     public static AgentKey? TryCreate(SshAgent agent, byte[] blob, string comment)

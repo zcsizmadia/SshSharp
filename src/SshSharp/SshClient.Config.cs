@@ -391,7 +391,7 @@ public sealed partial class SshClient
     private static async Task AddAcceptedKeysToAgentAsync(SshClient client, List<SshPrivateKey> identityKeys, SshAgent agent, SshAgentKeyConstraints constraints,
         ILogger logger, CancellationToken cancellationToken)
     {
-        foreach (var key in client.AcceptedKeys.Where(k => !k.HeldByAgent && identityKeys.Contains(k, ReferenceEqualityComparer.Instance)))
+        foreach (var key in client.AcceptedKeys.Where(k => k.HasLocalPrivateMaterial && identityKeys.Contains(k, ReferenceEqualityComparer.Instance)))
         {
             try
             {
