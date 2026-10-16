@@ -1,1 +1,4 @@
 #nullable enable
+[SSHSHARP001]SshSharp.Sftp.SftpClient.ExpandPathAsync(string! path, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<string!>!
+[SSHSHARP001]SshSharp.Sftp.SftpClient.GetOwnerNamesAsync(System.Collections.Generic.IEnumerable<uint>! userIds, System.Collections.Generic.IEnumerable<uint>! groupIds, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<(System.Collections.Generic.IReadOnlyDictionary<uint, string!>! UserNames, System.Collections.Generic.IReadOnlyDictionary<uint, string!>! GroupNames)>!
+[SSHSHARP001]SshSharp.Sftp.SftpClient.SetAttributesAsync(string! path, SshSharp.Sftp.SftpFileAttributes! attributes, bool followSymbolicLinks, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!

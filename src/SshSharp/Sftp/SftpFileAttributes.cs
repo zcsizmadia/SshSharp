@@ -25,7 +25,7 @@ public enum SftpFileType
 
 /// <summary>
 /// File attributes in SFTP (version 3): each is null when the server did not send it. To change some with
-/// <see cref="SftpClient.SetAttributesAsync"/>, set only those.
+/// <see cref="SftpClient.SetAttributesAsync(string, SftpFileAttributes, CancellationToken)"/>, set only those.
 /// </summary>
 [Experimental(SftpClient.ExperimentalId)]
 public sealed class SftpFileAttributes

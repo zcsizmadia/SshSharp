@@ -292,6 +292,81 @@ public sealed class SftpTests : IDisposable
         await Assert.That(await rig.Sftp.ReadSymbolicLinkAsync("soft", Timeout())).IsEqualTo("target");
     }
 
+    [Test]
+    public async Task ExpandPath_ExpandsTildes_AndResolvesThePath()
+    {
+        await using var rig = await Rig.StartAsync();
+
+        await Assert.That(await rig.Sftp.ExpandPathAsync("~", Timeout())).IsEqualTo(Home);
+        await Assert.That(await rig.Sftp.ExpandPathAsync("~/a/../b", Timeout())).IsEqualTo(Home + "/b");
+        await Assert.That(await rig.Sftp.ExpandPathAsync("~other/x", Timeout())).IsEqualTo("/home/other/x");
+        await Assert.That(await rig.Sftp.ExpandPathAsync("c", Timeout())).IsEqualTo(Home + "/c");
+    }
+
+    [Test]
+    public async Task ExpandPath_WithoutTheExtension_ExpandsOnlyTheOwnHome()
+    {
+        await using var rig = await Rig.StartAsync(f => f.Extensions.Remove("expand-path@openssh.com"));
+
+        // The home directory (home-directory, or "."), then the rest resolved as REALPATH resolves it.
+        await Assert.That(await rig.Sftp.ExpandPathAsync("~", Timeout())).IsEqualTo(Home);
+        await Assert.That(await rig.Sftp.ExpandPathAsync("~/a/../b", Timeout())).IsEqualTo(Home + "/b");
+        await Assert.That(await rig.Sftp.ExpandPathAsync("c", Timeout())).IsEqualTo(Home + "/c");
+        await Assert.That(async () => await rig.Sftp.ExpandPathAsync("~other/x", Timeout())).Throws<NotSupportedException>();
+    }
+
+    [Test]
+    public async Task SetAttributes_NotFollowingLinks_ChangesTheLinkItself()
+    {
+        await using var rig = await Rig.StartAsync(f =>
+        {
+            f.AddFile(Home + "/target", "t"u8.ToArray());
+            f.AddLink(Home + "/link", "target");
+        });
+        var readOnly = new SftpFileAttributes { Permissions = UnixFileMode.UserRead };
+
+        await rig.Sftp.SetAttributesAsync("link", readOnly, followSymbolicLinks: false, Timeout());
+        await Assert.That(rig.Files.Mode(Home + "/link")).IsEqualTo(0x100u);
+        await Assert.That(rig.Files.Mode(Home + "/target")).IsEqualTo(0x1A4u); // untouched
+
+        await rig.Sftp.SetAttributesAsync("link", readOnly, followSymbolicLinks: true, Timeout());
+        await Assert.That(rig.Files.Mode(Home + "/target")).IsEqualTo(0x100u);
+    }
+
+    [Test]
+    public async Task SetAttributes_NotFollowingLinks_NeedsLSetStat()
+    {
+        await using var rig = await Rig.StartAsync(f =>
+        {
+            f.Extensions.Remove("lsetstat@openssh.com");
+            f.AddFile(Home + "/target", "t"u8.ToArray());
+        });
+
+        await Assert.That(async () => await rig.Sftp.SetAttributesAsync("target", new SftpFileAttributes(), followSymbolicLinks: false, Timeout()))
+            .Throws<NotSupportedException>();
+    }
+
+    [Test]
+    public async Task OwnerNames_AreLookedUpById_AndUnknownIdsAreLeftOut()
+    {
+        await using var rig = await Rig.StartAsync(f => f.UserNames[0] = "root");
+
+        var (users, groups) = await rig.Sftp.GetOwnerNamesAsync([1000, 0, 1000, 4242], [1000, 77], Timeout());
+        await Assert.That(users).IsEquivalentTo(new Dictionary<uint, string> { [1000] = "tester", [0] = "root" });
+        await Assert.That(groups).IsEquivalentTo(new Dictionary<uint, string> { [1000] = "testers" });
+
+        var (none, onlyGroups) = await rig.Sftp.GetOwnerNamesAsync([], [1000], Timeout());
+        await Assert.That(none).IsEmpty();
+        await Assert.That(onlyGroups[1000]).IsEqualTo("testers");
+    }
+
+    [Test]
+    public async Task OwnerNames_NeedTheExtension()
+    {
+        await using var rig = await Rig.StartAsync(f => f.Extensions.Remove("users-groups-by-id@openssh.com"));
+        await Assert.That(async () => await rig.Sftp.GetOwnerNamesAsync([1000], [1000], Timeout())).Throws<NotSupportedException>();
+    }
+
     // ---- streams ----
 
     [Test]
