@@ -65,4 +65,40 @@ public class PublicKeyInteropTests
             await Assert.That(result.StandardOutputText).IsEqualTo("key-ok\n");
         }
     }
+
+    [Test]
+    public async Task EachKeyLogsIn_ThroughAnExternalSigner_WithItsSignaturesInBothEcdsaFormats()
+    {
+        var user = Environment.GetEnvironmentVariable("SSHSHARP_TEST_USER");
+        if (KeyDirectory is not { } directory || !RealServer.IsAvailable || string.IsNullOrEmpty(user))
+        {
+            Skip.Test("SSHSHARP_TEST_KEYDIR, SSHSHARP_TEST_SSHD and SSHSHARP_TEST_USER are needed.");
+            return;
+        }
+
+        // The key as a key vault would hold it: SshSharp sees only the public key and the signer's raw signatures (ECDSA as r || s and
+        // as DER), and builds the SSH encoding the real server checks.
+        var (host, port) = RealServer.Endpoint!.Value;
+        foreach (var file in PrivateKeyFiles(directory))
+        {
+            using var key = await LoadAsync(file);
+            foreach (var format in new[] { System.Security.Cryptography.DSASignatureFormat.IeeeP1363FixedFieldConcatenation, System.Security.Cryptography.DSASignatureFormat.Rfc3279DerSequence })
+            {
+                if (format == System.Security.Cryptography.DSASignatureFormat.Rfc3279DerSequence && !key.KeyType.StartsWith("ecdsa-", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                using var external = SshPrivateKey.FromSigner(new Keys.ExternalKeyTests.TestSigner(key) { Format = format });
+                var options = new SshClientOptions
+                {
+                    UserName = user,
+                    PrivateKeys = [external],
+                    HostKeyVerifier = SshHostKeyVerifier.FromDelegate((_, _) => ValueTask.FromResult(true)),
+                };
+                await using var client = await SshClient.ConnectAsync(host, port, options, Timeout());
+                await Assert.That((await client.RunCommandAsync("echo signer-ok", Timeout())).StandardOutputText).IsEqualTo("signer-ok\n");
+            }
+        }
+    }
 }

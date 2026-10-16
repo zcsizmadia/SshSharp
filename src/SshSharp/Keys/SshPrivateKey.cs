@@ -119,6 +119,50 @@ public abstract class SshPrivateKey : IDisposable
     }
 
     /// <summary>
+    /// A key that .NET's <see cref="RSA"/> holds, used without exporting it: a software key, or a non-exportable one in Windows CNG (a
+    /// TPM through the Microsoft Platform Crypto Provider, Windows Hello) or in any provider that implements <see cref="RSA"/>. Only the
+    /// public key is read. Signs with <c>rsa-sha2-512</c> or <c>rsa-sha2-256</c>.
+    /// </summary>
+    /// <param name="rsa">The key. It stays the caller's: disposing the returned key does not dispose it.</param>
+    /// <param name="comment">A comment for the key, often <c>user@host</c>.</param>
+    /// <exception cref="FormatException">The key is under 2048 bits.</exception>
+    /// <remarks>The returned key cannot be exported or added to an agent.</remarks>
+    public static SshPrivateKey FromRsa(RSA rsa, string? comment = null)
+    {
+        ArgumentNullException.ThrowIfNull(rsa);
+        return new ExternalKey(new ExternalKey.RsaSigner(rsa), comment);
+    }
+
+    /// <summary>
+    /// A key that .NET's <see cref="ECDsa"/> holds, on P-256, P-384 or P-521, used without exporting it, as <see cref="FromRsa"/>
+    /// does for RSA.
+    /// </summary>
+    /// <param name="ecdsa">The key. It stays the caller's: disposing the returned key does not dispose it.</param>
+    /// <param name="comment">A comment for the key, often <c>user@host</c>.</param>
+    /// <exception cref="ArgumentException">The key is not on one of the NIST curves SSH uses.</exception>
+    /// <remarks>The returned key cannot be exported or added to an agent.</remarks>
+    public static SshPrivateKey FromECDsa(ECDsa ecdsa, string? comment = null)
+    {
+        ArgumentNullException.ThrowIfNull(ecdsa);
+        return new ExternalKey(new ExternalKey.EcdsaSigner(ecdsa, ExternalKey.CurveOf(ecdsa)), comment);
+    }
+
+    /// <summary>
+    /// A key that signs through <paramref name="signer"/>: one in a key vault, a KMS, an HSM or on a smart card. Usable wherever a key
+    /// is: <see cref="SshClientOptions.PrivateKeys"/>, <see cref="WithCertificate"/>, <see cref="SshSignature"/>. Each signature is
+    /// checked against the public key before it is used.
+    /// </summary>
+    /// <param name="signer">The signer. It stays the caller's: disposing the returned key does nothing to it.</param>
+    /// <param name="comment">A comment for the key, often <c>user@host</c>.</param>
+    /// <exception cref="ArgumentException">The signer's <see cref="SshKeySigner.SignatureAlgorithms"/> include one its key type cannot use.</exception>
+    /// <remarks>The returned key cannot be exported or added to an agent.</remarks>
+    public static SshPrivateKey FromSigner(SshKeySigner signer, string? comment = null)
+    {
+        ArgumentNullException.ThrowIfNull(signer);
+        return new ExternalKey(signer, comment);
+    }
+
+    /// <summary>
     /// The key in the OpenSSH private key format (<c>BEGIN OPENSSH PRIVATE KEY</c>), as <c>ssh-keygen</c> writes it: encrypted with
     /// <c>aes256-ctr</c> and <c>bcrypt_pbkdf</c> when <paramref name="passphrase"/> is given, otherwise unencrypted. The text holds the
     /// private key: do not log it, and write it only to files other users cannot read (<see cref="SaveAsync"/> does).
@@ -126,8 +170,8 @@ public abstract class SshPrivateKey : IDisposable
     /// <param name="passphrase">The passphrase to encrypt with; null or empty for an unencrypted key.</param>
     /// <param name="kdfRounds">bcrypt_pbkdf rounds (<c>ssh-keygen -a</c>): 16 by default; more make guessing the passphrase slower, and
     /// loading the key too.</param>
-    /// <exception cref="NotSupportedException">The private key is not available: a key held by an agent, or one paired with a
-    /// certificate (export the key it was made from).</exception>
+    /// <exception cref="NotSupportedException">The private key is not available: a key held by an agent or an external signer, or one
+    /// paired with a certificate (export the key it was made from).</exception>
     public string ToOpenSshPrivateKey(string? passphrase = null, int kdfRounds = 16)
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(kdfRounds, 1);
@@ -213,8 +257,11 @@ public abstract class SshPrivateKey : IDisposable
     internal virtual void WritePrivateFields(SshWriter writer) =>
         throw new NotSupportedException("This key's private material cannot be exported: it is held by an agent, or paired with a certificate (export the key it was made from).");
 
-    /// <summary>Whether an agent holds the private material (an agent's key, or one paired with a certificate), so it cannot be added to one.</summary>
-    internal virtual bool HeldByAgent => false;
+    /// <summary>
+    /// Whether the private material is here, in this process: false for a key an agent or an external signer holds (and a certificate
+    /// paired with one), which can be neither exported nor added to an agent.
+    /// </summary>
+    internal virtual bool HasLocalPrivateMaterial => true;
 
     /// <summary>The user certificate this key authenticates with, if it was paired with one (<see cref="WithCertificate"/>).</summary>
     public SshCertificate? Certificate { get; private protected init; }
@@ -281,7 +328,7 @@ public abstract class SshPrivateKey : IDisposable
 
         internal override IReadOnlyList<string> SignatureAlgorithms { get; }
 
-        internal override bool HeldByAgent => _key.HeldByAgent;
+        internal override bool HasLocalPrivateMaterial => _key.HasLocalPrivateMaterial;
 
         internal override byte[] Sign(string algorithm, ReadOnlySpan<byte> data) => _key.Sign(SshCertificate.BaseAlgorithm(algorithm), data);
 
@@ -424,7 +471,7 @@ public abstract class SshPrivateKey : IDisposable
 
         private protected override void DisposeCore() => _ecdsa.Dispose();
 
-        private static byte[] PublicBlob(NistCurve curve, ECDsa ecdsa)
+        internal static byte[] PublicBlob(NistCurve curve, ECDsa ecdsa)
         {
             var q = ecdsa.ExportParameters(false).Q;
             byte[] point = [4, .. Pad(q.X!, curve.FieldSize), .. Pad(q.Y!, curve.FieldSize)];
@@ -532,7 +579,7 @@ public abstract class SshPrivateKey : IDisposable
 
         private static byte[] Fixed(BigInteger value, int length) => Pad(value.ToByteArray(isUnsigned: true, isBigEndian: true), length);
 
-        private static byte[] PublicBlob(RSA rsa)
+        internal static byte[] PublicBlob(RSA rsa)
         {
             var p = rsa.ExportParameters(false);
             return Encode(w =>

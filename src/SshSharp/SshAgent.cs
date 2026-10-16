@@ -289,9 +289,9 @@ public sealed class SshAgent
     public async Task AddKeyAsync(SshPrivateKey key, SshAgentKeyConstraints? constraints = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(key);
-        if (key.HeldByAgent)
+        if (!key.HasLocalPrivateMaterial)
         {
-            throw new NotSupportedException("This key is held by an agent; only a key loaded from a file or generated here can be added.");
+            throw new NotSupportedException("This key is held by an agent or an external signer; only a key loaded from a file or generated here can be added.");
         }
 
         var constrained = constraints is { Lifetime: not null } or { Confirm: true } or { Destinations.Count: > 0 };

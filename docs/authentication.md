@@ -50,6 +50,35 @@ user, as OpenSSH for Windows requires). `SaveAsync` never overwrites: it fails i
 the file's text instead, for a secret store; it holds the private key, so never log it. Keys loaded from any format can be
 written this way too, which converts them to the OpenSSH format; keys held by an agent cannot.
 
+### Keys held elsewhere (key vaults, HSMs, TPM)
+
+A private key that never leaves a key vault, a KMS, an HSM or a TPM can still be used: SshSharp sees only the public key, and asks
+for each signature.
+
+- **A key .NET's `RSA` or `ECDsa` holds:** `SshPrivateKey.FromRsa(rsa)` and `SshPrivateKey.FromECDsa(ecdsa)`, for a software key
+  or a non-exportable one, for example a Windows CNG key in the TPM (Microsoft Platform Crypto Provider). The `RSA` or `ECDsa` stays
+  yours; disposing the SSH key does not dispose it.
+- **Any other signer:** derive from `SshKeySigner` and pass it to `SshPrivateKey.FromSigner`. It gets the SSH algorithm (which
+  fixes the hash) and the data, and returns the signature as .NET produces it: PKCS#1 v1.5 for RSA, r‖s for ECDSA (or DER, by
+  overriding `EcdsaSignatureFormat`), 64 bytes for Ed25519.
+
+```csharp
+sealed class VaultSigner(VaultClient vault, byte[] publicKey) : SshKeySigner(publicKey)
+{
+    // ECDSA P-256 in the vault: it signs a SHA-256 digest and answers DER.
+    public override DSASignatureFormat EcdsaSignatureFormat => DSASignatureFormat.Rfc3279DerSequence;
+
+    public override async ValueTask<byte[]> SignAsync(string algorithm, ReadOnlyMemory<byte> data, CancellationToken cancellationToken) =>
+        await vault.SignDigestAsync(SHA256.HashData(data.Span), cancellationToken);
+}
+
+using var key = SshPrivateKey.FromSigner(new VaultSigner(vault, publicKeyBlob), comment: "vault:deploy");
+```
+
+Such a key works wherever a key does: in `PrivateKeys`, with `WithCertificate`, and for `SshSignature`. Each signature is checked
+against the public key before it is used, so a signer that answers in the wrong format, or with another key, fails at once with a
+`CryptographicException`. It cannot be exported or added to an agent.
+
 ## Certificates
 
 An OpenSSH user certificate (`id_ed25519-cert.pub`, made with `ssh-keygen -s`) lets servers that trust its authority
