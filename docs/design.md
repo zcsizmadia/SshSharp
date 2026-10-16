@@ -85,25 +85,12 @@ docs/                      # guides, design notes, the API reference site (DocFX
 
 ## Testing
 
-- **Testable by design.** The protocol stack runs over any `Stream`; tests use in-memory duplex pipes and scripted fake
-  servers (`FakeSshServer`, `FakeSessionServer`) and a fake agent, so unit tests need no network. Time comes from
+- **Testable by design.** The protocol stack runs over any `Stream`; tests use in-memory duplex pipes, scripted fake servers
+  (`FakeSshServer`, `FakeSessionServer`, `FakeSftpServer`) and a fake agent, so unit tests need no network. Time comes from
   `TimeProvider`; filesystem, environment and `Match exec` sit behind small delegates.
-- **Unit tests:** RFC and crypto known-answer vectors, parser corpora from OpenSSH, protocol tests against the fake servers,
-  and mutation fuzzing of every parser that reads untrusted input.
-- **Coverage-guided fuzzing:** `tests/SshSharp.Fuzz` with SharpFuzz and libFuzzer, nightly (`fuzz.yml`).
-- **Mutation testing:** Stryker.NET over `Crypto/` (sntrup761 included), `PacketCodec` and `Config/` (`mutation.yml`). Weekly runs are
-  incremental: only code changed in the last eight days is mutated. Manual runs are full, in parallel jobs, with the large
-  files on their own. A surviving mutant is a change no test notices. The score is reported, not a gate.
-- **Real-server interop** (`Integration/`, enabled by `SSHSHARP_TEST_*` environment variables): CI starts sshd on the Linux
-  runners with throwaway keys of every type and format, a CA for host and user certificates, `ssh-agent`, and PAM for
-  keyboard-interactive; a container matrix of older and newer OpenSSH releases and Dropbear; and OpenSSH for Windows on a
-  Windows runner (Git Bash as its shell; signals, the exit status through ConPTY and keep-alives are not tested there).
-- **Platform matrix:** Linux (amd64, arm64), Windows (amd64, arm64) and macOS (arm64), each on net8.0 and net10.0.
-- **Stress runs** (`stress.yml`, started by hand): the unit tests on the platform matrix and the interop tests (OpenSSH and
-  Dropbear containers, OpenSSH for Windows) run in a loop, `tests/stress/loop.sh`, with an instrumented build
-  (`-p:SshSharpInstrument=true`): pooled buffers are tracked and a double return is reported with both stacks, and received
-  data is checksummed on arrival and checked when read. Each job lists the tests that failed and how often, and keeps every
-  failing iteration's output with the server logs. Hung interop tests report the step they were stuck in.
+- **Validation in depth:** reference and Wycheproof vectors, real-server interop (OpenSSH old and new on Linux and Windows,
+  Dropbear, AsyncSSH, SFTP-only servers), network fault injection, coverage-guided fuzzing, mutation testing, and stress runs
+  with an instrumented build. [Testing and validation](testing.md) describes each, what it found, and what is not covered yet.
 - **Rules:** no code merges without tests. Timing-dependent tests use the fake clock or wait on a signal, not real sleeps.
   Flaky tests are fixed or tracked, not hidden.
 
