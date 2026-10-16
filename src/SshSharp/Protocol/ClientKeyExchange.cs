@@ -189,24 +189,20 @@ internal sealed class EcdhKeyExchange : ClientKeyExchange
             throw new SshProtocolException("The server's ECDH value must be an uncompressed point.");
         }
 
-        var x = serverPoint.AsSpan(1, size);
-        var y = serverPoint.AsSpan(1 + size);
-
-        // Never trust the platform to validate the peer's point (Windows CNG does not): check it explicitly.
-        if (!_curve.IsOnCurve(x, y))
-        {
-            throw new SshException(SshFailureReason.KeyExchangeFailed, "The server's ECDH point is not on the curve.");
-        }
-
-        byte[] secret;
+        // Never trust the platform to validate the peer's point (Windows CNG does not): TryDeriveSecret checks it explicitly.
+        byte[]? secret;
         try
         {
-            using var peer = ECDiffieHellman.Create(new ECParameters { Curve = _curve.Curve, Q = new ECPoint { X = x.ToArray(), Y = y.ToArray() } });
-            secret = _key.DeriveRawSecretAgreement(peer.PublicKey);
+            secret = _curve.TryDeriveSecret(_key, serverPoint.AsSpan(1, size), serverPoint.AsSpan(1 + size));
         }
         catch (CryptographicException ex)
         {
             throw new SshException(SshFailureReason.KeyExchangeFailed, $"ECDH failed: {ex.Message}", ex);
+        }
+
+        if (secret is null)
+        {
+            throw new SshException(SshFailureReason.KeyExchangeFailed, "The server's ECDH point is not on the curve.");
         }
 
         try
@@ -505,13 +501,6 @@ internal sealed class MlKemNistKeyExchange : ClientKeyExchange
             throw new SshProtocolException($"The ML-KEM/ECDH reply must be {ciphertextSize} bytes of ciphertext and an uncompressed point.");
         }
 
-        var x = serverReply.AsSpan(ciphertextSize + 1, size);
-        var y = serverReply.AsSpan(ciphertextSize + 1 + size, size);
-        if (!_curve.IsOnCurve(x, y))
-        {
-            throw new SshException(SshFailureReason.KeyExchangeFailed, "The server's ECDH point is not on the curve.");
-        }
-
         var pqSize = _algorithm.SharedSecretSizeInBytes;
         var secrets = new byte[pqSize + size];
         byte[]? classic = null;
@@ -521,12 +510,16 @@ internal sealed class MlKemNistKeyExchange : ClientKeyExchange
             try
             {
                 _mlkem.Decapsulate(serverReply.AsSpan(0, ciphertextSize), secrets.AsSpan(0, pqSize));
-                using var peer = ECDiffieHellman.Create(new ECParameters { Curve = _curve.Curve, Q = new ECPoint { X = x.ToArray(), Y = y.ToArray() } });
-                classic = _ecdh.DeriveRawSecretAgreement(peer.PublicKey);
+                classic = _curve.TryDeriveSecret(_ecdh, serverReply.AsSpan(ciphertextSize + 1, size), serverReply.AsSpan(ciphertextSize + 1 + size, size));
             }
             catch (CryptographicException ex)
             {
                 throw new SshException(SshFailureReason.KeyExchangeFailed, $"The ML-KEM/ECDH exchange failed: {ex.Message}", ex);
+            }
+
+            if (classic is null)
+            {
+                throw new SshException(SshFailureReason.KeyExchangeFailed, "The server's ECDH point is not on the curve.");
             }
 
             // The ECDH secret as a fixed-length byte array (the x coordinate, FieldSize bytes), not an mpint.

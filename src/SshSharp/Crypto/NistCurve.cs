@@ -92,6 +92,22 @@ internal sealed class NistCurve
         return left == right;
     }
 
+    /// <summary>
+    /// The ECDH shared secret of <paramref name="own"/> and the peer's point (x, y): the x coordinate, as the platform returns it. Null
+    /// when the point is not on this curve, which is checked here first and never left to the platform.
+    /// </summary>
+    /// <exception cref="CryptographicException">The platform refused the point or the agreement.</exception>
+    public byte[]? TryDeriveSecret(ECDiffieHellman own, ReadOnlySpan<byte> x, ReadOnlySpan<byte> y)
+    {
+        if (!IsOnCurve(x, y))
+        {
+            return null;
+        }
+
+        using var peer = ECDiffieHellman.Create(new ECParameters { Curve = Curve, Q = new ECPoint { X = x.ToArray(), Y = y.ToArray() } });
+        return own.DeriveRawSecretAgreement(peer.PublicKey);
+    }
+
     public static NistCurve FromSshName(string name) => name switch
     {
         "nistp256" => P256,
