@@ -6,9 +6,10 @@ The decisions behind SshSharp and the rules the code follows. Work items live in
 
 | Topic | Decision |
 |---|---|
-| Target frameworks | `net8.0` and `net10.0` only |
+| Target frameworks | `net8.0` and `net10.0` only. `net8.0` stays for a while after its end of support (November 2026), for users who cannot move yet; `net11.0` is added once .NET 11 is released, next to them ([#197](https://github.com/zcsizmadia/SshSharp/issues/197)). |
 | No `netstandard2.0` | The design depends on `Span`/`Memory` in the BCL APIs, Pipelines, `AesGcm`, `TimeProvider`, `SearchValues` and modern ECDH/RSA APIs. .NET Framework and Windows PowerShell 5.1 users stay on SSH.NET. |
 | Protocol | Pure managed C#, no native dependencies |
+| Finite-field DH | `diffie-hellman-group16-sha512` and `diffie-hellman-group14-sha256` stay in the default key exchanges, last, as in OpenSSH's client: chosen only when a server offers nothing better (no post-quantum hybrid, curve25519 or ECDH), and kept in FIPS mode as the fallback where the platform has no ML-KEM. RFC 9142 keeps group 14 as MUST. The exponent's `BigInteger.ModPow` is not constant-time, an accepted risk for a single-use ephemeral exponent ([crypto review](crypto-review.md), [#99](https://github.com/zcsizmadia/SshSharp/issues/99)). |
 | API style | Async-only for now: `CancellationToken` everywhere, `IAsyncDisposable`, no synchronous network methods and no sync-over-async (parsing local files such as `ssh_config` and `known_hosts` has synchronous helpers too). An SSH.NET-shaped `SshSharp.Compat` package with synchronous wrappers may be revisited once the async API is stable. |
 | Public API | Tracked in `PublicAPI.Shipped/Unshipped.txt` (PublicApiAnalyzers), so every public change shows in review; package validation on pack |
 | Test framework | TUnit (Microsoft.Testing.Platform) |
