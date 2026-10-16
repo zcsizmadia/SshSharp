@@ -90,8 +90,23 @@ internal sealed class FakeSftpServer
     /// <summary>How many pairs of replies were sent in reverse order.</summary>
     public int ReorderedPairs { get; private set; }
 
-    /// <summary>Every request type received, in order.</summary>
-    public List<byte> Requests { get; } = [];
+    /// <summary>
+    /// Every request type received so far, in order: a copy taken under the lock. The server keeps adding while a test reads, as a
+    /// read-ahead request can still arrive after a copy has returned, and enumerating the live list then threw "Collection was
+    /// modified" (the stress run on macOS).
+    /// </summary>
+    public List<byte> Requests
+    {
+        get
+        {
+            lock (_requests)
+            {
+                return [.. _requests];
+            }
+        }
+    }
+
+    private readonly List<byte> _requests = [];
 
     /// <summary>How many handles are open now.</summary>
     public int OpenHandles => _handles.Count;
@@ -215,7 +230,7 @@ internal sealed class FakeSftpServer
                     var packet = buffer.GetRange(4, length).ToArray();
                     buffer.RemoveRange(0, 4 + length);
                     var now = Interlocked.Increment(ref unanswered);
-                    lock (Requests)
+                    lock (_requests)
                     {
                         MaxOutstanding = Math.Max(MaxOutstanding, now);
                     }
@@ -232,7 +247,7 @@ internal sealed class FakeSftpServer
             await Task.Yield(); // lets requests the client already sent arrive behind this one
             if (packet[0] is 3 or 11 && HoldOpens is { } hold)
             {
-                lock (Requests)
+                lock (_requests)
                 {
                     HeldOpens++;
                 }
@@ -416,9 +431,9 @@ internal sealed class FakeSftpServer
     {
         var r = new SshReader(packet);
         var type = r.ReadByte();
-        lock (Requests)
+        lock (_requests)
         {
-            Requests.Add(type);
+            _requests.Add(type);
         }
 
         if (type == 1)

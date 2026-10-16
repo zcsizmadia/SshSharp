@@ -48,16 +48,7 @@ public class SftpFileProviderTests
             return rig;
         }
 
-        public int Requests
-        {
-            get
-            {
-                lock (Files.Requests)
-                {
-                    return Files.Requests.Count;
-                }
-            }
-        }
+        public int Requests => Files.Requests.Count;
 
         public async ValueTask DisposeAsync()
         {
