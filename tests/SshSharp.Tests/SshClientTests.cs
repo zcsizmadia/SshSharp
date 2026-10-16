@@ -95,7 +95,7 @@ public class SshClientTests
         {
             OnExec = async script =>
             {
-                await script.ExitSignalAsync("KILL");
+                await script.ExitSignalAsync("SEGV", coreDumped: true, message: "Segmentation fault");
                 await script.EofAsync();
                 await script.CloseAsync();
             },
@@ -104,7 +104,7 @@ public class SshClientTests
 
         var result = await client.RunCommandAsync("doomed", Timeout());
         await Assert.That(result.ExitStatus).IsNull();
-        await Assert.That(result.ExitSignal).IsEqualTo("KILL");
+        await Assert.That(result.ExitSignal).IsEqualTo(new SshExitSignal("SEGV", true, "Segmentation fault"));
     }
 
     [Test]
@@ -470,7 +470,7 @@ public class SshClientTests
         await Assert.That(ex.HostKey!.Fingerprint).StartsWith("SHA256:");
         await Assert.That(seen!.Host).IsNull(); // over a stream the host is not known
         await Assert.That(seen.HostKeyAlias).IsEqualTo("my-alias");
-        await Assert.That(seen.KnownHostsLookup).IsEqualTo(("my-alias", 22));
+        await Assert.That(seen.KnownHostsLookup).IsEqualTo(new SshKnownHostsLookup("my-alias", 22));
     }
 
     [Test]

@@ -4,7 +4,7 @@
 
 ```csharp
 var result = await client.RunCommandAsync("df -h /");
-Console.WriteLine(result.ExitStatus);          // null if the command was killed by a signal (see ExitSignal)
+Console.WriteLine(result.ExitStatus);          // null if the command was killed by a signal (see ExitSignal: its Name, CoreDumped and ErrorMessage)
 Console.WriteLine(result.StandardOutputText);
 Console.Error.WriteLine(result.StandardErrorText);
 ```

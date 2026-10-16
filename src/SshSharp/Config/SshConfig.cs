@@ -155,10 +155,62 @@ public sealed class SshConfig
     /// <summary>Resolves the effective settings for <paramref name="host"/>.</summary>
     /// <param name="host">The host name or alias, as the user typed it.</param>
     /// <param name="options">External inputs (explicit user and port, home directory, ...); defaults are taken from the process.</param>
+    /// <exception cref="NotSupportedException">
+    /// The config needs <see cref="SshConfigResolveOptions.ExecMatcher"/> or <see cref="SshConfigResolveOptions.HostCanonicalizer"/>,
+    /// which are asynchronous: use <see cref="ResolveAsync"/>.
+    /// </exception>
     public SshHostConfig Resolve(string host, SshConfigResolveOptions? options = null)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(host);
+        try
+        {
+            return ResolveCore(host, options ?? new SshConfigResolveOptions(), new SshConfigCallbackAnswers());
+        }
+        catch (SshConfigCallbackNeeded)
+        {
+            throw new NotSupportedException(
+                "This ssh_config needs Match exec or host canonicalization, whose callbacks are asynchronous: use ResolveAsync.");
+        }
+    }
+
+    /// <summary>
+    /// Resolves the effective settings for <paramref name="host"/>, as <see cref="Resolve"/> does, awaiting
+    /// <see cref="SshConfigResolveOptions.ExecMatcher"/> and <see cref="SshConfigResolveOptions.HostCanonicalizer"/> when the config
+    /// needs them (<c>Match exec</c>, <c>CanonicalizeHostname</c>).
+    /// </summary>
+    /// <param name="host">The host name or alias, as the user typed it.</param>
+    /// <param name="options">External inputs (explicit user and port, home directory, ...); defaults are taken from the process.</param>
+    /// <param name="cancellationToken">Cancels the callbacks.</param>
+    public async Task<SshHostConfig> ResolveAsync(string host, SshConfigResolveOptions? options = null, CancellationToken cancellationToken = default)
+    {
         options ??= new SshConfigResolveOptions();
+        var answers = new SshConfigCallbackAnswers();
+
+        // Each pass resolves until it needs an answer it does not have; the answer is awaited and recorded, and the next pass gets
+        // further. The bound only guards against a callback that would never settle the same way twice.
+        for (var pass = 0; pass < 256; pass++)
+        {
+            try
+            {
+                return ResolveCore(host, options, answers);
+            }
+            catch (SshConfigCallbackNeeded needed) when (needed.Domains is null)
+            {
+                answers.RecordExec(needed.Argument, await options.ExecMatcher!(needed.Argument, cancellationToken).ConfigureAwait(false));
+            }
+            catch (SshConfigCallbackNeeded needed)
+            {
+                var domains = needed.Domains!; // a host to canonicalize always comes with its domains
+                answers.RecordCanonical(needed.Argument, domains,
+                    await options.HostCanonicalizer!(needed.Argument, domains, cancellationToken).ConfigureAwait(false));
+            }
+        }
+
+        throw new InvalidOperationException("Resolving the ssh_config needed too many Match exec or canonicalization answers.");
+    }
+
+    private SshHostConfig ResolveCore(string host, SshConfigResolveOptions options, SshConfigCallbackAnswers answers)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(host);
 
         // The host and user come from the caller, and may come from untrusted input. They are substituted into Match exec and
         // ProxyCommand (%h, %n, %r), which run in a shell, so shell metacharacters are refused, as OpenSSH does since 9.6 (CVE-2023-51385).
@@ -175,7 +227,7 @@ public sealed class SshConfig
             RequireSafe(explicitUser, nameof(options), "user name");
         }
 
-        var values = new SshConfigResolver(_documents, host, options).Run();
+        var values = new SshConfigResolver(_documents, host, options, answers).Run();
 
         string? First(string key) => values.TryGetValue(key, out var v) && v.Count > 0 ? v[0] : null;
         IReadOnlyList<string> All(string key) => values.TryGetValue(key, out var v) ? v : [];

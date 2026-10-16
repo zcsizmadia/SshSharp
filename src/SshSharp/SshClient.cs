@@ -166,7 +166,7 @@ public sealed partial class SshClient : IAsyncDisposable
             int? exitStatus = channel.ExitStatus is { } status ? (int)status : null;
             outcome = exitStatus == 0 ? "success" : "failure";
             activity?.SetTag("ssh.command.exit_status", exitStatus);
-            SshLog.CommandFinished(_logger, channel.LocalId, exitStatus, channel.ExitSignal);
+            SshLog.CommandFinished(_logger, channel.LocalId, exitStatus, channel.ExitSignal?.Name);
             return new SshCommandResult(exitStatus, channel.ExitSignal, stdout.WrittenMemory, stderr.WrittenMemory);
         }
         catch (Exception ex)

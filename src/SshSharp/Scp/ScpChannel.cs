@@ -179,7 +179,7 @@ internal sealed class ScpChannel : IAsyncDisposable
         await _session.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
         if (_session.ExitStatus is not 0)
         {
-            throw await FailureAsync($"The remote scp failed (exit status {_session.ExitStatus?.ToString(CultureInfo.InvariantCulture) ?? _session.ExitSignal ?? "unknown"}).").ConfigureAwait(false);
+            throw await FailureAsync($"The remote scp failed (exit status {_session.ExitStatus?.ToString(CultureInfo.InvariantCulture) ?? _session.ExitSignal?.Name ?? "unknown"}).").ConfigureAwait(false);
         }
     }
 

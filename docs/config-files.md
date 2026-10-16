@@ -31,8 +31,12 @@ and `SshConfigResolveOptions` supplies the home directory, environment, local us
 - `RefuseConnection yes` (OpenSSH 10.0) makes connecting by that alias fail at once, before any network activity.
 
 `Match exec` runs a local command, so it is evaluated only when `SshConfigResolveOptions.ExecMatcher` is set (for example
-to `SshExecMatcher.RunShell`, for configuration files you trust); without it, `Match exec` does not match. `ProxyCommand` and `Match exec` inputs from the caller (host and user names) are validated so
-they cannot inject shell syntax.
+to `SshExecMatcher.RunShellAsync`, for configuration files you trust); without it, `Match exec` does not match. `ProxyCommand`
+and `Match exec` inputs from the caller (host and user names) are validated so they cannot inject shell syntax.
+
+`ExecMatcher` and `HostCanonicalizer` are asynchronous (they run a process, or look a name up), so a config that needs either
+resolves with `ResolveAsync`; `Resolve` throws `NotSupportedException` for it. Connecting by alias always resolves
+asynchronously.
 
 `KnownHostsCommand` asks a program for host keys, in addition to the known_hosts files, as OpenSSH 8.5+ does: its output is read
 as known_hosts lines. As in OpenSSH:

@@ -144,7 +144,7 @@ internal sealed class SshChannel
     public uint? ExitStatus { get; private set; }
 
     /// <summary>The signal that ended the command, from <c>exit-signal</c>.</summary>
-    public string? ExitSignal { get; private set; }
+    public SshExitSignal? ExitSignal { get; private set; }
 
     // ---- opening and closing ----
 
@@ -619,7 +619,11 @@ internal sealed class SshChannel
                     handled = true;
                     break;
                 case "exit-signal":
-                    ExitSignal = reader.ReadUtf8String();
+                    // RFC 4254 6.10: signal name, core dumped, error message, language tag (ignored).
+                    var signal = reader.ReadUtf8String();
+                    var coreDumped = !reader.Remaining.IsEmpty && reader.ReadBoolean();
+                    var message = reader.Remaining.IsEmpty ? null : reader.ReadUtf8String();
+                    ExitSignal = new SshExitSignal(signal, coreDumped, string.IsNullOrEmpty(message) ? null : message);
                     handled = true;
                     break;
                 case "eow@openssh.com":

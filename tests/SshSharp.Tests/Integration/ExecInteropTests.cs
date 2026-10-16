@@ -129,7 +129,7 @@ public class ExecInteropTests
         }
 
         await Assert.That(result.ExitStatus).IsNull();
-        await Assert.That(result.ExitSignal).IsEqualTo("KILL");
+        await Assert.That(result.ExitSignal?.Name).IsEqualTo("KILL");
     }
 
     [Test]

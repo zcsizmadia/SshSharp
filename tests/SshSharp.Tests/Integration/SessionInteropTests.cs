@@ -334,7 +334,7 @@ public class SessionInteropTests
             await yes.StandardOutput.DisposeAsync();
             stages.Step("waiting for yes to end");
             await yes.WaitForExitAsync(Timeout());
-            await Assert.That(yes.ExitSignal is "PIPE" || yes.ExitStatus is not null and not 0).IsTrue();
+            await Assert.That(yes.ExitSignal?.Name is "PIPE" || yes.ExitStatus is not null and not 0).IsTrue();
             stages.Step("closing the session");
             await yes.DisposeAsync();
             stages.Step("pinging after the eow session");
@@ -350,7 +350,7 @@ public class SessionInteropTests
             stages.Step("pinging after no-more-sessions");
             await client.PingAsync(Timeout());
             await Assert.That(client.IsConnected).IsTrue();
-        }, () => $"yes: exit status {yes?.ExitStatus?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "none"}, signal {yes?.ExitSignal ?? "none"}; connected {client.IsConnected}, error {client.ConnectionError?.Message ?? "none"}. {ConnectionInternals(client)}");
+        }, () => $"yes: exit status {yes?.ExitStatus?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "none"}, signal {yes?.ExitSignal?.Name ?? "none"}; connected {client.IsConnected}, error {client.ConnectionError?.Message ?? "none"}. {ConnectionInternals(client)}");
     }
 
     /// <summary>For a stuck test: when the connection last received a packet, whether a key re-exchange is under way, what waits to be sent.</summary>

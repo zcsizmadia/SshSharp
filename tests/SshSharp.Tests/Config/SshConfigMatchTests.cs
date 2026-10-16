@@ -12,8 +12,11 @@ public class SshConfigMatchTests
         LocalHostName = "box",
     };
 
+    // Resolve when no callback is set, ResolveAsync otherwise (the tests' callbacks complete at once).
     private static SshHostConfig Resolve(string config, string host, SshConfigResolveOptions? options = null) =>
-        SshConfig.Parse(config).Resolve(host, options ?? Options);
+        options is { ExecMatcher: not null } or { HostCanonicalizer: not null }
+            ? SshConfig.Parse(config).ResolveAsync(host, options).GetAwaiter().GetResult()
+            : SshConfig.Parse(config).Resolve(host, options ?? Options);
 
     [Test]
     public async Task HostCriterion_UsesHostNameSetEarlier_NotOriginalName()
@@ -117,7 +120,7 @@ public class SshConfigMatchTests
         {
             LocalUser = "local",
             HomeDirectory = "/h",
-            ExecMatcher = command => { commands.Add(command); return command.StartsWith("check", StringComparison.Ordinal); },
+            ExecMatcher = (command, _) => { commands.Add(command); return Task.FromResult(command.StartsWith("check", StringComparison.Ordinal)); },
         };
         await Assert.That(Resolve(config, "a", options).Port).IsEqualTo(51);
         await Assert.That(commands.Single()).IsEqualTo("check a local");
@@ -127,17 +130,49 @@ public class SshConfigMatchTests
     public async Task Exec_IsNotRunWhenAnEarlierCriterionAlreadyFailed()
     {
         var ran = false;
-        var options = new SshConfigResolveOptions { LocalUser = "l", HomeDirectory = "/h", ExecMatcher = _ => ran = true };
+        var options = new SshConfigResolveOptions { LocalUser = "l", HomeDirectory = "/h", ExecMatcher = (_, _) => Task.FromResult(ran = true) };
         Resolve("Match host other exec \"x\"\n Port 5\n", "a", options);
         await Assert.That(ran).IsFalse();
     }
 
     [Test]
+    public async Task Exec_NeedsResolveAsync_AndEachCommandRunsOnce()
+    {
+        const string config = "Match exec \"one\"\n Port 51\nMatch exec \"two\"\n User u2\nMatch final exec \"one\"\n HostName h1\n";
+        var commands = new List<string>();
+        var options = new SshConfigResolveOptions
+        {
+            LocalUser = "l",
+            HomeDirectory = "/h",
+            ExecMatcher = async (command, ct) => { await Task.Yield(); commands.Add(command); return command == "one"; },
+        };
+
+        // Resolve cannot wait for the callback; a config whose Match exec is never reached still resolves.
+        await Assert.That(() => SshConfig.Parse(config).Resolve("a", options)).Throws<NotSupportedException>();
+        await Assert.That(SshConfig.Parse("Match host other exec \"x\"\n Port 5\n").Resolve("a", options).Port).IsEqualTo(22);
+
+        commands.Clear();
+        var c = await SshConfig.Parse(config).ResolveAsync("a", options);
+        await Assert.That(c.Port).IsEqualTo(51);
+        await Assert.That(c.User).IsEqualTo("l");
+        await Assert.That(c.HostName).IsEqualTo("h1");
+        await Assert.That(string.Join(",", commands)).IsEqualTo("one,two");
+    }
+
+    [Test]
+    public async Task RunShellAsync_IsCancelled()
+    {
+        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(200));
+        var command = OperatingSystem.IsWindows() ? "ping -n 30 127.0.0.1 >nul" : "sleep 30";
+        await Assert.That(() => SshExecMatcher.RunShellAsync(command, cts.Token)).Throws<OperationCanceledException>();
+    }
+
+    [Test]
     public async Task RunShell_ReportsExitStatus()
     {
-        await Assert.That(SshExecMatcher.RunShell("exit 0")).IsTrue();
-        await Assert.That(SshExecMatcher.RunShell("exit 1")).IsFalse();
-        await Assert.That(() => SshExecMatcher.RunShell("")).Throws<ArgumentException>();
+        await Assert.That(await SshExecMatcher.RunShellAsync("exit 0")).IsTrue();
+        await Assert.That(await SshExecMatcher.RunShellAsync("exit 1")).IsFalse();
+        await Assert.That(() => SshExecMatcher.RunShellAsync("")).Throws<ArgumentException>();
     }
 
     [Test]
@@ -159,7 +194,7 @@ public class SshConfigMatchTests
     }
 
     private static SshConfigResolveOptions Canonicalizing(Func<string, IReadOnlyList<string>, string?> canonicalizer) =>
-        new() { LocalUser = "l", HomeDirectory = "/h", HostCanonicalizer = canonicalizer };
+        new() { LocalUser = "l", HomeDirectory = "/h", HostCanonicalizer = (host, domains, _) => Task.FromResult(canonicalizer(host, domains)) };
 
     [Test]
     public async Task Canonicalization_ReplacesTheHostName_AndEnablesMatchCanonical()
