@@ -82,6 +82,18 @@ public sealed class CertificateTests : IDisposable
     }
 
     [Test]
+    [Arguments("", null)]
+    [Arguments("RequiredRSASize 3072", 3072)]
+    [Arguments("RequiredRSASize 1024", 1024)]
+    [Arguments("RequiredRSASize 512", null)] // below ssh's floor: ignored
+    [Arguments("RequiredRSASize lots", null)]
+    public async Task RequiredRsaSize_IsReadFromSshConfig(string line, int? expected)
+    {
+        var host = SshSharp.Config.SshConfig.Parse($"Host *\n {line}\n").Resolve("h", new SshSharp.Config.SshConfigResolveOptions { LocalUser = "l", HomeDirectory = "/h" });
+        await Assert.That(host.RequiredRsaSize).IsEqualTo(expected);
+    }
+
+    [Test]
     public async Task HostChecks_TypeValidityPrincipalsAndCriticalOptions()
     {
         var key = FakeHostKey.Ed25519();
@@ -92,7 +104,14 @@ public sealed class CertificateTests : IDisposable
 
         await Assert.That(Make().CheckForHost(Host, now)).IsNull();
         await Assert.That(Make().CheckForHost("SRV.EXAMPLE.COM", now)).IsNull();
-        await Assert.That(Make(principals: []).CheckForHost("anything", now)).IsNull(); // no principals: any host, as in OpenSSH
+        // No principals: no host's, as OpenSSH's client has it ("Certificate lacks principal list"), not any host's.
+        await Assert.That(Make(principals: []).CheckForHost("anything", now)).Contains("no principals");
+
+        // Principals are patterns for host certificates (OpenSSH 10.3 made that consistent).
+        await Assert.That(Make(principals: ["*.example.com"]).CheckForHost(Host, now)).IsNull();
+        await Assert.That(Make(principals: ["srv?.example.com"]).CheckForHost("srv1.example.com", now)).IsNull();
+        await Assert.That(Make(principals: ["*.example.com"]).CheckForHost("example.org", now)).Contains("not issued for");
+        await Assert.That(Make(principals: ["other.example.com", "*.example.com"]).CheckForHost(Host, now)).IsNull();
         await Assert.That(Make(type: SshCertificateType.User).CheckForHost(Host, now)).Contains("user certificate");
         await Assert.That(Make(principals: ["other.example.com"]).CheckForHost(Host, now)).Contains("not issued for");
         await Assert.That(Make(before: now.AddMinutes(-1)).CheckForHost(Host, now)).Contains("valid only");

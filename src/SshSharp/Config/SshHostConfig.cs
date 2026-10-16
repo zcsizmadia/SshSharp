@@ -174,6 +174,12 @@ public sealed class SshHostConfig
     /// </summary>
     public TimeSpan? ObscureKeystrokeTiming { get; init; } = SshConfig.DefaultKeystrokeInterval;
 
+    /// <summary>
+    /// <c>RequiredRSASize</c>: the smallest RSA host key accepted, in bits, or null when unset (SshSharp's own minimum, 2048, applies;
+    /// ssh's default is 1024). Values below 1024, which ssh refuses, are left out.
+    /// </summary>
+    public int? RequiredRsaSize { get; init; }
+
     /// <summary>The TTY request mode.</summary>
     public RequestTty RequestTty { get; init; }
 

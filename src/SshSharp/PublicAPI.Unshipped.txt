@@ -128,3 +128,5 @@ SshSharp.Config.SshHostConfig.ObscureKeystrokeTiming.get -> System.TimeSpan?
 SshSharp.Config.SshHostConfig.ObscureKeystrokeTiming.init -> void
 SshSharp.SshClientOptions.ObscureKeystrokeTiming.get -> System.TimeSpan?
 SshSharp.SshClientOptions.ObscureKeystrokeTiming.init -> void
+SshSharp.Config.SshHostConfig.RequiredRsaSize.get -> int?
+SshSharp.Config.SshHostConfig.RequiredRsaSize.init -> void

@@ -281,7 +281,10 @@ public sealed class SshClientOptions
 
     internal Protocol.AlgorithmPreferences? AlgorithmPreferences { get; init; }
 
-    internal int MinimumRsaBits { get; init; } = 2048;
+    internal int MinimumRsaBits { get; init; } = DefaultMinimumRsaBits;
+
+    /// <summary>The smallest RSA host key accepted unless <c>RequiredRSASize</c> says otherwise (ssh's default is 1024).</summary>
+    internal const int DefaultMinimumRsaBits = 2048;
 }
 
 /// <summary>The outcome of a remote command.</summary>

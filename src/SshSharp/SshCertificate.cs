@@ -242,9 +242,11 @@ public sealed class SshCertificate
     }
 
     /// <summary>
-    /// Checks the certificate as a host's: a host certificate, signed by its authority, valid at <paramref name="now"/>, listing
-    /// <paramref name="hostName"/> among its principals (an empty list means any host, as in OpenSSH), and with no critical options
-    /// (none are defined for host certificates). Returns why it is not acceptable, or null.
+    /// Checks the certificate as a host's: a host certificate, signed by its authority, valid at <paramref name="now"/>, with a
+    /// principal that matches <paramref name="hostName"/>, and with no critical options (none are defined for host certificates).
+    /// Returns why it is not acceptable, or null. As OpenSSH's client: a certificate without principals is no host's (not any host's,
+    /// which would let a key its authority certified by mistake pose as every host), and principals are patterns (<c>*.example.com</c>).
+    /// Host names are compared without regard to case, as DNS names are.
     /// </summary>
     internal string? CheckForHost(string hostName, DateTimeOffset now)
     {
@@ -264,7 +266,12 @@ public sealed class SshCertificate
             return $"it is valid only from {ValidAfter:u} to {ValidBefore:u}";
         }
 
-        if (Principals.Count > 0 && !Principals.Any(p => string.Equals(p, hostName, StringComparison.OrdinalIgnoreCase)))
+        if (Principals.Count == 0)
+        {
+            return "it lists no principals, so it is no host's";
+        }
+
+        if (!Principals.Any(p => Config.Glob.IsMatch(p, hostName, ignoreCase: true)))
         {
             return $"it is not issued for {hostName}";
         }
