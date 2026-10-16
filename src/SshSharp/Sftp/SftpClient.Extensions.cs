@@ -192,12 +192,9 @@ public sealed partial class SftpClient
             ThrowStatus(reply, "Naming user and group ids", null);
         }
 
-        return Parse(reply, (ref SshReader r) =>
-        {
-            var userNames = ReadNames(r.ReadString(), users);
-            var groupNames = ReadNames(r.ReadString(), groups);
-            return ((IReadOnlyDictionary<uint, string>)userNames, (IReadOnlyDictionary<uint, string>)groupNames);
-        });
+        // The user names come first in the reply, then the group names.
+        return Parse<(IReadOnlyDictionary<uint, string>, IReadOnlyDictionary<uint, string>)>(reply, (ref SshReader r) =>
+            (ReadNames(r.ReadString(), users), ReadNames(r.ReadString(), groups)));
     }
 
     /// <summary>The ids as one string of uint32 values, as <c>users-groups-by-id@openssh.com</c> takes them.</summary>
