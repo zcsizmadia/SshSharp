@@ -204,7 +204,8 @@ public class SftpInteropTests
         try
         {
             // OpenSSH's path and owner extensions, where the server has them: ~ is the home directory, ~/x resolves under it, and the
-            // owner of a new file has a name.
+            // owner of a new file has a name, except on a chrooted SFTP-only server, which has no user database to name it from (the
+            // name is then left out).
             if (sftp.Extensions.ContainsKey("expand-path@openssh.com"))
             {
                 var home = await sftp.ExpandPathAsync("~", Timeout());
@@ -215,8 +216,11 @@ public class SftpInteropTests
                 && await sftp.GetAttributesAsync(root, cancellationToken: Timeout()) is { UserId: { } uid, GroupId: { } gid })
             {
                 var (users, groups) = await sftp.GetOwnerNamesAsync([uid], [gid], Timeout());
-                await Assert.That(users[uid]).IsNotEmpty();
-                await Assert.That(groups[gid]).IsNotEmpty();
+                if (!RealServer.SftpOnly)
+                {
+                    await Assert.That(users[uid]).IsNotEmpty();
+                    await Assert.That(groups[gid]).IsNotEmpty();
+                }
             }
 
             // A few MiB both ways, pipelined; the bytes must come back identical.
