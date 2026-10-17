@@ -3,3 +3,17 @@ SshSharp.SshClientOptions.AddressFamily.get -> SshSharp.Config.SshAddressFamily
 SshSharp.SshClientOptions.AddressFamily.init -> void
 SshSharp.SshClientOptions.ConnectTimeout.get -> System.TimeSpan?
 SshSharp.SshClientOptions.ConnectTimeout.init -> void
+SshSharp.SshClient.RunCommandAsync(string! command, SshSharp.SshSessionOptions? options, SshSharp.SshCommandInput? standardInput = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SshSharp.SshCommandResult!>!
+SshSharp.SshCommandException
+SshSharp.SshCommandException.ExitSignal.get -> SshSharp.SshExitSignal?
+SshSharp.SshCommandException.ExitStatus.get -> int?
+SshSharp.SshCommandException.IsStandardErrorTruncated.get -> bool
+SshSharp.SshCommandException.SshCommandException(string! message, int? exitStatus, SshSharp.SshExitSignal? exitSignal, System.ReadOnlyMemory<byte> standardError) -> void
+SshSharp.SshCommandException.StandardError.get -> System.ReadOnlyMemory<byte>
+SshSharp.SshCommandException.StandardErrorText.get -> string!
+SshSharp.SshCommandInput
+SshSharp.SshCommandResult.EnsureSuccess() -> SshSharp.SshCommandResult!
+SshSharp.SshFailureReason.CommandFailed = 12 -> SshSharp.SshFailureReason
+static SshSharp.SshCommandInput.FromBytes(System.ReadOnlyMemory<byte> data) -> SshSharp.SshCommandInput!
+static SshSharp.SshCommandInput.FromStream(System.IO.Stream! stream) -> SshSharp.SshCommandInput!
+static SshSharp.SshCommandInput.FromText(string! text, System.Text.Encoding? encoding = null) -> SshSharp.SshCommandInput!

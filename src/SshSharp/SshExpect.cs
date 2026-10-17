@@ -154,7 +154,7 @@ public sealed class SshExpect
     /// <remarks>
     /// With a terminal, the program's output includes the echo of what was sent (a shell shows the command typed), and a prompt ends
     /// without a line feed, so a read that reaches a prompt waits for more: wait for a prompt with
-    /// <see cref="ExpectAsync(string, CancellationToken)"/> instead. To run one command and read its output, <see cref="SshClient.RunCommandAsync"/>
+    /// <see cref="ExpectAsync(string, CancellationToken)"/> instead. To run one command and read its output, <see cref="SshClient.RunCommandAsync(string, CancellationToken)"/>
     /// needs neither.
     /// </remarks>
     /// <param name="cancellationToken">A timeout or cancellation.</param>

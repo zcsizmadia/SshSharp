@@ -42,6 +42,12 @@ public enum SshFailureReason
 
     /// <summary>An SFTP request failed with an error status from the server (see <c>SftpException.Status</c>).</summary>
     SftpFailed,
+
+    /// <summary>
+    /// A remote command ran but did not succeed: it exited with a non-zero status, was ended by a signal, or ended without reporting
+    /// either. Raised by <see cref="SshCommandResult.EnsureSuccess"/> as an <see cref="SshCommandException"/>.
+    /// </summary>
+    CommandFailed,
 }
 
 /// <summary>The base class for errors raised by SshSharp when talking SSH.</summary>
@@ -100,4 +106,70 @@ public sealed class SshAuthenticationException : SshException
 
     /// <summary>The methods the server still accepts (from its last <c>USERAUTH_FAILURE</c>), for example <c>publickey</c>.</summary>
     public IReadOnlyList<string> AllowedMethods { get; }
+}
+
+/// <summary>
+/// A remote command did not succeed (<see cref="SshCommandResult.EnsureSuccess"/>): it exited with a non-zero <see cref="ExitStatus"/>,
+/// was ended by <see cref="ExitSignal"/>, or ended without reporting either. <see cref="StandardError"/> holds the end of what it wrote to
+/// standard error. The message names the status or the signal only: neither the command nor its output is in it, since exception messages
+/// often end up in logs.
+/// </summary>
+public sealed class SshCommandException : SshException
+{
+    /// <summary>The most standard error kept: the last 4 KiB, where a failing program usually says why.</summary>
+    internal const int MaxStandardErrorBytes = 4 * 1024;
+
+    /// <summary>Creates the exception.</summary>
+    /// <param name="message">A description.</param>
+    /// <param name="exitStatus">The command's exit status, or null if it reported none.</param>
+    /// <param name="exitSignal">The signal that ended the command, if any.</param>
+    /// <param name="standardError">What the command wrote to standard error; only the last 4 KiB is kept (copied).</param>
+    public SshCommandException(string message, int? exitStatus, SshExitSignal? exitSignal, ReadOnlyMemory<byte> standardError)
+        : base(SshFailureReason.CommandFailed, message)
+    {
+        ExitStatus = exitStatus;
+        ExitSignal = exitSignal;
+        IsStandardErrorTruncated = standardError.Length > MaxStandardErrorBytes;
+        StandardError = standardError[Math.Max(0, standardError.Length - MaxStandardErrorBytes)..].ToArray();
+    }
+
+    /// <summary>The command's exit status, or null if it ended without one (for example, killed by a signal).</summary>
+    public int? ExitStatus { get; }
+
+    /// <summary>The signal that ended the command, if any.</summary>
+    public SshExitSignal? ExitSignal { get; }
+
+    /// <summary>
+    /// The end of what the command wrote to standard error: all of it up to 4 KiB, otherwise the last 4 KiB
+    /// (<see cref="IsStandardErrorTruncated"/>). The full output is in the <see cref="SshCommandResult"/> the exception came from.
+    /// </summary>
+    public ReadOnlyMemory<byte> StandardError { get; }
+
+    /// <summary>Whether <see cref="StandardError"/> holds only the last 4 KiB of a longer standard error.</summary>
+    public bool IsStandardErrorTruncated { get; }
+
+    /// <summary>
+    /// <see cref="StandardError"/> decoded as UTF-8. When it was truncated, a character that the cut split at the start is left out. The text
+    /// comes from the server: strip control characters before showing it in a terminal.
+    /// </summary>
+    public string StandardErrorText
+    {
+        get
+        {
+            var span = StandardError.Span;
+            if (IsStandardErrorTruncated)
+            {
+                // Skip UTF-8 continuation bytes (10xxxxxx) at the cut, at most three: the rest of a character that began before it.
+                var skip = 0;
+                while (skip < 3 && skip < span.Length && (span[skip] & 0xC0) == 0x80)
+                {
+                    skip++;
+                }
+
+                span = span[skip..];
+            }
+
+            return System.Text.Encoding.UTF8.GetString(span);
+        }
+    }
 }

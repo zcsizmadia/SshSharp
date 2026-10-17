@@ -10,7 +10,7 @@ Every example on these pages is compiled with the library in CI, so it matches t
 
 | Guide | Use it to |
 |---|---|
-| [Run a command](run-a-command.md) | Run a command and read its stdout, stderr and exit status. |
+| [Run a command](run-a-command.md) | Run a command, with standard input, environment variables or a terminal; read its stdout, stderr and exit status, or throw on failure. |
 | [Stream large output](stream-output.md) | Process output as it arrives, feed input, and handle output that does not fit in memory. |
 | [Interactive shells and SshExpect](interactive-shell.md) | Drive a shell or a device CLI with a terminal; wait for prompts and answer them. |
 

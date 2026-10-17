@@ -35,6 +35,10 @@ ok   app-2                             1.1s  load 0.30, disk 57%, running
 - **Bastions.** With `ProxyJump`, every host makes its own connection to the bastion. With many hosts, raise the bastion's
   `MaxStartups` and `MaxSessions` as needed, or connect to the bastion once and open each target over
   `OpenTcpTunnelAsync` (see [Jump hosts: by hand](../how-to/jump-hosts.md#by-hand)).
+- **Exit status.** `systemctl is-system-running` exits non-zero on a degraded system, and its state is still worth reporting, so the
+  code reads the output rather than calling `EnsureSuccess()`. For a check that passes or fails by its exit status
+  (`systemctl is-active myapp`), chain `.EnsureSuccess()`: a failure throws `SshCommandException`, which the `catch (SshException)`
+  above already turns into a report line (`CommandFailed: The command failed with exit status 3.`).
 - **Output parsing.** The parsing here is deliberately simple. For anything richer, have the server print JSON
   (`jq`, or a small script you deploy) and deserialize it.
 - **Metrics.** Instead of printing, record a gauge per host, or let SshSharp's own metrics (`sshsharp.connect.duration` and

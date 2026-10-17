@@ -1,6 +1,6 @@
 # Errors and failure reasons
 
-Every SSH-level failure is an `SshException`, and its `Reason` (an `SshFailureReason`) says what kind of failure it is. Three
+Every SSH-level failure is an `SshException`, and its `Reason` (an `SshFailureReason`) says what kind of failure it is. Five
 reasons have their own exception types with extra information. Everything else follows .NET's usual conventions.
 
 ## The exception types
@@ -11,7 +11,8 @@ Exception
 │   ├── SshHostKeyException       HostKey: the key the server presented
 │   ├── SshAuthenticationException AllowedMethods: what the server would accept
 │   ├── SshProtocolException      the server violated the protocol
-│   └── SftpException             Status: SftpStatusCode, Path
+│   ├── SftpException             Status: SftpStatusCode, Path
+│   └── SshCommandException       ExitStatus, ExitSignal, StandardError (last 4 KiB): from EnsureSuccess()
 ├── OperationCanceledException    your CancellationToken was cancelled
 ├── ArgumentException             invalid arguments
 ├── InvalidOperationException     RunCommandAsync output over MaxCommandOutputBytes
@@ -33,6 +34,7 @@ Exception
 | `AgentFailed` | The SSH agent could not be reached, or refused a request. | `SshException` | Check `SSH_AUTH_SOCK` or the agent service; a locked agent refuses. |
 | `TransferFailed` | An SCP transfer failed on the server's side, or a directory download met a name it will not write. | `SshException` | The message has the server's words. |
 | `SftpFailed` | An SFTP request failed. | `SftpException` | `Status` (`NoSuchFile`, `PermissionDenied`, `Failure`, ...) and `Path` say what and where. |
+| `CommandFailed` | `SshCommandResult.EnsureSuccess()` found that the command did not succeed: a non-zero exit status, a signal, or neither reported. | `SshCommandException` | `ExitStatus` or `ExitSignal` says how it ended; `StandardErrorText` (the last 4 KiB of stderr) usually says why. The connection is fine. |
 | `Unknown` | Not otherwise classified. | `SshException` | Look at `InnerException`. |
 
 ## Handling them
@@ -54,7 +56,9 @@ Exception
 ## Messages
 
 Exception messages never contain passwords, keys, command text, user names or host names, so they are safe to log. Some carry
-text from the server (an SFTP error, an SCP message); treat that as untrusted before showing it to end users.
+text from the server (an SFTP error, an SCP message); treat that as untrusted before showing it to end users. `SshCommandException`
+keeps the command's stderr out of its message, in `StandardError` and `StandardErrorText`: it is the remote program's own output,
+which may contain anything, so decide whether it is safe to log, and strip control characters before showing it in a terminal.
 
 ## See also
 

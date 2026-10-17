@@ -49,20 +49,11 @@ internal sealed class ExecScript(FakeSessionServer server, FakeSessionServer.Ser
         return null;
     }
 
-    /// <summary>Lets the client send <paramref name="bytes"/> more (SSH_MSG_CHANNEL_WINDOW_ADJUST), as a server does after consuming input.</summary>
-    public Task GrantWindowAsync(uint bytes) => server.SendRawAsync(Build(w =>
-    {
-        w.WriteByte(SshMessage.ChannelWindowAdjust);
-        w.WriteUInt32(channel.ClientId);
-        w.WriteUInt32(bytes);
-    })).AsTask();
-
-    private static byte[] Build(Action<SshWriter> body)
-    {
-        var buffer = new ArrayBufferWriter<byte>();
-        body(new SshWriter(buffer));
-        return buffer.WrittenSpan.ToArray();
-    }
+    /// <summary>
+    /// Lets the client send <paramref name="bytes"/> more (SSH_MSG_CHANNEL_WINDOW_ADJUST), as a server does after consuming input. Like
+    /// every script message, it is dropped once the server has sent CLOSE: the client may already have forgotten the channel.
+    /// </summary>
+    public Task GrantWindowAsync(uint bytes) => server.SendWindowAdjustAsync(channel, bytes);
 
     /// <summary>The channel requests the client sent before and while the program runs.</summary>
     public FakeSessionServer.ChannelRequestRecord[] Requests
@@ -1379,6 +1370,14 @@ internal sealed class FakeSessionServer : IAsyncDisposable
 
     internal async Task SendChannelAsync(byte type, ServerChannel channel, bool fromScript = false) =>
         await SendOnChannelAsync(channel, Build(w => { w.WriteByte(type); w.WriteUInt32(channel.ClientId); }), fromScript, isClose: type == SshMessage.ChannelClose);
+
+    internal async Task SendWindowAdjustAsync(ServerChannel channel, uint bytes) =>
+        await SendOnChannelAsync(channel, Build(w =>
+        {
+            w.WriteByte(SshMessage.ChannelWindowAdjust);
+            w.WriteUInt32(channel.ClientId);
+            w.WriteUInt32(bytes);
+        }), fromScript: true);
 
     internal async Task SendRequestAsync(ServerChannel channel, string type, Action<SshWriter> body, bool fromScript = false) =>
         await SendOnChannelAsync(channel, Build(w =>

@@ -44,7 +44,12 @@ internal static class Diagnostics
         try
         {
             await using var client = await SshClient.ConnectAsync("prod-db", cancellationToken: cancellationToken);
-            await client.RunCommandAsync("systemctl reload nginx", cancellationToken);
+            (await client.RunCommandAsync("systemctl reload nginx", cancellationToken)).EnsureSuccess();
+        }
+        catch (SshCommandException ex)
+        {
+            // Before SshException: it is one. The message names the exit status or signal; stderr's end is separate.
+            Console.Error.WriteLine($"{ex.Message}\n{ex.StandardErrorText.Trim()}");
         }
         catch (SshHostKeyException ex)
         {

@@ -12,7 +12,8 @@ connection per server: the upload (SFTP), the commands, and even the HTTP health
   renaming it over the old one: `rename(2)` is atomic, so `current` always points at a complete release.
 - **Health check through the connection**: `CreateHttpConnectCallback` lets `HttpClient` reach `http://localhost:8080` on the
   server, without opening the service's port to the network.
-- **Stop at the first failure**, leaving the rest of the fleet on the old version.
+- **Stop at the first failure**, leaving the rest of the fleet on the old version. Each command is checked with `EnsureSuccess()`,
+  which throws `SshCommandException` with the exit status and the end of stderr; the main loop reports it and stops.
 
 ## The code
 

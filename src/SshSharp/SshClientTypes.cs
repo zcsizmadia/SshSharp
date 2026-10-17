@@ -191,7 +191,7 @@ public sealed class SshClientOptions
     /// <summary>The clock for rekey and keep-alive timing; replaceable in tests.</summary>
     internal TimeProvider TimeProvider { get; init; } = TimeProvider.System;
 
-    /// <summary>The most output (stdout plus stderr) <see cref="SshClient.RunCommandAsync"/> will collect before failing. Default 128 MiB.</summary>
+    /// <summary>The most output (stdout plus stderr) <see cref="SshClient.RunCommandAsync(string, CancellationToken)"/> and its overloads will collect before failing. Default 128 MiB.</summary>
     public long MaxCommandOutputBytes { get; init; } = 128L * 1024 * 1024;
 
     /// <summary>
@@ -357,4 +357,27 @@ public sealed class SshCommandResult
 
     /// <summary>Standard error decoded as UTF-8.</summary>
     public string StandardErrorText => System.Text.Encoding.UTF8.GetString(StandardError.Span);
+
+    /// <summary>
+    /// Throws unless the command succeeded, that is, exited with status 0; returns this result when it did, so calls chain:
+    /// <c>(await client.RunCommandAsync("make")).EnsureSuccess().StandardOutputText</c>.
+    /// </summary>
+    /// <returns>This result.</returns>
+    /// <exception cref="SshCommandException">The command exited with a non-zero status, was ended by a signal, or ended without
+    /// reporting either. The exception carries the status, the signal and the last 4 KiB of standard error, but not standard output.</exception>
+    public SshCommandResult EnsureSuccess()
+    {
+        if (ExitStatus == 0)
+        {
+            return this;
+        }
+
+        var message = (ExitStatus, ExitSignal) switch
+        {
+            ({ } status, _) => $"The command failed with exit status {status}.",
+            (null, { } signal) => $"The command was ended by signal {signal.Name}{(signal.CoreDumped ? " (core dumped)" : "")}.",
+            _ => "The command ended without reporting an exit status.",
+        };
+        throw new SshCommandException(message, ExitStatus, ExitSignal, StandardError);
+    }
 }

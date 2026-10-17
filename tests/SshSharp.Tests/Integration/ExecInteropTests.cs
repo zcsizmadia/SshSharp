@@ -204,4 +204,50 @@ public class ExecInteropTests
         var result = await client.RunCommandAsync("echo via-stream", Timeout());
         await Assert.That(result.StandardOutputText).IsEqualTo("via-stream\n");
     }
+
+    [Test]
+    public async Task StandardInput_ReachesTheCommand_AndEndOfFileLetsItFinish()
+    {
+        if (!Configured)
+        {
+            Skip.Test("No real server account configured.");
+        }
+
+        RealServer.SkipUnlessItRunsCommands();
+        await using var client = await ConnectAsync(Timeout());
+
+        // cat finishes only once it reads end-of-file.
+        var echoed = await client.RunCommandAsync("cat", null, SshCommandInput.FromText("one\ntwo\n"), Timeout());
+        await Assert.That(echoed.EnsureSuccess().StandardOutputText).IsEqualTo("one\ntwo\n");
+
+        // A script on standard input, as sh -s reads it.
+        var script = await client.RunCommandAsync("sh -s", null, SshCommandInput.FromText("echo from-$((6*7))\nexit 5\n"), Timeout());
+        await Assert.That(script.StandardOutputText).IsEqualTo("from-42\n");
+        await Assert.That(script.ExitStatus).IsEqualTo(5);
+
+        // More than the server's window, from a stream, counted on the server so that little comes back: OpenSSH for Windows deadlocks
+        // when output backs up while input is being closed (see SessionInteropTests).
+        var data = new byte[(3 * 1024 * 1024) + 7];
+        await using var stream = new MemoryStream(data);
+        var counted = await client.RunCommandAsync("wc -c", null, SshCommandInput.FromStream(stream), Timeout());
+        await Assert.That(counted.EnsureSuccess().StandardOutputText.Trim()).IsEqualTo(data.Length.ToString(System.Globalization.CultureInfo.InvariantCulture));
+    }
+
+    [Test]
+    public async Task EnsureSuccess_ReportsAFailedCommandsStatusAndStderr()
+    {
+        if (!Configured)
+        {
+            Skip.Test("No real server account configured.");
+        }
+
+        RealServer.SkipUnlessItRunsCommands();
+        await using var client = await ConnectAsync(Timeout());
+        var result = await client.RunCommandAsync("echo stdout-marker; echo went-wrong 1>&2; exit 3", null, null, Timeout());
+
+        var ex = Assert.Throws<SshCommandException>(() => result.EnsureSuccess());
+        await Assert.That(ex!.ExitStatus).IsEqualTo(3);
+        await Assert.That(ex.StandardErrorText.Trim()).IsEqualTo("went-wrong");
+        await Assert.That(ex.Message).DoesNotContain("stdout-marker");
+    }
 }
