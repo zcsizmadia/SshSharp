@@ -43,8 +43,8 @@ internal sealed class DuplexStream(Stream read, Stream write) : Stream
     /// <summary>Two connected ends: what one writes, the other reads.</summary>
     public static (DuplexStream A, DuplexStream B) CreatePair()
     {
-        var aToB = new System.IO.Pipelines.Pipe();
-        var bToA = new System.IO.Pipelines.Pipe();
+        var aToB = UnpooledMemoryPool.CreatePipe();
+        var bToA = UnpooledMemoryPool.CreatePipe();
         return (new DuplexStream(bToA.Reader.AsStream(), aToB.Writer.AsStream()), new DuplexStream(aToB.Reader.AsStream(), bToA.Writer.AsStream()));
     }
 
@@ -232,11 +232,12 @@ internal sealed class FakeServerOptions
 /// </summary>
 internal sealed class FakeSshServer : IAsyncDisposable
 {
-    private readonly Pipe _toServer = new();
-    private readonly Pipe _toClient = new();
+    private readonly Pipe _toServer = UnpooledMemoryPool.CreatePipe();
+    private readonly Pipe _toClient = UnpooledMemoryPool.CreatePipe();
     private readonly PipeReader _reader;
     private readonly PipeWriter _writer;
     private readonly SemaphoreSlim _sendLock = new(1, 1);
+    private bool _writerCompleted; // protected by _sendLock
     private PacketProtector _send = PacketProtector.None;
     private PacketProtector _receive = PacketProtector.None;
     private uint _sendSeq;
@@ -318,7 +319,7 @@ internal sealed class FakeSshServer : IAsyncDisposable
         if (Options.CloseAfterKexInit)
         {
             Negotiated = AlgorithmNegotiator.Negotiate(ClientKexInit, serverInit);
-            await _writer.CompleteAsync();
+            await CompleteWriterAsync();
             return;
         }
 
@@ -358,7 +359,7 @@ internal sealed class FakeSshServer : IAsyncDisposable
                 }
                 else
                 {
-                    PacketCodec.Encode(_writer, payload.Span, _send, _sendSeq++);
+                    EncodeLocked(payload.Span);
                     await _writer.FlushAsync(cancellationToken);
                     return;
                 }
@@ -410,22 +411,69 @@ internal sealed class FakeSshServer : IAsyncDisposable
     /// <summary>Writes raw bytes to the client, bypassing the packet layer (to simulate corruption).</summary>
     public async ValueTask WriteRawAsync(byte[] bytes, CancellationToken cancellationToken = default)
     {
-        await _writer.WriteAsync(bytes, cancellationToken);
+        await _sendLock.WaitAsync(cancellationToken);
+        try
+        {
+            ThrowIfWriterCompleted();
+            await _writer.WriteAsync(bytes, cancellationToken);
+        }
+        finally
+        {
+            _sendLock.Release();
+        }
     }
 
     /// <summary>Closes the server's side of the connection.</summary>
-    public async ValueTask CloseAsync()
-    {
-        await _writer.CompleteAsync();
-    }
+    public ValueTask CloseAsync() => CompleteWriterAsync();
 
     public async ValueTask DisposeAsync()
     {
-        await _writer.CompleteAsync();
+        await CompleteWriterAsync();
         await _reader.CompleteAsync();
         _send.Dispose();
         _receive.Dispose();
         ClientStream.Dispose();
+    }
+
+    /// <summary>Encodes a packet into the server-to-client pipe. The caller holds <see cref="_sendLock"/>.</summary>
+    private void EncodeLocked(ReadOnlySpan<byte> payload)
+    {
+        ThrowIfWriterCompleted();
+        PacketCodec.Encode(_writer, payload, _send, _sendSeq++);
+    }
+
+    /// <summary>Writing after the close fails as the completed pipe would have failed it.</summary>
+    private void ThrowIfWriterCompleted()
+    {
+        if (_writerCompleted)
+        {
+            throw new InvalidOperationException("The server's side of the connection is closed.");
+        }
+    }
+
+    /// <summary>
+    /// Completes the server-to-client pipe under the send lock, so no packet is being encoded into the pipe's memory meanwhile, as the
+    /// client's transport does. A sender stuck holding the lock (writing into a pipe nobody reads) keeps the pipe open instead; the
+    /// unpooled pipe memory makes a late write harmless either way.
+    /// </summary>
+    private async ValueTask CompleteWriterAsync()
+    {
+        var locked = await _sendLock.WaitAsync(TimeSpan.FromSeconds(5));
+        try
+        {
+            if (locked && !_writerCompleted)
+            {
+                _writerCompleted = true;
+                await _writer.CompleteAsync();
+            }
+        }
+        finally
+        {
+            if (locked)
+            {
+                _sendLock.Release();
+            }
+        }
     }
 
     public static byte[] IgnorePayload() => [SshMessage.Ignore, 0, 0, 0, 1, 0x41];
@@ -484,7 +532,7 @@ internal sealed class FakeSshServer : IAsyncDisposable
         _rekeying = true;
         _pendingServerInit = serverInit;
         _pendingServerInitPayload = payload;
-        PacketCodec.Encode(_writer, payload, _send, _sendSeq++);
+        EncodeLocked(payload);
         await _writer.FlushAsync(cancellationToken);
     }
 
@@ -560,7 +608,7 @@ internal sealed class FakeSshServer : IAsyncDisposable
         await _sendLock.WaitAsync(cancellationToken);
         try
         {
-            PacketCodec.Encode(_writer, new byte[] { SshMessage.NewKeys }, _send, _sendSeq++);
+            EncodeLocked(new byte[] { SshMessage.NewKeys });
             await _writer.FlushAsync(cancellationToken);
             _send.Dispose();
             _send = newSend;
@@ -625,7 +673,7 @@ internal sealed class FakeSshServer : IAsyncDisposable
         await _sendLock.WaitAsync(cancellationToken);
         try
         {
-            PacketCodec.Encode(_writer, payload.Span, _send, _sendSeq++);
+            EncodeLocked(payload.Span);
             await _writer.FlushAsync(cancellationToken);
         }
         finally
