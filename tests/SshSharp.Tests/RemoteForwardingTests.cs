@@ -152,12 +152,9 @@ public class RemoteForwardingTests
     [Test]
     public async Task NothingListeningLocally_ClosesTheForwardedConnection()
     {
-        int unusedPort;
-        using (var probe = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp))
-        {
-            probe.Bind(new IPEndPoint(IPAddress.Loopback, 0));
-            unusedPort = ((IPEndPoint)probe.LocalEndPoint!).Port;
-        }
+        // Port 1 on loopback: nothing listens there. A port bound and released could be taken by another test's listener before it is
+        // used (a stress run saw a SOCKS proxy answer on one).
+        const int unusedPort = 1;
 
         await using var server = new FakeSessionServer();
         await using var client = await ConnectAsync(server);
