@@ -69,7 +69,7 @@ value.
 | `AddKeysToAgent` | `AddKeysToAgent` | Yes (`yes`, `confirm`, a lifetime); `ask` is treated as `no`. |
 | `PreferredAuthentications` | `PreferredAuthentications` | Yes. |
 | `PubkeyAuthentication`, `PasswordAuthentication`, `KbdInteractiveAuthentication` (`ChallengeResponseAuthentication`) | same names | Yes. |
-| `GSSAPIAuthentication`, `GSSAPIDelegateCredentials` | `GssapiAuthentication`, `GssapiDelegateCredentials` | Yes (.NET 10). |
+| `GSSAPIAuthentication`, `GSSAPIDelegateCredentials` | `GssapiAuthentication`, `GssapiDelegateCredentials` | Yes (.NET 10 and later). |
 | `BatchMode` | `BatchMode` | Yes: no prompts or passphrase requests. |
 | `ForwardAgent` | `ForwardAgent` | Yes: the agent used for authentication is forwarded. |
 

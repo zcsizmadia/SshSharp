@@ -79,6 +79,8 @@ internal static class KnownHostsCommandRunner
             start.ArgumentList.Add(argument);
         }
 
+        ChildProcess.InheritStandardStreamsOnly(start);
+
         Process process;
         try
         {
@@ -115,14 +117,7 @@ internal static class KnownHostsCommandRunner
             {
                 if (!process.HasExited)
                 {
-                    try
-                    {
-                        process.Kill(entireProcessTree: true);
-                    }
-                    catch (InvalidOperationException)
-                    {
-                        // It exited meanwhile.
-                    }
+                    ChildProcess.Stop(process);
                 }
             }
         }

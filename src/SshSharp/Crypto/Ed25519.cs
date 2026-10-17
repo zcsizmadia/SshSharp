@@ -117,7 +117,7 @@ internal static class Ed25519
         return CryptographicOperations.FixedTimeEquals(check, signature[..32]);
     }
 
-    private static void RequireSizes(ReadOnlySpan<byte> input, int inputSize, Span<byte> output, int outputSize)
+    private static void RequireSizes(ReadOnlySpan<byte> input, int inputSize, ReadOnlySpan<byte> output, int outputSize)
     {
         if (input.Length != inputSize || output.Length != outputSize)
         {

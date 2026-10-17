@@ -7,7 +7,7 @@ title: SshSharp
   <img src="images/sshsharp.svg" alt="SshSharp logo" width="72" height="72">
   <h1 class="display-5 fw-bold mt-3">SshSharp</h1>
   <p class="lead mx-auto" style="max-width: 46rem">
-    A managed, async-first SSH client library for .NET 8 and .NET 10. It reads <code>ssh_config</code> and
+    A managed, async-first SSH client library for .NET 8, .NET 10 and .NET 11. It reads <code>ssh_config</code> and
     <code>known_hosts</code> the way OpenSSH does, so your application connects the way <code>ssh</code> would:
     same host names, keys, agent, jump hosts and host key policy.
   </p>
@@ -108,7 +108,7 @@ No `ssh_config`? Pass the host, the credentials and a host key policy in [`SshCl
 | [`SshSharp.IO.Abstractions`](https://www.nuget.org/packages/SshSharp.IO.Abstractions) | `SftpFileSystem`: SFTP as a System.IO.Abstractions `IFileSystem`. |
 | [`SshSharp.FileProviders`](https://www.nuget.org/packages/SshSharp.FileProviders) | `SftpFileProvider`: a remote directory as an `IFileProvider`, for static files, Razor views and configuration. |
 
-All four are released together with the same version, target .NET 8 and .NET 10, and have no native dependencies.
+All four are released together with the same version, target .NET 8, .NET 10 and .NET 11, and have no native dependencies.
 
 ## Where to go next
 

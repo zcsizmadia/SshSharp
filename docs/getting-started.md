@@ -5,7 +5,7 @@ It takes about five minutes. For a longer walk-through that builds a small tool 
 
 ## Requirements
 
-- .NET 8 or .NET 10, on Windows, Linux or macOS (x64 and Arm64). SshSharp is pure managed code: no native libraries to deploy.
+- .NET 8, .NET 10 or .NET 11, on Windows, Linux or macOS (x64 and Arm64). SshSharp is pure managed code: no native libraries to deploy.
 - An SSH server: OpenSSH (Linux, BSD, macOS or the one built into Windows), Dropbear, or any server that speaks modern
   algorithms (see [Algorithms](reference/algorithms.md)).
 

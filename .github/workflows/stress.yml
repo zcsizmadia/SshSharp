@@ -42,14 +42,16 @@ jobs:
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           global-json-file: global.json
-          dotnet-version: 8.0.x
+          dotnet-version: |
+            8.0.x
+            10.0.x
           cache: true
           cache-dependency-path: '**/Directory.Packages.props'
       - run: dotnet restore
       - run: dotnet build -c Release --no-restore -p:SshSharpInstrument=true
       - name: Loop
         shell: bash
-        run: tests/stress/loop.sh "$ITERATIONS" "$RUNNER_TEMP/stress" net8.0,net10.0 "$UNIT_FILTER"
+        run: tests/stress/loop.sh "$ITERATIONS" "$RUNNER_TEMP/stress" net8.0,net10.0,net11.0 "$UNIT_FILTER"
       - name: Summary
         if: always()
         shell: bash
@@ -100,7 +102,9 @@ jobs:
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           global-json-file: global.json
-          dotnet-version: 8.0.x
+          dotnet-version: |
+            8.0.x
+            10.0.x
           cache: true
           cache-dependency-path: '**/Directory.Packages.props'
       - name: Start the server container
@@ -151,7 +155,9 @@ jobs:
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           global-json-file: global.json
-          dotnet-version: 8.0.x
+          dotnet-version: |
+            8.0.x
+            10.0.x
           cache: true
           cache-dependency-path: '**/Directory.Packages.props'
       - name: Start OpenSSH Server for Windows

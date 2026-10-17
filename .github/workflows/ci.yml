@@ -30,13 +30,17 @@ jobs:
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           global-json-file: global.json
-          dotnet-version: 8.0.x
+          dotnet-version: |
+            8.0.x
+            10.0.x
           cache: true
           cache-dependency-path: '**/Directory.Packages.props'
       - run: dotnet restore
       - run: dotnet build -c Release --no-restore
       - name: Test net8.0
         run: dotnet test --project tests/SshSharp.Tests -c Release -f net8.0 --no-build
+      - name: Test net11.0
+        run: dotnet test --project tests/SshSharp.Tests -c Release -f net11.0 --no-build
       - name: Test net10.0 with coverage
         run: dotnet test --project tests/SshSharp.Tests -c Release -f net10.0 --no-build --coverage --coverage-output-format cobertura --coverage-output coverage.cobertura.xml --results-directory TestResults
       - name: Coverage summary
@@ -80,7 +84,9 @@ jobs:
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           global-json-file: global.json
-          dotnet-version: 8.0.x
+          dotnet-version: |
+            8.0.x
+            10.0.x
           cache: true
           cache-dependency-path: '**/Directory.Packages.props'
       - name: Start OpenSSH with a throwaway account
@@ -320,7 +326,9 @@ jobs:
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           global-json-file: global.json
-          dotnet-version: 8.0.x
+          dotnet-version: |
+            8.0.x
+            10.0.x
           cache: true
           cache-dependency-path: '**/Directory.Packages.props'
       - name: Start the server container
@@ -385,7 +393,9 @@ jobs:
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           global-json-file: global.json
-          dotnet-version: 8.0.x
+          dotnet-version: |
+            8.0.x
+            10.0.x
           cache: true
           cache-dependency-path: '**/Directory.Packages.props'
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -445,6 +455,7 @@ jobs:
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           global-json-file: global.json
+          dotnet-version: 10.0.x # the runtime for net10.0; the SDK comes from global.json
           cache: true
           cache-dependency-path: '**/Directory.Packages.props'
       - name: Start OpenSSH Server for Windows
@@ -555,7 +566,9 @@ jobs:
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           global-json-file: global.json
-          dotnet-version: 8.0.x
+          dotnet-version: |
+            8.0.x
+            10.0.x
           cache: true
           cache-dependency-path: '**/Directory.Packages.props'
       - name: Install ssh-audit (pinned by hash)

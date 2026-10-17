@@ -7,11 +7,11 @@ order, and the first one the server also supports is used. `client.Algorithms` s
 
 | Algorithm | Notes | FIPS mode |
 |---|---|---|
-| `mlkem768x25519-sha256` | Post-quantum hybrid (ML-KEM-768 + X25519). OpenSSH 9.9+, its default since 10.0. .NET 10 where the platform has ML-KEM (OpenSSL 3.5+, or a recent Windows). | No |
+| `mlkem768x25519-sha256` | Post-quantum hybrid (ML-KEM-768 + X25519). OpenSSH 9.9+, its default since 10.0. .NET 10 and later where the platform has ML-KEM (OpenSSL 3.5+, or a recent Windows). | No |
 | `mlkem768nistp256-sha256` | Post-quantum hybrid with P-256 (RFC 10042). Same platform requirement. | Yes |
 | `mlkem1024nistp384-sha384` | Post-quantum hybrid with P-384 (RFC 10042). Same platform requirement. | Yes |
 | `sntrup761x25519-sha512`, `sntrup761x25519-sha512@openssh.com` | Post-quantum hybrid (Streamlined NTRU Prime + X25519). Managed, so on every platform and .NET 8. OpenSSH 8.5+. | No |
-| `curve25519-sha256`, `curve25519-sha256@libssh.org` | X25519. | No |
+| `curve25519-sha256`, `curve25519-sha256@libssh.org` | X25519 (the platform's on .NET 11 where the OS provides it, managed otherwise). | No |
 | `ecdh-sha2-nistp256`, `ecdh-sha2-nistp384`, `ecdh-sha2-nistp521` | NIST curves. | Yes |
 | `diffie-hellman-group16-sha512`, `diffie-hellman-group14-sha256` | Finite-field DH, last, for servers with nothing better. | Yes |
 
