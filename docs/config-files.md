@@ -38,6 +38,10 @@ and `Match exec` inputs from the caller (host and user names) are validated so t
 resolves with `ResolveAsync`; `Resolve` throws `NotSupportedException` for it. Connecting by alias always resolves
 asynchronously.
 
+Within one resolution, each distinct `Match exec` command runs once and its answer is reused, as is each canonicalization. That
+includes the second pass that `Match final` or canonicalization causes, where OpenSSH runs the command again. A command whose
+tokens expand differently in that pass (`%h` after canonicalization, say) is a different command, and runs.
+
 `KnownHostsCommand` asks a program for host keys, in addition to the known_hosts files, as OpenSSH 8.5+ does: its output is read
 as known_hosts lines. As in OpenSSH:
 
