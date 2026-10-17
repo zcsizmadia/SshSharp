@@ -11,6 +11,8 @@ public class ExternalKeyTests
 
     private static readonly byte[] Data = Encoding.ASCII.GetBytes("data to sign");
 
+    private static SshSignRequest Authentication(string algorithm) => new(algorithm, Data, SshSignaturePurpose.Authentication);
+
     /// <summary>A signer backed by a key SshSharp generated, standing in for a key vault: it signs with that key's private half.</summary>
     internal sealed class TestSigner(SshPrivateKey key, Func<byte[], byte[]>? reshape = null) : SshKeySigner(key.PublicKey)
     {
@@ -24,16 +26,20 @@ public class ExternalKeyTests
 
         public int Calls { get; private set; }
 
+        /// <summary>Every request the signer was given, in order.</summary>
+        public List<SshSignRequest> Requests { get; } = [];
+
         public override IReadOnlyList<string> SignatureAlgorithms => Algorithms ?? base.SignatureAlgorithms;
 
         public override DSASignatureFormat EcdsaSignatureFormat => Declared ?? Format;
 
-        public override async ValueTask<byte[]> SignAsync(string algorithm, ReadOnlyMemory<byte> data, CancellationToken cancellationToken)
+        public override async ValueTask<byte[]> SignAsync(SshSignRequest request, CancellationToken cancellationToken)
         {
             Calls++;
+            Requests.Add(request);
 
             // The raw signature out of SshSharp's own SSH blob: string algorithm, then string signature (for ECDSA, two mpints).
-            var blob = await key.SignAsync(algorithm, data, null, cancellationToken);
+            var blob = await key.SignAsync(request, null, cancellationToken);
             var reader = new SshSharp.Protocol.SshReader(blob);
             reader.ReadString();
             var signature = reader.ReadString().ToArray();
@@ -157,6 +163,42 @@ public class ExternalKeyTests
     }
 
     [Test]
+    public async Task TheSigner_IsToldWhatEachSignatureIsFor_AndCanRefuse()
+    {
+        using var inner = SshPrivateKey.Generate(SshKeyType.Ed25519);
+        var signer = new TestSigner(inner);
+        using var key = SshPrivateKey.FromSigner(signer);
+
+        await AssertAuthenticatesAsync(key);
+        await SshSignature.SignAsync(key, Data, "git", cancellationToken: Timeout());
+
+        var login = signer.Requests[0];
+        await Assert.That(login.Purpose).IsEqualTo(SshSignaturePurpose.Authentication);
+        await Assert.That(login.Namespace).IsNull();
+        await Assert.That(login.Algorithm).IsEqualTo("ssh-ed25519");
+        var file = signer.Requests[^1];
+        await Assert.That(file.Purpose).IsEqualTo(SshSignaturePurpose.FileSignature);
+        await Assert.That(file.Namespace).IsEqualTo("git");
+
+        // A key service that allows logging in only: SSH signatures fail with its error, and logging in still works.
+        using var loginOnly = SshPrivateKey.FromSigner(new LoginOnlySigner(inner));
+        await Assert.That(async () => await SshSignature.SignAsync(loginOnly, Data, "file", cancellationToken: Timeout()))
+            .Throws<UnauthorizedAccessException>();
+        await AssertAuthenticatesAsync(loginOnly);
+    }
+
+    /// <summary>Signs for authentication only, as a key service's policy might.</summary>
+    private sealed class LoginOnlySigner(SshPrivateKey key) : SshKeySigner(key.PublicKey)
+    {
+        private readonly TestSigner _inner = new(key);
+
+        public override ValueTask<byte[]> SignAsync(SshSignRequest request, CancellationToken cancellationToken) =>
+            request.Purpose == SshSignaturePurpose.Authentication
+                ? _inner.SignAsync(request, cancellationToken)
+                : throw new UnauthorizedAccessException("This key signs for logging in only.");
+    }
+
+    [Test]
     public async Task FromSigner_WorksWithACertificate_AndForSshSignatures()
     {
         using var ca = SshPrivateKey.Generate(SshKeyType.Ed25519);
@@ -169,7 +211,7 @@ public class ExternalKeyTests
         var certificate = SshCertificate.FromBlob(TestKeys.Certificate(ca, key.PublicKey.ToArray(), SshCertificateType.User, ["tester"]));
         var certified = key.WithCertificate(certificate);
         await Assert.That(certified.KeyType).IsEqualTo("ssh-ed25519-cert-v01@openssh.com");
-        var blob = await certified.SignAsync("ssh-ed25519-cert-v01@openssh.com", Data, null, Timeout());
+        var blob = await certified.SignAsync(Authentication("ssh-ed25519-cert-v01@openssh.com"), null, Timeout());
         await Assert.That(blob.Length).IsGreaterThan(64);
         await Assert.That(certified.HasLocalPrivateMaterial).IsFalse();
     }
@@ -186,11 +228,11 @@ public class ExternalKeyTests
             Format = DSASignatureFormat.Rfc3279DerSequence,
             Declared = DSASignatureFormat.IeeeP1363FixedFieldConcatenation,
         });
-        await Assert.That(async () => await wrongFormat.SignAsync("ecdsa-sha2-nistp256", Data, null, Timeout())).Throws<CryptographicException>();
+        await Assert.That(async () => await wrongFormat.SignAsync(Authentication("ecdsa-sha2-nistp256"), null, Timeout())).Throws<CryptographicException>();
 
         // Signed by another key than the one the signer claims.
         using var wrongKey = SshPrivateKey.FromSigner(new SwappedSigner(inner, other));
-        var error = await Assert.That(async () => await wrongKey.SignAsync("ecdsa-sha2-nistp256", Data, null, Timeout())).Throws<CryptographicException>();
+        var error = await Assert.That(async () => await wrongKey.SignAsync(Authentication("ecdsa-sha2-nistp256"), null, Timeout())).Throws<CryptographicException>();
         await Assert.That(error!.Message).Contains("does not verify against its public key");
     }
 
@@ -200,7 +242,7 @@ public class ExternalKeyTests
         using var rsa = SshPrivateKey.Generate(SshKeyType.Rsa, rsaBits: 2048);
         using var sha256Only = SshPrivateKey.FromSigner(new TestSigner(rsa) { Algorithms = ["rsa-sha2-256"] });
         await Assert.That(sha256Only.SignatureAlgorithms).IsEquivalentTo(new[] { "rsa-sha2-256" });
-        await Assert.That(async () => await sha256Only.SignAsync("rsa-sha2-512", Data, null, Timeout())).Throws<ArgumentException>();
+        await Assert.That(async () => await sha256Only.SignAsync(Authentication("rsa-sha2-512"), null, Timeout())).Throws<ArgumentException>();
 
         await Assert.That(() => SshPrivateKey.FromSigner(new TestSigner(rsa) { Algorithms = ["ssh-rsa"] })).Throws<ArgumentException>();
         await Assert.That(() => SshPrivateKey.FromSigner(new TestSigner(rsa) { Algorithms = [] })).Throws<ArgumentException>();
@@ -220,14 +262,14 @@ public class ExternalKeyTests
     public async Task ASignerNeedsASupportedPublicKey()
     {
         using var small = RSA.Create(1024);
-        await Assert.That(() => SshPrivateKey.FromRsa(small)).Throws<FormatException>();
+        await Assert.That(() => SshPrivateKey.FromRsa(small)).Throws<ArgumentException>().WithMessageContaining("2048");
         await Assert.That(() => new RawSigner([0, 0, 0, 3, (byte)'a', (byte)'b', (byte)'c'])).Throws<FormatException>();
     }
 
     /// <summary>A signer for whatever public key bytes it is given; never asked to sign.</summary>
     private sealed class RawSigner(byte[] publicKey) : SshKeySigner(publicKey)
     {
-        public override ValueTask<byte[]> SignAsync(string algorithm, ReadOnlyMemory<byte> data, CancellationToken cancellationToken) =>
+        public override ValueTask<byte[]> SignAsync(SshSignRequest request, CancellationToken cancellationToken) =>
             throw new InvalidOperationException();
     }
 
@@ -236,7 +278,7 @@ public class ExternalKeyTests
     {
         private readonly TestSigner _actual = new(actual);
 
-        public override ValueTask<byte[]> SignAsync(string algorithm, ReadOnlyMemory<byte> data, CancellationToken cancellationToken) =>
-            _actual.SignAsync(algorithm, data, cancellationToken);
+        public override ValueTask<byte[]> SignAsync(SshSignRequest request, CancellationToken cancellationToken) =>
+            _actual.SignAsync(request, cancellationToken);
     }
 }

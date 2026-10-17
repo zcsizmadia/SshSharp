@@ -52,7 +52,7 @@ public abstract class SshKeySigner
     /// <summary>
     /// The SSH signature algorithms this signer can sign with, most preferred first: <c>ssh-ed25519</c>, the key's own
     /// <c>ecdsa-sha2-*</c>, or <c>rsa-sha2-512</c> then <c>rsa-sha2-256</c> for RSA (never SHA-1 <c>ssh-rsa</c>). Override to offer
-    /// fewer, for a service that signs only with SHA-256, for example.
+    /// fewer, for a service that signs only with SHA-256, for example. Read once, by <see cref="SshPrivateKey.FromSigner"/>.
     /// </summary>
     public virtual IReadOnlyList<string> SignatureAlgorithms => KeyType switch
     {
@@ -68,13 +68,18 @@ public abstract class SshKeySigner
     public virtual DSASignatureFormat EcdsaSignatureFormat => DSASignatureFormat.IeeeP1363FixedFieldConcatenation;
 
     /// <summary>
-    /// Signs <paramref name="data"/> with <paramref name="algorithm"/>, one of <see cref="SignatureAlgorithms"/>. The algorithm fixes the
-    /// hash: SHA-256 for <c>rsa-sha2-256</c> and <c>ecdsa-sha2-nistp256</c>, SHA-384 for nistp384, SHA-512 for <c>rsa-sha2-512</c> and
-    /// nistp521; Ed25519 signs the data itself. A service that signs a digest hashes <paramref name="data"/> first.
+    /// Signs <see cref="SshSignRequest.Data"/> with <see cref="SshSignRequest.Algorithm"/>, one of <see cref="SignatureAlgorithms"/>; the
+    /// algorithm fixes the hash, and a service that signs a digest hashes the data first. <see cref="SshSignRequest.Purpose"/> says what
+    /// the signature is for (logging in, or an SSH signature with its <see cref="SshSignRequest.Namespace"/>), so the signer can refuse
+    /// what its policy does not allow by throwing.
     /// </summary>
     /// <returns>
     /// The signature: the PKCS#1 v1.5 signature for RSA, the 64-byte signature for Ed25519, and for ECDSA the signature in
     /// <see cref="EcdsaSignatureFormat"/>. SshSharp encodes it as SSH carries it.
     /// </returns>
-    public abstract ValueTask<byte[]> SignAsync(string algorithm, ReadOnlyMemory<byte> data, CancellationToken cancellationToken);
+    /// <remarks>
+    /// A <see cref="ValueTask{TResult}"/>, unlike SshSharp's public methods: this is a callback that many signers answer at once (a key in
+    /// memory), so it should not allocate a task each time.
+    /// </remarks>
+    public abstract ValueTask<byte[]> SignAsync(SshSignRequest request, CancellationToken cancellationToken);
 }

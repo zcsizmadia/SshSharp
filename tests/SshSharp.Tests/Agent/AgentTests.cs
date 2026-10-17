@@ -118,13 +118,13 @@ public sealed class AgentTests : IDisposable
         agent.RawIdentities.Add(blob);
         var key = (await new SshAgent(agent.Path).GetKeysAsync(Timeout())).Single();
 
-        var signature = await key.SignAsync(certificateType, new byte[] { 1, 2, 3 }, null, Timeout());
+        var signature = await key.SignAsync(new SshSignRequest(certificateType, new byte[] { 1, 2, 3 }, SshSignaturePurpose.Authentication), null, Timeout());
         await Assert.That(new SshReader(signature).ReadUtf8String()).IsEqualTo(plainAlgorithm);
         await Assert.That(agent.LastSignedBlob).IsEquivalentTo(blob); // the certificate itself was sent to the agent
 
         // An agent that signs with anything else is caught here, not by the server.
         agent.ClaimAlgorithm = "ssh-ed25519";
-        var error = await Assert.ThrowsAsync<SshException>(async () => await key.SignAsync(certificateType, new byte[] { 1, 2, 3 }, null, Timeout()));
+        var error = await Assert.ThrowsAsync<SshException>(async () => await key.SignAsync(new SshSignRequest(certificateType, new byte[] { 1, 2, 3 }, SshSignaturePurpose.Authentication), null, Timeout()));
         await Assert.That(error!.Reason).IsEqualTo(SshFailureReason.AgentFailed);
     }
 
@@ -228,9 +228,9 @@ public sealed class AgentTests : IDisposable
         agent.Keys.Add((key, "k"));
         var held = (await new SshAgent(agent.Path).GetKeysAsync(Timeout())).Single();
         await Assert.That(() => held.Sign("ssh-ed25519", [1])).Throws<NotSupportedException>();
-        await Assert.That(async () => await held.SignAsync("rsa-sha2-256", new byte[] { 1 }, null, Timeout())).Throws<ArgumentException>();
+        await Assert.That(async () => await held.SignAsync(new SshSignRequest("rsa-sha2-256", new byte[] { 1 }, SshSignaturePurpose.Authentication), null, Timeout())).Throws<ArgumentException>();
         held.Dispose(); // nothing to clear; the agent keeps the key
-        await Assert.That((await held.SignAsync("ssh-ed25519", new byte[] { 1 }, null, Timeout())).Length).IsGreaterThan(64);
+        await Assert.That((await held.SignAsync(new SshSignRequest("ssh-ed25519", new byte[] { 1 }, SshSignaturePurpose.Authentication), null, Timeout())).Length).IsGreaterThan(64);
     }
 
     [Test]

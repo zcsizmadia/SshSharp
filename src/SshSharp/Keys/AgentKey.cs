@@ -85,14 +85,14 @@ internal sealed class AgentKey : SshPrivateKey
     internal override byte[] Sign(string algorithm, ReadOnlySpan<byte> data) =>
         throw new NotSupportedException("A key held by an SSH agent signs only asynchronously.");
 
-    internal override ValueTask<byte[]> SignAsync(string algorithm, ReadOnlyMemory<byte> data, AgentBinding? binding, CancellationToken cancellationToken)
+    internal override ValueTask<byte[]> SignAsync(SshSignRequest request, AgentBinding? binding, CancellationToken cancellationToken)
     {
-        if (!SignatureAlgorithms.Contains(algorithm, StringComparer.Ordinal))
+        if (!SignatureAlgorithms.Contains(request.Algorithm, StringComparer.Ordinal))
         {
-            throw new ArgumentException($"This {KeyType} key does not sign with '{algorithm}'.", nameof(algorithm));
+            throw new ArgumentException($"This {KeyType} key does not sign with '{request.Algorithm}'.", nameof(request));
         }
 
-        return _agent.SignAsync(PublicKey, SshCertificate.BaseAlgorithm(algorithm), data, binding, cancellationToken);
+        return _agent.SignAsync(PublicKey, SshCertificate.BaseAlgorithm(request.Algorithm), request.Data, binding, cancellationToken);
     }
 
     private protected override void DisposeCore()
