@@ -41,16 +41,24 @@ OpenSSH host certificates of the same types (`ssh-ed25519-cert-v01@openssh.com`,
 |---|---|---|
 | `aes256-gcm@openssh.com`, `aes128-gcm@openssh.com` | AEAD. First when the CPU has AES instructions. | Yes |
 | `chacha20-poly1305@openssh.com` | AEAD, managed. First when the CPU lacks AES instructions. | No |
-| `aes256-ctr`, `aes192-ctr`, `aes128-ctr` | With an encrypt-then-MAC below. | Yes |
+| `aes256-ctr`, `aes192-ctr`, `aes128-ctr` | With a MAC below. | Yes |
 
 ## MACs
 
 Used only with the CTR ciphers; the AEAD ciphers carry their own authentication.
 
-| Algorithm | FIPS mode |
-|---|---|
-| `hmac-sha2-512-etm@openssh.com` | Yes |
-| `hmac-sha2-256-etm@openssh.com` | Yes |
+| Algorithm | Notes | FIPS mode |
+|---|---|---|
+| `hmac-sha2-512-etm@openssh.com` | Encrypt-then-MAC. | Yes |
+| `hmac-sha2-256-etm@openssh.com` | Encrypt-then-MAC. | Yes |
+| `hmac-sha2-256` | Encrypt-and-MAC (RFC 4253, RFC 6668). For servers that offer no `-etm` MAC, often network equipment. | Yes |
+| `hmac-sha2-512` | Encrypt-and-MAC, as above. | Yes |
+
+The encrypt-then-MAC (`-etm@openssh.com`) variants come first, as in OpenSSH: they authenticate the encrypted packet before anything
+is decrypted, and leave only the packet length in clear. The plain variants authenticate the plaintext and encrypt the length, so
+the receiver decrypts the packet before it can check the MAC. With AES-CTR both are sound, and the plain ones are what many routers,
+switches and appliances offer. A server that offers both always gets an `-etm` MAC. To refuse the plain ones, write
+`MACs -hmac-sha2-256,hmac-sha2-512` in `ssh_config`.
 
 ## Compression
 

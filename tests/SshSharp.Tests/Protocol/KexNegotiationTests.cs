@@ -201,8 +201,75 @@ public class KexNegotiationTests
         await Assert.That(prefs.HostKeys.Contains(SshAlgorithms.RsaSha2_512)).IsTrue();
         await Assert.That(prefs.Ciphers.Contains("chacha20-poly1305@openssh.com")).IsFalse();
         await Assert.That(prefs.Ciphers.Contains("aes256-gcm@openssh.com")).IsTrue();
-        await Assert.That(prefs.Macs.Count).IsEqualTo(2);
+        await Assert.That(string.Join(",", prefs.Macs))
+            .IsEqualTo("hmac-sha2-512-etm@openssh.com,hmac-sha2-256-etm@openssh.com,hmac-sha2-256,hmac-sha2-512");
         await Assert.That(SshAlgorithms.FilterFips(["none"], AlgorithmKind.Compression).Count).IsEqualTo(1);
+    }
+
+    [Test]
+    public async Task FipsMode_KeepsThePlainHmacSha2_AndDropsUnknownMacs()
+    {
+        var prefs = AlgorithmPreferences.FromConfig(Config("MACs hmac-sha2-256,umac-64@openssh.com,hmac-sha1,hmac-sha2-512\n"), fipsMode: true);
+        await Assert.That(string.Join(",", prefs.Macs)).IsEqualTo("hmac-sha2-256,hmac-sha2-512");
+        await Assert.That(string.Join(",", AlgorithmPreferences.Fips().Macs)).IsEqualTo(string.Join(",", SshAlgorithms.DefaultMacs));
+    }
+
+    [Test]
+    public async Task DefaultMacs_PreferEncryptThenMac_ThenThePlainOnesInOpenSshOrder()
+    {
+        await Assert.That(string.Join(",", SshAlgorithms.DefaultMacs))
+            .IsEqualTo("hmac-sha2-512-etm@openssh.com,hmac-sha2-256-etm@openssh.com,hmac-sha2-256,hmac-sha2-512");
+        await Assert.That(string.Join(",", KexInitMessage.ForClient(new AlgorithmPreferences()).MacClientToServer))
+            .IsEqualTo(string.Join(",", SshAlgorithms.DefaultMacs));
+    }
+
+    [Test]
+    [Arguments("MACs hmac-sha2-256", "hmac-sha2-256")]
+    [Arguments("MACs hmac-sha2-512,hmac-sha2-256-etm@openssh.com", "hmac-sha2-512,hmac-sha2-256-etm@openssh.com")]
+    [Arguments("MACs -hmac-sha2-*-etm@openssh.com", "hmac-sha2-256,hmac-sha2-512")]
+    [Arguments("MACs -hmac-sha2-256,hmac-sha2-512", "hmac-sha2-512-etm@openssh.com,hmac-sha2-256-etm@openssh.com")]
+    [Arguments("MACs ^hmac-sha2-512", "hmac-sha2-512,hmac-sha2-512-etm@openssh.com,hmac-sha2-256-etm@openssh.com,hmac-sha2-256")]
+    [Arguments("MACs +hmac-sha2-256", "hmac-sha2-512-etm@openssh.com,hmac-sha2-256-etm@openssh.com,hmac-sha2-512,hmac-sha2-256")]
+    public async Task FromConfig_MacsSpecsAcceptThePlainHmacSha2(string line, string expected)
+    {
+        var prefs = AlgorithmPreferences.FromConfig(Config(line + "\n"));
+        await Assert.That(string.Join(",", prefs.Macs)).IsEqualTo(expected);
+    }
+
+    [Test]
+    public async Task Negotiate_PicksAPlainHmacSha2_WhenTheServerOffersOnlyThat()
+    {
+        // Network equipment often offers only aes*-ctr with hmac-sha2-256 or hmac-sha2-512.
+        var client = KexInitMessage.ForClient(new AlgorithmPreferences());
+        foreach (var mac in new[] { "hmac-sha2-256", "hmac-sha2-512" })
+        {
+            var negotiated = AlgorithmNegotiator.Negotiate(client, Server(ciphers: ["aes128-ctr"], macs: ["hmac-sha1", mac]));
+            await Assert.That(negotiated.CipherClientToServer).IsEqualTo("aes128-ctr");
+            await Assert.That(negotiated.MacClientToServer).IsEqualTo(mac);
+            await Assert.That(negotiated.MacServerToClient).IsEqualTo(mac);
+        }
+
+        // The client's order decides: encrypt-then-MAC wins when the server has both, whatever the server's order.
+        var both = AlgorithmNegotiator.Negotiate(client, Server(ciphers: ["aes128-ctr"], macs: ["hmac-sha2-256", "hmac-sha2-512", "hmac-sha2-256-etm@openssh.com"]));
+        await Assert.That(both.MacClientToServer).IsEqualTo("hmac-sha2-256-etm@openssh.com");
+        var plain = AlgorithmNegotiator.Negotiate(client, Server(ciphers: ["aes128-ctr"], macs: ["hmac-sha2-512", "hmac-sha2-256"]));
+        await Assert.That(plain.MacClientToServer).IsEqualTo("hmac-sha2-256");
+    }
+
+    [Test]
+    public async Task Negotiate_AnAeadCipherIgnoresAPlainMac()
+    {
+        var client = KexInitMessage.ForClient(new AlgorithmPreferences { Ciphers = ["aes256-gcm@openssh.com"] });
+        var negotiated = AlgorithmNegotiator.Negotiate(client, Server(ciphers: ["aes256-gcm@openssh.com"], macs: ["hmac-sha2-256"]));
+        await Assert.That(negotiated.CipherClientToServer).IsEqualTo("aes256-gcm@openssh.com");
+
+        // Negotiated (both sides list it) but unused: the AEAD cipher gets no integrity key and builds no HMAC.
+        SshAlgorithms.TryGetCipher(negotiated.CipherClientToServer, out var gcm);
+        SshAlgorithms.TryGetMac(negotiated.MacClientToServer, out var mac);
+        using var keys = KeyDerivation.DeriveAll(HashAlgorithmName.SHA256, [1], new byte[32], new byte[32], gcm, gcm, mac, mac);
+        await Assert.That(keys.IntegrityKeyClientToServer.Length).IsEqualTo(0);
+        using var protector = PacketProtectorFactory.Create(gcm, mac, keys.EncryptionKeyClientToServer, keys.IvClientToServer, keys.IntegrityKeyClientToServer);
+        await Assert.That(protector).IsTypeOf<AesGcmProtector>();
     }
 
     [Test]
@@ -217,7 +284,15 @@ public class KexNegotiationTests
         await Assert.That(SshAlgorithms.TryGetCipher("rot13", out _)).IsFalse();
         await Assert.That(SshAlgorithms.TryGetMac("hmac-sha2-512-etm@openssh.com", out var mac)).IsTrue();
         await Assert.That(mac.KeyLength).IsEqualTo(64);
+        await Assert.That(mac.EncryptThenMac).IsTrue();
         await Assert.That(SshAlgorithms.TryGetMac("hmac-md5", out _)).IsFalse();
+
+        await Assert.That(SshAlgorithms.TryGetMac("hmac-sha2-256", out var plain256)).IsTrue();
+        await Assert.That(plain256).IsEqualTo(new MacInfo("hmac-sha2-256", HashAlgorithmName.SHA256, 32, false, true));
+        await Assert.That(SshAlgorithms.TryGetMac("hmac-sha2-512", out var plain512)).IsTrue();
+        await Assert.That(plain512).IsEqualTo(new MacInfo("hmac-sha2-512", HashAlgorithmName.SHA512, 64, false, true));
+        await Assert.That(SshAlgorithms.IsKnownMac("hmac-sha2-256")).IsTrue();
+        await Assert.That(SshAlgorithms.IsKnownMac("hmac-sha1")).IsFalse();
     }
 
     // ---- key derivation and exchange hash, checked against independent re-computations ----
@@ -354,10 +429,48 @@ public class KexNegotiationTests
         }
     }
 
+    /// <summary>
+    /// Every MAC with every AES-CTR cipher, from derived keys: the -etm MACs get the encrypt-then-MAC protector, the plain ones
+    /// encrypt-and-MAC, and several packets in a row decode (the counter and sequence number carry over).
+    /// </summary>
+    [Test]
+    public async Task Factory_BuildsWorkingProtectorsForEveryMac()
+    {
+        var h = SHA256.HashData("h"u8);
+        foreach (var cipherName in new[] { "aes128-ctr", "aes192-ctr", "aes256-ctr" })
+        {
+            foreach (var macName in SshAlgorithms.DefaultMacs)
+            {
+                SshAlgorithms.TryGetCipher(cipherName, out var cipher);
+                SshAlgorithms.TryGetMac(macName, out var mac);
+                using var keys = KeyDerivation.DeriveAll(HashAlgorithmName.SHA256, [5, 6, 7], h, h, cipher, cipher, mac, mac);
+                await Assert.That(keys.IntegrityKeyClientToServer.Length).IsEqualTo(mac.KeyLength);
+                using var sender = PacketProtectorFactory.Create(cipher, mac, keys.EncryptionKeyClientToServer, keys.IvClientToServer, keys.IntegrityKeyClientToServer);
+                using var receiver = PacketProtectorFactory.Create(cipher, mac, keys.EncryptionKeyClientToServer, keys.IvClientToServer, keys.IntegrityKeyClientToServer);
+                await Assert.That(sender.GetType()).IsEqualTo(mac.EncryptThenMac ? typeof(AesCtrEtmProtector) : typeof(AesCtrHmacProtector));
+                await Assert.That(sender.TagSize).IsEqualTo(mac.KeyLength);
+
+                for (uint sequence = 0; sequence < 3; sequence++)
+                {
+                    var wire = new ArrayBufferWriter<byte>();
+                    PacketCodec.Encode(wire, "hello"u8, sender, sequence);
+                    var ok = PacketCodec.TryDecode(new ReadOnlySequence<byte>(wire.WrittenMemory), receiver, sequence, out var packet, out _);
+                    using (packet)
+                    {
+                        await Assert.That(ok).IsTrue();
+                        await Assert.That(Convert.ToHexString(packet!.Payload.Span)).IsEqualTo(Convert.ToHexString("hello"u8));
+                    }
+                }
+            }
+        }
+    }
+
     [Test]
     public async Task Factory_ChecksKeySizes()
     {
         SshAlgorithms.TryGetCipher("aes128-ctr", out var ctr);
+        SshAlgorithms.TryGetMac("hmac-sha2-512", out var plain);
+        await Assert.That(() => PacketProtectorFactory.Create(ctr, plain, new byte[16], new byte[16], new byte[32])).Throws<ArgumentException>();
         SshAlgorithms.TryGetMac("hmac-sha2-256-etm@openssh.com", out var mac);
         await Assert.That(() => PacketProtectorFactory.Create(ctr, mac, new byte[15], new byte[16], new byte[32])).Throws<ArgumentException>();
         await Assert.That(() => PacketProtectorFactory.Create(ctr, mac, new byte[16], new byte[16], new byte[31])).Throws<ArgumentException>();

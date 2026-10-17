@@ -26,7 +26,9 @@ internal static class PacketProtectorFactory
                     throw new ArgumentException($"{mac.Name} needs a {mac.KeyLength}-byte key.", nameof(integrityKey));
                 }
 
-                return new AesCtrEtmProtector(encryptionKey, iv, integrityKey, mac.Hash);
+                return mac.EncryptThenMac
+                    ? new AesCtrEtmProtector(encryptionKey, iv, integrityKey, mac.Hash)
+                    : new AesCtrHmacProtector(encryptionKey, iv, integrityKey, mac.Hash);
             default:
                 throw new ArgumentOutOfRangeException(nameof(cipher), cipher.Kind, "Unsupported cipher kind.");
         }

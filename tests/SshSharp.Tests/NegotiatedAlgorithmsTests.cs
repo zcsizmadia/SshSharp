@@ -99,6 +99,25 @@ public class NegotiatedAlgorithmsTests
         await Assert.That(algorithms.MacServerToClient).IsEqualTo(expectedMac);
     }
 
+    /// <summary>
+    /// A server that offers only a plain (encrypt-and-MAC) HMAC with AES-CTR, as network equipment often does (#268): the client connects
+    /// with its defaults, authenticates and runs a command, so many packets in both directions carry the plain MAC.
+    /// </summary>
+    [Test]
+    [Arguments("aes128-ctr", "hmac-sha2-256")]
+    [Arguments("aes256-ctr", "hmac-sha2-512")]
+    public async Task APlainHmacSha2_ConnectsAndCarriesASession(string cipher, string mac)
+    {
+        await using var server = new FakeSessionServer(new FakeServerOptions { Cipher = cipher, Mac = mac });
+        await using var client = await ConnectAsync(server);
+        await Assert.That(client.Algorithms.EncryptionClientToServer).IsEqualTo(cipher);
+        await Assert.That(client.Algorithms.MacClientToServer).IsEqualTo(mac);
+        await Assert.That(client.Algorithms.MacServerToClient).IsEqualTo(mac);
+
+        var result = await client.RunCommandAsync("true", Timeout());
+        await Assert.That(result.ExitStatus).IsEqualTo(0);
+    }
+
     [Test]
     public async Task AKeyReexchange_IsReflected()
     {

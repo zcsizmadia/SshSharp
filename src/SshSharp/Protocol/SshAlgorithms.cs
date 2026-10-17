@@ -17,8 +17,12 @@ internal sealed record CipherInfo(string Name, CipherKind Kind, int KeyLength, i
     public bool IsAead => Kind is CipherKind.ChaCha20Poly1305 or CipherKind.AesGcm;
 }
 
-/// <summary>An encrypt-then-MAC integrity algorithm.</summary>
-internal sealed record MacInfo(string Name, HashAlgorithmName Hash, int KeyLength, bool IsFipsApproved);
+/// <summary>
+/// An HMAC integrity algorithm. <paramref name="EncryptThenMac"/> is true for the <c>-etm@openssh.com</c> variants, which MAC the encrypted
+/// packet and leave its length in clear, and false for the plain ones of RFC 4253 section 6.4, which MAC the plaintext packet and encrypt
+/// its length.
+/// </summary>
+internal sealed record MacInfo(string Name, HashAlgorithmName Hash, int KeyLength, bool EncryptThenMac, bool IsFipsApproved);
 
 /// <summary>Algorithm names (RFC 4250 and OpenSSH extensions), their defaults, and the capabilities this library implements.</summary>
 internal static class SshAlgorithms
@@ -101,9 +105,13 @@ internal static class SshAlgorithms
         ? ["aes256-gcm@openssh.com", "aes128-gcm@openssh.com", "chacha20-poly1305@openssh.com", "aes256-ctr", "aes192-ctr", "aes128-ctr"]
         : ["chacha20-poly1305@openssh.com", "aes256-gcm@openssh.com", "aes128-gcm@openssh.com", "aes256-ctr", "aes192-ctr", "aes128-ctr"];
 
+    /// <summary>
+    /// Encrypt-then-MAC first. The plain MACs of RFC 4253 follow, in OpenSSH's order, for servers (often network equipment) that offer
+    /// only those with <c>aes*-ctr</c>.
+    /// </summary>
     public static IReadOnlyList<string> DefaultMacs { get; } =
     [
-        "hmac-sha2-512-etm@openssh.com", "hmac-sha2-256-etm@openssh.com",
+        "hmac-sha2-512-etm@openssh.com", "hmac-sha2-256-etm@openssh.com", "hmac-sha2-256", "hmac-sha2-512",
     ];
 
     public static IReadOnlyList<string> DefaultCompression { get; } = [CompressionNone];
@@ -120,8 +128,10 @@ internal static class SshAlgorithms
 
     private static readonly Dictionary<string, MacInfo> Macs = new(StringComparer.Ordinal)
     {
-        ["hmac-sha2-512-etm@openssh.com"] = new("hmac-sha2-512-etm@openssh.com", HashAlgorithmName.SHA512, 64, true),
-        ["hmac-sha2-256-etm@openssh.com"] = new("hmac-sha2-256-etm@openssh.com", HashAlgorithmName.SHA256, 32, true),
+        ["hmac-sha2-512-etm@openssh.com"] = new("hmac-sha2-512-etm@openssh.com", HashAlgorithmName.SHA512, 64, true, true),
+        ["hmac-sha2-256-etm@openssh.com"] = new("hmac-sha2-256-etm@openssh.com", HashAlgorithmName.SHA256, 32, true, true),
+        ["hmac-sha2-256"] = new("hmac-sha2-256", HashAlgorithmName.SHA256, 32, false, true),
+        ["hmac-sha2-512"] = new("hmac-sha2-512", HashAlgorithmName.SHA512, 64, false, true),
     };
 
     private static readonly HashSet<string> FipsKex = new(StringComparer.Ordinal)

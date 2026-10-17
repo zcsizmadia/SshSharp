@@ -22,19 +22,22 @@ internal abstract class PacketProtector : IDisposable
 
     /// <summary>
     /// True when the 4-byte length field is left out of the padded region (AEAD and encrypt-then-MAC suites); false for the
-    /// unprotected state, where the whole packet including the length is padded to the alignment.
+    /// unprotected state and encrypt-and-MAC, where the whole packet including the length is padded to the alignment.
     /// </summary>
     public abstract bool LengthExcludedFromAlignment { get; }
 
-    /// <summary>Returns the plaintext <c>packet_length</c> given the first four bytes as received.</summary>
+    /// <summary>
+    /// Returns the plaintext <c>packet_length</c> given the first four bytes as received. It must not change any state: the codec calls it
+    /// again each time more data arrives until the whole packet is there.
+    /// </summary>
     public abstract uint ReadLength(uint sequenceNumber, ReadOnlySpan<byte> firstFourBytes);
 
     /// <summary>Encrypts <paramref name="packet"/> in place and writes the tag.</summary>
     public abstract void Encrypt(uint sequenceNumber, Span<byte> packet, Span<byte> tag);
 
     /// <summary>
-    /// Verifies the tag and decrypts <paramref name="packet"/> in place (after this call everything but the 4 length bytes is plaintext).
-    /// Returns false, leaving the plaintext unusable, when verification fails.
+    /// Verifies the tag and decrypts <paramref name="packet"/> in place (after this call at least everything but the 4 length bytes is
+    /// plaintext). Returns false, leaving the plaintext unusable, when verification fails.
     /// </summary>
     public abstract bool TryDecrypt(uint sequenceNumber, Span<byte> packet, ReadOnlySpan<byte> tag);
 
@@ -195,6 +198,71 @@ internal sealed class AesCtrEtmProtector : PacketProtector
 
         _ctr.Transform(packet[4..]);
         return true;
+    }
+
+    public override void Dispose()
+    {
+        _ctr.Dispose();
+        _mac.Dispose();
+    }
+
+    private void ComputeMac(uint sequenceNumber, ReadOnlySpan<byte> packet, Span<byte> destination)
+    {
+        Span<byte> sequence = stackalloc byte[4];
+        BinaryPrimitives.WriteUInt32BigEndian(sequence, sequenceNumber);
+        _mac.AppendData(sequence);
+        _mac.AppendData(packet);
+        _mac.GetHashAndReset(destination);
+    }
+}
+
+/// <summary>
+/// <c>aes*-ctr</c> with plain <c>hmac-sha2-256</c> or <c>hmac-sha2-512</c> (encrypt-and-MAC, RFC 4253 section 6.4): the MAC is over the
+/// sequence number and the plaintext packet, and the length is encrypted with the rest. The receiver decrypts the length to learn how much
+/// to read, then decrypts the packet and verifies the MAC.
+/// </summary>
+internal sealed class AesCtrHmacProtector : PacketProtector
+{
+    private readonly AesCtr _ctr;
+    private readonly IncrementalHash _mac;
+    private readonly int _macSize;
+
+    public AesCtrHmacProtector(ReadOnlySpan<byte> aesKey, ReadOnlySpan<byte> iv, ReadOnlySpan<byte> macKey, HashAlgorithmName hash)
+    {
+        _ctr = new AesCtr(aesKey, iv);
+        _mac = IncrementalHash.CreateHMAC(hash, macKey);
+        _macSize = _mac.HashLengthInBytes;
+    }
+
+    public override int Alignment => 16;
+
+    public override int TagSize => _macSize;
+
+    public override bool LengthExcludedFromAlignment => false;
+
+    public override uint ReadLength(uint sequenceNumber, ReadOnlySpan<byte> firstFourBytes)
+    {
+        // The length is the first 4 bytes of the packet's first block. Peeking leaves the counter alone, so TryDecrypt decrypts the whole
+        // packet, length included, from the same keystream.
+        Span<byte> keystream = stackalloc byte[4];
+        _ctr.PeekKeystream(keystream);
+        return BinaryPrimitives.ReadUInt32BigEndian(firstFourBytes) ^ BinaryPrimitives.ReadUInt32BigEndian(keystream);
+    }
+
+    public override void Encrypt(uint sequenceNumber, Span<byte> packet, Span<byte> tag)
+    {
+        ComputeMac(sequenceNumber, packet, tag);
+        _ctr.Transform(packet);
+    }
+
+    public override bool TryDecrypt(uint sequenceNumber, Span<byte> packet, ReadOnlySpan<byte> tag)
+    {
+        // Encrypt-and-MAC can only be verified after decrypting. A forged packet fails the MAC below and the connection is dropped, so
+        // the receive counter running ahead does not matter.
+        _ctr.Transform(packet);
+        Span<byte> expected = stackalloc byte[_macSize];
+        ComputeMac(sequenceNumber, packet, expected);
+        return CryptographicOperations.FixedTimeEquals(expected, tag);
     }
 
     public override void Dispose()

@@ -319,7 +319,8 @@ The defaults prefer modern algorithms: the post-quantum hybrid `mlkem768x25519-s
 `sntrup761x25519-sha512@openssh.com`; managed, so offered on every platform and on .NET 8, and the only post-quantum method of
 OpenSSH 8.5 to 9.8, for example Ubuntu 24.04's 9.6), then `curve25519-sha256` and `ecdh-sha2-nistp*` (plus
 `diffie-hellman-group14/16`) for key exchange; `chacha20-poly1305@openssh.com`, `aes*-gcm@openssh.com` and `aes*-ctr` with `hmac-sha2-*-etm` for
-ciphers; `ssh-ed25519`, `ecdsa-sha2-*` and `rsa-sha2-256/512` host keys, and OpenSSH host certificates. Strict key exchange
+ciphers, then `aes*-ctr` with the plain `hmac-sha2-256` and `hmac-sha2-512` for servers, often network equipment, that offer no
+`-etm` MAC; `ssh-ed25519`, `ecdsa-sha2-*` and `rsa-sha2-256/512` host keys, and OpenSSH host certificates. Strict key exchange
 (the Terrapin fix) is always on. `FipsMode = true` limits negotiation to FIPS-approved algorithms, led by the two NIST-curve ML-KEM hybrids,
 so FIPS mode keeps a post-quantum key exchange where the server offers one. Keys are renewed after
 `RekeyAfterBytes` (default 1 GiB) or `RekeyAfterTime` (default 1 hour).

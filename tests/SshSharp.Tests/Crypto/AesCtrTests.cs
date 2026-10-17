@@ -115,4 +115,33 @@ public class AesCtrTests
     {
         await Assert.That(() => new AesCtr(new byte[16], new byte[15])).Throws<ArgumentException>();
     }
+
+    /// <summary>
+    /// Peeking (how encrypt-and-MAC learns the encrypted packet length) shows the next keystream block, after some has been used too, and
+    /// does not advance the counter: what follows decrypts exactly as without the peek.
+    /// </summary>
+    [Test]
+    public async Task PeekKeystream_ShowsTheNextBlock_WithoutAdvancing()
+    {
+        var key = H("2b7e151628aed2a6abf7158809cf4f3c");
+        var counter = H("f0f1f2f3f4f5f6f7f8f9fafbfcfdfeff");
+        var reference = ReferenceCtr(key, counter, new byte[64]);
+        using var ctr = new AesCtr(key, counter);
+
+        foreach (var block in new[] { 0, 1, 3 })
+        {
+            var full = new byte[16];
+            ctr.PeekKeystream(full);
+            var start = new byte[4];
+            ctr.PeekKeystream(start);
+            await Assert.That(Hex(full)).IsEqualTo(Hex(reference[(block * 16)..((block + 1) * 16)]));
+            await Assert.That(Hex(start)).IsEqualTo(Hex(reference[(block * 16)..((block * 16) + 4)]));
+
+            var used = new byte[block == 1 ? 32 : 16];
+            ctr.Transform(used);
+            await Assert.That(Hex(used)).IsEqualTo(Hex(reference[(block * 16)..((block * 16) + used.Length)]));
+        }
+
+        await Assert.That(() => ctr.PeekKeystream(new byte[17])).Throws<ArgumentException>();
+    }
 }

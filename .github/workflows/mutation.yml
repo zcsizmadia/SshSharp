@@ -55,7 +55,7 @@ jobs:
             mutate: -m "**/Crypto/Sntrup761.cs"
             tests: Crypto/Sntrup761Tests.cs;Protocol/SntrupKexTests.cs
           - scope: packet-codec
-            mutate: -m "**/Protocol/PacketCodec.cs"
+            mutate: -m "**/Protocol/PacketCodec.cs" -m "**/Protocol/PacketProtector*.cs"
             tests: Protocol/PacketCodecTests.cs;Protocol/KexNegotiationTests.cs;Protocol/SshWireTests.cs;Fuzz/ParserRobustnessTests.cs
           - scope: config-parser
             mutate: -m "**/Config/SshConfig.cs" -m "**/Config/SshConfigLine.cs"
