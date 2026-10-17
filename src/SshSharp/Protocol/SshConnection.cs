@@ -350,7 +350,7 @@ internal sealed class SshConnection : IAsyncDisposable
         }
         catch (IOException ex)
         {
-            throw ConnectionLost(ex);
+            throw SendFailed(ex);
         }
     }
 
@@ -368,8 +368,25 @@ internal sealed class SshConnection : IAsyncDisposable
         }
         catch (IOException ex)
         {
-            throw ConnectionLost(ex);
+            throw SendFailed(ex);
         }
+    }
+
+    /// <summary>
+    /// A send failed in the stream, so the connection is gone: it fails now, as when the outbox's send fails, before the caller hears of
+    /// it. Otherwise <see cref="SshClient.IsConnected"/> would stay true until the receive loop noticed, and the caller of a command
+    /// that failed this way could still find the client connected.
+    /// </summary>
+    private SshException SendFailed(IOException exception)
+    {
+        var lost = ConnectionLost(exception);
+        if (!Volatile.Read(ref _closing))
+        {
+            SshLog.ConnectionFailed(_logger, lost);
+        }
+
+        Fail(lost);
+        return lost;
     }
 
     /// <summary>A failure of the underlying stream, as the <see cref="SshException"/> callers handle.</summary>

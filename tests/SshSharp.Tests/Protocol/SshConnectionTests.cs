@@ -65,6 +65,12 @@ public class SshConnectionTests
         var ex = await Assert.ThrowsAsync<SshException>(async () => await client.RunCommandAsync("x", Timeout()));
         await Assert.That(ex!.Reason).IsEqualTo(SshFailureReason.ConnectionClosed);
         await Assert.That(ex.InnerException).IsTypeOf<IOException>();
+
+        // And the client knows at once, though the stream still reads: the failed send ended the connection (a stress run saw a
+        // command fail this way while IsConnected was still true, until the receive loop noticed).
+        await Assert.That(client.IsConnected).IsFalse();
+        await Assert.That(client.ConnectionClosed.IsCancellationRequested).IsTrue();
+        await Assert.That(client.ConnectionError).IsNotNull();
     }
 
     [Test]
