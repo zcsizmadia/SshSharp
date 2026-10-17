@@ -1,6 +1,5 @@
 #nullable enable
 [SSHSHARP001]SshSharp.Sftp.SftpClient.ExpandPathAsync(string! path, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<string!>!
-[SSHSHARP001]SshSharp.Sftp.SftpClient.GetOwnerNamesAsync(System.Collections.Generic.IEnumerable<uint>! userIds, System.Collections.Generic.IEnumerable<uint>! groupIds, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<(System.Collections.Generic.IReadOnlyDictionary<uint, string!>! UserNames, System.Collections.Generic.IReadOnlyDictionary<uint, string!>! GroupNames)>!
 [SSHSHARP001]SshSharp.Sftp.SftpClient.SetAttributesAsync(string! path, SshSharp.Sftp.SftpFileAttributes! attributes, bool followSymbolicLinks, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
 SshSharp.SshKeySigner
 SshSharp.SshKeySigner.KeyType.get -> string!
@@ -107,3 +106,40 @@ static SshSharp.SshKnownHostsLookup.operator ==(SshSharp.SshKnownHostsLookup? le
 *REMOVED*SshSharp.SshCommandResult.ExitSignal.get -> string?
 *REMOVED*SshSharp.SshHostKeyContext.KnownHostsLookup.get -> (string! Name, int Port)?
 *REMOVED*SshSharp.SshSession.ExitSignal.get -> string?
+*REMOVED*[SSHSHARP001]SshSharp.Sftp.SftpTransferOptions.PreserveTimes.get -> bool
+*REMOVED*[SSHSHARP001]SshSharp.Sftp.SftpTransferOptions.PreserveTimes.init -> void
+*REMOVED*[SSHSHARP001]SshSharp.Sftp.SftpTransferOptions.Progress.get -> System.IProgress<long>?
+[SSHSHARP001]override SshSharp.Sftp.SftpOwnerNames.Equals(object? obj) -> bool
+[SSHSHARP001]override SshSharp.Sftp.SftpOwnerNames.GetHashCode() -> int
+[SSHSHARP001]override SshSharp.Sftp.SftpOwnerNames.ToString() -> string!
+[SSHSHARP001]override SshSharp.Sftp.SftpTransferProgress.Equals(object? obj) -> bool
+[SSHSHARP001]override SshSharp.Sftp.SftpTransferProgress.GetHashCode() -> int
+[SSHSHARP001]override SshSharp.Sftp.SftpTransferProgress.ToString() -> string!
+[SSHSHARP001]SshSharp.Sftp.SftpClient.GetOwnerNamesAsync(System.Collections.Generic.IEnumerable<uint>! userIds, System.Collections.Generic.IEnumerable<uint>! groupIds, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SshSharp.Sftp.SftpOwnerNames!>!
+[SSHSHARP001]SshSharp.Sftp.SftpOwnerNames
+[SSHSHARP001]SshSharp.Sftp.SftpOwnerNames.<Clone>$() -> SshSharp.Sftp.SftpOwnerNames!
+[SSHSHARP001]SshSharp.Sftp.SftpOwnerNames.Deconstruct(out System.Collections.Generic.IReadOnlyDictionary<uint, string!>! UserNames, out System.Collections.Generic.IReadOnlyDictionary<uint, string!>! GroupNames) -> void
+[SSHSHARP001]SshSharp.Sftp.SftpOwnerNames.Equals(SshSharp.Sftp.SftpOwnerNames? other) -> bool
+[SSHSHARP001]SshSharp.Sftp.SftpOwnerNames.GroupNames.get -> System.Collections.Generic.IReadOnlyDictionary<uint, string!>!
+[SSHSHARP001]SshSharp.Sftp.SftpOwnerNames.GroupNames.init -> void
+[SSHSHARP001]SshSharp.Sftp.SftpOwnerNames.SftpOwnerNames(System.Collections.Generic.IReadOnlyDictionary<uint, string!>! UserNames, System.Collections.Generic.IReadOnlyDictionary<uint, string!>! GroupNames) -> void
+[SSHSHARP001]SshSharp.Sftp.SftpOwnerNames.UserNames.get -> System.Collections.Generic.IReadOnlyDictionary<uint, string!>!
+[SSHSHARP001]SshSharp.Sftp.SftpOwnerNames.UserNames.init -> void
+[SSHSHARP001]SshSharp.Sftp.SftpTransferOptions.Preserve.get -> bool
+[SSHSHARP001]SshSharp.Sftp.SftpTransferOptions.Preserve.init -> void
+[SSHSHARP001]SshSharp.Sftp.SftpTransferOptions.Progress.get -> System.IProgress<SshSharp.Sftp.SftpTransferProgress!>?
+[SSHSHARP001]SshSharp.Sftp.SftpTransferProgress
+[SSHSHARP001]SshSharp.Sftp.SftpTransferProgress.<Clone>$() -> SshSharp.Sftp.SftpTransferProgress!
+[SSHSHARP001]SshSharp.Sftp.SftpTransferProgress.BytesTransferred.get -> long
+[SSHSHARP001]SshSharp.Sftp.SftpTransferProgress.BytesTransferred.init -> void
+[SSHSHARP001]SshSharp.Sftp.SftpTransferProgress.Deconstruct(out string! Path, out long BytesTransferred, out long? TotalBytes) -> void
+[SSHSHARP001]SshSharp.Sftp.SftpTransferProgress.Equals(SshSharp.Sftp.SftpTransferProgress? other) -> bool
+[SSHSHARP001]SshSharp.Sftp.SftpTransferProgress.Path.get -> string!
+[SSHSHARP001]SshSharp.Sftp.SftpTransferProgress.Path.init -> void
+[SSHSHARP001]SshSharp.Sftp.SftpTransferProgress.SftpTransferProgress(string! Path, long BytesTransferred, long? TotalBytes) -> void
+[SSHSHARP001]SshSharp.Sftp.SftpTransferProgress.TotalBytes.get -> long?
+[SSHSHARP001]SshSharp.Sftp.SftpTransferProgress.TotalBytes.init -> void
+[SSHSHARP001]static SshSharp.Sftp.SftpOwnerNames.operator !=(SshSharp.Sftp.SftpOwnerNames? left, SshSharp.Sftp.SftpOwnerNames? right) -> bool
+[SSHSHARP001]static SshSharp.Sftp.SftpOwnerNames.operator ==(SshSharp.Sftp.SftpOwnerNames? left, SshSharp.Sftp.SftpOwnerNames? right) -> bool
+[SSHSHARP001]static SshSharp.Sftp.SftpTransferProgress.operator !=(SshSharp.Sftp.SftpTransferProgress? left, SshSharp.Sftp.SftpTransferProgress? right) -> bool
+[SSHSHARP001]static SshSharp.Sftp.SftpTransferProgress.operator ==(SshSharp.Sftp.SftpTransferProgress? left, SshSharp.Sftp.SftpTransferProgress? right) -> bool

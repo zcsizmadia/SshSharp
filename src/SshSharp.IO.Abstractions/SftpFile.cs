@@ -421,7 +421,7 @@ internal sealed class SftpFile(SftpFileSystem fileSystem) : IFile
 
     // ---- helpers ----
 
-    private async Task<byte[]> DownloadAsync(string full, IProgress<long> progress, CancellationToken cancellationToken)
+    private async Task<byte[]> DownloadAsync(string full, IProgress<SftpTransferProgress> progress, CancellationToken cancellationToken)
     {
         var buffer = new MemoryStream();
         await fileSystem.Sftp.DownloadAsync(full, buffer, new SftpTransferOptions { Progress = progress }, cancellationToken).ConfigureAwait(false);
@@ -440,7 +440,7 @@ internal sealed class SftpFile(SftpFileSystem fileSystem) : IFile
         return fileSystem.RunTransferAsync(full, true, (ct, progress) => WriteCoreAsync(full, data, append, progress, ct), cancellationToken);
     }
 
-    private async Task WriteCoreAsync(string full, ReadOnlyMemory<byte> data, bool append, IProgress<long> progress, CancellationToken cancellationToken)
+    private async Task WriteCoreAsync(string full, ReadOnlyMemory<byte> data, bool append, IProgress<SftpTransferProgress> progress, CancellationToken cancellationToken)
     {
         if (!append)
         {
@@ -457,7 +457,7 @@ internal sealed class SftpFile(SftpFileSystem fileSystem) : IFile
             var part = data.Slice(offset, Math.Min(chunk, data.Length - offset));
             await stream.WriteAsync(part, cancellationToken).ConfigureAwait(false);
             await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
-            progress.Report(offset + part.Length);
+            progress.Report(new SftpTransferProgress(full, offset + part.Length, data.Length));
         }
     }
 

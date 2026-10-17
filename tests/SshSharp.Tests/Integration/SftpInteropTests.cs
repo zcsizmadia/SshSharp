@@ -411,8 +411,8 @@ public class SftpInteropTests
         }
     }
 
-    private sealed class SynchronousProgress(Action<long> report) : IProgress<long>
+    private sealed class SynchronousProgress(Action<long> report) : IProgress<SftpTransferProgress>
     {
-        public void Report(long value) => report(value);
+        public void Report(SftpTransferProgress value) => report(value.BytesTransferred);
     }
 }

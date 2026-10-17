@@ -160,6 +160,9 @@ internal sealed class FakeSftpServer
 
     public uint? Mode(string path) => _nodes.TryGetValue(path, out var node) ? node.Mode : null;
 
+    /// <summary>Sets a node's permission bits (the low 12 bits of st_mode, setuid included).</summary>
+    public void SetMode(string path, uint mode) => _nodes[path].Mode = mode & 0xFFF;
+
     public void Install(FakeSessionServer server) => server.Subsystems["sftp"] = RunAsync;
 
     /// <summary>How many SFTP sessions have started, and the most open at once.</summary>

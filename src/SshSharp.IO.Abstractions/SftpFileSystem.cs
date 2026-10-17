@@ -161,7 +161,7 @@ public sealed class SftpFileSystem : IFileSystem
     /// Like <see cref="Run{T}"/> for a transfer of any length: the timeout limits how long it may go without progress (the operation
     /// reports progress to the <see cref="IProgress{T}"/> it is given), not how long it takes.
     /// </summary>
-    internal T RunTransfer<T>(string? path, bool directory, Func<CancellationToken, IProgress<long>, Task<T>> operation, bool limited = true)
+    internal T RunTransfer<T>(string? path, bool directory, Func<CancellationToken, IProgress<SftpTransferProgress>, Task<T>> operation, bool limited = true)
     {
         // The deadline starts when the work does, on the thread pool: started before queueing it, a busy pool's delay would count
         // against the server, and the operation could find its time used up before it began.
@@ -181,7 +181,7 @@ public sealed class SftpFileSystem : IFileSystem
         }
     }
 
-    internal void RunTransfer(string? path, bool directory, Func<CancellationToken, IProgress<long>, Task> operation, bool limited = true) =>
+    internal void RunTransfer(string? path, bool directory, Func<CancellationToken, IProgress<SftpTransferProgress>, Task> operation, bool limited = true) =>
         RunTransfer<bool>(path, directory, async (ct, progress) =>
         {
             await operation(ct, progress).ConfigureAwait(false);
@@ -193,7 +193,7 @@ public sealed class SftpFileSystem : IFileSystem
         RunTransferAsync(path, directory, (ct, _) => operation(ct), cancellationToken);
 
     /// <summary>The asynchronous <see cref="RunTransfer{T}"/>: the timeout limits time without progress.</summary>
-    internal async Task<T> RunTransferAsync<T>(string? path, bool directory, Func<CancellationToken, IProgress<long>, Task<T>> operation, CancellationToken cancellationToken)
+    internal async Task<T> RunTransferAsync<T>(string? path, bool directory, Func<CancellationToken, IProgress<SftpTransferProgress>, Task<T>> operation, CancellationToken cancellationToken)
     {
         using var deadline = new Deadline(Options.OperationTimeout, cancellationToken);
         try
@@ -206,7 +206,7 @@ public sealed class SftpFileSystem : IFileSystem
         }
     }
 
-    internal Task RunTransferAsync(string? path, bool directory, Func<CancellationToken, IProgress<long>, Task> operation, CancellationToken cancellationToken) =>
+    internal Task RunTransferAsync(string? path, bool directory, Func<CancellationToken, IProgress<SftpTransferProgress>, Task> operation, CancellationToken cancellationToken) =>
         RunTransferAsync<bool>(path, directory, async (ct, progress) =>
         {
             await operation(ct, progress).ConfigureAwait(false);
@@ -214,7 +214,7 @@ public sealed class SftpFileSystem : IFileSystem
         }, cancellationToken);
 
     /// <summary>A timeout that each progress report restarts, linked to the caller's token; infinite when the timeout is.</summary>
-    private sealed class Deadline : IProgress<long>, IDisposable
+    private sealed class Deadline : IProgress<SftpTransferProgress>, IDisposable
     {
         private readonly CancellationTokenSource _source;
         private readonly CancellationToken _caller;
@@ -233,7 +233,7 @@ public sealed class SftpFileSystem : IFileSystem
         /// <summary>Whether the timeout, not the caller, cancelled the operation (still answers once disposed).</summary>
         public bool TimedOut => _source.IsCancellationRequested && !_caller.IsCancellationRequested;
 
-        public void Report(long value)
+        public void Report(SftpTransferProgress value)
         {
             try
             {
