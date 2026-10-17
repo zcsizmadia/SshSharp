@@ -79,3 +79,9 @@ Hashed host names (`|1|salt|hash`), `[host]:port`, wildcards and negation, `@cer
 `SshHostConfig.RevokedHostKeys` is the resolved `RevokedHostKeys` file (`~` and tokens expanded); `KnownHostsVerifier.FromConfig`
 checks host keys against it (see [Host keys](host-keys.md#revoked-host-keys)).
 `AppendAsync` only appends, so comments and the order of existing lines are kept.
+
+## See also
+
+- [Use ssh_config and known_hosts](how-to/ssh-config-and-known-hosts.md)
+- [ssh_config directives](reference/ssh-config.md): every directive and how a connection applies it
+- [Unit-test code that uses SshSharp](how-to/unit-testing.md#test-configuration-logic-directly)

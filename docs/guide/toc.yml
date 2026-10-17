@@ -1,0 +1,143 @@
+# The documentation's sidebar. The pages keep their places in the folder tree (and so their URLs); only the navigation is here.
+- name: Get started
+  items:
+    - name: Overview
+      href: ../index.md
+    - name: Getting started
+      href: ../getting-started.md
+    - name: "Tutorial: a server check tool"
+      href: ../tutorial.md
+- name: How-to guides
+  items:
+    - name: All how-to guides
+      href: ../how-to/index.md
+    - name: Commands and shells
+      items:
+        - name: Run a command
+          href: ../how-to/run-a-command.md
+        - name: Stream large output
+          href: ../how-to/stream-output.md
+        - name: Interactive shells and SshExpect
+          href: ../how-to/interactive-shell.md
+    - name: Files
+      items:
+        - name: Transfer files with SFTP
+          href: ../how-to/transfer-files-sftp.md
+        - name: Transfer files with SCP
+          href: ../how-to/transfer-files-scp.md
+        - name: IFileSystem and IFileProvider
+          href: ../how-to/file-system-adapters.md
+    - name: Networking
+      items:
+        - name: Port forwarding and tunnels
+          href: ../how-to/port-forwarding.md
+        - name: Jump hosts (ProxyJump)
+          href: ../how-to/jump-hosts.md
+    - name: Configuration and trust
+      items:
+        - name: Use ssh_config and known_hosts
+          href: ../how-to/ssh-config-and-known-hosts.md
+        - name: Verify host keys
+          href: ../how-to/verify-host-keys.md
+    - name: Authentication
+      items:
+        - name: Keys and the SSH agent
+          href: ../how-to/agent-and-keys.md
+        - name: Certificates
+          href: ../how-to/certificates.md
+        - name: Kerberos
+          href: ../how-to/kerberos.md
+    - name: Reliability
+      items:
+        - name: Keep-alive and reconnecting
+          href: ../how-to/keepalive-and-reconnect.md
+        - name: Cancellation and timeouts
+          href: ../how-to/cancellation-and-timeouts.md
+        - name: Logging and diagnostics
+          href: ../how-to/logging-and-diagnostics.md
+    - name: Applications
+      items:
+        - name: ASP.NET Core and dependency injection
+          href: ../how-to/aspnetcore-and-di.md
+        - name: Unit-test code that uses SshSharp
+          href: ../how-to/unit-testing.md
+        - name: Native AOT
+          href: ../how-to/native-aot.md
+        - name: FIPS mode
+          href: ../how-to/fips-mode.md
+        - name: Migrate from SSH.NET
+          href: ../migrating-from-sshnet.md
+- name: Guides
+  items:
+    - name: Connecting
+      href: ../connecting.md
+    - name: Authentication
+      href: ../authentication.md
+    - name: Host keys
+      href: ../host-keys.md
+    - name: Commands and shells
+      href: ../sessions.md
+    - name: File transfer (SFTP)
+      href: ../sftp.md
+    - name: File transfer (SCP)
+      href: ../scp.md
+    - name: Signing files and commits
+      href: ../signing.md
+    - name: Configuration files
+      href: ../config-files.md
+    - name: Dependency injection
+      href: ../dependency-injection.md
+    - name: Errors and diagnostics
+      href: ../diagnostics.md
+- name: Scenarios
+  items:
+    - name: All scenarios
+      href: ../scenarios/index.md
+    - name: A deployment script
+      href: ../scenarios/deployment-script.md
+    - name: A fleet health check
+      href: ../scenarios/fleet-health-check.md
+    - name: A file sync job
+      href: ../scenarios/file-sync.md
+    - name: A database through a jump host
+      href: ../scenarios/database-tunnel.md
+    - name: A background worker
+      href: ../scenarios/background-worker.md
+- name: Concepts
+  items:
+    - name: Architecture and connection lifecycle
+      href: ../concepts/architecture.md
+    - name: Channels and flow control
+      href: ../concepts/channels.md
+    - name: Threading and concurrency
+      href: ../concepts/threading.md
+    - name: Security model
+      href: ../concepts/security-model.md
+- name: Reference
+  items:
+    - name: API reference
+      href: ../api/index.md
+    - name: ssh_config directives
+      href: ../reference/ssh-config.md
+    - name: Algorithms
+      href: ../reference/algorithms.md
+    - name: Errors and failure reasons
+      href: ../reference/errors.md
+    - name: FAQ
+      href: ../reference/faq.md
+    - name: Troubleshooting
+      href: ../reference/troubleshooting.md
+- name: About, security and internals
+  items:
+    - name: Design notes
+      href: ../design.md
+    - name: Threat model
+      href: ../threat-model.md
+    - name: Cryptography review
+      href: ../crypto-review.md
+    - name: Testing and validation
+      href: ../testing.md
+    - name: Benchmarks
+      href: ../benchmarks.md
+    - name: Security policy
+      href: https://github.com/zcsizmadia/SshSharp/blob/main/SECURITY.md

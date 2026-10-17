@@ -6,6 +6,31 @@ more than one method (sshd's `AuthenticationMethods publickey,keyboard-interacti
 success and the client continues with the next method. If nothing works, `SshAuthenticationException.AllowedMethods`
 lists what the server would accept.
 
+For short task-oriented examples, see the how-to guides: [Keys and the SSH agent](how-to/agent-and-keys.md),
+[Certificates](how-to/certificates.md) and [Kerberos](how-to/kerberos.md).
+
+## The order methods are tried in
+
+```mermaid
+flowchart TD
+    none["none<br/>learns which methods the server accepts"] --> gss{"Gssapi set and<br/>gssapi-with-mic offered?"}
+    gss -- yes --> kerberos["gssapi-with-mic<br/>(Kerberos ticket)"]
+    gss -- no --> keys
+    kerberos -- failed --> keys["publickey, each key in PrivateKeys order:<br/>ask if acceptable, then sign"]
+    keys -- "no key accepted" --> kbd["keyboard-interactive<br/>(KeyboardInteractive handler, or Password<br/>for a single hidden prompt)"]
+    kbd -- "failed or not offered" --> pw["password"]
+    pw -- failed --> fail(["SshAuthenticationException<br/>with AllowedMethods"])
+    kerberos -- success --> ok(["authenticated"])
+    keys -- success --> ok
+    kbd -- success --> ok
+    pw -- success --> ok
+```
+
+A method is tried only when the server lists it and you supplied what it needs. After a partial success (the server requires
+another method too), the order is walked again with the methods the server still lists, since the one it wants next may come
+earlier in the order. Connecting by `ssh_config` alias follows
+`PreferredAuthentications` instead, when it is set.
+
 ## Password
 
 ```csharp
@@ -290,3 +315,11 @@ var options = new SshClientOptions
 `PreferredAuthentications`, `PubkeyAuthentication`, `PasswordAuthentication`, `KbdInteractiveAuthentication`,
 `IdentityFile`, `CertificateFile`, `IdentityAgent`, `IdentitiesOnly` and `BatchMode` (no prompts) are honored;
 `SshConfigConnectOptions` supplies the password, passphrases and the keyboard-interactive handler.
+
+## See also
+
+- How-to guides: [Keys and the SSH agent](how-to/agent-and-keys.md), [Certificates](how-to/certificates.md),
+  [Kerberos](how-to/kerberos.md)
+- [Signing files and commits](signing.md)
+- [Security model](concepts/security-model.md)
+- [Troubleshooting: authentication](reference/troubleshooting.md#authentication)

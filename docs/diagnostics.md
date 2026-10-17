@@ -99,3 +99,9 @@ await using var client = await SshClient.ConnectAsync(host, 22, options);
 ```
 
 Nothing is recorded unless something listens.
+
+## See also
+
+- [Errors and failure reasons](reference/errors.md): every reason, and what to do about it
+- [Logging and diagnostics](how-to/logging-and-diagnostics.md): short examples, including listeners without OpenTelemetry
+- [Troubleshooting](reference/troubleshooting.md)

@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- The code shown in the documentation site's how-to guides, scenarios and concept pages. The pages include regions of these files
+       (DocFX's [!code-csharp[](...#tag)]), and the project is built with the solution in CI, so every example compiles against the
+       current API. Nothing here runs: the methods take a connected client and are never called. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Library</OutputType>
+    <IsPackable>false</IsPackable>
+    <!-- Examples, not a library: their names, literals and shapes follow the page they illustrate. -->
+    <NoWarn>$(NoWarn);CA1812;CA1515;CA1848;CA1303;CA2007;CA1031;CA2000;CA1062;CA5394;CA1822;CA1716;CA1859;CA1305;CA1873;IDE0060</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/SshSharp/SshSharp.csproj" />
+    <ProjectReference Include="../../src/SshSharp.Extensions.DependencyInjection/SshSharp.Extensions.DependencyInjection.csproj" />
+    <ProjectReference Include="../../src/SshSharp.FileProviders/SshSharp.FileProviders.csproj" />
+    <ProjectReference Include="../../src/SshSharp.IO.Abstractions/SshSharp.IO.Abstractions.csproj" />
+  </ItemGroup>
+</Project>

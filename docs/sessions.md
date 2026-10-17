@@ -176,3 +176,10 @@ usable. For SFTP, use `client.OpenSftpAsync()` (see [File transfer (SFTP)](sftp.
 
 Disposing an `SshSession` closes the channel; a program still running gets a hangup from the server. Disposing the
 `SshClient` closes every session.
+
+## See also
+
+- How-to guides: [Run a command](how-to/run-a-command.md), [Stream large output](how-to/stream-output.md),
+  [Interactive shells and SshExpect](how-to/interactive-shell.md)
+- [Channels and flow control](concepts/channels.md)
+- [Cancellation and timeouts](how-to/cancellation-and-timeouts.md)

@@ -1,7 +1,8 @@
 # Connecting
 
 `SshClient` is one authenticated SSH connection. Every way of connecting returns it after the key exchange and
-authentication have succeeded; dispose it to disconnect.
+authentication have succeeded; dispose it to disconnect. [Architecture and connection lifecycle](concepts/architecture.md) shows
+the handshake step by step.
 
 ## Over TCP
 
@@ -221,11 +222,12 @@ sshd creates the socket readable only by the user, and does not replace a file t
 `client.RemoteSocketForwardings` lists the ones started from `ssh_config`. A server with `AllowStreamLocalForwarding no`
 refuses the request, and the call throws an `SshException`.
 
-**Known issue on Windows:** when the target is a local Unix socket, Windows sometimes fails to deliver the end of stream to the
-local program after SshSharp shuts down its sending side. A program that is waiting in a receive at that moment may never see it
-(about 1 exchange in 10,000 with plain Winsock, more often through .NET's sockets). A protocol that half-closes and then waits for
-the answer can stall in that case. SshSharp can do nothing about it once it has shut down its side. Protocols that frame their
-messages (a length or a delimiter) are not affected, and neither are TCP targets.
+> [!NOTE]
+> **Known issue on Windows:** when the target is a local Unix socket, Windows sometimes fails to deliver the end of stream to the
+> local program after SshSharp shuts down its sending side. A program that is waiting in a receive at that moment may never see it
+> (about 1 exchange in 10,000 with plain Winsock, more often through .NET's sockets). A protocol that half-closes and then waits for
+> the answer can stall in that case. SshSharp can do nothing about it once it has shut down its side. Protocols that frame their
+> messages (a length or a delimiter) are not affected, and neither are TCP targets.
 
 ### Forwardings from `ssh_config`
 
@@ -278,6 +280,7 @@ var roundTrip = await client.PingAsync(cts.Token);
 Console.WriteLine($"{roundTrip.TotalMilliseconds:F1} ms");
 ```
 
+> [!WARNING]
 > **OpenSSH for Windows:** the server built into Windows (OpenSSH for Windows 9.5) often fails to answer keep-alives, and the
 > connection then ends after `KeepAliveCountMax` intervals, as it does with OpenSSH's own `ssh -o ServerAliveInterval`. It announces
 > `ping@openssh.com`, so SshSharp probes it with pings, but those go unanswered at times too: the server stops sending on the
@@ -333,3 +336,13 @@ if (!client.Algorithms.IsPostQuantum)
     Console.WriteLine($"{host} uses {client.Algorithms.KeyExchange}; upgrade it to OpenSSH 8.5 or later for post-quantum key exchange.");
 }
 ```
+
+[Algorithms](reference/algorithms.md) lists every algorithm, its order and whether FIPS mode keeps it.
+
+## See also
+
+- How-to guides: [Port forwarding and tunnels](how-to/port-forwarding.md), [Jump hosts](how-to/jump-hosts.md),
+  [Use ssh_config and known_hosts](how-to/ssh-config-and-known-hosts.md),
+  [Keep-alive and reconnecting](how-to/keepalive-and-reconnect.md), [Cancellation and timeouts](how-to/cancellation-and-timeouts.md)
+- [ssh_config directives](reference/ssh-config.md)
+- [Channels and flow control](concepts/channels.md)
