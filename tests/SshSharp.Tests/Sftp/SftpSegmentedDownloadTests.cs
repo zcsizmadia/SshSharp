@@ -50,15 +50,15 @@ public sealed class SftpSegmentedDownloadTests : IDisposable
     }
 
     /// <summary>Collects progress reports synchronously (Progress&lt;T&gt; would post them later).</summary>
-    private sealed class Recorder : IProgress<long>
+    private sealed class Recorder : IProgress<SftpTransferProgress>
     {
         public List<long> Values { get; } = [];
 
-        public void Report(long value)
+        public void Report(SftpTransferProgress value)
         {
             lock (Values)
             {
-                Values.Add(value);
+                Values.Add(value.BytesTransferred);
             }
         }
     }
@@ -202,7 +202,7 @@ public sealed class SftpSegmentedDownloadTests : IDisposable
         await using var rig = await Rig.StartAsync(f => f.AddFile(Home + "/big.bin", data, modifyTime: 1_600_000_000));
         var local = Path.Combine(_dir, "big.bin");
 
-        await rig.Sftp.DownloadFileAsync("big.bin", local, new SftpTransferOptions { Segments = 2, PreserveTimes = true }, Timeout());
+        await rig.Sftp.DownloadFileAsync("big.bin", local, new SftpTransferOptions { Segments = 2, Preserve = true }, Timeout());
 
         await Assert.That(new DateTimeOffset(File.GetLastWriteTimeUtc(local)).ToUnixTimeSeconds()).IsEqualTo(1_600_000_000);
         await Assert.That(rig.Files.Sessions).IsEqualTo(2);

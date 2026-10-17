@@ -173,7 +173,7 @@ public sealed partial class SftpClient
     /// <summary>The names of user and group ids, as <c>ls -l</c> shows them (<c>users-groups-by-id@openssh.com</c>, OpenSSH 9.1+).</summary>
     /// <returns>The names the server knows; an id it cannot name is left out.</returns>
     /// <exception cref="NotSupportedException">The server lacks <c>users-groups-by-id@openssh.com</c>.</exception>
-    public async Task<(IReadOnlyDictionary<uint, string> UserNames, IReadOnlyDictionary<uint, string> GroupNames)> GetOwnerNamesAsync(
+    public async Task<SftpOwnerNames> GetOwnerNamesAsync(
         IEnumerable<uint> userIds, IEnumerable<uint> groupIds, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(userIds);
@@ -193,8 +193,7 @@ public sealed partial class SftpClient
         }
 
         // The user names come first in the reply, then the group names.
-        return Parse<(IReadOnlyDictionary<uint, string>, IReadOnlyDictionary<uint, string>)>(reply, (ref SshReader r) =>
-            (ReadNames(r.ReadString(), users), ReadNames(r.ReadString(), groups)));
+        return Parse(reply, (ref SshReader r) => new SftpOwnerNames(ReadNames(r.ReadString(), users), ReadNames(r.ReadString(), groups)));
     }
 
     /// <summary>The ids as one string of uint32 values, as <c>users-groups-by-id@openssh.com</c> takes them.</summary>

@@ -512,7 +512,7 @@ public sealed class SftpTests : IDisposable
         await using var rig = await Rig.StartAsync(f => f.AddFile(Home + "/remote", "remote data"u8.ToArray(), modifyTime: 1_500_000_000));
         var local = Path.Combine(_dir, "local");
 
-        await rig.Sftp.DownloadFileAsync("remote", local, new SftpTransferOptions { PreserveTimes = true }, Timeout());
+        await rig.Sftp.DownloadFileAsync("remote", local, new SftpTransferOptions { Preserve = true }, Timeout());
         await Assert.That(await File.ReadAllTextAsync(local)).IsEqualTo("remote data");
         await Assert.That(new DateTimeOffset(File.GetLastWriteTimeUtc(local))).IsEqualTo(DateTimeOffset.FromUnixTimeSeconds(1_500_000_000));
 
@@ -520,9 +520,56 @@ public sealed class SftpTests : IDisposable
         await Assert.That(await File.ReadAllTextAsync(local)).IsEqualTo("remote data");
 
         File.SetLastWriteTimeUtc(local, new DateTime(2020, 1, 2, 3, 4, 5, DateTimeKind.Utc));
-        await rig.Sftp.UploadFileAsync(local, "uploaded", new SftpTransferOptions { PreserveTimes = true }, Timeout());
+        await rig.Sftp.UploadFileAsync(local, "uploaded", new SftpTransferOptions { Preserve = true }, Timeout());
         await Assert.That(rig.Files.ModifyTime(Home + "/uploaded")).IsEqualTo((uint)new DateTimeOffset(2020, 1, 2, 3, 4, 5, TimeSpan.Zero).ToUnixTimeSeconds());
         await Assert.That(async () => await rig.Sftp.UploadFileAsync(local, "uploaded", new SftpTransferOptions { Overwrite = false }, Timeout())).Throws<SftpException>();
+    }
+
+    [Test]
+    public async Task Preserve_CopiesThePermissionBits_ButNeverSetuid()
+    {
+        await using var rig = await Rig.StartAsync(f => f.AddFile(Home + "/tool", "#!/bin/sh"u8.ToArray()));
+        rig.Files.SetMode(Home + "/tool", 0xDED); // 06755: setuid and setgid, rwxr-xr-x
+        var local = Path.Combine(_dir, "tool");
+
+        await rig.Sftp.DownloadFileAsync("tool", local, new SftpTransferOptions { Preserve = true }, Timeout());
+        await rig.Sftp.UploadFileAsync(local, "copy", new SftpTransferOptions { Preserve = true }, Timeout());
+
+        if (OperatingSystem.IsWindows())
+        {
+            // No Unix modes here: the times are copied, the permissions are not sent, and the server keeps its default.
+            await Assert.That(rig.Files.Mode(Home + "/copy")).IsEqualTo(0x1A4u);
+            return;
+        }
+
+        // The rwx bits arrive; setuid and setgid do not, whichever way they would travel.
+        await Assert.That(File.GetUnixFileMode(local)).IsEqualTo((UnixFileMode)0x1ED);
+        await Assert.That(rig.Files.Mode(Home + "/copy")).IsEqualTo(0x1EDu);
+
+        File.SetUnixFileMode(local, (UnixFileMode)0x9A0); // 04640: setuid, rw-r-----
+        await rig.Sftp.UploadFileAsync(local, "copy", new SftpTransferOptions { Preserve = true }, Timeout());
+        await Assert.That(rig.Files.Mode(Home + "/copy")).IsEqualTo(0x1A0u);
+    }
+
+    [Test]
+    public async Task Progress_NamesTheFile_AndItsSize_WhenKnown()
+    {
+        var data = RandomNumberGenerator.GetBytes(300 * 1024);
+        await using var rig = await Rig.StartAsync(f => f.AddFile(Home + "/data.bin", data));
+        var reports = new List<SftpTransferProgress>();
+        var progress = new SyncReports(reports);
+
+        await rig.Sftp.DownloadAsync("data.bin", new MemoryStream(), new SftpTransferOptions { Progress = progress }, Timeout());
+        await Assert.That(reports[^1]).IsEqualTo(new SftpTransferProgress("data.bin", data.Length, data.Length));
+
+        // An upload knows the size when the source can tell it, and not otherwise.
+        reports.Clear();
+        await rig.Sftp.UploadAsync(new MemoryStream(data), "up.bin", new SftpTransferOptions { Progress = progress }, Timeout());
+        await Assert.That(reports[^1]).IsEqualTo(new SftpTransferProgress("up.bin", data.Length, data.Length));
+
+        reports.Clear();
+        await rig.Sftp.UploadAsync(new UnseekableStream(data), "up2.bin", new SftpTransferOptions { Progress = progress }, Timeout());
+        await Assert.That(reports[^1]).IsEqualTo(new SftpTransferProgress("up2.bin", data.Length, null));
     }
 
     [Test]
@@ -582,13 +629,30 @@ public sealed class SftpTests : IDisposable
     }
 
     /// <summary>Records progress on the reporting thread (Progress&lt;T&gt; posts to the thread pool, which would race the assertions).</summary>
-    private sealed class SyncProgress(List<long> values) : IProgress<long>
+    private sealed class SyncReports(List<SftpTransferProgress> reports) : IProgress<SftpTransferProgress>
     {
-        public void Report(long value)
+        public void Report(SftpTransferProgress value)
+        {
+            lock (reports)
+            {
+                reports.Add(value);
+            }
+        }
+    }
+
+    /// <summary>A source that cannot tell its length, as a network stream cannot.</summary>
+    private sealed class UnseekableStream(byte[] data) : MemoryStream(data)
+    {
+        public override bool CanSeek => false;
+    }
+
+    private sealed class SyncProgress(List<long> values) : IProgress<SftpTransferProgress>
+    {
+        public void Report(SftpTransferProgress value)
         {
             lock (values)
             {
-                values.Add(value);
+                values.Add(value.BytesTransferred);
             }
         }
     }

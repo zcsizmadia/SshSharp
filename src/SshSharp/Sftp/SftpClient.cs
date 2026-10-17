@@ -444,7 +444,8 @@ public sealed partial class SftpClient : IAsyncDisposable
         var (handle, _) = await OpenHandleAsync(remotePath, FileMode.Open, FileAccess.Read, cancellationToken).ConfigureAwait(false);
         try
         {
-            return await DownloadHandleAsync(handle, remotePath, destination, 0, options, cancellationToken).ConfigureAwait(false);
+            var size = options.Progress is null ? null : (await GetHandleAttributesAsync(handle, remotePath, cancellationToken).ConfigureAwait(false)).Size;
+            return await DownloadHandleAsync(handle, remotePath, destination, 0, size, options, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -454,8 +455,8 @@ public sealed partial class SftpClient : IAsyncDisposable
 
     /// <summary>
     /// Downloads <paramref name="remotePath"/> to the local file <paramref name="localPath"/>. With <see cref="SftpTransferOptions.Overwrite"/>
-    /// off, an existing local file is an error; with <see cref="SftpTransferOptions.PreserveTimes"/>, the local file gets the remote one's
-    /// modification and access times. A failed download leaves no partial file behind.
+    /// off, an existing local file is an error; with <see cref="SftpTransferOptions.Preserve"/>, the local file gets the remote one's
+    /// modification and access times, and its permissions where this system has Unix modes. A failed download leaves no partial file behind.
     /// </summary>
     /// <returns>The number of bytes downloaded.</returns>
     public async Task<long> DownloadFileAsync(string remotePath, string localPath, SftpTransferOptions? options = null, CancellationToken cancellationToken = default)
@@ -467,7 +468,7 @@ public sealed partial class SftpClient : IAsyncDisposable
         {
             var resumeFrom = options.Resume && File.Exists(localPath) ? new FileInfo(localPath).Length : 0;
             var segmented = options.Segments > 1 && !options.Resume && OpenSibling is not null;
-            var attributes = options.PreserveTimes || resumeFrom > 0 || segmented
+            var attributes = options.Preserve || options.Progress is not null || resumeFrom > 0 || segmented
                 ? await GetHandleAttributesAsync(handle, remotePath, cancellationToken).ConfigureAwait(false)
                 : null;
             if (resumeFrom > 0 && attributes!.Size is { } remoteSize && resumeFrom > remoteSize)
@@ -481,7 +482,7 @@ public sealed partial class SftpClient : IAsyncDisposable
                 ? await DownloadSegmentedAsync(handle, remotePath, localPath, attributes!, segments, options, cancellationToken).ConfigureAwait(false)
                 : await DownloadSequentialAsync().ConfigureAwait(false);
 
-            if (attributes is not null && options.PreserveTimes)
+            if (attributes is not null && options.Preserve)
             {
                 if (attributes.LastWriteTime is { } modified)
                 {
@@ -492,6 +493,8 @@ public sealed partial class SftpClient : IAsyncDisposable
                 {
                     File.SetLastAccessTimeUtc(localPath, accessed.UtcDateTime);
                 }
+
+                SetLocalPermissions(localPath, attributes.Permissions);
             }
 
             return total;
@@ -503,7 +506,7 @@ public sealed partial class SftpClient : IAsyncDisposable
                     var mode = resumeFrom > 0 ? FileMode.Append : options.Overwrite || options.Resume ? FileMode.Create : FileMode.CreateNew;
                     await using var file = new FileStream(localPath, mode, FileAccess.Write, FileShare.None, 64 * 1024, useAsync: true);
                     created = resumeFrom == 0;
-                    return await DownloadHandleAsync(handle, remotePath, file, resumeFrom, options, cancellationToken).ConfigureAwait(false);
+                    return await DownloadHandleAsync(handle, remotePath, file, resumeFrom, attributes?.Size, options, cancellationToken).ConfigureAwait(false);
                 }
                 catch when (created && !options.Resume)
                 {
@@ -631,7 +634,7 @@ public sealed partial class SftpClient : IAsyncDisposable
                                     lock (progressLock)
                                     {
                                         transferred += data.Length;
-                                        progress.Report(transferred);
+                                        progress.Report(new SftpTransferProgress(remotePath, transferred, size));
                                     }
                                 }
                             }, options, failed.Token).ConfigureAwait(false);
@@ -701,8 +704,8 @@ public sealed partial class SftpClient : IAsyncDisposable
     }
 
     /// <summary>
-    /// Uploads the local file <paramref name="localPath"/> to <paramref name="remotePath"/>. With <see cref="SftpTransferOptions.PreserveTimes"/>,
-    /// the remote file gets the local one's modification and access times.
+    /// Uploads the local file <paramref name="localPath"/> to <paramref name="remotePath"/>. With <see cref="SftpTransferOptions.Preserve"/>,
+    /// the remote file gets the local one's modification and access times, and its permissions where this system has Unix modes.
     /// </summary>
     /// <returns>The number of bytes uploaded.</returns>
     public async Task<long> UploadFileAsync(string localPath, string remotePath, SftpTransferOptions? options = null, CancellationToken cancellationToken = default)
@@ -715,12 +718,13 @@ public sealed partial class SftpClient : IAsyncDisposable
             total = await UploadAsync(file, remotePath, options, cancellationToken).ConfigureAwait(false);
         }
 
-        if (options.PreserveTimes)
+        if (options.Preserve)
         {
             await SetAttributesAsync(remotePath, new SftpFileAttributes
             {
                 LastAccessTime = File.GetLastAccessTimeUtc(localPath),
                 LastWriteTime = File.GetLastWriteTimeUtc(localPath),
+                Permissions = LocalPermissions(localPath),
             }, cancellationToken).ConfigureAwait(false);
         }
 
@@ -867,14 +871,15 @@ public sealed partial class SftpClient : IAsyncDisposable
         }
     }
 
-    private async Task<long> DownloadHandleAsync(byte[] handle, string path, Stream destination, long start, SftpTransferOptions options, CancellationToken cancellationToken)
+    private async Task<long> DownloadHandleAsync(byte[] handle, string path, Stream destination, long start, long? size, SftpTransferOptions options,
+        CancellationToken cancellationToken)
     {
         long total = 0;
         return await DownloadRangeAsync(handle, path, start, stop: null, async (_, data, ct) =>
         {
             await destination.WriteAsync(data, ct).ConfigureAwait(false);
             total += data.Length;
-            options.Progress?.Report(total);
+            options.Progress?.Report(new SftpTransferProgress(path, start + total, size));
         }, options, cancellationToken).ConfigureAwait(false);
     }
 
@@ -992,6 +997,7 @@ public sealed partial class SftpClient : IAsyncDisposable
         var chunk = Limits.MaxWriteLength;
         var inFlight = new Queue<(Task<SftpResponse> Reply, int Length)>();
         long offset = start, acknowledged = 0;
+        long? size = options.Progress is not null && source.CanSeek ? source.Length : null;
         try
         {
             while (true)
@@ -1043,7 +1049,7 @@ public sealed partial class SftpClient : IAsyncDisposable
             var (reply, length) = inFlight.Dequeue();
             ExpectWritten(await reply.ConfigureAwait(false), path);
             acknowledged += length;
-            options.Progress?.Report(acknowledged);
+            options.Progress?.Report(new SftpTransferProgress(path, start + acknowledged, size));
         }
     }
 
@@ -1202,6 +1208,19 @@ public sealed record SftpLimits(int MaxReadLength, int MaxWriteLength, int? MaxO
 [Experimental(SftpClient.ExperimentalId)]
 public sealed record SftpFileInfo(string Name, string FullPath, string LongName, SftpFileAttributes Attributes);
 
+/// <summary>The names of user and group ids, from <see cref="SftpClient.GetOwnerNamesAsync"/>.</summary>
+/// <param name="UserNames">The user names by id; an id the server cannot name is left out.</param>
+/// <param name="GroupNames">The group names by id; an id the server cannot name is left out.</param>
+[Experimental(SftpClient.ExperimentalId)]
+public sealed record SftpOwnerNames(IReadOnlyDictionary<uint, string> UserNames, IReadOnlyDictionary<uint, string> GroupNames);
+
+/// <summary>The progress of one file in an SFTP transfer (<see cref="SftpTransferOptions.Progress"/>).</summary>
+/// <param name="Path">The file's remote path.</param>
+/// <param name="BytesTransferred">The file's bytes transferred so far, including what a resumed transfer found there already.</param>
+/// <param name="TotalBytes">The file's size, or null when it is not known (an upload from a stream that cannot tell its length).</param>
+[Experimental(SftpClient.ExperimentalId)]
+public sealed record SftpTransferProgress(string Path, long BytesTransferred, long? TotalBytes);
+
 /// <summary>Options for <see cref="SftpClient"/>'s uploads and downloads.</summary>
 [Experimental(SftpClient.ExperimentalId)]
 public sealed class SftpTransferOptions
@@ -1209,8 +1228,13 @@ public sealed class SftpTransferOptions
     /// <summary>Replace an existing destination file (default true, as <c>sftp put</c> and <c>get</c> do); otherwise it is an error.</summary>
     public bool Overwrite { get; init; } = true;
 
-    /// <summary>Copy the source's modification and access times to the destination.</summary>
-    public bool PreserveTimes { get; init; }
+    /// <summary>
+    /// Copy the source's modification and access times, and its permission bits (read, write and execute for the owner, the group and
+    /// others), to the destination, as <c>sftp -p</c> does. Permissions are copied only where the receiving side has Unix modes: a
+    /// download to Windows keeps the times only, and an upload from Windows sends none. Unlike OpenSSH, setuid, setgid and the sticky bit
+    /// are never copied, so a server cannot hand this machine a setuid file.
+    /// </summary>
+    public bool Preserve { get; init; }
 
     /// <summary>
     /// Continue an interrupted transfer, as sftp's <c>reget</c> and <c>reput</c> do: the destination's existing bytes are taken as the
@@ -1220,8 +1244,8 @@ public sealed class SftpTransferOptions
     /// </summary>
     public bool Resume { get; init; }
 
-    /// <summary>Reports the bytes transferred so far.</summary>
-    public IProgress<long>? Progress { get; init; }
+    /// <summary>Reports each file's progress: its path, the bytes transferred so far and its size, when known.</summary>
+    public IProgress<SftpTransferProgress>? Progress { get; init; }
 
     /// <summary>How many reads or writes may be in flight at once (default 64, as OpenSSH's sftp). More helps on links with latency.</summary>
     public int MaxRequestsInFlight

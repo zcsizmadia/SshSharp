@@ -83,9 +83,15 @@ public sealed partial class SftpClient
                 Directory.CreateDirectory(local);
                 await DownloadTreeAsync(entry.FullPath, local, root, depth + 1, options, summary, cancellationToken).ConfigureAwait(false);
                 summary.Directories++;
-                if (options.PreserveTimes && entry.Attributes.LastWriteTime is { } modified)
+                if (options.Preserve)
                 {
-                    Directory.SetLastWriteTimeUtc(local, modified.UtcDateTime); // after its contents, which would change it
+                    // After its contents, which would change its time (and which a mode without write permission could refuse).
+                    if (entry.Attributes.LastWriteTime is { } modified)
+                    {
+                        Directory.SetLastWriteTimeUtc(local, modified.UtcDateTime);
+                    }
+
+                    SetLocalPermissions(local, entry.Attributes.Permissions);
                 }
             }
             else if (entry.Attributes.IsRegularFile)
@@ -130,10 +136,14 @@ public sealed partial class SftpClient
             {
                 await UploadTreeAsync(directory, remote, depth + 1, options, summary, cancellationToken).ConfigureAwait(false);
                 summary.Directories++;
-                if (options.PreserveTimes)
+                if (options.Preserve)
                 {
-                    await SetAttributesAsync(remote, new SftpFileAttributes { LastWriteTime = directory.LastWriteTimeUtc, LastAccessTime = directory.LastAccessTimeUtc },
-                        cancellationToken).ConfigureAwait(false);
+                    await SetAttributesAsync(remote, new SftpFileAttributes
+                    {
+                        LastWriteTime = directory.LastWriteTimeUtc,
+                        LastAccessTime = directory.LastAccessTimeUtc,
+                        Permissions = LocalPermissions(directory.FullName),
+                    }, cancellationToken).ConfigureAwait(false);
                 }
             }
             else
@@ -141,6 +151,22 @@ public sealed partial class SftpClient
                 summary.Bytes += await UploadFileAsync(entry.FullName, remote, options, cancellationToken).ConfigureAwait(false);
                 summary.Files++;
             }
+        }
+    }
+
+    /// <summary>The permission bits <see cref="SftpTransferOptions.Preserve"/> copies: read, write and execute for owner, group and others.</summary>
+    private const UnixFileMode PreservedPermissions = (UnixFileMode)0x1FF; // 0777
+
+    /// <summary>A local file's or directory's permissions to preserve, or null where this system has no Unix modes (Windows).</summary>
+    private static UnixFileMode? LocalPermissions(string path) =>
+        OperatingSystem.IsWindows() ? null : File.GetUnixFileMode(path) & PreservedPermissions;
+
+    /// <summary>Gives a local file or directory the remote permissions, where this system has Unix modes and the server sent them.</summary>
+    private static void SetLocalPermissions(string path, UnixFileMode? permissions)
+    {
+        if (!OperatingSystem.IsWindows() && permissions is { } mode)
+        {
+            File.SetUnixFileMode(path, mode & PreservedPermissions);
         }
     }
 

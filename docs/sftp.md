@@ -15,7 +15,7 @@ await using var client = await SshClient.ConnectAsync("deploy@files.example.com"
 await using var sftp = await client.OpenSftpAsync();
 
 await sftp.UploadFileAsync("report.pdf", "incoming/report.pdf");
-await sftp.DownloadFileAsync("outgoing/data.csv", "data.csv", new SftpTransferOptions { PreserveTimes = true });
+await sftp.DownloadFileAsync("outgoing/data.csv", "data.csv", new SftpTransferOptions { Preserve = true });
 
 await foreach (var entry in sftp.ListDirectoryAsync("incoming"))
 {
@@ -36,8 +36,8 @@ latency. Each request is as large as the server allows (`limits@openssh.com`; 32
 | Option | Meaning |
 |---|---|
 | `Overwrite` (default true) | Replace an existing destination file; otherwise it is an error. |
-| `PreserveTimes` | Copy the modification and access times. |
-| `Progress` | An `IProgress<long>` with the bytes transferred so far. |
+| `Preserve` | Copy the modification and access times, and the permission bits (`rwx` for owner, group and others), as `sftp -p` does. Permissions travel only where the receiving side has Unix modes, and setuid, setgid and the sticky bit are never copied. |
+| `Progress` | An `IProgress<SftpTransferProgress>`: for each file, its remote `Path`, `BytesTransferred` so far (including what a resumed transfer found there) and `TotalBytes`, when known. |
 | `MaxRequestsInFlight` | The window of outstanding requests (1 to 1024). |
 | `Resume` | Continue an interrupted transfer, as `reget` and `reput` do: only the part the destination lacks is sent. |
 | `Segments` (default 1) | Download one file in up to 16 parallel ranges, each over its own SFTP session (see below). |
@@ -60,7 +60,7 @@ await sftp.DownloadFileAsync("backups/db.tar.zst", "db.tar.zst", new SftpTransfe
 It helps on links with high latency, or where a single session's server process is the limit. It does not help where the
 bandwidth is the limit (the sessions share one TCP connection), and it costs a few extra round trips to open the sessions, so
 files smaller than 1 MiB per segment use fewer segments. The server may allow fewer sessions than asked (sshd's `MaxSessions`,
-10 per connection by default); then the ranges are shared among the sessions it opens. `Progress` reports the total over all
+10 per connection by default); then the ranges are shared among the sessions it opens. `Progress` reports the file's total over all
 segments. The first range that fails stops the others and the local file is removed. A file that grows during the download is
 fetched to its new end; one that shrinks fails the download rather than leave a gap.
 
@@ -75,7 +75,7 @@ whole tree, creating directories as needed (an existing one is fine), with the s
 `SftpTransferSummary` with the files, directories and bytes transferred and the entries skipped.
 
 ```csharp
-var summary = await sftp.DownloadDirectoryAsync("releases/1.4", "out", new SftpTransferOptions { PreserveTimes = true });
+var summary = await sftp.DownloadDirectoryAsync("releases/1.4", "out", new SftpTransferOptions { Preserve = true });
 Console.WriteLine($"{summary.Files} files, {summary.Bytes} bytes");
 ```
 
@@ -105,7 +105,7 @@ files, `DownloadAsync` is much faster. `Length` is the size when the stream open
 |---|---|
 | `GetAttributesAsync(path, followSymbolicLinks)` | Size, owner, permissions, times, file type (`IsDirectory`, `IsRegularFile`, `IsSymbolicLink`). |
 | `SetAttributesAsync(path, attributes, followSymbolicLinks)` | Changes the attributes that are set: `Size`, `Permissions`, `LastWriteTime`, ... With `followSymbolicLinks: false`, those of a link itself (`lsetstat@openssh.com`; Linux keeps a link's permissions, but its times change). |
-| `GetOwnerNamesAsync(userIds, groupIds)` | User and group names for owner ids, as `ls -l` shows them (`users-groups-by-id@openssh.com`). |
+| `GetOwnerNamesAsync(userIds, groupIds)` | User and group names for owner ids, as `ls -l` shows them (`users-groups-by-id@openssh.com`), as an `SftpOwnerNames` (`UserNames`, `GroupNames`). |
 | `ExistsAsync(path)` | Whether the path exists. |
 | `ListDirectoryAsync(path)` | The entries, as `IAsyncEnumerable<SftpFileInfo>`, without `.` and `..`. A name that is not valid UTF-8 is listed with replacement characters (and cannot be opened by that name); a listing stops with an error after 1,000,000 entries. |
 | `CreateDirectoryAsync`, `DeleteDirectoryAsync` | One directory (deleting needs it empty). |

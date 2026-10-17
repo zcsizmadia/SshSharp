@@ -506,7 +506,7 @@ public sealed class SftpErrorPathTests : IDisposable
     }
 
     [Test]
-    public async Task PreserveTimes_AppliesToUploadedDirectoriesToo()
+    public async Task Preserve_AppliesToUploadedDirectoriesToo()
     {
         await using var rig = await Rig.StartAsync();
         var local = Directory.CreateDirectory(Path.Combine(_dir, "tree"));
@@ -515,7 +515,7 @@ public sealed class SftpErrorPathTests : IDisposable
         var stamp = new DateTime(2020, 5, 6, 7, 8, 9, DateTimeKind.Utc);
         sub.LastWriteTimeUtc = stamp;
 
-        await rig.Sftp.UploadDirectoryAsync(local.FullName, "up", new SftpTransferOptions { PreserveTimes = true }, Timeout());
+        await rig.Sftp.UploadDirectoryAsync(local.FullName, "up", new SftpTransferOptions { Preserve = true }, Timeout());
 
         await Assert.That(rig.Files.ModifyTime(Home + "/up/sub")).IsEqualTo((uint)new DateTimeOffset(stamp).ToUnixTimeSeconds());
     }

@@ -55,7 +55,7 @@ public sealed class SftpDirectoryTests : IDisposable
         try
         {
             var target = Path.Combine(_dir, "down");
-            var summary = await rig.Sftp.DownloadDirectoryAsync("tree", target, new SftpTransferOptions { PreserveTimes = true }, Timeout());
+            var summary = await rig.Sftp.DownloadDirectoryAsync("tree", target, new SftpTransferOptions { Preserve = true }, Timeout());
 
             await Assert.That(summary).IsEqualTo(new SftpTransferSummary(3, 3, 5 + 70_000 + 1, 1));
             await Assert.That(await File.ReadAllTextAsync(Path.Combine(target, "a.txt"))).IsEqualTo("alpha");
