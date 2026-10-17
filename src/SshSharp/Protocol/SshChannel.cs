@@ -619,11 +619,10 @@ internal sealed class SshChannel
                     handled = true;
                     break;
                 case "exit-signal":
-                    // RFC 4254 6.10: signal name, core dumped, error message, language tag (ignored).
-                    var signal = reader.ReadUtf8String();
-                    var coreDumped = !reader.Remaining.IsEmpty && reader.ReadBoolean();
-                    var message = reader.Remaining.IsEmpty ? null : reader.ReadUtf8String();
-                    ExitSignal = new SshExitSignal(signal, coreDumped, string.IsNullOrEmpty(message) ? null : message);
+                    // RFC 4254 6.10: signal name, core dumped, error message, language tag (ignored). The name is what matters: a flag or
+                    // message that is missing or malformed (the message is the server's free text, and must be UTF-8) leaves those
+                    // fields unset rather than losing the signal.
+                    ExitSignal = ReadExitSignal(ref reader);
                     handled = true;
                     break;
                 case "eow@openssh.com":
@@ -646,6 +645,25 @@ internal sealed class SshChannel
             }));
         }
     }
+    /// <summary>Parses <c>exit-signal</c>; only the signal name is required (a bad name is a protocol error, as before).</summary>
+    private static SshExitSignal ReadExitSignal(ref SshReader reader)
+    {
+        var name = reader.ReadUtf8String();
+        var coreDumped = false;
+        string? message = null;
+        try
+        {
+            coreDumped = !reader.Remaining.IsEmpty && reader.ReadBoolean();
+            message = reader.Remaining.IsEmpty ? null : reader.ReadUtf8String();
+        }
+        catch (SshProtocolException)
+        {
+            // Truncated, or not UTF-8: keep what was read.
+        }
+
+        return new SshExitSignal(name, coreDumped, string.IsNullOrEmpty(message) ? null : message);
+    }
+
     /// <summary>The connection failed: wake everything that is waiting.</summary>
     internal void Fail(Exception exception)
     {

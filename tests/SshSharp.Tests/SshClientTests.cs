@@ -89,6 +89,38 @@ public class SshClientTests
     }
 
     [Test]
+    [Arguments("only the name")]
+    [Arguments("a message that is not UTF-8")]
+    public async Task AnExitSignalWithAMissingOrBadMessage_KeepsTheSignalName(string variant)
+    {
+        // The error message is the server's free text: when it is missing (an old or minimal server) or not valid UTF-8, the signal name
+        // is still reported, with no message.
+        await using var server = new FakeSessionServer
+        {
+            OnExec = async script =>
+            {
+                await script.ExitSignalRawAsync("TERM", w =>
+                {
+                    if (variant != "only the name")
+                    {
+                        w.WriteBoolean(true);
+                        w.WriteString((byte[])[0xC3, 0x28]); // an invalid UTF-8 sequence
+                        w.WriteString(string.Empty);
+                    }
+                });
+                await script.EofAsync();
+                await script.CloseAsync();
+            },
+        };
+        await using var client = await ConnectAsync(server);
+
+        var result = await client.RunCommandAsync("doomed", Timeout());
+        await Assert.That(result.ExitSignal?.Name).IsEqualTo("TERM");
+        await Assert.That(result.ExitSignal?.ErrorMessage).IsNull();
+        await Assert.That(result.ExitSignal?.CoreDumped).IsEqualTo(variant != "only the name");
+    }
+
+    [Test]
     public async Task ReportsAnExitSignalWithoutAStatus()
     {
         await using var server = new FakeSessionServer
