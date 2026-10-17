@@ -110,12 +110,7 @@ jobs:
           echo "::add-mask::$PASSWORD"
           docker build -q -t sshsharp-interop --build-arg BASE="${{ matrix.image }}" --build-arg SERVER="${{ matrix.server }}" tests/docker
           docker run -d --name server -p 127.0.0.1:2200:${{ matrix.port || '22' }} -e TEST_PASSWORD="$PASSWORD" sshsharp-interop
-          for i in $(seq 1 30); do
-            if timeout 2 bash -c 'exec 3<>/dev/tcp/127.0.0.1/2200 && head -n 1 <&3' 2>/dev/null | grep -q '^SSH-'; then break; fi
-            sleep 1
-          done
-          timeout 2 bash -c 'exec 3<>/dev/tcp/127.0.0.1/2200 && head -n 1 <&3' 2>/dev/null | grep -q '^SSH-' \
-            || { echo "::error::the server does not answer"; exit 1; }
+          tests/docker/wait-for-ssh.sh 2200 > /dev/null || { echo "::error::the server does not answer"; docker logs server || true; exit 1; }
           {
             echo "SSHSHARP_TEST_SSHD=127.0.0.1:2200"
             echo "SSHSHARP_TEST_SSHD_INNER_PORT=${{ matrix.port || '22' }}"
