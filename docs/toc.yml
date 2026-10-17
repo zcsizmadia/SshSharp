@@ -18,6 +18,8 @@
       href: signing.md
     - name: Configuration files
       href: config-files.md
+    - name: Dependency injection
+      href: dependency-injection.md
     - name: Errors and diagnostics
       href: diagnostics.md
     - name: Migrating from SSH.NET

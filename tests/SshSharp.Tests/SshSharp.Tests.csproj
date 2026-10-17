@@ -16,6 +16,7 @@
     <PackageReference Include="Microsoft.Testing.Extensions.CodeCoverage" />
     <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" />
     <PackageReference Include="Microsoft.Extensions.Configuration.Json" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
     <ProjectReference Include="../../src/SshSharp/SshSharp.csproj" />
   </ItemGroup>
   <ItemGroup>
@@ -24,5 +25,6 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\SshSharp.FileProviders\SshSharp.FileProviders.csproj" />
     <ProjectReference Include="..\..\src\SshSharp.IO.Abstractions\SshSharp.IO.Abstractions.csproj" />
+    <ProjectReference Include="..\..\src\SshSharp.Extensions.DependencyInjection\SshSharp.Extensions.DependencyInjection.csproj" />
   </ItemGroup>
 </Project>

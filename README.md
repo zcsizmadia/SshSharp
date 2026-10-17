@@ -50,6 +50,8 @@ Console.WriteLine(result.StandardOutputText);
 - **Files for the rest of .NET:** `SshSharp.IO.Abstractions` implements System.IO.Abstractions' `IFileSystem` over SFTP (code written
   against `IFileSystem` reads and writes the server unchanged), and `SshSharp.FileProviders` serves a directory as an `IFileProvider`, for
   ASP.NET Core static files, Razor views and configuration; nothing is mounted, so only your application sees the files.
+- **Dependency injection:** `SshSharp.Extensions.DependencyInjection` registers named endpoints from configuration, with a factory for
+  new connections, a shared connection that is opened again when it drops, and a health check.
 - **Observability:** `ILogger` logging, `ActivitySource` tracing and `Meter` metrics, with no secrets recorded.
 
 ## Why not SSH.NET?
@@ -125,6 +127,7 @@ or a long track record. Moving from SSH.NET? See the
 dotnet add package SshSharp
 dotnet add package SshSharp.IO.Abstractions # optional: an IFileSystem over SFTP
 dotnet add package SshSharp.FileProviders   # optional: an IFileProvider over SFTP
+dotnet add package SshSharp.Extensions.DependencyInjection # optional: named endpoints, a shared connection, health checks
 ```
 
 ## Examples
