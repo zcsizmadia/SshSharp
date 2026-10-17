@@ -189,3 +189,6 @@ rename, a hard link) throws `NotSupportedException`.
 
 Prefer SFTP. It can list, resume and change files, and OpenSSH 9.0 switched its own `scp` command to SFTP by default. SCP
 (see [File transfer (SCP)](scp.md)) remains for servers that do not offer SFTP.
+
+The [sample tool](https://github.com/zcsizmadia/SshSharp/tree/main/samples/SshSharp.Samples)'s `get`, `put` and `tree` commands show transfers
+with `Preserve`, progress, segments and resuming, and `IFileSystem` over SFTP.

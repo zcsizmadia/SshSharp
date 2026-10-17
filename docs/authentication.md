@@ -80,7 +80,9 @@ using var key = SshPrivateKey.FromSigner(new VaultSigner(vault, publicKeyBlob), 
 
 Such a key works wherever a key does: in `PrivateKeys`, with `WithCertificate`, and for `SshSignature`. Each signature is checked
 against the public key before it is used, so a signer that answers in the wrong format, or with another key, fails at once with a
-`CryptographicException`. It cannot be exported or added to an agent.
+`CryptographicException`. It cannot be exported or added to an agent. The
+[sample tool](https://github.com/zcsizmadia/SshSharp/tree/main/samples/SshSharp.Samples)'s `run-cng` command logs in with a
+Windows CNG key through such a signer.
 
 ## Certificates
 

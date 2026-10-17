@@ -189,8 +189,9 @@ latest release.
   tracing, metrics
 - [Migrating from SSH.NET](https://github.com/zcsizmadia/SshSharp/blob/main/docs/migrating-from-sshnet.md): the same tasks,
   side by side
-- [Samples](https://github.com/zcsizmadia/SshSharp/tree/main/samples/SshSharp.Samples): a small `ssh`-like tool (commands,
-  streaming, shell, port forwarding, SOCKS, SCP)
+- [Samples](https://github.com/zcsizmadia/SshSharp/tree/main/samples): an `ssh`-like tool (commands, streaming, shell, port
+  forwarding, SOCKS, SCP, SFTP, `IFileSystem`, a Windows CNG key), ASP.NET Core with dependency injection, static files and a health
+  check, and a worker service that survives dropped connections
 - [API reference](https://zcsizmadia.github.io/SshSharp/api/SshSharp.html): generated from the XML documentation with DocFX
   (to build it locally: `dotnet tool restore`, then `dotnet docfx docs/docfx.json --serve`); every public member is documented,
   and IntelliSense shows the same text.

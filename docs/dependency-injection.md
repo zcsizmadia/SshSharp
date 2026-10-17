@@ -102,3 +102,6 @@ failure status, tags and a timeout.
 Clients log through the container's `ILoggerFactory`, under the category `SshSharp` (see [Errors and diagnostics](diagnostics.md)).
 
 `ISshClientFactory` and `ISshConnectionProvider` are interfaces, so code that takes them can be given a fake in its tests.
+
+Runnable examples: [an ASP.NET Core minimal API](https://github.com/zcsizmadia/SshSharp/tree/main/samples/SshSharp.Samples.AspNetCore)
+and [a worker service](https://github.com/zcsizmadia/SshSharp/tree/main/samples/SshSharp.Samples.Worker).

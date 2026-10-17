@@ -7,5 +7,6 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/SshSharp/SshSharp.csproj" />
+    <ProjectReference Include="../../src/SshSharp.IO.Abstractions/SshSharp.IO.Abstractions.csproj" />
   </ItemGroup>
 </Project>
