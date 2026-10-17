@@ -18,6 +18,12 @@ internal sealed class FaultyProxy : IAsyncDisposable
     private volatile bool _stalledToClient;
     private long _closeAfterToServer = long.MaxValue;
     private long _closeAfterToClient = long.MaxValue;
+    private long _forwardedToServer;
+    private long _forwardedToClient;
+    private int _accepted;
+    private volatile bool _serverReached;
+    private volatile bool _cut;
+    private volatile string? _serverError;
 
     public FaultyProxy((string Host, int Port) target)
     {
@@ -28,6 +34,9 @@ internal sealed class FaultyProxy : IAsyncDisposable
     }
 
     public int Port => ((IPEndPoint)_listener.LocalEndPoint!).Port;
+
+    /// <summary>How long the proxy waits to reach the server for each client before closing that client.</summary>
+    public static TimeSpan ServerConnectTimeout { get; } = TimeSpan.FromSeconds(10);
 
     /// <summary>Delay added to every chunk forwarded, both ways.</summary>
     public TimeSpan Latency { get; set; }
@@ -68,9 +77,15 @@ internal sealed class FaultyProxy : IAsyncDisposable
     /// <summary>At most this many bytes per second each way (0: no limit).</summary>
     public int BytesPerSecond { get; set; }
 
+    /// <summary>What the proxy did, for a test's failure message: whether it reached the server, and what it forwarded each way.</summary>
+    public string Describe() =>
+        $"proxy: {Volatile.Read(ref _accepted)} accepted, server {(_serverReached ? "reached" : _serverError is { } error ? "not reached (" + error + ")" : "not reached yet")}, " +
+        $"{Interlocked.Read(ref _forwardedToServer)} bytes to the server, {Interlocked.Read(ref _forwardedToClient)} to the client{(_cut ? ", cut" : "")}";
+
     /// <summary>Close every connection abruptly (RST), as a reset router or a killed server does.</summary>
     public void Cut()
     {
+        _cut = true;
         lock (_sockets)
         {
             foreach (var socket in _sockets)
@@ -95,9 +110,26 @@ internal sealed class FaultyProxy : IAsyncDisposable
                 return;
             }
 
+            Interlocked.Increment(ref _accepted);
             var server = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
             client.NoDelay = true; // so that each slice goes out as it is sent
-            await server.ConnectAsync(_target.Host, _target.Port, _stop.Token);
+            try
+            {
+                using var connecting = CancellationTokenSource.CreateLinkedTokenSource(_stop.Token);
+                connecting.CancelAfter(ServerConnectTimeout);
+                await server.ConnectAsync(_target.Host, _target.Port, connecting.Token);
+                _serverReached = true;
+            }
+            catch (Exception ex)
+            {
+                // The server cannot be reached (refused, or no answer in time): the client is closed, as a proxy with nowhere to go would,
+                // rather than left waiting for an identification that never comes.
+                _serverError = ex.GetType().Name + ": " + ex.Message;
+                server.Dispose();
+                client.Dispose();
+                continue;
+            }
+
             lock (_sockets)
             {
                 _sockets.Add(client);
@@ -132,6 +164,7 @@ internal sealed class FaultyProxy : IAsyncDisposable
                 var allowed = (int)Math.Min(read, Math.Max(0, limit - forwarded));
                 await SendAsync(to, buffer.AsMemory(0, allowed));
                 forwarded += allowed;
+                Interlocked.Add(ref toServer ? ref _forwardedToServer : ref _forwardedToClient, allowed);
                 if (allowed < read || forwarded >= limit)
                 {
                     Cut();
