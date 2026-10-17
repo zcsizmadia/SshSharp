@@ -289,6 +289,35 @@ public sealed class ConfigConnectTests : IDisposable
     }
 
     [Test]
+    public async Task ConnectTimeout_Zero_MeansNoLimit()
+    {
+        // As in OpenSSH: the attempt runs until the connector itself gives up, instead of timing out at once.
+        Exception? caught = null;
+        try
+        {
+            await SshClient.ConnectAsync("slow", new SshConfigConnectOptions
+            {
+                UseAgent = false, // the developer's own agent must not change the outcome
+                Config = SshConfig.Parse("Host slow\n ConnectTimeout 0\n User u\n"),
+                ResolveOptions = Resolve,
+                TcpConnector = async (_, _, _, ct) =>
+                {
+                    await Task.Delay(200, ct);
+                    throw new IOException("the connector gave up");
+                },
+            }, Timeout());
+        }
+        catch (Exception ex)
+        {
+            caught = ex;
+        }
+
+        await Assert.That(caught).IsNotNull();
+        await Assert.That(caught is SshException { Reason: SshFailureReason.Timeout }).IsFalse();
+        await Assert.That(caught!.ToString()).Contains("the connector gave up");
+    }
+
+    [Test]
     public async Task ConnectTimeout_CallersCancellation_StaysACancellation()
     {
         using var cancel = new CancellationTokenSource();
