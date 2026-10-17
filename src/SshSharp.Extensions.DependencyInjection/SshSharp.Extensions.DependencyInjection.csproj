@@ -17,8 +17,9 @@
     <IncludeSymbols>true</IncludeSymbols>
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
 
-    <!-- The public API is tracked in PublicAPI.*.txt. A new package: no earlier release to validate against yet. -->
+    <!-- The public API is tracked in PublicAPI.*.txt, and packing validates it against the previous release on nuget.org. -->
     <EnablePackageValidation>true</EnablePackageValidation>
+    <PackageValidationBaselineVersion>1.0.0</PackageValidationBaselineVersion>
 
     <MinVerTagPrefix>v</MinVerTagPrefix>
     <MinVerDefaultPreReleaseIdentifiers>preview.0</MinVerDefaultPreReleaseIdentifiers>

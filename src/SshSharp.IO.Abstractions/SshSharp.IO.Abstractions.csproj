@@ -19,7 +19,7 @@
 
     <!-- The public API is tracked in PublicAPI.*.txt, and packing validates it against the previous release on nuget.org. -->
     <EnablePackageValidation>true</EnablePackageValidation>
-    <PackageValidationBaselineVersion>0.6.0</PackageValidationBaselineVersion>
+    <PackageValidationBaselineVersion>1.0.0</PackageValidationBaselineVersion>
 
     <MinVerTagPrefix>v</MinVerTagPrefix>
     <MinVerDefaultPreReleaseIdentifiers>preview.0</MinVerDefaultPreReleaseIdentifiers>

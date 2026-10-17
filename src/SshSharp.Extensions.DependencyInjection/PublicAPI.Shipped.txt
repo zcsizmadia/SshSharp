@@ -1,1 +1,39 @@
 #nullable enable
+Microsoft.Extensions.DependencyInjection.SshServiceCollectionExtensions
+SshSharp.Extensions.DependencyInjection.ISshClientFactory
+SshSharp.Extensions.DependencyInjection.ISshClientFactory.ConnectAsync(string! name, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SshSharp.SshClient!>!
+SshSharp.Extensions.DependencyInjection.ISshConnectionProvider
+SshSharp.Extensions.DependencyInjection.ISshConnectionProvider.GetClientAsync(string! name, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SshSharp.SshClient!>!
+SshSharp.Extensions.DependencyInjection.SshEndpointOptions
+SshSharp.Extensions.DependencyInjection.SshEndpointOptions.AcceptNewHostKeys.get -> bool
+SshSharp.Extensions.DependencyInjection.SshEndpointOptions.AcceptNewHostKeys.set -> void
+SshSharp.Extensions.DependencyInjection.SshEndpointOptions.ConfigAlias.get -> string?
+SshSharp.Extensions.DependencyInjection.SshEndpointOptions.ConfigAlias.set -> void
+SshSharp.Extensions.DependencyInjection.SshEndpointOptions.ConfigureClientOptions.get -> System.Func<System.IServiceProvider!, SshSharp.SshClientOptions!, SshSharp.SshClientOptions!>?
+SshSharp.Extensions.DependencyInjection.SshEndpointOptions.ConfigureClientOptions.set -> void
+SshSharp.Extensions.DependencyInjection.SshEndpointOptions.ConnectTimeout.get -> System.TimeSpan
+SshSharp.Extensions.DependencyInjection.SshEndpointOptions.ConnectTimeout.set -> void
+SshSharp.Extensions.DependencyInjection.SshEndpointOptions.Host.get -> string?
+SshSharp.Extensions.DependencyInjection.SshEndpointOptions.Host.set -> void
+SshSharp.Extensions.DependencyInjection.SshEndpointOptions.KeepAliveInterval.get -> System.TimeSpan?
+SshSharp.Extensions.DependencyInjection.SshEndpointOptions.KeepAliveInterval.set -> void
+SshSharp.Extensions.DependencyInjection.SshEndpointOptions.KnownHostsFiles.get -> System.Collections.Generic.IList<string!>!
+SshSharp.Extensions.DependencyInjection.SshEndpointOptions.KnownHostsFiles.set -> void
+SshSharp.Extensions.DependencyInjection.SshEndpointOptions.MaxReconnectDelay.get -> System.TimeSpan
+SshSharp.Extensions.DependencyInjection.SshEndpointOptions.MaxReconnectDelay.set -> void
+SshSharp.Extensions.DependencyInjection.SshEndpointOptions.Password.get -> string?
+SshSharp.Extensions.DependencyInjection.SshEndpointOptions.Password.set -> void
+SshSharp.Extensions.DependencyInjection.SshEndpointOptions.Port.get -> int
+SshSharp.Extensions.DependencyInjection.SshEndpointOptions.Port.set -> void
+SshSharp.Extensions.DependencyInjection.SshEndpointOptions.PrivateKeyFiles.get -> System.Collections.Generic.IList<string!>!
+SshSharp.Extensions.DependencyInjection.SshEndpointOptions.PrivateKeyFiles.set -> void
+SshSharp.Extensions.DependencyInjection.SshEndpointOptions.PrivateKeyPassphrase.get -> string?
+SshSharp.Extensions.DependencyInjection.SshEndpointOptions.PrivateKeyPassphrase.set -> void
+SshSharp.Extensions.DependencyInjection.SshEndpointOptions.ReconnectDelay.get -> System.TimeSpan
+SshSharp.Extensions.DependencyInjection.SshEndpointOptions.ReconnectDelay.set -> void
+SshSharp.Extensions.DependencyInjection.SshEndpointOptions.SshEndpointOptions() -> void
+SshSharp.Extensions.DependencyInjection.SshEndpointOptions.UserName.get -> string?
+SshSharp.Extensions.DependencyInjection.SshEndpointOptions.UserName.set -> void
+static Microsoft.Extensions.DependencyInjection.SshServiceCollectionExtensions.AddSsh(this Microsoft.Extensions.DependencyInjection.IHealthChecksBuilder! builder, string! name, string? checkName = null, Microsoft.Extensions.Diagnostics.HealthChecks.HealthStatus? failureStatus = null, System.Collections.Generic.IEnumerable<string!>? tags = null, System.TimeSpan? timeout = null) -> Microsoft.Extensions.DependencyInjection.IHealthChecksBuilder!
+static Microsoft.Extensions.DependencyInjection.SshServiceCollectionExtensions.AddSshClient(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, string! name) -> Microsoft.Extensions.Options.OptionsBuilder<SshSharp.Extensions.DependencyInjection.SshEndpointOptions!>!
+static Microsoft.Extensions.DependencyInjection.SshServiceCollectionExtensions.AddSshClient(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, string! name, System.Action<SshSharp.Extensions.DependencyInjection.SshEndpointOptions!>! configure) -> Microsoft.Extensions.Options.OptionsBuilder<SshSharp.Extensions.DependencyInjection.SshEndpointOptions!>!
