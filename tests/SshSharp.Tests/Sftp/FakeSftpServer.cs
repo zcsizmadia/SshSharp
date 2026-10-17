@@ -201,20 +201,41 @@ internal sealed class FakeSftpServer
             MaxConcurrentSessions = Math.Max(MaxConcurrentSessions, ++_openSessions);
         }
 
+        var opened = new HashSet<string>(StringComparer.Ordinal);
         try
         {
-            await RunSessionAsync(script);
+            await RunSessionAsync(script, opened);
         }
         finally
         {
             lock (_nodes)
             {
                 _openSessions--;
+
+                // As sftp-server does when its session ends: the handles it opened are closed, including ones whose OPEN the client
+                // stopped waiting for and so never learned.
+                foreach (var handle in opened)
+                {
+                    _handles.Remove(handle);
+                }
             }
         }
     }
 
-    private async Task RunSessionAsync(ExecScript script)
+    /// <summary>Handles a request for one session, remembering the handles it opens.</summary>
+    private byte[]? HandleLocked(byte[] packet, HashSet<string> opened)
+    {
+        var reply = HandleLocked(packet);
+        if (reply is [102, ..] && packet[0] is 3 or 11)
+        {
+            var length = BinaryPrimitives.ReadInt32BigEndian(reply.AsSpan(5));
+            opened.Add(System.Text.Encoding.UTF8.GetString(reply, 9, length));
+        }
+
+        return reply;
+    }
+
+    private async Task RunSessionAsync(ExecScript script, HashSet<string> opened)
     {
         // A reader queues requests as they arrive and a responder answers them, so requests the client sends without waiting pile up
         // in the queue (MaxOutstanding), and two queued ones can be answered in reverse order.
@@ -264,7 +285,7 @@ internal sealed class FakeSftpServer
                 await hold.Task;
             }
 
-            var reply = HandleLocked(packet);
+            var reply = HandleLocked(packet, opened);
             if (StderrPerReply > 0)
             {
                 await script.StderrAsync(new byte[StderrPerReply]);
@@ -291,7 +312,7 @@ internal sealed class FakeSftpServer
 
             if (ReorderReplies && packet[0] != 1 && queue.Reader.TryRead(out var next))
             {
-                var nextReply = HandleLocked(next);
+                var nextReply = HandleLocked(next, opened);
                 Interlocked.Add(ref unanswered, -2);
                 await script.StdoutAsync(Frame(nextReply!));
                 await script.StdoutAsync(Frame(reply!));

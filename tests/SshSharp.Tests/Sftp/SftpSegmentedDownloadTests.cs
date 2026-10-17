@@ -161,6 +161,14 @@ public sealed class SftpSegmentedDownloadTests : IDisposable
 
         await Assert.That(error!.Status).IsEqualTo(SftpStatusCode.Failure);
         await Assert.That(File.Exists(local)).IsFalse();
+
+        // Every handle is closed: the ranges close theirs, and an OPEN the failure cancelled is closed with its session, which the server
+        // may finish ending a moment after the download has returned (seen on macos-latest).
+        for (var i = 0; i < 1000 && rig.Files.OpenHandles != 0; i++)
+        {
+            await Task.Delay(10);
+        }
+
         await Assert.That(rig.Files.OpenHandles).IsEqualTo(0);
 
         // The session is still usable.
