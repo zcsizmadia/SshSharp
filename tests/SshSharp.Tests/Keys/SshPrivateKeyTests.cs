@@ -247,7 +247,7 @@ public class SshPrivateKeyTests
         try
         {
             await File.WriteAllTextAsync(path, TestKeys.OpenSshEd25519(out var blob));
-            using var key = await SshPrivateKey.LoadFileAsync(path);
+            using var key = await SshPrivateKey.LoadAsync(path);
             await Assert.That(key.PublicKey.ToArray()).IsEquivalentTo(blob);
         }
         finally

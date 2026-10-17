@@ -62,17 +62,12 @@ SshSharp.SshSession.CloseInputAsync(System.Threading.CancellationToken cancellat
 *REMOVED*SshSharp.SshSocksProxy.LocalEndPoint.get -> System.Net.IPEndPoint!
 *REMOVED*static SshSharp.Config.SshAlgorithmList.Apply(string! specification, System.Collections.Generic.IReadOnlyList<string!>! defaults) -> System.Collections.Generic.IReadOnlyList<string!>!
 SshSharp.Config.SshConfig.ResolveAsync(string! host, SshSharp.Config.SshConfigResolveOptions? options = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SshSharp.Config.SshHostConfig!>!
-SshSharp.Config.SshConfigResolveOptions.ExecMatcher.get -> System.Func<string!, System.Threading.CancellationToken, System.Threading.Tasks.Task<bool>!>?
-SshSharp.Config.SshConfigResolveOptions.HostCanonicalizer.get -> System.Func<string!, System.Collections.Generic.IReadOnlyList<string!>!, System.Threading.CancellationToken, System.Threading.Tasks.Task<string?>!>?
 static SshSharp.Config.SshExecMatcher.RunShellAsync(string! command, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
 *REMOVED*SshSharp.Config.SshConfigResolveOptions.ExecMatcher.get -> System.Func<string!, bool>?
 *REMOVED*SshSharp.Config.SshConfigResolveOptions.HostCanonicalizer.get -> System.Func<string!, System.Collections.Generic.IReadOnlyList<string!>!, string?>?
 override SshSharp.SshExitSignal.Equals(object? obj) -> bool
 override SshSharp.SshExitSignal.GetHashCode() -> int
 override SshSharp.SshExitSignal.ToString() -> string!
-override SshSharp.SshKnownHostsLookup.Equals(object? obj) -> bool
-override SshSharp.SshKnownHostsLookup.GetHashCode() -> int
-override SshSharp.SshKnownHostsLookup.ToString() -> string!
 SshSharp.SshCommandResult.ExitSignal.get -> SshSharp.SshExitSignal?
 SshSharp.SshExitSignal
 SshSharp.SshExitSignal.<Clone>$() -> SshSharp.SshExitSignal!
@@ -85,21 +80,9 @@ SshSharp.SshExitSignal.ErrorMessage.init -> void
 SshSharp.SshExitSignal.Name.get -> string!
 SshSharp.SshExitSignal.Name.init -> void
 SshSharp.SshExitSignal.SshExitSignal(string! Name, bool CoreDumped, string? ErrorMessage) -> void
-SshSharp.SshHostKeyContext.KnownHostsLookup.get -> SshSharp.SshKnownHostsLookup?
-SshSharp.SshKnownHostsLookup
-SshSharp.SshKnownHostsLookup.<Clone>$() -> SshSharp.SshKnownHostsLookup!
-SshSharp.SshKnownHostsLookup.Deconstruct(out string! Name, out int Port) -> void
-SshSharp.SshKnownHostsLookup.Equals(SshSharp.SshKnownHostsLookup? other) -> bool
-SshSharp.SshKnownHostsLookup.Name.get -> string!
-SshSharp.SshKnownHostsLookup.Name.init -> void
-SshSharp.SshKnownHostsLookup.Port.get -> int
-SshSharp.SshKnownHostsLookup.Port.init -> void
-SshSharp.SshKnownHostsLookup.SshKnownHostsLookup(string! Name, int Port) -> void
 SshSharp.SshSession.ExitSignal.get -> SshSharp.SshExitSignal?
 static SshSharp.SshExitSignal.operator !=(SshSharp.SshExitSignal? left, SshSharp.SshExitSignal? right) -> bool
 static SshSharp.SshExitSignal.operator ==(SshSharp.SshExitSignal? left, SshSharp.SshExitSignal? right) -> bool
-static SshSharp.SshKnownHostsLookup.operator !=(SshSharp.SshKnownHostsLookup? left, SshSharp.SshKnownHostsLookup? right) -> bool
-static SshSharp.SshKnownHostsLookup.operator ==(SshSharp.SshKnownHostsLookup? left, SshSharp.SshKnownHostsLookup? right) -> bool
 *REMOVED*SshSharp.SshCommandResult.ExitSignal.get -> string?
 *REMOVED*SshSharp.SshHostKeyContext.KnownHostsLookup.get -> (string! Name, int Port)?
 *REMOVED*SshSharp.SshSession.ExitSignal.get -> string?
@@ -484,3 +467,39 @@ static SshSharp.Sftp.SftpTransferSummary.operator !=(SshSharp.Sftp.SftpTransferS
 static SshSharp.Sftp.SftpTransferSummary.operator ==(SshSharp.Sftp.SftpTransferSummary? left, SshSharp.Sftp.SftpTransferSummary? right) -> bool
 static SshSharp.Sftp.SshSftpExtensions.OpenSftpAsync(this SshSharp.SshClient! client, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SshSharp.Sftp.SftpClient!>!
 SshSharp.SshExpect.ReadLineAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<string?>!
+*REMOVED*override SshSharp.SshGssapiOptions.Equals(object? obj) -> bool
+*REMOVED*override SshSharp.SshGssapiOptions.GetHashCode() -> int
+*REMOVED*override SshSharp.SshGssapiOptions.ToString() -> string!
+*REMOVED*SshSharp.Scp.SshScpOptions.Progress.get -> System.IProgress<SshSharp.Scp.SshScpProgress>?
+*REMOVED*SshSharp.Scp.SshScpProgress.SshScpProgress() -> void
+*REMOVED*SshSharp.SshGssapiOptions.<Clone>$() -> SshSharp.SshGssapiOptions!
+*REMOVED*SshSharp.SshGssapiOptions.Equals(SshSharp.SshGssapiOptions? other) -> bool
+*REMOVED*SshSharp.SshRemoteSocketForwarder.SocketPath.get -> string!
+*REMOVED*static SshSharp.SshAgent.Pageant() -> SshSharp.SshAgent?
+*REMOVED*static SshSharp.SshAllowedSigners.LoadFileAsync(string! path, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SshSharp.SshAllowedSigners!>!
+*REMOVED*static SshSharp.SshGssapiOptions.operator !=(SshSharp.SshGssapiOptions? left, SshSharp.SshGssapiOptions? right) -> bool
+*REMOVED*static SshSharp.SshGssapiOptions.operator ==(SshSharp.SshGssapiOptions? left, SshSharp.SshGssapiOptions? right) -> bool
+*REMOVED*static SshSharp.SshPrivateKey.LoadFileAsync(string! path, string? passphrase = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SshSharp.SshPrivateKey!>!
+override SshSharp.KnownHostsLookup.Equals(object? obj) -> bool
+override SshSharp.KnownHostsLookup.GetHashCode() -> int
+override SshSharp.KnownHostsLookup.ToString() -> string!
+SshSharp.Config.SshConfigResolveOptions.ExecMatcher.get -> System.Func<string!, System.Threading.CancellationToken, System.Threading.Tasks.ValueTask<bool>>?
+SshSharp.Config.SshConfigResolveOptions.HostCanonicalizer.get -> System.Func<string!, System.Collections.Generic.IReadOnlyList<string!>!, System.Threading.CancellationToken, System.Threading.Tasks.ValueTask<string?>>?
+SshSharp.KnownHostsLookup
+SshSharp.KnownHostsLookup.<Clone>$() -> SshSharp.KnownHostsLookup!
+SshSharp.KnownHostsLookup.Deconstruct(out string! Name, out int Port) -> void
+SshSharp.KnownHostsLookup.Equals(SshSharp.KnownHostsLookup? other) -> bool
+SshSharp.KnownHostsLookup.KnownHostsLookup(string! Name, int Port) -> void
+SshSharp.KnownHostsLookup.Name.get -> string!
+SshSharp.KnownHostsLookup.Name.init -> void
+SshSharp.KnownHostsLookup.Port.get -> int
+SshSharp.KnownHostsLookup.Port.init -> void
+SshSharp.Scp.SshScpOptions.Progress.get -> System.IProgress<SshSharp.Scp.SshScpProgress!>?
+SshSharp.Scp.SshScpProgress.<Clone>$() -> SshSharp.Scp.SshScpProgress!
+SshSharp.SshHostKeyContext.KnownHostsLookup.get -> SshSharp.KnownHostsLookup?
+SshSharp.SshRemoteSocketForwarder.RemoteSocketPath.get -> string!
+static SshSharp.KnownHostsLookup.operator !=(SshSharp.KnownHostsLookup? left, SshSharp.KnownHostsLookup? right) -> bool
+static SshSharp.KnownHostsLookup.operator ==(SshSharp.KnownHostsLookup? left, SshSharp.KnownHostsLookup? right) -> bool
+static SshSharp.SshAgent.FromPageant() -> SshSharp.SshAgent?
+static SshSharp.SshAllowedSigners.LoadAsync(string! path, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SshSharp.SshAllowedSigners!>!
+static SshSharp.SshPrivateKey.LoadAsync(string! path, string? passphrase = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SshSharp.SshPrivateKey!>!

@@ -158,7 +158,7 @@ public sealed class SshClientOptions
     public SshGssapiOptions? Gssapi { get; init; }
 
     /// <summary>
-    /// Keys for public-key authentication, tried in order (load them with <see cref="SshPrivateKey.LoadFileAsync"/>). The client does not
+    /// Keys for public-key authentication, tried in order (load them with <see cref="SshPrivateKey.LoadAsync"/>). The client does not
     /// dispose them. The server is asked whether it accepts each key before anything is signed.
     /// </summary>
     public IReadOnlyList<SshPrivateKey> PrivateKeys { get; init; } = [];

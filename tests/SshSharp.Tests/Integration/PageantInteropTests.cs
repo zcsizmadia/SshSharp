@@ -17,7 +17,7 @@ public class PageantInteropTests
             return;
         }
 
-        var pageant = SshAgent.Pageant();
+        var pageant = SshAgent.FromPageant();
         await Assert.That(pageant).IsNotNull();
         await Assert.That(pageant!.Path).StartsWith(@"\\.\pipe\pageant.");
         await Assert.That(SshAgent.FromEnvironment()!.Path).IsEqualTo(pageant.Path);

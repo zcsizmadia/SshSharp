@@ -23,11 +23,11 @@ public sealed class SshConfigResolveOptions
 
     /// <summary>
     /// Evaluates <c>Match exec</c> commands (after token expansion): completes with true when the command succeeds. Null (the
-    /// default) means exec criteria never match, because running commands from a config file is opt-in; use
-    /// <see cref="SshExecMatcher.RunShellAsync"/> for trusted files. Asynchronous, so a config that needs it resolves with
-    /// <see cref="SshConfig.ResolveAsync"/>.
+    /// default) means exec criteria never match, because running commands from a config file is opt-in; for trusted files, run them with
+    /// <see cref="SshExecMatcher.RunShellAsync"/>: <c>(command, ct) =&gt; new(SshExecMatcher.RunShellAsync(command, ct))</c>. Asynchronous,
+    /// so a config that needs it resolves with <see cref="SshConfig.ResolveAsync"/>.
     /// </summary>
-    public Func<string, CancellationToken, Task<bool>>? ExecMatcher { get; init; }
+    public Func<string, CancellationToken, ValueTask<bool>>? ExecMatcher { get; init; }
 
     /// <summary>
     /// Looks up the canonical name for <c>CanonicalizeHostname</c>: receives the host and the <c>CanonicalDomains</c> and completes
@@ -35,7 +35,7 @@ public sealed class SshConfigResolveOptions
     /// the caller's business (DNS, <c>CanonicalizePermittedCNAMEs</c> policy). Asynchronous, so a config that needs it resolves with
     /// <see cref="SshConfig.ResolveAsync"/>.
     /// </summary>
-    public Func<string, IReadOnlyList<string>, CancellationToken, Task<string?>>? HostCanonicalizer { get; init; }
+    public Func<string, IReadOnlyList<string>, CancellationToken, ValueTask<string?>>? HostCanonicalizer { get; init; }
 
     /// <summary>A tag given by the caller (<c>ssh -P</c>), matched by <c>Match tagged</c>; overrides <c>Tag</c> in the file.</summary>
     public string? Tag { get; init; }

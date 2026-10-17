@@ -13,7 +13,7 @@ public class PublicKeyInteropTests
 
     /// <summary>Files with "encrypted" in their name are protected with SSHSHARP_TEST_KEY_PASSPHRASE.</summary>
     private static Task<SshPrivateKey> LoadAsync(string file) =>
-        SshPrivateKey.LoadFileAsync(file, Path.GetFileName(file).Contains("encrypted", StringComparison.Ordinal)
+        SshPrivateKey.LoadAsync(file, Path.GetFileName(file).Contains("encrypted", StringComparison.Ordinal)
             ? Environment.GetEnvironmentVariable("SSHSHARP_TEST_KEY_PASSPHRASE")
             : null);
 

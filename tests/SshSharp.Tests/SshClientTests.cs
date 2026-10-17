@@ -523,7 +523,7 @@ public class SshClientTests
         await Assert.That(ex.HostKey!.Fingerprint).StartsWith("SHA256:");
         await Assert.That(seen!.Host).IsNull(); // over a stream the host is not known
         await Assert.That(seen.HostKeyAlias).IsEqualTo("my-alias");
-        await Assert.That(seen.KnownHostsLookup).IsEqualTo(new SshKnownHostsLookup("my-alias", 22));
+        await Assert.That(seen.KnownHostsLookup).IsEqualTo(new KnownHostsLookup("my-alias", 22));
     }
 
     [Test]

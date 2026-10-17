@@ -44,7 +44,7 @@ public sealed record SshAgentKeyConstraints
                 }
             }
 
-            field = value;
+            field = [.. value]; // a copy: changing the caller's list later does not change the constraint
         }
     } = [];
 }

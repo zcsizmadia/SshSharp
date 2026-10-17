@@ -138,7 +138,7 @@ Connect with a key and verify the host against `~/.ssh/known_hosts`:
 using SshSharp;
 using SshSharp.Config;
 
-using var key = await SshPrivateKey.LoadFileAsync("/home/me/.ssh/id_ed25519");
+using var key = await SshPrivateKey.LoadAsync("/home/me/.ssh/id_ed25519");
 await using var client = await SshClient.ConnectAsync("example.com", 22, new SshClientOptions
 {
     UserName = "deploy",

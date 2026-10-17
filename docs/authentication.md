@@ -18,8 +18,8 @@ password answers a round that asks for exactly one hidden input. It is never sen
 ## Private keys
 
 ```csharp
-using var ed25519 = await SshPrivateKey.LoadFileAsync("id_ed25519");
-using var rsa = await SshPrivateKey.LoadFileAsync("legacy.pem", passphrase: Environment.GetEnvironmentVariable("KEY_PASSPHRASE"));
+using var ed25519 = await SshPrivateKey.LoadAsync("id_ed25519");
+using var rsa = await SshPrivateKey.LoadAsync("legacy.pem", passphrase: Environment.GetEnvironmentVariable("KEY_PASSPHRASE"));
 var options = new SshClientOptions { UserName = "deploy", PrivateKeys = [ed25519, rsa], HostKeyVerifier = verifier };
 ```
 
@@ -90,7 +90,7 @@ An OpenSSH user certificate (`id_ed25519-cert.pub`, made with `ssh-keygen -s`) l
 (`TrustedUserCAKeys`) accept the key without an `authorized_keys` entry.
 
 ```csharp
-using var key = await SshPrivateKey.LoadFileAsync("id_ed25519");
+using var key = await SshPrivateKey.LoadAsync("id_ed25519");
 var certificate = SshCertificate.Parse(await File.ReadAllTextAsync("id_ed25519-cert.pub"));
 var options = new SshClientOptions
 {
@@ -161,7 +161,7 @@ servers you trust: while you are connected, anyone with enough rights on the ser
 the keys). Connecting by `ssh_config` alias follows `ForwardAgent yes`.
 
 On Windows, when `SSH_AUTH_SOCK` is not set and the OpenSSH agent service is not running, `FromEnvironment()` finds PuTTY's Pageant
-(0.75 and later) on the pipe it creates for the current user; `SshAgent.Pageant()` asks for Pageant specifically. Pageant's keys work like
+(0.75 and later) on the pipe it creates for the current user; `SshAgent.FromPageant()` asks for Pageant specifically. Pageant's keys work like
 any agent's, including for signing (`SshSignature`) and agent forwarding. An agent pipe is used only when it belongs to the current
 user, SYSTEM or the Administrators group, so another user cannot pose as the agent by creating its pipe first.
 
@@ -171,7 +171,7 @@ user, SYSTEM or the Administrators group, so another user cannot pose as the age
 
 ```csharp
 var agent = SshAgent.FromEnvironment() ?? throw new InvalidOperationException("No SSH agent is running.");
-using var key = await SshPrivateKey.LoadFileAsync("/home/me/.ssh/id_ed25519", passphrase);
+using var key = await SshPrivateKey.LoadAsync("/home/me/.ssh/id_ed25519", passphrase);
 await agent.AddKeyAsync(key, new SshAgentKeyConstraints { Lifetime = TimeSpan.FromHours(1), Confirm = true }); // ssh-add -t 1h -c
 await agent.RemoveKeyAsync(key);                                                                                 // ssh-add -d
 await agent.RemoveAllKeysAsync();                                                                                // ssh-add -D

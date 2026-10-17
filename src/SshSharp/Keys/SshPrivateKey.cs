@@ -9,7 +9,7 @@ using SshSharp.Protocol;
 namespace SshSharp;
 
 /// <summary>
-/// A private key for public-key authentication. Load one with <see cref="Parse"/> or <see cref="LoadFileAsync"/>. Supported formats:
+/// A private key for public-key authentication. Load one with <see cref="Parse"/> or <see cref="LoadAsync"/>. Supported formats:
 /// the OpenSSH key format (<c>BEGIN OPENSSH PRIVATE KEY</c>, as <c>ssh-keygen</c> writes by default, also passphrase-protected), PuTTY
 /// <c>.ppk</c> (versions 2 and 3, also encrypted), PKCS#8 (<c>BEGIN PRIVATE KEY</c>,
 /// and <c>BEGIN ENCRYPTED PRIVATE KEY</c> for RSA and ECDSA), and PKCS#1/SEC1 PEM (<c>BEGIN RSA PRIVATE KEY</c>, <c>BEGIN EC PRIVATE KEY</c>).
@@ -65,7 +65,7 @@ public abstract class SshPrivateKey : IDisposable
 
     /// <summary>Reads and parses a private key file.</summary>
     /// <inheritdoc cref="Parse" path="/exception"/>
-    public static async Task<SshPrivateKey> LoadFileAsync(string path, string? passphrase = null, CancellationToken cancellationToken = default)
+    public static async Task<SshPrivateKey> LoadAsync(string path, string? passphrase = null, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
         return Parse(await File.ReadAllTextAsync(path, cancellationToken).ConfigureAwait(false), passphrase);

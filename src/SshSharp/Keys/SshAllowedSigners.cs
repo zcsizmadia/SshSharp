@@ -56,7 +56,7 @@ public sealed class SshAllowedSigners
 
     /// <summary>Reads and parses an allowed-signers file.</summary>
     /// <inheritdoc cref="Parse" path="/exception"/>
-    public static async Task<SshAllowedSigners> LoadFileAsync(string path, CancellationToken cancellationToken = default)
+    public static async Task<SshAllowedSigners> LoadAsync(string path, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
         return Parse(await File.ReadAllTextAsync(path, cancellationToken).ConfigureAwait(false));

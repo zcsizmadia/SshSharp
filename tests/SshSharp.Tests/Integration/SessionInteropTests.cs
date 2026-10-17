@@ -18,7 +18,7 @@ public class SessionInteropTests
         }
 
         // The key is not disposed until the process ends; fine for a test.
-        var key = keyFile is not null && File.Exists(keyFile) ? await SshPrivateKey.LoadFileAsync(keyFile) : null;
+        var key = keyFile is not null && File.Exists(keyFile) ? await SshPrivateKey.LoadAsync(keyFile) : null;
         var options = new SshClientOptions
         {
             UserName = user,

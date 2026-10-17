@@ -298,7 +298,7 @@ public class SshSignatureTests
             var (signed, signOutput) = await RunAsync(sshKeygen, null, "-Y", "sign", "-f", keyPath, "-n", "git", messagePath);
             await Assert.That(signed).IsEqualTo(0).Because(signOutput);
             var theirs = SshSignature.Parse(await File.ReadAllTextAsync(messagePath + ".sig"));
-            var signers = await SshAllowedSigners.LoadFileAsync(allowed);
+            var signers = await SshAllowedSigners.LoadAsync(allowed);
             await Assert.That(signers.Verify(theirs, "signer@example.com", Message, "git")).IsTrue();
             await Assert.That(signers.Verify(theirs, "signer@example.com", Message.AsSpan(1), "git")).IsFalse();
             await Assert.That(theirs.ToString()).IsEqualTo(await File.ReadAllTextAsync(messagePath + ".sig"));

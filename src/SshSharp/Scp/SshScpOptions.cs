@@ -29,4 +29,4 @@ public sealed class SshScpOptions
 /// <param name="Path">The file: the remote path for uploads of a single file, otherwise the path relative to the transfer's root.</param>
 /// <param name="BytesTransferred">Bytes of this file transferred so far.</param>
 /// <param name="TotalBytes">The file's size.</param>
-public readonly record struct SshScpProgress(string Path, long BytesTransferred, long TotalBytes);
+public sealed record SshScpProgress(string Path, long BytesTransferred, long TotalBytes);

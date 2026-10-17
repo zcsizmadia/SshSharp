@@ -171,7 +171,7 @@ public sealed class RemoteSocketForwardingTests : IDisposable
         await using var forwarder = await client.ForwardRemoteUnixSocketAsync("/run/app/db.sock", "127.0.0.1", service.Port, Timeout());
 
         await Assert.That(server.RemoteSocketForwards).Contains("/run/app/db.sock");
-        await Assert.That(forwarder.SocketPath).IsEqualTo("/run/app/db.sock");
+        await Assert.That(forwarder.RemoteSocketPath).IsEqualTo("/run/app/db.sock");
         await Assert.That((forwarder.LocalHost, forwarder.LocalPort, forwarder.LocalSocketPath)).IsEqualTo(("127.0.0.1", service.Port, (string?)null));
         var answers = await Task.WhenAll(Enumerable.Range(0, 3).Select(async i =>
         {

@@ -41,7 +41,7 @@ await using var client = await SshClient.ConnectAsync("prod-db");
 ## Use a key
 
 ```csharp
-using var key = await SshPrivateKey.LoadFileAsync(
+using var key = await SshPrivateKey.LoadAsync(
     Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".ssh", "id_ed25519"));
 
 await using var client = await SshClient.ConnectAsync("example.com", 22, new SshClientOptions

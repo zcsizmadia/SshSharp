@@ -11,7 +11,7 @@ public class PageantTests
     {
         if (!OperatingSystem.IsWindows())
         {
-            await Assert.That(SshAgent.Pageant()).IsNull();
+            await Assert.That(SshAgent.FromPageant()).IsNull();
             return;
         }
 

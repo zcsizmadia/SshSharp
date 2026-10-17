@@ -32,7 +32,7 @@ public sealed class CertificateInteropTests : IDisposable
         var knownHosts = Path.Combine(_dir, "known_hosts");
         await File.WriteAllTextAsync(knownHosts, $"@cert-authority * {ca[0]} {ca[1]}\n");
 
-        using var key = await SshPrivateKey.LoadFileAsync(Path.Combine(dir, "user"));
+        using var key = await SshPrivateKey.LoadAsync(Path.Combine(dir, "user"));
         var certificate = SshCertificate.Parse(await File.ReadAllTextAsync(Path.Combine(dir, "user-cert.pub")));
         var options = new SshClientOptions
         {
