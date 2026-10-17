@@ -14,6 +14,7 @@ internal sealed class ConnectDeadline : IDisposable
     private readonly CancellationTokenSource? _timeout;
     private readonly CancellationTokenSource? _linked;
 
+    /// <summary>Starts the clock: the deadline is <paramref name="limit"/> from now.</summary>
     /// <param name="limit">The limit; null or infinite for none.</param>
     /// <param name="cancellationToken">The caller's token.</param>
     public ConnectDeadline(TimeSpan? limit, CancellationToken cancellationToken)
