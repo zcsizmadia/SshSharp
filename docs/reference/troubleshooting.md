@@ -12,12 +12,15 @@ The TCP connection (or a proxy, `ProxyJump` hop or `ProxyCommand`) failed before
 - Check the host name, port and firewall: does `ssh -p <port> <host>` connect from the same machine?
 - Through a proxy: the message says what the proxy answered (a 407 means proxy credentials are needed).
 - With `BindAddress` or `LocalEndPoint`: an IPv4 bind address reaches only IPv4 destinations, and the reverse.
+- With `AddressFamily` (`SshClientOptions` or `ssh_config`): only addresses of that family are tried.
 - `RefuseConnection yes` in `ssh_config` refuses on purpose.
 
 ### `Timeout` while connecting
 
-`ConnectTimeout` passed. A server that accepts TCP but does not answer the SSH version exchange (a busy sshd hitting
-`MaxStartups`, a port that is not SSH) looks like this. Check that the port speaks SSH (`nc host 22` shows `SSH-2.0-...`).
+`ConnectTimeout` passed (`SshClientOptions.ConnectTimeout`, or `ssh_config`'s). A server that accepts TCP but does not answer the
+SSH version exchange (a busy sshd hitting `MaxStartups`, a port that is not SSH) looks like this. Check that the port speaks SSH
+(`nc host 22` shows `SSH-2.0-...`). A host name whose IPv6 address does not answer can use up the whole timeout before its IPv4
+address is tried: set `AddressFamily = SshAddressFamily.Inet` (`AddressFamily inet`) where the IPv6 route is broken.
 
 ### No common algorithms
 

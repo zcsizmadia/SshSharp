@@ -274,6 +274,42 @@ public sealed class SshClientOptions
     public System.Net.IPEndPoint? LocalEndPoint { get; init; }
 
     /// <summary>
+    /// How long the connection attempt may take, as ssh_config's <c>ConnectTimeout</c>: resolving the name and the TCP connection (or the
+    /// connection through <see cref="Proxy"/>), the SSH handshake, host key verification and authentication, the time spent in your
+    /// callbacks included (<see cref="KeyboardInteractive"/>, a host key prompt). When it passes, the attempt fails with an
+    /// <see cref="SshException"/> whose <see cref="SshException.Reason"/> is <see cref="SshFailureReason.Timeout"/> (its inner exception is a
+    /// <see cref="TimeoutException"/>); a cancelled <see cref="CancellationToken"/> still ends it with an
+    /// <see cref="OperationCanceledException"/>. It ends with the connection: once connected, operations are bounded by their own tokens.
+    /// Null (the default) or <see cref="System.Threading.Timeout.InfiniteTimeSpan"/> sets no limit but the token. Over a stream you
+    /// opened (<see cref="SshClient.ConnectAsync(Stream, SshClientOptions, bool, CancellationToken)"/>) it bounds the handshake and
+    /// authentication.
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException">The value is zero or negative (other than infinite), or longer than about 24 days.</exception>
+    public TimeSpan? ConnectTimeout
+    {
+        get => _connectTimeout;
+        init
+        {
+            if (value is { } limit && limit != System.Threading.Timeout.InfiniteTimeSpan && (limit <= TimeSpan.Zero || limit.TotalMilliseconds > int.MaxValue))
+            {
+                throw new ArgumentOutOfRangeException(nameof(value), limit, "The connect timeout must be positive (at most about 24 days), infinite, or null.");
+            }
+
+            _connectTimeout = value;
+        }
+    }
+
+    private readonly TimeSpan? _connectTimeout;
+
+    /// <summary>
+    /// Which addresses of the server to try, as ssh_config's <c>AddressFamily</c> (<c>ssh -4</c>, <c>ssh -6</c>): any (the default), IPv4
+    /// only or IPv6 only. Applies to <see cref="SshClient.ConnectAsync(string, int, SshClientOptions, CancellationToken)"/>; with a
+    /// <see cref="Proxy"/>, the proxy resolves the server's name and this does not apply (the connection to the proxy itself uses any
+    /// family). With a <see cref="LocalEndPoint"/> too, only addresses that are of the allowed family and of the local endpoint's are tried.
+    /// </summary>
+    public Config.SshAddressFamily AddressFamily { get; init; }
+
+    /// <summary>
     /// Restrict key exchange, host key, cipher and MAC algorithms to FIPS-approved ones (NIST curves and DH groups, RSA/ECDSA, AES, HMAC-SHA2).
     /// Curve25519, Ed25519 and ChaCha20-Poly1305 are excluded. This limits what is negotiated; it does not make the process FIPS-validated.
     /// </summary>

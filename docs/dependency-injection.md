@@ -45,7 +45,7 @@ builder.Services.AddSshClient("db", o => o.ConfigAlias = "prod-db"); // everythi
 | `AcceptNewHostKeys` | Record the key of a host not in those files yet (`StrictHostKeyChecking accept-new`). Off by default: an unknown host fails the connection, and a changed key always does. |
 | `ConfigAlias` | Connect through ssh_config by this alias instead: ProxyJump, IdentityFile, known_hosts and the rest come from there, and `Host`, `Port`, `UserName`, `PrivateKeyFiles`, `KnownHostsFiles`, `AcceptNewHostKeys` and `KeepAliveInterval` are ignored (ssh_config's `ServerAliveInterval` applies). `Password` is still offered, to the destination only, never to a ProxyJump hop. |
 | `KeepAliveInterval` | Keep-alives, so a dead connection is noticed. |
-| `ConnectTimeout` | How long one attempt may take, authentication included (default 30 s); then a `TimeoutException`. |
+| `ConnectTimeout` | How long one attempt may take, authentication included (default 30 s); then a `TimeoutException`. It is also the built `SshClientOptions.ConnectTimeout`, which `ConfigureClientOptions` may shorten but not extend. |
 | `ReconnectDelay`, `MaxReconnectDelay` | The shared connection's wait after a failed attempt (default 1 s, doubling up to 1 min). |
 | `ConfigureClientOptions` | A function from the services and the built `SshClientOptions` to the options to use: an agent, a custom host key verifier, keys held elsewhere (`SshPrivateKey.FromSigner`), a proxy. Not used with `ConfigAlias`. |
 

@@ -284,7 +284,53 @@ public sealed class ConfigConnectTests : IDisposable
             },
         }, Timeout()));
         await Assert.That(ex!.Reason).IsEqualTo(SshFailureReason.Timeout);
+        await Assert.That(ex.InnerException).IsTypeOf<TimeoutException>(); // as SshClientOptions.ConnectTimeout reports it
         await Assert.That(DateTime.UtcNow - started).IsLessThan(TimeSpan.FromSeconds(20));
+    }
+
+    [Test]
+    public async Task ConnectTimeout_CallersCancellation_StaysACancellation()
+    {
+        using var cancel = new CancellationTokenSource();
+        var connecting = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var attempt = SshClient.ConnectAsync("slow", new SshConfigConnectOptions
+        {
+            UseAgent = false, // the developer's own agent must not change the outcome
+            Config = SshConfig.Parse("Host slow\n ConnectTimeout 300\n User u\n"),
+            ResolveOptions = Resolve,
+            TcpConnector = async (_, _, _, ct) =>
+            {
+                connecting.TrySetResult();
+                await Task.Delay(System.Threading.Timeout.Infinite, ct);
+                throw new InvalidOperationException("unreachable");
+            },
+        }, cancel.Token);
+        await connecting.Task.WaitAsync(Timeout());
+        await cancel.CancelAsync();
+
+        await Assert.That(async () => await attempt).Throws<OperationCanceledException>();
+    }
+
+    [Test]
+    [Arguments("", SshAddressFamily.Any)]
+    [Arguments(" AddressFamily inet\n", SshAddressFamily.Inet)]
+    [Arguments(" AddressFamily inet6\n", SshAddressFamily.Inet6)]
+    public async Task AddressFamily_InSshConfig_ReachesTheConnection(string line, SshAddressFamily expected)
+    {
+        SshAddressFamily? seen = null;
+        var ex = await Assert.ThrowsAsync<SshException>(async () => await SshClient.ConnectAsync("box", new SshConfigConnectOptions
+        {
+            UseAgent = false, // the developer's own agent must not change the outcome
+            Config = SshConfig.Parse("Host box\n User u\n" + line),
+            ResolveOptions = Resolve,
+            TcpConnector = (_, _, family, _) =>
+            {
+                seen = family;
+                throw new SshException(SshFailureReason.ConnectFailed, "No route.");
+            },
+        }, Timeout()));
+        await Assert.That(ex!.Reason).IsEqualTo(SshFailureReason.ConnectFailed);
+        await Assert.That(seen).IsEqualTo(expected);
     }
 
     [Test]

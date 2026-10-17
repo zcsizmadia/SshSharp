@@ -21,6 +21,14 @@ internal static class TcpConnector
     /// <param name="cancellationToken">Cancels resolving and connecting.</param>
     public static async Task<NetworkStream> ConnectAsync(string host, int port, IReadOnlyList<IPEndPoint>? local, SshAddressFamily family, string what, CancellationToken cancellationToken)
     {
+        // An address of the other family has nothing to try (the socket would refuse it with a NotSupportedException).
+        if (family != SshAddressFamily.Any && IPAddress.TryParse(host, out var address)
+            && address.AddressFamily != (family == SshAddressFamily.Inet ? AddressFamily.InterNetwork : AddressFamily.InterNetworkV6))
+        {
+            throw new SshException(SshFailureReason.ConnectFailed,
+                $"The address of {what} is not {(family == SshAddressFamily.Inet ? "IPv4" : "IPv6")}, the only family AddressFamily allows.");
+        }
+
         if (local is null || local.Count == 0)
         {
             var tcp = family switch

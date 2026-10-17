@@ -47,7 +47,11 @@ public sealed class SshEndpointOptions
     /// <summary>Send keep-alives at this interval, so a dead connection is noticed (none by default).</summary>
     public TimeSpan? KeepAliveInterval { get; set; }
 
-    /// <summary>How long one connection attempt, handshake and authentication included, may take (default 30 seconds).</summary>
+    /// <summary>
+    /// How long one connection attempt, handshake and authentication included, may take (default 30 seconds). It is also the
+    /// <see cref="SshClientOptions.ConnectTimeout"/> of the client options built from these settings, which
+    /// <see cref="ConfigureClientOptions"/> may shorten; it cannot extend the attempt past this limit.
+    /// </summary>
     public TimeSpan ConnectTimeout { get; set; } = TimeSpan.FromSeconds(30);
 
     /// <summary>The wait before the shared connection's first reconnection attempt; it doubles after each failure (default 1 second).</summary>

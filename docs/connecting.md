@@ -17,6 +17,26 @@ await using var client = await SshClient.ConnectAsync("example.com", 22, new Ssh
 
 Socket errors surface as `SshException` with `SshFailureReason.ConnectFailed`.
 
+### Connect timeout
+
+`ConnectTimeout` bounds the whole attempt: name resolution, the TCP connection (or the proxy), the key exchange, host key
+verification and authentication. When it passes, the attempt fails with `SshException` and `SshFailureReason.Timeout`; cancelling
+your token is still an `OperationCanceledException`. It is null (no limit) by default.
+
+[!code-csharp[](snippets/Resilience.cs#connect-timeout)]
+
+Over a stream it bounds the key exchange and authentication. See [Cancellation and timeouts](how-to/cancellation-and-timeouts.md).
+
+### IPv4 or IPv6 only
+
+`AddressFamily` chooses which of the server's addresses are tried, as `ssh -4` and `ssh -6` (`AddressFamily inet` and `inet6` in
+`ssh_config`) do: `Any` (the default), `Inet` (IPv4) or `Inet6` (IPv6).
+
+[!code-csharp[](snippets/Connecting.cs#address-family)]
+
+An address literal of the other family, or a name with no address of the allowed one, fails with `ConnectFailed`. Through a `Proxy`
+it does not apply, since the proxy resolves the name. With `LocalEndPoint`, both restrictions apply.
+
 ## Over any stream
 
 SSH can run over anything duplex: a WebSocket wrapper, a named pipe, a tunnel of your own. Without a host name there is

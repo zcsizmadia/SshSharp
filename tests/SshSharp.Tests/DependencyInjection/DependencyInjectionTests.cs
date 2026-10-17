@@ -165,6 +165,85 @@ public sealed class DependencyInjectionTests : IDisposable
         await Assert.That(server.Connections).IsEqualTo(3);
     }
 
+    /// <summary>An endpoint at a loopback port that completes TCP connections (the backlog does) and never sends an identification.</summary>
+    private Action<SshEndpointOptions> Silent(System.Net.Sockets.TcpListener listener, TimeSpan connectTimeout, Func<IServiceProvider, SshClientOptions, SshClientOptions>? configure = null) => o =>
+    {
+        o.Host = "127.0.0.1";
+        o.Port = ((System.Net.IPEndPoint)listener.LocalEndpoint).Port;
+        o.UserName = "tester";
+        o.KnownHostsFiles = [KnownHosts];
+        o.ConnectTimeout = connectTimeout;
+        o.ConfigureClientOptions = configure;
+    };
+
+    [Test]
+    public async Task ConnectTimeout_IsTheClientOptionsConnectTimeout()
+    {
+        await using var server = new TcpFakeSshServer();
+        TimeSpan? seen = null;
+        var services = new ServiceCollection();
+        services.AddSshClient("box", Endpoint(server)).Configure(o =>
+        {
+            o.ConnectTimeout = TimeSpan.FromSeconds(20);
+            o.ConfigureClientOptions = (_, options) =>
+            {
+                seen = options.ConnectTimeout;
+                return options;
+            };
+        });
+        await using var provider = services.BuildServiceProvider();
+
+        await using var client = await provider.GetRequiredService<ISshClientFactory>().ConnectAsync("box", Timeout());
+        await Assert.That(client.IsConnected).IsTrue();
+        await Assert.That(seen).IsEqualTo(TimeSpan.FromSeconds(20));
+    }
+
+    [Test]
+    public async Task ConnectTimeout_StopsAServerThatNeverAnswers_WithATimeoutException()
+    {
+        var listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+        listener.Start();
+        try
+        {
+            var services = new ServiceCollection();
+            services.AddSshClient("box", Silent(listener, TimeSpan.FromMilliseconds(300)));
+            await using var provider = services.BuildServiceProvider();
+
+            await Assert.That(async () => await provider.GetRequiredService<ISshClientFactory>().ConnectAsync("box", Timeout()))
+                .Throws<TimeoutException>().WithMessageContaining("'box'");
+        }
+        finally
+        {
+            listener.Stop();
+        }
+    }
+
+    [Test]
+    public async Task ConfigureClientOptions_CanShortenTheConnectTimeout_StillATimeoutException()
+    {
+        var listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+        listener.Start();
+        try
+        {
+            var services = new ServiceCollection();
+            services.AddSshClient("box", Silent(listener, TimeSpan.FromMinutes(5), (_, o) => new SshClientOptions
+            {
+                UserName = o.UserName,
+                HostKeyVerifier = o.HostKeyVerifier,
+                ConnectTimeout = TimeSpan.FromMilliseconds(300),
+            }));
+            await using var provider = services.BuildServiceProvider();
+
+            var ex = await Assert.ThrowsAsync<TimeoutException>(async () => await provider.GetRequiredService<ISshClientFactory>().ConnectAsync("box", Timeout()));
+            await Assert.That(ex!.InnerException).IsTypeOf<SshException>();
+            await Assert.That(((SshException)ex.InnerException!).Reason).IsEqualTo(SshFailureReason.Timeout);
+        }
+        finally
+        {
+            listener.Stop();
+        }
+    }
+
     [Test]
     public async Task DisposingTheContainer_ClosesTheSharedConnection()
     {

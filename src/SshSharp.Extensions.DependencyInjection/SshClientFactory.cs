@@ -58,7 +58,7 @@ internal sealed class SshClientFactory(
             return endpoint.ConfigAlias is { Length: > 0 } alias
                 ? await SshClient.ConnectAsync(alias, new SshConfigConnectOptions { Password = endpoint.Password, Logger = _logger }, timeout.Token)
                     .ConfigureAwait(false)
-                : await ConnectDirectAsync(endpoint, timeout.Token).ConfigureAwait(false);
+                : await ConnectDirectAsync(name, endpoint, timeout.Token).ConfigureAwait(false);
         }
         catch (OperationCanceledException ex) when (timeout.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
         {
@@ -66,7 +66,7 @@ internal sealed class SshClientFactory(
         }
     }
 
-    private async Task<SshClient> ConnectDirectAsync(SshEndpointOptions endpoint, CancellationToken cancellationToken)
+    private async Task<SshClient> ConnectDirectAsync(string name, SshEndpointOptions endpoint, CancellationToken cancellationToken)
     {
         var keys = new List<SshPrivateKey>();
         try
@@ -89,6 +89,7 @@ internal sealed class SshClientFactory(
                     Policy = endpoint.AcceptNewHostKeys ? StrictHostKeyChecking.AcceptNew : StrictHostKeyChecking.Yes,
                 },
                 KeepAliveInterval = endpoint.KeepAliveInterval,
+                ConnectTimeout = endpoint.ConnectTimeout,
                 Logger = _logger,
             };
             if (endpoint.ConfigureClientOptions is { } configure)
@@ -96,7 +97,16 @@ internal sealed class SshClientFactory(
                 options = configure(services, options);
             }
 
-            return await SshClient.ConnectAsync(endpoint.Host!, endpoint.Port, options, cancellationToken).ConfigureAwait(false);
+            try
+            {
+                return await SshClient.ConnectAsync(endpoint.Host!, endpoint.Port, options, cancellationToken).ConfigureAwait(false);
+            }
+            catch (SshException ex) when (ex is { Reason: SshFailureReason.Timeout, InnerException: TimeoutException })
+            {
+                // The client's ConnectTimeout passed (perhaps one ConfigureClientOptions shortened): reported as this endpoint's timeout, as
+                // the factory's own limit is. A proxy's handshake timeout has no TimeoutException inside and stays an SshException.
+                throw new TimeoutException($"Connecting to the SSH endpoint '{name}' took longer than {options.ConnectTimeout}.", ex);
+            }
         }
         finally
         {

@@ -56,9 +56,10 @@ public sealed partial class SshClient
             throw new SshException(SshFailureReason.ConnectFailed, "The configuration names a KnownHostsCommand, and AllowKnownHostsCommand is off.");
         }
 
-        using var timeout = hostConfig.ConnectTimeout is { } limit ? new CancellationTokenSource(limit) : null;
-        using var linked = timeout is null ? null : CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeout.Token);
-        var token = linked?.Token ?? cancellationToken;
+        // Covers the whole hop, as ssh's does: loading identities, any ProxyJump hosts, the connection, handshake and authentication. So it
+        // is applied here rather than through the hop's SshClientOptions.ConnectTimeout, which would start only at the connection.
+        using var deadline = new ConnectDeadline(hostConfig.ConnectTimeout, cancellationToken);
+        var token = deadline.Token;
 
         // Measured from here, so failures to reach the server count too; a direct TCP connection is tagged as one.
         var direct = via is null && hostConfig.ProxyJump.Count == 0 && hostConfig.ProxyCommand is null && options.Proxy is null;
@@ -189,9 +190,9 @@ public sealed partial class SshClient
 
             return client;
         }
-        catch (OperationCanceledException) when (timeout?.IsCancellationRequested == true && !cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException) when (deadline.Expired)
         {
-            var error = new SshException(SshFailureReason.Timeout, $"Connecting took longer than ConnectTimeout ({hostConfig.ConnectTimeout!.Value.TotalSeconds.ToString(CultureInfo.InvariantCulture)} s).");
+            var error = deadline.Error();
             measurement.Failed(error);
             throw error;
         }

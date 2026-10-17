@@ -80,7 +80,10 @@ elsewhere:
   `StrictHostKeyChecking yes`; `AcceptNewHostKeys` switches to `accept-new`. In a container, mount a `known_hosts` file.
 - **`ConfigAlias`** connects through `ssh_config` instead; then `Host`, `Port`, `UserName`, `PrivateKeyFiles`, `KnownHostsFiles`,
   `AcceptNewHostKeys`, `KeepAliveInterval` and `ConfigureClientOptions` are not used.
-- **Timeouts.** `ConnectTimeout` (30 s) bounds each attempt, authentication included, and fails with `TimeoutException`.
+- **Timeouts.** `ConnectTimeout` (30 s) bounds each attempt, authentication included, and fails with `TimeoutException`. It is
+  also the `SshClientOptions.ConnectTimeout` that `ConfigureClientOptions` receives; a shorter one set there applies, and still fails
+  with `TimeoutException`. With `ConfigAlias`, `ssh_config`'s own `ConnectTimeout` applies too, and fails with `SshException`
+  (`Reason = Timeout`) when it is the shorter.
 - **Health endpoints are often public.** The check's description names no server software; the exception is attached for logging,
   so keep it out of public responses.
 - **Testing.** `ISshClientFactory` and `ISshConnectionProvider` are interfaces, but they return `SshClient`, which only a server can

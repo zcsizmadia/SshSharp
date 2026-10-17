@@ -1,1 +1,5 @@
 #nullable enable
+SshSharp.SshClientOptions.AddressFamily.get -> SshSharp.Config.SshAddressFamily
+SshSharp.SshClientOptions.AddressFamily.init -> void
+SshSharp.SshClientOptions.ConnectTimeout.get -> System.TimeSpan?
+SshSharp.SshClientOptions.ConnectTimeout.init -> void

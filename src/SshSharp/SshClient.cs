@@ -90,7 +90,14 @@ public sealed partial class SshClient : IAsyncDisposable
         return _connection.PreventNewSessionsAsync(cancellationToken);
     }
 
-    /// <summary>Connects to <paramref name="host"/> over TCP, performs the handshake and authenticates.</summary>
+    /// <summary>
+    /// Connects to <paramref name="host"/> over TCP, performs the handshake and authenticates. <see cref="SshClientOptions.ConnectTimeout"/>
+    /// bounds the whole attempt, and <see cref="SshClientOptions.AddressFamily"/> chooses which of the host's addresses are tried.
+    /// </summary>
+    /// <exception cref="SshException">The server could not be reached (<see cref="SshFailureReason.ConnectFailed"/>), the attempt took longer
+    /// than <see cref="SshClientOptions.ConnectTimeout"/> (<see cref="SshFailureReason.Timeout"/>), or the handshake or authentication
+    /// failed.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled.</exception>
     public static async Task<SshClient> ConnectAsync(string host, int port, SshClientOptions options, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(host);
@@ -98,31 +105,52 @@ public sealed partial class SshClient : IAsyncDisposable
         ArgumentOutOfRangeException.ThrowIfGreaterThan(port, 65535);
         ArgumentNullException.ThrowIfNull(options);
         IReadOnlyList<System.Net.IPEndPoint>? local = options.LocalEndPoint is { } bind ? [bind] : null;
+        using var deadline = new ConnectDeadline(options.ConnectTimeout, cancellationToken);
         using var measurement = new ConnectMeasurement(options.Proxy is null ? port : null);
-        Stream stream;
         try
         {
-            // The host name stays out of error messages (exception text often ends up in logs); it is in the caller's hands already.
-            stream = options.Proxy is { } proxy
-                ? await proxy.ConnectAsync(host, port, local, cancellationToken).ConfigureAwait(false)
-                : await TcpConnector.ConnectAsync(host, port, local, Config.SshAddressFamily.Any, "the server", cancellationToken).ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            measurement.Failed(ex);
-            throw;
-        }
+            Stream stream;
+            try
+            {
+                // The host name stays out of error messages (exception text often ends up in logs); it is in the caller's hands already.
+                stream = options.Proxy is { } proxy
+                    ? await proxy.ConnectAsync(host, port, local, deadline.Token).ConfigureAwait(false)
+                    : await TcpConnector.ConnectAsync(host, port, local, options.AddressFamily, "the server", deadline.Token).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (!deadline.Expired)
+            {
+                measurement.Failed(ex);
+                throw;
+            }
 
-        return await ConnectCoreAsync(stream, options, leaveOpen: false, owner: null, host, port, measurement, cancellationToken).ConfigureAwait(false);
+            return await ConnectCoreAsync(stream, options, leaveOpen: false, owner: null, host, port, measurement, deadline.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (deadline.Expired)
+        {
+            var error = deadline.Error();
+            measurement.Failed(error); // unless the handshake already recorded its own failure
+            throw error;
+        }
     }
 
     /// <summary>Runs the SSH protocol over an existing stream (a socket, a WebSocket wrapper, a tunnel from another connection, ...).</summary>
     /// <param name="stream">A connected, duplex stream.</param>
-    /// <param name="options">Connection options.</param>
+    /// <param name="options">Connection options. <see cref="SshClientOptions.ConnectTimeout"/> bounds the handshake and authentication.</param>
     /// <param name="leaveOpen">Whether to leave <paramref name="stream"/> open when the client is disposed.</param>
     /// <param name="cancellationToken">Cancels the connection attempt.</param>
-    public static Task<SshClient> ConnectAsync(Stream stream, SshClientOptions options, bool leaveOpen = false, CancellationToken cancellationToken = default) =>
-        ConnectCoreAsync(stream, options, leaveOpen, owner: null, host: null, port: 22, measurement: null, cancellationToken);
+    public static async Task<SshClient> ConnectAsync(Stream stream, SshClientOptions options, bool leaveOpen = false, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        using var deadline = new ConnectDeadline(options.ConnectTimeout, cancellationToken);
+        try
+        {
+            return await ConnectCoreAsync(stream, options, leaveOpen, owner: null, host: null, port: 22, measurement: null, deadline.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (deadline.Expired)
+        {
+            throw deadline.Error();
+        }
+    }
 
     /// <summary>Runs <paramref name="command"/> on the server and collects its output and exit status.</summary>
     /// <exception cref="SshException">The server refused the command or the connection failed.</exception>
