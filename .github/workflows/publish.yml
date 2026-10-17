@@ -50,8 +50,9 @@ jobs:
           dotnet pack src/SshSharp -c Release --no-build -o packages
           dotnet pack src/SshSharp.FileProviders -c Release --no-build -o packages
           dotnet pack src/SshSharp.IO.Abstractions -c Release --no-build -o packages
+          dotnet pack src/SshSharp.Extensions.DependencyInjection -c Release --no-build -o packages
           version="${GITHUB_REF_NAME#v}"
-          for id in SshSharp SshSharp.FileProviders SshSharp.IO.Abstractions; do
+          for id in SshSharp SshSharp.FileProviders SshSharp.IO.Abstractions SshSharp.Extensions.DependencyInjection; do
             if [ ! -f "packages/$id.$version.nupkg" ]; then
               echo "::error::Expected packages/$id.$version.nupkg for tag $GITHUB_REF_NAME; got: $(ls packages)"
               exit 1

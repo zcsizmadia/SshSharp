@@ -25,6 +25,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SshSharp.FileProviders", "s
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SshSharp.IO.Abstractions", "src\SshSharp.IO.Abstractions\SshSharp.IO.Abstractions.csproj", "{C6268604-B179-4331-80B4-DB3D19CAD42B}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SshSharp.Extensions.DependencyInjection", "src\SshSharp.Extensions.DependencyInjection\SshSharp.Extensions.DependencyInjection.csproj", "{52518490-24D8-485B-90C8-28018873642A}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -131,6 +133,18 @@ Global
 		{C6268604-B179-4331-80B4-DB3D19CAD42B}.Release|x64.Build.0 = Release|Any CPU
 		{C6268604-B179-4331-80B4-DB3D19CAD42B}.Release|x86.ActiveCfg = Release|Any CPU
 		{C6268604-B179-4331-80B4-DB3D19CAD42B}.Release|x86.Build.0 = Release|Any CPU
+		{52518490-24D8-485B-90C8-28018873642A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{52518490-24D8-485B-90C8-28018873642A}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{52518490-24D8-485B-90C8-28018873642A}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{52518490-24D8-485B-90C8-28018873642A}.Debug|x64.Build.0 = Debug|Any CPU
+		{52518490-24D8-485B-90C8-28018873642A}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{52518490-24D8-485B-90C8-28018873642A}.Debug|x86.Build.0 = Debug|Any CPU
+		{52518490-24D8-485B-90C8-28018873642A}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{52518490-24D8-485B-90C8-28018873642A}.Release|Any CPU.Build.0 = Release|Any CPU
+		{52518490-24D8-485B-90C8-28018873642A}.Release|x64.ActiveCfg = Release|Any CPU
+		{52518490-24D8-485B-90C8-28018873642A}.Release|x64.Build.0 = Release|Any CPU
+		{52518490-24D8-485B-90C8-28018873642A}.Release|x86.ActiveCfg = Release|Any CPU
+		{52518490-24D8-485B-90C8-28018873642A}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -144,5 +158,6 @@ Global
 		{6FE6D4A2-6E19-49E8-956B-BC46F8B5045D} = {5D20AA90-6969-D8BD-9DCD-8634F4692FDA}
 		{AE3BD058-5706-4A05-9E49-7556B70417DD} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{C6268604-B179-4331-80B4-DB3D19CAD42B} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
+		{52518490-24D8-485B-90C8-28018873642A} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 	EndGlobalSection
 EndGlobal
