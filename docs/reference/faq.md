@@ -3,7 +3,7 @@
 ## General
 
 **Which .NET versions are supported?**
-.NET 8 and .NET 10, on Windows, Linux and macOS. .NET Framework and .NET Standard are not supported: the library depends on APIs they
+.NET 8, .NET 10 and .NET 11, on Windows, Linux and macOS. .NET Framework and .NET Standard are not supported: the library depends on APIs they
 lack (`System.IO.Pipelines`-based I/O, `AesGcm`, modern ECDH and RSA APIs). If you need them, SSH.NET is the established choice.
 
 **Is there a synchronous API?**

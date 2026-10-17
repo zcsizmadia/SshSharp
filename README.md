@@ -21,7 +21,7 @@ Console.WriteLine(result.StandardOutputText);
 
 ## Features
 
-- **Pure managed C#**, no native dependencies; .NET 8 and .NET 10, tested on Windows and Linux (x64 and Arm64) and macOS
+- **Pure managed C#**, no native dependencies; .NET 8, .NET 10 and .NET 11, tested on Windows and Linux (x64 and Arm64) and macOS
   (Arm64); trimming- and Native AOT-compatible, with an AOT-compiled smoke test against a real server in CI.
 - **Async all the way:** `CancellationToken` on every network operation, `IAsyncDisposable`, `System.IO.Pipelines` I/O with zero-copy
   packet handling.
@@ -40,7 +40,7 @@ Console.WriteLine(result.StandardOutputText);
   started from `ssh_config`.
 - **Sessions:** run commands, stream stdin/stdout/stderr, interactive shells with a pseudo-terminal, environment variables,
   signals and window resizing; subsystems (`ssh -s`) such as `netconf`; `expect`-style scripting of shells.
-- **Modern algorithms:** post-quantum `mlkem768x25519-sha256`, and the FIPS-compatible `mlkem768nistp256-sha256` and `mlkem1024nistp384-sha384` (on .NET 10 where the platform has ML-KEM),
+- **Modern algorithms:** post-quantum `mlkem768x25519-sha256`, and the FIPS-compatible `mlkem768nistp256-sha256` and `mlkem1024nistp384-sha384` (on .NET 10 and later where the platform has ML-KEM),
   and `sntrup761x25519-sha512` (managed, on every platform), `curve25519-sha256`,
   ECDH and DH group 14/16 key exchange; ChaCha20-Poly1305, AES-GCM and
   AES-CTR with HMAC-SHA2 ETM; Ed25519, ECDSA and RSA (SHA-2) keys; strict key exchange (Terrapin) always on; a FIPS mode.
@@ -62,7 +62,7 @@ Console.WriteLine(result.StandardOutputText);
 
 | | SshSharp | SSH.NET 2026.0 |
 |---|---|---|
-| Target frameworks | .NET 8, .NET 10 | .NET Framework 4.6.2+, .NET Standard 2.0, .NET 8+ |
+| Target frameworks | .NET 8, .NET 10, .NET 11 | .NET Framework 4.6.2+, .NET Standard 2.0, .NET 8+ |
 | API | Async-only network API; `CancellationToken` on every network operation | Mostly synchronous; async connect, commands and SFTP |
 | `ssh_config` (`Host`, `Match` with `localnetwork`, `sessiontype` and `command`, `Include`; connect by alias; `KnownHostsCommand`, `RefuseConnection`) | ✅ | ❌ |
 | `known_hosts` verification (hashed hosts, `@cert-authority`, `@revoked`, `StrictHostKeyChecking`) | ✅ | ❌ (verify in a `HostKeyReceived` handler) |
@@ -83,14 +83,14 @@ Console.WriteLine(result.StandardOutputText);
 | FIDO security keys through the agent (`sk-ssh-ed25519@openssh.com`, `sk-ecdsa-sha2-nistp256@openssh.com`, and their certificates) | ✅ | ❌ |
 | Agent key management (`ssh-add`: add with lifetime, confirmation or destination constraints (`-h`), remove, lock; `AddKeysToAgent`), and signing with destination-constrained keys | ✅ | ❌ |
 | Password, public key, keyboard-interactive, multi-factor | ✅ | ✅ |
-| Kerberos (GSSAPI, `gssapi-with-mic`; .NET 10) | ✅ | ❌ |
+| Kerberos (GSSAPI, `gssapi-with-mic`; .NET 10+) | ✅ | ❌ |
 | OpenSSH certificates | User and host | User (authentication) |
 | Private key formats | OpenSSH, PKCS#1/#8, SEC1, PuTTY `.ppk` | OpenSSH, PKCS#1/#8, PuTTY `.ppk`, ssh.com |
 | Key generation (Ed25519, ECDSA, RSA; saved in the OpenSSH format) | ✅ | ❌ |
 | Signing and verifying files and git commits (`ssh-keygen -Y`, SSHSIG, allowed-signers files) | ✅ | ❌ |
 | Post-quantum key exchange `sntrup761x25519-sha512` (OpenSSH 8.5+, also as `@openssh.com`) | ✅ (managed: every platform, .NET 8 too) | ✅ |
-| Post-quantum key exchange `mlkem768x25519-sha256` (OpenSSH 9.9+) | ✅ (.NET 10 with platform ML-KEM) | ✅ |
-| FIPS-compatible post-quantum key exchange (`mlkem768nistp256-sha256`, `mlkem1024nistp384-sha384`) | ✅ (.NET 10 with platform ML-KEM) | ❌ |
+| Post-quantum key exchange `mlkem768x25519-sha256` (OpenSSH 9.9+) | ✅ (.NET 10+ with platform ML-KEM) | ✅ |
+| FIPS-compatible post-quantum key exchange (`mlkem768nistp256-sha256`, `mlkem1024nistp384-sha384`) | ✅ (.NET 10+ with platform ML-KEM) | ❌ |
 | Strict key exchange (Terrapin fix) | ✅ | ✅ |
 | Legacy algorithms (CBC, 3DES, SHA-1, `ssh-rsa`, DH group 1, zlib) | — (by design) | ✅ |
 | Commands, shells with a terminal, `expect`-style scripting | ✅ | ✅ |
@@ -216,7 +216,7 @@ latest release.
 
 ## Testing
 
-Every pull request runs about 1,300 unit tests on Linux, Windows and macOS (x64 and Arm64), each on .NET 8 and .NET 10, and the
+Every pull request runs about 1,300 unit tests on Linux, Windows and macOS (x64 and Arm64), each on .NET 8, .NET 10 and .NET 11, and the
 interop tests against real servers: OpenSSH old and new on Linux and Windows, Dropbear, AsyncSSH, Apache MINA SSHD, Erlang/OTP,
 and SFTP-only servers. The cryptography is checked against reference vectors and about 6,400 Project Wycheproof edge cases. A
 fault-injection proxy cuts, stalls and slows connections at any point, the parsers are fuzzed nightly, and stress runs loop the

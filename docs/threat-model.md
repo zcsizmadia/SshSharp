@@ -42,7 +42,7 @@ A man in the middle can read, change, drop and inject bytes. The server itself m
 - **Keys and nonces:** keys are renewed after 1 GiB (configurable, capped at 64 GiB), 2^31 packets or one hour, so sequence
   numbers (the ChaCha20-Poly1305 nonce) never wrap under one key.
 - **Post-quantum key exchange:** `mlkem768x25519-sha256` and the FIPS-compatible `mlkem768nistp256-sha256` and
-  `mlkem1024nistp384-sha384` use the platform's ML-KEM (on .NET 10 where the OS provides it), and
+  `mlkem1024nistp384-sha384` use the platform's ML-KEM (on .NET 10 and later where the OS provides it), and
   `sntrup761x25519-sha512` a managed sntrup761 (everywhere; see the [cryptography review](crypto-review.md)). Both check the
   server's reply length exactly and still reject low-order X25519 points, so neither is weaker than curve25519 alone.
 - **Host key rotation (`UpdateHostKeys`):** off by default. A new key is recorded only after the server proves it holds it
@@ -143,7 +143,7 @@ A man in the middle can read, change, drop and inject bytes. The server itself m
   (the `Password` option) cannot be wiped; this is a known limitation. The same holds for `SshGssapiOptions.Credential`: a
   `NetworkCredential` keeps its password as a managed string, so prefer the platform's ticket (`kinit`, or the Windows logon
   session) to an explicit credential.
-- The managed X25519, Ed25519, sntrup761 and Poly1305 code avoids branches and table lookups on secret data. DH (group14/16) uses
+- On .NET 11, X25519 comes from the platform where the OS provides it. The managed X25519, Ed25519, sntrup761 and Poly1305 code avoids branches and table lookups on secret data. DH (group14/16) uses
   `BigInteger.ModPow`, which is not constant-time, on an ephemeral exponent used once; curve25519 and ECDH are preferred.
 
 ### Configuration input
@@ -163,6 +163,9 @@ A man in the middle can read, change, drop and inject bytes. The server itself m
   an absolute path), so
   token values cannot inject commands; the run is limited to 30 seconds and 1 MiB of output. On Windows a batch file (`.bat`,
   `.cmd`) is refused, because Windows runs it through `cmd.exe`, which would reparse the arguments.
+- On .NET 11, these commands inherit only their standard streams, not the other handles the application has open (sockets,
+  files, the agent's pipe), and outside Windows a command being stopped gets SIGTERM and half a second before it is killed.
+  Earlier runtimes inherit what the OS passes by default and kill at once.
 - `Match localnetwork` reads the local interface addresses. As ssh_config(5) warns, a network address is not a trustworthy
   criterion: anyone who controls the network can choose which block applies.
 - Host and user names supplied by the caller are substituted into those commands (`%h`, `%n`, `%r`), so they are refused when

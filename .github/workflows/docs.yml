@@ -35,7 +35,9 @@ jobs:
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           global-json-file: global.json
-          dotnet-version: 8.0.x
+          dotnet-version: |
+            8.0.x
+            10.0.x
       - run: dotnet tool restore
       - run: dotnet build src/SshSharp.FileProviders -c Release && dotnet build src/SshSharp.IO.Abstractions -c Release && dotnet build src/SshSharp.Extensions.DependencyInjection -c Release
       - run: dotnet docfx docs/docfx.json

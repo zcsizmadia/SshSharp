@@ -43,7 +43,7 @@ Features that SSH.NET users have asked for in its issue tracker, and that SshSha
 | Measure the round trip | `client.PingAsync()` (`ping@openssh.com`, or a `keepalive@openssh.com` request on older servers) |
 | Close idle channels | `SshClientOptions.ChannelTimeouts` (`ChannelTimeout` in `ssh_config`, as OpenSSH 9.2+) |
 | Faster SFTP downloads over high-latency links | `SftpTransferOptions.Segments`: one file in parallel ranges, each over its own SFTP session (see [SFTP](sftp.md)) |
-| Kerberos / Active Directory sign-in (GSSAPI) | `SshClientOptions.Gssapi`, or `GSSAPIAuthentication yes` in `ssh_config` (.NET 10; see [Authentication](authentication.md)) |
+| Kerberos / Active Directory sign-in (GSSAPI) | `SshClientOptions.Gssapi`, or `GSSAPIAuthentication yes` in `ssh_config` (.NET 10 and later; see [Authentication](authentication.md)) |
 | Remote files as an `IFileSystem` or `IFileProvider` | the `SshSharp.IO.Abstractions` and `SshSharp.FileProviders` packages |
 | Detect a stalled connection, also while a write is blocked | keep-alive (`KeepAliveInterval`, `KeepAliveCountMax`): the probes don't wait for pending writes, so a server that stops reading is still detected |
 | RSA SHA-2 signatures with servers that announce them | `server-sig-algs` (RFC 8308) is used to pick `rsa-sha2-512` or `rsa-sha2-256` |

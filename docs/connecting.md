@@ -314,7 +314,7 @@ connection stays up, a session's output streams end, and a forwarded connection'
 ## Algorithms
 
 The defaults prefer modern algorithms: the post-quantum hybrid `mlkem768x25519-sha256` (in OpenSSH since 9.9 and its default since 10.0; offered on
-.NET 10 where the platform has ML-KEM: OpenSSL 3.5+ or a recent Windows), followed by the RFC 10042 hybrids with NIST curves,
+.NET 10 and later where the platform has ML-KEM: OpenSSL 3.5+ or a recent Windows), followed by the RFC 10042 hybrids with NIST curves,
 `mlkem768nistp256-sha256` and `mlkem1024nistp384-sha384`, then `sntrup761x25519-sha512` (and its older name
 `sntrup761x25519-sha512@openssh.com`; managed, so offered on every platform and on .NET 8, and the only post-quantum method of
 OpenSSH 8.5 to 9.8, for example Ubuntu 24.04's 9.6), then `curve25519-sha256` and `ecdh-sha2-nistp*` (plus
