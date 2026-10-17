@@ -12,6 +12,11 @@ internal sealed class SshConfigResolver(IReadOnlyList<SshConfigDocument> documen
 {
     private const int MaxIncludeDepth = 16;
 
+    // Depth alone does not bound the work: a few globbed files at each of 16 levels would be millions of parses.
+    private const int MaxIncludedFiles = 1024;
+
+    private int _includedFiles;
+
     private static readonly HashSet<string> Accumulating = new(StringComparer.OrdinalIgnoreCase)
     {
         "identityfile", "certificatefile", "localforward", "remoteforward", "dynamicforward", "sendenv",
@@ -97,6 +102,11 @@ internal sealed class SshConfigResolver(IReadOnlyList<SshConfigDocument> documen
             IEnumerable<string> files = Glob.HasWildcards(path) ? Glob.ExpandFiles(path) : File.Exists(path) ? [path] : [];
             foreach (var file in files)
             {
+                if (++_includedFiles > MaxIncludedFiles)
+                {
+                    throw new FormatException($"ssh_config line {directive.Line}: more than {MaxIncludedFiles} files included in all.");
+                }
+
                 SshConfig included;
                 try
                 {

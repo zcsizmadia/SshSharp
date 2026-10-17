@@ -380,9 +380,9 @@ internal sealed class SshConnection : IAsyncDisposable
     private SshException SendFailed(IOException exception)
     {
         var lost = ConnectionLost(exception);
-        if (!Volatile.Read(ref _closing))
+        if (Volatile.Read(ref _failure) is null && !Volatile.Read(ref _closing))
         {
-            SshLog.ConnectionFailed(_logger, lost);
+            SshLog.ConnectionFailed(_logger, lost); // once, not for every send that fails after it
         }
 
         Fail(lost);

@@ -645,10 +645,15 @@ internal sealed class SshChannel
             }));
         }
     }
+    /// <summary>The longest signal name kept (RFC 4254's names are a few letters; extension names add an <c>@domain</c>).</summary>
+    private const int MaxSignalNameLength = 64;
+
     /// <summary>Parses <c>exit-signal</c>; only the signal name is required (a bad name is a protocol error, as before).</summary>
     private static SshExitSignal ReadExitSignal(ref SshReader reader)
     {
-        var name = reader.ReadUtf8String();
+        // A signal name is a short word (TERM, KILL, or a vendor's name@domain); it is logged, so no control characters and no essay.
+        var raw = reader.ReadUtf8String();
+        var name = new string(raw.Where(c => !char.IsControl(c)).Take(MaxSignalNameLength).ToArray());
         var coreDumped = false;
         string? message = null;
         try

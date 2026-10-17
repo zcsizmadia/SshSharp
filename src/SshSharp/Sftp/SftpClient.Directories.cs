@@ -69,8 +69,17 @@ public sealed partial class SftpClient
             entries.Add(entry);
         }
 
+        // A name listed twice (a broken or hostile server) is fetched once: a directory's permissions are applied after its contents, so a
+        // second copy would be written into a directory already made read-only.
+        var seen = new HashSet<string>(StringComparer.Ordinal);
         foreach (var entry in entries)
         {
+            if (!seen.Add(entry.Name))
+            {
+                summary.Skipped++;
+                continue;
+            }
+
             if (LocalPathFor(localDirectory, entry.Name, root) is not { } local)
             {
                 summary.Skipped++; // a name this system cannot hold, or one that was not valid UTF-8

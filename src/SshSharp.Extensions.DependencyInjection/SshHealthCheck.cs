@@ -12,13 +12,15 @@ internal sealed class SshHealthCheck(string name, ISshConnectionProvider connect
         {
             var client = await connections.GetClientAsync(name, cancellationToken).ConfigureAwait(false);
             var roundTrip = await client.PingAsync(cancellationToken).ConfigureAwait(false);
+            // Nothing from the server in the text: health endpoints are often reachable without authentication.
             return HealthCheckResult.Healthy(
-                string.Create(CultureInfo.InvariantCulture, $"Connected to {client.ServerIdentification}; ping {roundTrip.TotalMilliseconds:F0} ms."),
+                string.Create(CultureInfo.InvariantCulture, $"Connected; ping {roundTrip.TotalMilliseconds:F0} ms."),
                 new Dictionary<string, object> { ["roundTripMilliseconds"] = roundTrip.TotalMilliseconds });
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
-            return new HealthCheckResult(context.Registration.FailureStatus, $"SSH endpoint '{name}': {ex.Message}", ex);
+            // The error's type only (a server's disconnect text could be in its message); the exception itself is attached for logging.
+            return new HealthCheckResult(context.Registration.FailureStatus, $"SSH endpoint '{name}' is unavailable ({ex.GetType().Name}).", ex);
         }
     }
 }
