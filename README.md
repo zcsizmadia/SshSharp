@@ -235,6 +235,8 @@ found, and what is not covered yet.
 - Mutation testing (Stryker.NET, weekly in CI): `dotnet tool restore`, then in `tests/SshSharp.Tests`:
   `dotnet stryker --test-runner mtp --project SshSharp.csproj --target-framework net10.0 -m "**/Crypto/X25519.cs"`.
 - Releases: pushing a `v*` tag on `main` publishes to nuget.org (`.github/workflows/publish.yml`).
+- Contributing: see [CONTRIBUTING.md](CONTRIBUTING.md). Every new feature ships with its documentation (how-to, reference,
+  compiled examples) in the same pull request.
 
 ## License
 
