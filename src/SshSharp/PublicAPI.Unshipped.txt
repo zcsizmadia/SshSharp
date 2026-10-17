@@ -483,3 +483,4 @@ static SshSharp.Sftp.SftpTransferProgress.operator ==(SshSharp.Sftp.SftpTransfer
 static SshSharp.Sftp.SftpTransferSummary.operator !=(SshSharp.Sftp.SftpTransferSummary? left, SshSharp.Sftp.SftpTransferSummary? right) -> bool
 static SshSharp.Sftp.SftpTransferSummary.operator ==(SshSharp.Sftp.SftpTransferSummary? left, SshSharp.Sftp.SftpTransferSummary? right) -> bool
 static SshSharp.Sftp.SshSftpExtensions.OpenSftpAsync(this SshSharp.SshClient! client, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SshSharp.Sftp.SftpClient!>!
+SshSharp.SshExpect.ReadLineAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<string?>!

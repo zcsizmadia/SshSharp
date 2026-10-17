@@ -5,8 +5,8 @@ namespace SshSharp;
 
 /// <summary>
 /// Drives an interactive program, as <c>expect</c> does: wait until its output shows a prompt or other text, then send the next input.
-/// Wrap a shell session (<see cref="SshClient.StartShellAsync"/>, usually with a terminal) and use <see cref="ExpectAsync(string, CancellationToken)"/>
-/// and <see cref="SendLineAsync"/>; timeouts are <see cref="CancellationToken"/>s.
+/// Wrap a shell session (<see cref="SshClient.StartShellAsync"/>, usually with a terminal) and use <see cref="ExpectAsync(string, CancellationToken)"/>,
+/// <see cref="ReadLineAsync"/> and <see cref="SendLineAsync"/>; timeouts are <see cref="CancellationToken"/>s.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -43,6 +43,9 @@ public sealed class SshExpect
     // Where the last fruitless plain-text search ended: the next one starts there (less the text's length, for a match across reads).
     private int _searched;
     private bool _ended;
+
+    // How many characters MaxBufferLength has made the buffer drop, so a line read can tell that it lost its start.
+    private long _dropped;
 
     /// <summary>Drives <paramref name="session"/>: reads its standard output, writes its standard input.</summary>
     /// <param name="session">The session, for example a shell started with a terminal.</param>
@@ -144,6 +147,59 @@ public sealed class SshExpect
         }, cancellationToken);
     }
 
+    /// <summary>
+    /// Reads the next line of output: the text up to the next line feed, without it or a carriage return before it (a terminal ends
+    /// lines with <c>\r\n</c>). Once the output has ended, the text left without a line feed is the last line, and then null.
+    /// </summary>
+    /// <remarks>
+    /// With a terminal, the program's output includes the echo of what was sent (a shell shows the command typed), and a prompt ends
+    /// without a line feed, so a read that reaches a prompt waits for more: wait for a prompt with
+    /// <see cref="ExpectAsync(string, CancellationToken)"/> instead. To run one command and read its output, <see cref="SshClient.RunCommandAsync"/>
+    /// needs neither.
+    /// </remarks>
+    /// <param name="cancellationToken">A timeout or cancellation.</param>
+    /// <returns>The line, or null when the output has ended and nothing is left.</returns>
+    /// <exception cref="InvalidDataException">The line is longer than <see cref="MaxBufferLength"/>, so its start was dropped.</exception>
+    /// <exception cref="OperationCanceledException">Cancelled; nothing is lost, and the partial line stays in <see cref="Pending"/>.</exception>
+    public async Task<string?> ReadLineAsync(CancellationToken cancellationToken = default)
+    {
+        var dropped = _dropped;
+        _searched = _start; // a new search: everything pending is new to it
+        while (true)
+        {
+            var from = Math.Max(_start, _searched);
+            var index = _buffer.AsSpan(from, _length - from).IndexOf('\n');
+            if (index >= 0)
+            {
+                var feed = from + index;
+                var end = feed > _start && _buffer[feed - 1] == '\r' ? feed - 1 : feed;
+                var line = new string(_buffer, _start, end - _start);
+                _start = feed + 1;
+                _searched = _start;
+                return line;
+            }
+
+            _searched = _length;
+            if (_ended)
+            {
+                if (_length == _start)
+                {
+                    return null;
+                }
+
+                var last = new string(_buffer, _start, _length - _start);
+                _start = _searched = _length;
+                return last;
+            }
+
+            await ReadMoreAsync(cancellationToken).ConfigureAwait(false);
+            if (_dropped != dropped)
+            {
+                throw new InvalidDataException($"A line of output is longer than MaxBufferLength ({MaxBufferLength} characters); its start was dropped.");
+            }
+        }
+    }
+
     /// <summary>Sends <paramref name="text"/> to the program as it is.</summary>
     public async Task SendAsync(string text, CancellationToken cancellationToken = default)
     {
@@ -194,6 +250,7 @@ public sealed class SshExpect
         // Keep at most MaxBufferLength characters: the oldest go first.
         if (_length - _start > MaxBufferLength)
         {
+            _dropped += _length - MaxBufferLength - _start;
             _start = _length - MaxBufferLength;
             _searched = Math.Max(_searched, _start);
         }

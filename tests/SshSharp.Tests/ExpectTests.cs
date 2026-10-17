@@ -204,6 +204,58 @@ public class ExpectTests
     }
 
     [Test]
+    public async Task ReadLine_ReturnsLinesWithoutTheirEndings_AcrossReads_ThenTheRest_ThenNull()
+    {
+        // A terminal's \r\n and a plain \n; a line split across reads, and a \r\n split between them; a lone \r stays in its line.
+        var expect = Over("uptime\r\n 10:19", " up 1 day\r", "\nsecond\nprogress 50%\rprogress 100%\n", "no newline at the end");
+
+        await Assert.That(await expect.ReadLineAsync(Timeout())).IsEqualTo("uptime");
+        await Assert.That(await expect.ReadLineAsync(Timeout())).IsEqualTo(" 10:19 up 1 day");
+        await Assert.That(await expect.ReadLineAsync(Timeout())).IsEqualTo("second");
+        await Assert.That(await expect.ReadLineAsync(Timeout())).IsEqualTo("progress 50%\rprogress 100%");
+        await Assert.That(await expect.ReadLineAsync(Timeout())).IsEqualTo("no newline at the end");
+        await Assert.That(await expect.ReadLineAsync(Timeout())).IsNull();
+        await Assert.That(await expect.ReadLineAsync(Timeout())).IsNull();
+    }
+
+    [Test]
+    public async Task ReadLine_AndExpect_ShareTheBuffer()
+    {
+        // Wait for the prompt, send, then read what came back line by line: nothing is lost between the two kinds of read.
+        var input = new MemoryStream();
+        var expect = new SshExpect(new ScriptedStream(new[] { "Password: ", "\r\nWelcome\r\n$ " }.Select(Encoding.UTF8.GetBytes)), input);
+
+        await expect.ExpectAsync("Password: ", Timeout());
+        await expect.SendLineAsync("secret", Timeout());
+        await Assert.That(await expect.ReadLineAsync(Timeout())).IsEqualTo(string.Empty); // the rest of the prompt's line
+        await Assert.That(await expect.ReadLineAsync(Timeout())).IsEqualTo("Welcome");
+        await Assert.That((await expect.ExpectAsync("$ ", Timeout())).Before).IsEqualTo(string.Empty);
+        await Assert.That(Encoding.UTF8.GetString(input.ToArray())).IsEqualTo("secret\n");
+    }
+
+    [Test]
+    public async Task ReadLine_ThatIsCancelled_KeepsThePartialLine()
+    {
+        var expect = new SshExpect(new ScriptedStream(new[] { "partial" }.Select(Encoding.UTF8.GetBytes), endAfter: false), new MemoryStream());
+        using var cancel = new CancellationTokenSource(TimeSpan.FromMilliseconds(200));
+
+        await Assert.That(async () => await expect.ReadLineAsync(cancel.Token)).Throws<OperationCanceledException>();
+
+        await Assert.That(expect.Pending).IsEqualTo("partial");
+    }
+
+    [Test]
+    public async Task ReadLine_LongerThanTheBuffer_IsAnError_NotACutLine()
+    {
+        var expect = new SshExpect(new ScriptedStream(new[] { new string('a', 100), new string('b', 100), "\nnext\n" }.Select(Encoding.UTF8.GetBytes)), new MemoryStream())
+        {
+            MaxBufferLength = 150,
+        };
+
+        await Assert.That(async () => await expect.ReadLineAsync(Timeout())).Throws<InvalidDataException>().WithMessageContaining("MaxBufferLength");
+    }
+
+    [Test]
     public async Task SendLine_WritesTheLineAndTheNewLine()
     {
         var input = new MemoryStream();

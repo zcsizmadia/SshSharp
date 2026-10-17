@@ -133,6 +133,21 @@ Each match returns the output before it (`Before`), the matched text (`Value`) a
 with `Encoding` (UTF-8 by default), and a character split between two packets is decoded whole. The buffer keeps the newest
 `MaxBufferLength` characters (1 Mi) while nothing matches.
 
+`ReadLineAsync` reads the output a line at a time, from the same buffer, so it mixes with `ExpectAsync`. It returns each line
+without its `\n` or a terminal's `\r\n`; once the output has ended, the text left without a line feed, and then null. A line
+longer than `MaxBufferLength` is an `InvalidDataException`, not a cut line. A prompt ends without a line feed, so wait for prompts
+with `ExpectAsync`:
+
+```csharp
+// A line the command ends with marks the end of its output, since the prompt that follows has no line feed.
+await expect.SendLineAsync("ls -1 /etc/ssh; echo '--end--'", cancellationToken);
+await expect.ReadLineAsync(cancellationToken);                                // the echo of the command
+while (await expect.ReadLineAsync(cancellationToken) is { } line && line != "--end--")
+{
+    Console.WriteLine(line);
+}
+```
+
 A text pattern is searched only in the new output (plus the overlap it could span), so many small packets stay cheap. A regular
 expression runs over everything pending after each read; against output you do not control, give it a `matchTimeout` (for
 example `new Regex(pattern, RegexOptions.None, TimeSpan.FromSeconds(1))`) so a pathological pattern cannot spin.

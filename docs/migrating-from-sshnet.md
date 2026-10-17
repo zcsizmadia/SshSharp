@@ -183,7 +183,35 @@ shell.WriteLine("uptime");
 var line = shell.ReadLine();
 ```
 
-SshSharp:
+SshSharp offers three ways, depending on what the shell is for.
+
+**Option 1: one command, no shell.** Often the shell only runs a command and reads its output. A command needs no terminal, so
+there is no echo or prompt to skip, and you get the exit status too:
+
+```csharp
+var result = await client.RunCommandAsync("uptime");
+var line = result.StandardOutputText.TrimEnd('\n');
+```
+
+**Option 2: an interactive shell, line by line, with `SshExpect`.** It decodes the output and keeps a buffer, so lines, prompts and
+partial reads mix safely:
+
+```csharp
+await using var shell = await client.StartShellAsync(new SshSessionOptions
+{
+    Terminal = new SshTerminalOptions { TerminalType = "xterm", Columns = 80, Rows = 24 },
+});
+var io = new SshExpect(shell);
+await io.SendLineAsync("uptime");
+var echo = await io.ReadLineAsync(); // the terminal echoes the command first, as with ShellStream
+var line = await io.ReadLineAsync();
+```
+
+A prompt ends without a line feed, so wait for it with `ExpectAsync` (below) rather than `ReadLineAsync`, which would wait for the
+line to end.
+
+**Option 3: the session's streams, for full control.** `StandardInput` and `StandardOutput` are plain streams, for your own reader and
+writer, or to copy to a file or the console:
 
 ```csharp
 await using var shell = await client.StartShellAsync(new SshSessionOptions
@@ -195,6 +223,9 @@ var output = new StreamReader(shell.StandardOutput);
 await input.WriteLineAsync("uptime");
 var line = await output.ReadLineAsync();
 ```
+
+Use one way per session: `SshExpect` and a `StreamReader` both buffer what they read, so reading the same output with both loses
+data.
 
 For `ShellStream.Expect`, wrap the session in `SshExpect`:
 
