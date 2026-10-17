@@ -26,6 +26,14 @@ or group exchange). Typical for old network equipment and very old servers. The 
 (any OpenSSH since 6.5 has `curve25519-sha256`, `aes*-ctr` and `hmac-sha2-*`). With `FipsMode`, a server that has only an Ed25519
 host key fails the same way. See [Algorithms](algorithms.md).
 
+**"No matching MAC".** SshSharp has both the encrypt-then-MAC `hmac-sha2-*-etm@openssh.com` and the plain `hmac-sha2-256` and
+`hmac-sha2-512`, which routers, switches and appliances often offer alone with `aes*-ctr`. If the MAC still does not match:
+
+- The server offers only `hmac-sha1`, `hmac-md5` or `umac-*`. SshSharp does not implement them; enable an HMAC-SHA2 MAC on the
+  server, or an AEAD cipher (`aes*-gcm@openssh.com`, `chacha20-poly1305@openssh.com`), which needs no MAC.
+- A `MACs` line in `ssh_config` removed the plain ones (`MACs -hmac-sha2-256,...`) or lists only `-etm` MACs. The error message shows
+  both sides' lists.
+
 ### The connection drops after a while
 
 - Idle connections through NAT or firewalls get dropped: set `KeepAliveInterval` (`ServerAliveInterval`).

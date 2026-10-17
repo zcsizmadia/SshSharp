@@ -28,6 +28,7 @@ public class PacketCodecTests
     public static IEnumerable<string> Suites() =>
     [
         "none", "chacha20-poly1305", "aes128-gcm", "aes256-gcm", "aes128-ctr+hmac-sha2-256-etm", "aes256-ctr+hmac-sha2-512-etm",
+        "aes128-ctr+hmac-sha2-256", "aes256-ctr+hmac-sha2-512",
     ];
 
     // Each call creates a fresh protector (own counters/state) from the same keys, so sender and receiver stay in sync.
@@ -39,6 +40,8 @@ public class PacketCodecTests
         "aes256-gcm" => new AesGcmProtector(Gcm256Key, GcmIv),
         "aes128-ctr+hmac-sha2-256-etm" => new AesCtrEtmProtector(Ctr128Key, CtrIv, Mac256Key, HashAlgorithmName.SHA256),
         "aes256-ctr+hmac-sha2-512-etm" => new AesCtrEtmProtector(Ctr256Key, CtrIv, Mac512Key, HashAlgorithmName.SHA512),
+        "aes128-ctr+hmac-sha2-256" => new AesCtrHmacProtector(Ctr128Key, CtrIv, Mac256Key, HashAlgorithmName.SHA256),
+        "aes256-ctr+hmac-sha2-512" => new AesCtrHmacProtector(Ctr256Key, CtrIv, Mac512Key, HashAlgorithmName.SHA512),
         _ => throw new ArgumentOutOfRangeException(nameof(suite)),
     };
     private static byte[] Encode(PacketProtector protector, byte[] payload, uint sequence)
@@ -114,11 +117,16 @@ public class PacketCodecTests
     public async Task Encoded_SizeAndAlignment_AreValid(string suite)
     {
         using var sender = Create(suite);
+        using var receiver = Create(suite);
         foreach (var size in new[] { 1, 5, 12, 13, 27, 100 })
         {
             var wire = Encode(sender, new byte[size], 0);
             var firstFour = wire.AsSpan(0, 4);
-            var length = sender.ReadLength(0, firstFour);
+
+            // An encrypted length (encrypt-and-MAC) is read with the receiver's keystream, so the receiver decodes each packet in turn.
+            var length = receiver.ReadLength(0, firstFour);
+            var (ok, _, _) = Decode(receiver, new ReadOnlySequence<byte>(wire), 0);
+            await Assert.That(ok).IsTrue();
 
             await Assert.That(wire.Length).IsEqualTo((int)(4 + length + sender.TagSize));
             var aligned = sender.LengthExcludedFromAlignment ? length : length + 4;
@@ -210,6 +218,108 @@ public class PacketCodecTests
         using var receiver = Create(name);
         var wire = Encode(sender, new byte[20], 3);
         await Assert.That(() => Decode(receiver, new ReadOnlySequence<byte>(wire), 4)).Throws<SshProtocolException>();
+    }
+
+    private const string AuthenticationFailed = "Packet authentication failed (bad MAC or tag).";
+
+    public static IEnumerable<string> PlainMacSuites() => ["aes128-ctr+hmac-sha2-256", "aes256-ctr+hmac-sha2-512"];
+
+    /// <summary>
+    /// Encrypt-and-MAC (RFC 4253 section 6.4), checked against an independent re-computation: the whole packet, length included, is
+    /// AES-CTR encrypted, and the MAC is HMAC(key, sequence_number || plaintext packet).
+    /// </summary>
+    [Test]
+    [MethodDataSource(nameof(PlainMacSuites))]
+    public async Task PlainMac_EncryptsTheLength_AndMacsThePlaintext(string suite)
+    {
+        var (key, macKey, macSize) = suite.EndsWith("256", StringComparison.Ordinal) ? (Ctr128Key, Mac256Key, 32) : (Ctr256Key, Mac512Key, 64);
+        using var sender = Create(suite);
+        var payload = "encrypt-and-MAC"u8.ToArray();
+        var first = Encode(sender, [0], 6); // check the second packet: the counter and the sequence number have both moved on
+        var wire = Encode(sender, payload, 7);
+        var packetSize = wire.Length - macSize;
+        await Assert.That(sender.TagSize).IsEqualTo(macSize);
+        await Assert.That(packetSize % 16).IsEqualTo(0);
+
+        using var reference = new SshSharp.Crypto.AesCtr(key, CtrIv);
+        reference.Transform(new byte[first.Length - macSize]);
+        var plain = wire[..packetSize];
+        reference.Transform(plain);
+        await Assert.That(BinaryPrimitives.ReadUInt32BigEndian(plain)).IsEqualTo((uint)(packetSize - 4));
+        await Assert.That(BinaryPrimitives.ReadUInt32BigEndian(wire)).IsNotEqualTo((uint)(packetSize - 4));
+        await Assert.That(Convert.ToHexString(plain.AsSpan(5, payload.Length))).IsEqualTo(Convert.ToHexString(payload));
+
+        var macInput = new byte[4 + packetSize];
+        BinaryPrimitives.WriteUInt32BigEndian(macInput, 7);
+        plain.CopyTo(macInput, 4);
+        var expectedMac = macSize == 32 ? HMACSHA256.HashData(macKey, macInput) : HMACSHA512.HashData(macKey, macInput);
+        await Assert.That(Convert.ToHexString(wire.AsSpan(packetSize))).IsEqualTo(Convert.ToHexString(expectedMac));
+    }
+
+    [Test]
+    [MethodDataSource(nameof(PlainMacSuites))]
+    public async Task PlainMac_ReadLengthDecryptsWithoutAdvancing(string suite)
+    {
+        using var sender = Create(suite);
+        using var receiver = Create(suite);
+        var wire = Encode(sender, new byte[40], 0);
+        var expected = (uint)(wire.Length - receiver.TagSize - 4);
+
+        // The codec asks again each time more data arrives: the answer must not change, and the packet must still decode afterwards.
+        await Assert.That(receiver.ReadLength(0, wire.AsSpan(0, 4))).IsEqualTo(expected);
+        await Assert.That(receiver.ReadLength(0, wire.AsSpan(0, 4))).IsEqualTo(expected);
+        var (ok, payload, _) = Decode(receiver, new ReadOnlySequence<byte>(wire), 0);
+        await Assert.That(ok).IsTrue();
+        await Assert.That(payload!.Length).IsEqualTo(40);
+    }
+
+    [Test]
+    [MethodDataSource(nameof(PlainMacSuites))]
+    public async Task PlainMac_TamperedMac_FailsAuthentication(string suite)
+    {
+        using var sender = Create(suite);
+        var wire = Encode(sender, new byte[30], 2);
+        foreach (var index in new[] { wire.Length - sender.TagSize, wire.Length - 1 })
+        {
+            var bad = (byte[])wire.Clone();
+            bad[index] ^= 0x80;
+            using var receiver = Create(suite);
+            var ex = Assert.Throws<SshProtocolException>(() => Decode(receiver, new ReadOnlySequence<byte>(bad), 2));
+            await Assert.That(ex.Message).IsEqualTo(AuthenticationFailed);
+            await Assert.That(ex.Reason).IsEqualTo(SshFailureReason.ProtocolError);
+        }
+    }
+
+    [Test]
+    [MethodDataSource(nameof(PlainMacSuites))]
+    public async Task PlainMac_TamperedCiphertext_FailsAuthentication(string suite)
+    {
+        using var sender = Create(suite);
+        var wire = Encode(sender, new byte[30], 2);
+
+        // Every byte after the encrypted length: the padding length, payload and padding are all covered by the MAC.
+        for (var index = 4; index < wire.Length - sender.TagSize; index++)
+        {
+            var bad = (byte[])wire.Clone();
+            bad[index] ^= 0x01;
+            using var receiver = Create(suite);
+            var ex = Assert.Throws<SshProtocolException>(() => Decode(receiver, new ReadOnlySequence<byte>(bad), 2));
+            await Assert.That(ex.Message).IsEqualTo(AuthenticationFailed);
+        }
+    }
+
+    [Test]
+    [MethodDataSource(nameof(PlainMacSuites))]
+    public async Task PlainMac_WrongSequenceNumber_FailsAuthentication(string suite)
+    {
+        using var sender = Create(suite);
+        var wire = Encode(sender, new byte[20], 3);
+        foreach (var sequence in new uint[] { 2, 4, 3 | 0x80000000 })
+        {
+            using var receiver = Create(suite);
+            var ex = Assert.Throws<SshProtocolException>(() => Decode(receiver, new ReadOnlySequence<byte>(wire), sequence));
+            await Assert.That(ex.Message).IsEqualTo(AuthenticationFailed);
+        }
     }
 
     [Test]

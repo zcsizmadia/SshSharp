@@ -10,7 +10,7 @@ namespace SshSharp.Tests.Protocol;
 /// </summary>
 public class AllocationTests
 {
-    public static IEnumerable<string> Suites() => ["chacha20-poly1305", "aes256-gcm", "aes256-ctr+hmac-sha2-256-etm"];
+    public static IEnumerable<string> Suites() => ["chacha20-poly1305", "aes256-gcm", "aes256-ctr+hmac-sha2-256-etm", "aes256-ctr+hmac-sha2-256"];
 
     private static PacketProtector Create(string suite)
     {
@@ -24,6 +24,7 @@ public class AllocationTests
         {
             "chacha20-poly1305" => new ChaCha20Poly1305Protector(key),
             "aes256-gcm" => new AesGcmProtector(key.AsSpan(0, 32), key.AsSpan(32, 12)),
+            "aes256-ctr+hmac-sha2-256" => new AesCtrHmacProtector(key.AsSpan(0, 32), key.AsSpan(32, 16), key.AsSpan(0, 32), HashAlgorithmName.SHA256),
             _ => new AesCtrEtmProtector(key.AsSpan(0, 32), key.AsSpan(32, 16), key.AsSpan(0, 32), HashAlgorithmName.SHA256),
         };
     }

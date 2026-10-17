@@ -130,36 +130,11 @@ public class TransportInteropTests
 
         var seen = new List<HostKeyInfo>();
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
-        SshTransport transport;
-        Stream stream;
-        for (var attempt = 1; ; attempt++)
+        var (stream, transport) = await ConnectOrSkipAsync(() =>
         {
             seen.Clear();
-            stream = await RealServer.ConnectAsync();
-            transport = new SshTransport(stream, Options(kex, cipher, hostKey, seen));
-            try
-            {
-                await transport.ConnectAsync(timeout.Token);
-                break;
-            }
-            catch (SshException ex) when (ex.Reason == SshFailureReason.KeyExchangeFailed && ex.Message.StartsWith("No matching", StringComparison.Ordinal))
-            {
-                // Older OpenSSH and Dropbear lack some algorithms; only "the server does not offer it" is a skip, anything else fails.
-                await transport.DisposeAsync();
-                await stream.DisposeAsync();
-                Skip.Test($"{RealServer.Software} does not offer this combination: {ex.Message}");
-                return;
-            }
-            catch (Exception ex) when (attempt == 1 && ex is IOException or SshException { Reason: SshFailureReason.ConnectionClosed })
-            {
-                // A server that finds nothing in common disconnects at once, and OpenSSH for Windows resets the connection; Windows may then
-                // drop its KEXINIT before the client reads it, so the client sees the reset instead of "no matching". Once more decides:
-                // that race is rare, and a real failure fails again.
-                await transport.DisposeAsync();
-                await stream.DisposeAsync();
-            }
-        }
-
+            return Options(kex, cipher, hostKey, seen);
+        }, timeout.Token);
         await using var connectedStream = stream;
         await using var connected = transport;
 
@@ -172,14 +147,83 @@ public class TransportInteropTests
         await Assert.That(seen[0].Fingerprint).StartsWith("SHA256:");
 
         // The first encrypted request and reply in each direction: if either direction's keys were wrong this would fail.
+        await AssertServiceRequestIsAcceptedAsync(transport, timeout.Token);
+    }
+
+    /// <summary>
+    /// The plain (encrypt-and-MAC) HMACs of RFC 4253 with AES-CTR (#268), the combination network equipment often offers alone. The
+    /// client offers only that MAC and cipher, so the handshake and the round trip after it use them in both directions.
+    /// </summary>
+    [Test]
+    [Arguments("aes128-ctr", "hmac-sha2-256")]
+    [Arguments("aes128-ctr", "hmac-sha2-512")]
+    public async Task PlainHmacSha2_HandshakeAndEncryptedRoundTrip(string cipher, string mac)
+    {
+        if (!RealServer.IsAvailable)
+        {
+            Skip.Test("SSHSHARP_TEST_SSHD is not set.");
+        }
+
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        var (stream, transport) = await ConnectOrSkipAsync(() => new SshTransportOptions
+        {
+            Preferences = new AlgorithmPreferences { Ciphers = [cipher], Macs = [mac] },
+            VerifyHostKey = (_, _) => ValueTask.FromResult(true),
+        }, timeout.Token);
+        await using var connectedStream = stream;
+        await using var connected = transport;
+
+        await Assert.That(transport.Algorithms!.CipherClientToServer).IsEqualTo(cipher);
+        await Assert.That(transport.Algorithms.CipherServerToClient).IsEqualTo(cipher);
+        await Assert.That(transport.Algorithms.MacClientToServer).IsEqualTo(mac);
+        await Assert.That(transport.Algorithms.MacServerToClient).IsEqualTo(mac);
+        await AssertServiceRequestIsAcceptedAsync(transport, timeout.Token);
+    }
+
+    private static async Task AssertServiceRequestIsAcceptedAsync(SshTransport transport, CancellationToken cancellationToken)
+    {
         var request = new ArrayBufferWriter<byte>();
         var writer = new SshWriter(request);
         writer.WriteByte(SshMessage.ServiceRequest);
         writer.WriteString("ssh-userauth");
-        await transport.SendAsync(request.WrittenMemory, timeout.Token);
+        await transport.SendAsync(request.WrittenMemory, cancellationToken);
 
-        using var reply = await transport.ReceiveAsync(timeout.Token);
+        using var reply = await transport.ReceiveAsync(cancellationToken);
         await Assert.That(reply.Payload.Span[0]).IsEqualTo(SshMessage.ServiceAccept);
+    }
+
+    /// <summary>
+    /// Connects a transport with fresh options per attempt. A server without the algorithms skips the test; the caller disposes the
+    /// stream and transport.
+    /// </summary>
+    private static async Task<(Stream Stream, SshTransport Transport)> ConnectOrSkipAsync(Func<SshTransportOptions> options, CancellationToken cancellationToken)
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            var stream = await RealServer.ConnectAsync();
+            var transport = new SshTransport(stream, options());
+            try
+            {
+                await transport.ConnectAsync(cancellationToken);
+                return (stream, transport);
+            }
+            catch (SshException ex) when (ex.Reason == SshFailureReason.KeyExchangeFailed && ex.Message.StartsWith("No matching", StringComparison.Ordinal))
+            {
+                // Older OpenSSH and Dropbear lack some algorithms; only "the server does not offer it" is a skip, anything else fails.
+                await transport.DisposeAsync();
+                await stream.DisposeAsync();
+                Skip.Test($"{RealServer.Software} does not offer this combination: {ex.Message}");
+                throw new System.Diagnostics.UnreachableException(); // Skip.Test throws
+            }
+            catch (Exception ex) when (attempt == 1 && ex is IOException or SshException { Reason: SshFailureReason.ConnectionClosed })
+            {
+                // A server that finds nothing in common disconnects at once, and OpenSSH for Windows resets the connection; Windows may then
+                // drop its KEXINIT before the client reads it, so the client sees the reset instead of "no matching". Once more decides:
+                // that race is rare, and a real failure fails again.
+                await transport.DisposeAsync();
+                await stream.DisposeAsync();
+            }
+        }
     }
 
     [Test]

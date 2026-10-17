@@ -29,6 +29,9 @@ ACCEPTED = {
     "2048-bit modulus only provides 112-bits of symmetric strength",
     # ECDSA host keys: a warning about how a server made its key, not about the client that accepts the algorithm.
     "using weak random number generator could reveal the key",
+    # hmac-sha2-256 and hmac-sha2-512 (#268), offered after the encrypt-then-MAC variants, as OpenSSH's client does, for servers
+    # (often network equipment) that offer nothing else with aes*-ctr. A server offering both always gets encrypt-then-MAC.
+    "using encrypt-and-MAC mode",
 }
 
 SECTIONS = (("kex", "key exchange"), ("key", "host key"), ("enc", "cipher"), ("mac", "MAC"))

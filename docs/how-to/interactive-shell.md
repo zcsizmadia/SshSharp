@@ -43,6 +43,10 @@ the match (`Value`) and, for a regular expression, its groups (`Match`). Output 
 
 [!code-csharp[](../snippets/Shells.cs#expect-device)]
 
+Routers, switches and appliances often offer only `aes*-ctr` with the plain `hmac-sha2-256` or `hmac-sha2-512` MAC. The defaults
+include both, after the encrypt-then-MAC ones, so no configuration is needed. A device that offers only SHA-1 MACs or CBC ciphers
+cannot be reached; see [Troubleshooting](../reference/troubleshooting.md#no-common-algorithms).
+
 ## Start a subsystem
 
 A subsystem is a protocol the server runs by name instead of a command, as `ssh -s` does: `netconf`, or anything configured with

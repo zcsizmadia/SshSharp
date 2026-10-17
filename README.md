@@ -43,7 +43,7 @@ Console.WriteLine(result.StandardOutputText);
 - **Modern algorithms:** post-quantum `mlkem768x25519-sha256`, and the FIPS-compatible `mlkem768nistp256-sha256` and `mlkem1024nistp384-sha384` (on .NET 10 where the platform has ML-KEM),
   and `sntrup761x25519-sha512` (managed, on every platform), `curve25519-sha256`,
   ECDH and DH group 14/16 key exchange; ChaCha20-Poly1305, AES-GCM and
-  AES-CTR with HMAC-SHA2 ETM; Ed25519, ECDSA and RSA (SHA-2) keys; strict key exchange (Terrapin) always on; a FIPS mode.
+  AES-CTR with HMAC-SHA2 (ETM preferred, plain `hmac-sha2-256/512` for network equipment); Ed25519, ECDSA and RSA (SHA-2) keys; strict key exchange (Terrapin) always on; a FIPS mode.
 - **File transfer:** SFTP (version 3 with OpenSSH's extensions: pipelined uploads and downloads, seekable remote file
   streams, directories, links and attributes), and SCP uploads and downloads of files,
   streams and directories, with progress, kept times, and checks that stop a hostile server from writing outside the target.

@@ -56,6 +56,22 @@ internal sealed class AesCtr : IDisposable
         }
     }
 
+    /// <summary>
+    /// Writes the first <c>destination.Length</c> bytes (at most one block) of the next keystream block without advancing the counter. A
+    /// receiver whose packet length is encrypted needs it before the whole packet has arrived; the packet is then decrypted from the same
+    /// counter.
+    /// </summary>
+    public void PeekKeystream(Span<byte> destination)
+    {
+        if (destination.Length > BlockSize)
+        {
+            throw new ArgumentException("At most one block of keystream can be peeked.", nameof(destination));
+        }
+
+        _encryptor.TransformBlock(_counter, 0, BlockSize, _keystream, 0);
+        _keystream.AsSpan(0, destination.Length).CopyTo(destination);
+    }
+
     public void Dispose()
     {
         _encryptor.Dispose();
