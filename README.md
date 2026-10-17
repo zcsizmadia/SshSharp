@@ -16,8 +16,8 @@ var result = await client.RunCommandAsync("uptime");
 Console.WriteLine(result.StandardOutputText);
 ```
 
-> **Status:** pre-1.0 (0.x releases). The API may still change before 1.0, and the managed cryptography
-> has had an internal constant-time review but not yet an outside one. See [SECURITY.md](https://github.com/zcsizmadia/SshSharp/blob/main/SECURITY.md).
+> **Status:** 1.0: the public API follows semantic versioning, so breaking changes wait for a major version. The managed
+> cryptography has had an internal constant-time review but not yet an outside one. See [SECURITY.md](https://github.com/zcsizmadia/SshSharp/blob/main/SECURITY.md).
 
 ## Features
 
@@ -115,7 +115,7 @@ Console.WriteLine(result.StandardOutputText);
 | Fuzzing | ✅ (coverage-guided, nightly; every parser in each test run) | ❌ |
 | Fault-injection tests against real servers (cuts at any byte, either way; silent or one-way stalled networks; latency, tiny segments, low bandwidth; sessions killed on the server) | ✅ | Partial (sessions killed on the server) |
 | Mutation testing | ✅ (Stryker.NET, weekly) | ❌ |
-| Maturity | New, pre-1.0; managed crypto awaiting an outside review | More than a decade of production use |
+| Maturity | New (1.0); managed crypto awaiting an outside review | More than a decade of production use |
 
 **Use SSH.NET instead** when you need .NET Framework or .NET Standard, servers that only speak legacy algorithms,
 or a long track record. Moving from SSH.NET? See the
@@ -185,6 +185,8 @@ latest release.
 - [Signing files and commits](https://github.com/zcsizmadia/SshSharp/blob/main/docs/signing.md): SSH signatures
   (`ssh-keygen -Y`) and allowed-signers files
 - [Configuration files](https://github.com/zcsizmadia/SshSharp/blob/main/docs/config-files.md)
+- [Dependency injection](https://github.com/zcsizmadia/SshSharp/blob/main/docs/dependency-injection.md): named endpoints,
+  a shared reconnecting connection, health checks
 - [Errors and diagnostics](https://github.com/zcsizmadia/SshSharp/blob/main/docs/diagnostics.md): exceptions, logging,
   tracing, metrics
 - [Migrating from SSH.NET](https://github.com/zcsizmadia/SshSharp/blob/main/docs/migrating-from-sshnet.md): the same tasks,

@@ -14,7 +14,7 @@ date with you once a fix is ready.
 
 ## Supported versions
 
-SshSharp is pre-1.0. Only the latest release (and `main`) receives security fixes.
+Only the latest 1.x release (and `main`) receives security fixes.
 
 ## Scope
 

@@ -48,9 +48,11 @@ jobs:
       - name: Pack (with package validation)
         if: matrix.os == 'ubuntu-latest'
         run: |
-          dotnet pack src/SshSharp -c Release --no-build -o packages
+          for project in SshSharp SshSharp.FileProviders SshSharp.IO.Abstractions SshSharp.Extensions.DependencyInjection; do
+            dotnet pack "src/$project" -c Release --no-build -o packages
+          done
           ls packages
-          echo "Package: $(ls packages/*.nupkg)" >> "$GITHUB_STEP_SUMMARY"
+          echo "Packages: $(ls packages/*.nupkg | xargs -n1 basename | tr '\n' ' ')" >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: matrix.os == 'ubuntu-latest'
         with:

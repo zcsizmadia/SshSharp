@@ -1,14 +1,19 @@
 # Threat model
 
 SshSharp is an SSH **client** library. This page lists who and what it trusts, and what it does about the rest.
-It is reviewed before each release; the last review covered everything up to 0.6.0, including SFTP and its adapters,
-proxies, remote dynamic and Unix-socket forwarding, destination-constrained agent keys, SSH signatures and sntrup761, and the
-areas added in 0.6.0: Kerberos (`gssapi-with-mic`), adding keys to the agent and Pageant, revoked host keys (KRLs),
-`ping@openssh.com`, channel idle timeouts (`ChannelTimeout`) and segmented SFTP downloads.
+It is reviewed before each release; the last review covered everything up to 1.0.0, including SFTP and its adapters,
+proxies, remote dynamic and Unix-socket forwarding, destination-constrained agent keys, SSH signatures, sntrup761, Kerberos
+(`gssapi-with-mic`), adding keys to the agent and Pageant, revoked host keys (KRLs), `ping@openssh.com`, channel idle timeouts
+(`ChannelTimeout`) and segmented SFTP downloads, and the areas added in 1.0.0: keys held elsewhere (`SshKeySigner`), SFTP
+`Preserve` with permissions, and the dependency injection package (`SshSharp.Extensions.DependencyInjection`).
 
 ## Trusted
 
 - **The application** that uses the library, its options and callbacks (host key verifier, loggers, `Match exec` runner).
+- **Signers** (`SshKeySigner`, `SshPrivateKey.FromSigner`, `FromRsa`, `FromECDsa`): application code, or a key service it trusts,
+  that signs for a key SshSharp never sees. Each request says what it is for (`SshSignRequest.Purpose`: logging in, or an SSH
+  signature with its namespace), so a signer can refuse by policy. What it signs includes the session identifier and the user name,
+  which matters to a signer that logs its requests. Every signature it returns is verified against the public key before use.
 - **The local machine**: the process, its memory, and files the application chooses to load (private keys, `ssh_config`,
   `known_hosts`). Their *contents* are still parsed defensively; see below.
 - **The .NET runtime and OS cryptography** (AES, SHA-2, HMAC, RSA, ECDSA, ECDH, random numbers).
@@ -107,8 +112,11 @@ A man in the middle can read, change, drop and inject bytes. The server itself m
 - Recursive downloads apply the same name checks as SCP (no `.`, `..`, separators, NUL, or Windows device names; `:` and `\`
   only matter on Windows) and keep every path inside the target directory. Uploads skip special files (FIFOs, sockets,
   devices).
-- `SshSharp.FileProviders` refuses `..`, NUL and backslashes in subpaths, so a web request cannot leave the configured root,
-  and bounds its cache.
+- With `Preserve`, a download applies the server's permission bits (read, write and execute for owner, group and others; never
+  set-id or sticky) where this machine has Unix modes, without the local umask, as `sftp -p` does: a server can make what it sends
+  world-writable. A directory's mode is applied after its contents, and a name listed twice is fetched once.
+- `SshSharp.FileProviders` treats backslashes as separators and refuses `..` and NUL in subpaths, so a web request cannot leave
+  the configured root by name, and bounds its cache. The server follows symbolic links, including ones that point out of the root.
 
 ### SSH signatures and allowed-signers files
 
@@ -145,6 +153,9 @@ A man in the middle can read, change, drop and inject bytes. The server itself m
 - `Match exec` runs nothing unless the application opts in with an exec runner.
 - `ProxyCommand` runs by default, as with `ssh`. Applications that load configurations they do not control can turn it off
   with `SshConfigConnectOptions.AllowProxyCommand = false`.
+- The password and keyboard-interactive answers given in `SshConfigConnectOptions` go to the destination only: a `ProxyJump`
+  hop, perhaps run by someone else, is never offered them, and logs in with keys or the agent.
+- `Include` is bounded: at most 16 levels deep and 1,024 files in all, so a configuration cannot make resolution parse without end.
 - `KnownHostsCommand` runs only with `SshConfigConnectOptions.AllowKnownHostsCommand = true`. It is off by default, unlike
   `ProxyCommand`, because its output is trusted as known_hosts lines: a configuration the application does not control must not
   be able to vouch for host keys. With it off, a configuration that names one fails the connection. As in OpenSSH, no shell is
@@ -159,6 +170,17 @@ A man in the middle can read, change, drop and inject bytes. The server itself m
   contain white space either, which would split `%h` into extra arguments. User names may (Windows account names can).
 - The config file itself is trusted to the same degree OpenSSH trusts it: whoever can edit it can run commands as the user.
   Values it sets (`HostName`, `User`) are used as written.
+
+### Dependency injection
+
+- `SshEndpointOptions` can hold a password and a key passphrase bound from configuration: bind them from a secret store, not a
+  checked-in file. They are not logged.
+- Host keys are checked strictly by default: an unknown host fails unless `AcceptNewHostKeys` is set (which trusts the first key it
+  sees), and a changed key always fails.
+- With `ConfigAlias`, the connection takes ssh_config's settings and the core defaults (`ProxyCommand` allowed, the agent used,
+  `ForwardAgent` and `StrictHostKeyChecking` as the file says); an unknown host is refused, since there is no one to ask.
+- The health check's description names no server software and carries no server text, since health endpoints are often reachable
+  without authentication. Its exception is attached for logging: do not write it to a public response.
 
 ## Out of scope
 

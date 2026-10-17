@@ -43,7 +43,7 @@ builder.Services.AddSshClient("db", o => o.ConfigAlias = "prod-db"); // everythi
 | `PrivateKeyFiles`, `PrivateKeyPassphrase` | Keys to authenticate with (OpenSSH, PEM or PuTTY files; `~/` is the user's home). |
 | `KnownHostsFiles` | Where the server's host key is checked (default `~/.ssh/known_hosts`). |
 | `AcceptNewHostKeys` | Record the key of a host not in those files yet (`StrictHostKeyChecking accept-new`). Off by default: an unknown host fails the connection, and a changed key always does. |
-| `ConfigAlias` | Connect through ssh_config by this alias instead: ProxyJump, IdentityFile, known_hosts and the rest come from there. |
+| `ConfigAlias` | Connect through ssh_config by this alias instead: ProxyJump, IdentityFile, known_hosts and the rest come from there, and `Host`, `Port`, `UserName`, `PrivateKeyFiles`, `KnownHostsFiles`, `AcceptNewHostKeys` and `KeepAliveInterval` are ignored (ssh_config's `ServerAliveInterval` applies). `Password` is still offered, to the destination only, never to a ProxyJump hop. |
 | `KeepAliveInterval` | Keep-alives, so a dead connection is noticed. |
 | `ConnectTimeout` | How long one attempt may take, authentication included (default 30 s); then a `TimeoutException`. |
 | `ReconnectDelay`, `MaxReconnectDelay` | The shared connection's wait after a failed attempt (default 1 s, doubling up to 1 min). |
@@ -94,7 +94,8 @@ builder.Services.AddHealthChecks().AddSsh("deploy");
 ```
 
 The check pings the endpoint's shared connection, opening it if needed: healthy when it answers, otherwise the registration's failure
-status (unhealthy by default) with the error. Its options are those of any health check: a name (default `ssh-` and the endpoint), the
+status (unhealthy by default). Its description names no server software and holds no server text, as health endpoints are often
+public; the exception is attached for logging, so keep it out of public responses. Its options are those of any health check: a name (default `ssh-` and the endpoint), the
 failure status, tags and a timeout.
 
 ## Logging and testing

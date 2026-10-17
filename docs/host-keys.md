@@ -21,7 +21,7 @@ var custom = new KnownHostsVerifier(["/etc/myapp/known_hosts"])
 |---|---|---|---|
 | `Yes` | accepted | rejected | rejected |
 | `AcceptNew` | accepted | recorded and accepted, unless another key type is already known for the host | rejected |
-| `Ask` (default) | accepted | `Ask` decides (rejected without it); recorded when accepted | rejected |
+| `Ask` (default) | accepted | `AskHostKey` decides (rejected without it); recorded when accepted | rejected |
 | `No` | accepted | accepted and recorded | accepted (not recorded) |
 
 `No` turns off protection against a changed key, so use it only where interception is not a concern. `@revoked` entries
@@ -33,7 +33,7 @@ hashed hosts, `[host]:port`, wildcards and negation.
 var verifier = new KnownHostsVerifier([knownHostsPath])
 {
     Policy = StrictHostKeyChecking.Ask,
-    Ask = (prompt, ct) =>
+    AskHostKey = (prompt, ct) =>
     {
         Console.WriteLine($"Unknown host key {prompt.Context.HostKey.KeyType} {prompt.Context.HostKey.Fingerprint}.");
         if (prompt.KnownKeyTypes.Count > 0)
