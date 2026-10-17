@@ -263,14 +263,8 @@ public sealed partial class SshClient : IAsyncDisposable
         finally
         {
             await stop.CancelAsync().ConfigureAwait(false);
-            try
-            {
-                await writing.ConfigureAwait(false);
-            }
-            catch (Exception)
-            {
-                // Already reported above, or the run failed first and that is what the caller sees.
-            }
+            // The writer's failure was already reported above, or the run failed first and that is what the caller sees.
+            await writing.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
 
             var tags = new TagList { { "result", outcome } };
             if (errorType is not null)
