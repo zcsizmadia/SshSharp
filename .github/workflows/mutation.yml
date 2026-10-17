@@ -2,8 +2,8 @@ name: Mutation testing
 
 # Stryker.NET mutates the library and runs the TUnit suite against every mutant: a mutant no test notices is a gap in the tests.
 # The weekly run is incremental: it mutates only what changed in the last eight days. A manual run is full by default; a full run takes
-# hours on the hosted runners (about a minute per mutant), so the large files run as jobs of their own. Reports are uploaded as
-# artifacts; the score is not a gate.
+# hours on the hosted runners, so the large files run as jobs of their own, and each job compiles only the tests for its files.
+# Reports are uploaded as artifacts; the score is not a gate.
 on:
   schedule:
     - cron: '17 3 * * 6' # weekly
@@ -29,26 +29,46 @@ jobs:
         include:
           - scope: field25519
             mutate: -m "**/Crypto/Field25519.cs"
+            tests: Crypto/Field25519Tests.cs;Crypto/X25519Tests.cs;Crypto/Ed25519Tests.cs;Crypto/WycheproofTests.cs
           - scope: x25519
             mutate: -m "**/Crypto/X25519.cs"
+            tests: Crypto/X25519Tests.cs;Crypto/WycheproofTests.cs;Protocol/ClientKeyExchangeTests.cs
           - scope: ed25519
             mutate: -m "**/Crypto/Ed25519.cs"
-          - scope: symmetric
-            mutate: -m "**/Crypto/ChaCha20*.cs" -m "**/Crypto/Poly1305.cs" -m "**/Crypto/AesCtr.cs" -m "**/Crypto/XorHelper.cs"
-          - scope: kdf
-            mutate: -m "**/Crypto/Argon2.cs" -m "**/Crypto/BcryptPbkdf.cs" -m "**/Crypto/Blake2b.cs"
+            tests: Crypto/Ed25519Tests.cs;Crypto/WycheproofTests.cs;Keys/*Tests.cs
+          - scope: chacha20-poly1305
+            mutate: -m "**/Crypto/ChaCha20*.cs" -m "**/Crypto/Poly1305.cs"
+            tests: Crypto/ChaChaPolyTests.cs;Crypto/WycheproofTests.cs;Protocol/PacketCodecTests.cs
+          - scope: aes-ctr
+            mutate: -m "**/Crypto/AesCtr.cs" -m "**/Crypto/XorHelper.cs"
+            tests: Crypto/AesCtrTests.cs;Crypto/ChaChaPolyTests.cs;Protocol/PacketCodecTests.cs
+          - scope: argon2-blake2b
+            mutate: -m "**/Crypto/Argon2.cs" -m "**/Crypto/Blake2b.cs"
+            tests: Crypto/Argon2Tests.cs;Keys/*Tests.cs
+          - scope: bcrypt-pbkdf
+            mutate: -m "**/Crypto/BcryptPbkdf.cs"
+            tests: Crypto/BcryptPbkdfTests.cs;Keys/*Tests.cs
           - scope: ecdh-dh
             mutate: -m "**/Crypto/NistCurve.cs" -m "**/Crypto/ModpGroup.cs"
+            tests: Crypto/NistCurveTests.cs;Crypto/ModpGroupTests.cs;Crypto/WycheproofTests.cs;Protocol/ClientKeyExchangeTests.cs;Keys/ExternalKeyTests.cs
           - scope: sntrup761
             mutate: -m "**/Crypto/Sntrup761.cs"
+            tests: Crypto/Sntrup761Tests.cs;Protocol/SntrupKexTests.cs
           - scope: packet-codec
             mutate: -m "**/Protocol/PacketCodec.cs"
+            tests: Protocol/PacketCodecTests.cs;Protocol/KexNegotiationTests.cs;Protocol/SshWireTests.cs;Fuzz/ParserRobustnessTests.cs
           - scope: config-parser
-            mutate: -m "**/Config/SshConfig.cs" -m "**/Config/SshConfigLine.cs" -m "**/Config/SshTokens.cs" -m "**/Config/Glob.cs"
+            mutate: -m "**/Config/SshConfig.cs" -m "**/Config/SshConfigLine.cs"
+            tests: Config/*Tests.cs;Fuzz/ParserRobustnessTests.cs
+          - scope: config-tokens-glob
+            mutate: -m "**/Config/SshTokens.cs" -m "**/Config/Glob.cs"
+            tests: Config/*Tests.cs;Fuzz/ParserRobustnessTests.cs
           - scope: config-resolver
             mutate: -m "**/Config/SshConfigResolver.cs" -m "**/Config/SshConfigResolveOptions.cs" -m "**/Config/SshHostConfig.cs" -m "**/Config/SshAlgorithmList.cs"
+            tests: Config/*Tests.cs;ConfigConnectTests.cs;ConfigForwardingTests.cs
           - scope: config-known-hosts
             mutate: -m "**/Config/KnownHosts*.cs" -m "**/Config/ForwardSpec.cs" -m "**/Config/SshExecMatcher.cs" -m "**/Config/SshTime.cs"
+            tests: Config/*Tests.cs;KnownHostsVerifierTests.cs;ConfigForwardingTests.cs;Fuzz/ParserRobustnessTests.cs
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -62,6 +82,9 @@ jobs:
         # MTP is Stryker's runner for Microsoft.Testing.Platform, which TUnit is built on (a preview runner in Stryker.NET 5).
         env:
           FULL: ${{ github.event_name == 'workflow_dispatch' && inputs.full }}
+          # Only this scope's tests are compiled (tests/SshSharp.Tests/SshSharp.Tests.csproj), so a mutant runs the tests that can
+          # kill it: the whole suite made per-test coverage capture alone take hours.
+          SSHSHARP_MUTATION_TESTS: ${{ matrix.tests }}
         run: |
           set -euo pipefail
           since=""

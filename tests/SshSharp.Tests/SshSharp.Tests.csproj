@@ -17,6 +17,12 @@
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
     <ProjectReference Include="../../src/SshSharp/SshSharp.csproj" />
   </ItemGroup>
+  <!-- The mutation workflow compiles one scope's tests only (SSHSHARP_MUTATION_TESTS, a ;-separated list of globs), so each mutant
+       runs the tests that can kill it, not the whole suite. The shared helpers (files not named *Tests.cs) stay. -->
+  <ItemGroup Condition="'$(SSHSHARP_MUTATION_TESTS)' != ''">
+    <Compile Remove="**/*Tests.cs" />
+    <Compile Include="$(SSHSHARP_MUTATION_TESTS)" />
+  </ItemGroup>
   <ItemGroup>
     <None Include="Fixtures/**" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
