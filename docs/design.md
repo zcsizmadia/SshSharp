@@ -6,7 +6,7 @@ The decisions behind SshSharp and the rules the code follows. Work items live in
 
 | Topic | Decision |
 |---|---|
-| Target frameworks | `net8.0` and `net10.0` only. `net8.0` stays for a while after its end of support (November 2026), for users who cannot move yet; `net11.0` is added once .NET 11 is released, next to them ([#197](https://github.com/zcsizmadia/SshSharp/issues/197)). |
+| Target frameworks | `net8.0`, `net10.0` and `net11.0`. `net8.0` stays for a while after its end of support (November 2026), for users who cannot move yet. `net11.0` uses the platform's X25519 (`X25519DiffieHellman`) where the OS provides it, and starts local commands with only their standard streams inherited, stopping them with SIGTERM before a kill ([#197](https://github.com/zcsizmadia/SshSharp/issues/197)). |
 | No `netstandard2.0` | The design depends on `Span`/`Memory` in the BCL APIs, Pipelines, `AesGcm`, `TimeProvider`, `SearchValues` and modern ECDH/RSA APIs. .NET Framework and Windows PowerShell 5.1 users stay on SSH.NET. |
 | Protocol | Pure managed C#, no native dependencies |
 | Finite-field DH | `diffie-hellman-group-exchange-sha256`, `diffie-hellman-group16-sha512`, `diffie-hellman-group18-sha512` and `diffie-hellman-group14-sha256` stay in the default key exchanges, last, in OpenSSH's client order: chosen only when a server offers nothing better (no post-quantum hybrid, curve25519 or ECDH), and the fixed groups are kept in FIPS mode as the fallback where the platform has no ML-KEM (group exchange is not: SP 800-56A rev. 3 approves only fixed safe-prime groups). RFC 9142 keeps group 14 as MUST. Group exchange ([#269](https://github.com/zcsizmadia/SshSharp/issues/269)) is the only finite-field method on many embedded and older servers; the server's group is checked before use, with one Miller-Rabin round rather than a full safe-prime proof, which would cost another 0.65 s at 8192 bits on every connection ([threat model](threat-model.md)). The exponent's `BigInteger.ModPow` is not constant-time, an accepted risk for a single-use ephemeral exponent ([crypto review](crypto-review.md), [#99](https://github.com/zcsizmadia/SshSharp/issues/99)). |
@@ -117,7 +117,7 @@ docs/                      # guides, design notes, the API reference site (DocFX
 
 ## Risks
 
-- **Managed X25519/Ed25519** is the riskiest code: it signs with users' long-term keys. The managed sntrup761 handles the
+- **Managed X25519/Ed25519** (X25519 only before .NET 11, or where the OS lacks it) is the riskiest code: it signs with users' long-term keys. The managed sntrup761 handles the
   post-quantum half of a key exchange. Both are checked against official vectors, reviewed for constant time with a
   dudect-style timing test (`docs/crypto-review.md`), and await an outside review. The BCL is used wherever it
   provides the primitive on both target frameworks.

@@ -54,6 +54,8 @@ jobs:
           puttygen --version
       - name: Test net8.0
         run: dotnet test --project tests/SshSharp.Tests -c Release -f net8.0 --no-build --treenode-filter "${{ env.UNIT_TESTS }}" --report-trx --report-trx-filename unit-net8.0.trx --results-directory TestResults
+      - name: Test net11.0
+        run: dotnet test --project tests/SshSharp.Tests -c Release -f net11.0 --no-build --treenode-filter "${{ env.UNIT_TESTS }}" --report-trx --report-trx-filename unit-net11.0.trx --results-directory TestResults
       - name: Test net10.0 with coverage
         run: dotnet test --project tests/SshSharp.Tests -c Release -f net10.0 --no-build --treenode-filter "${{ env.UNIT_TESTS }}" --report-trx --report-trx-filename unit-net10.0.trx --coverage --coverage-output-format cobertura --coverage-output coverage.cobertura.xml --results-directory TestResults
       # Every skip must be one this job is known to need (tests/ci/skips/unit-<os>-<framework>.txt): an unexpected one fails the job.
@@ -64,6 +66,7 @@ jobs:
           status=0
           pwsh tests/ci/check-skips.ps1 -Job "unit (${{ matrix.os }}) net8.0" -Trx TestResults/unit-net8.0.trx || status=1
           pwsh tests/ci/check-skips.ps1 -Job "unit (${{ matrix.os }}) net10.0" -Trx TestResults/unit-net10.0.trx || status=1
+          pwsh tests/ci/check-skips.ps1 -Job "unit (${{ matrix.os }}) net11.0" -Trx TestResults/unit-net11.0.trx || status=1
           exit "$status"
       - name: Coverage summary
         if: matrix.os == 'ubuntu-latest'

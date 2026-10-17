@@ -244,8 +244,8 @@ internal sealed class ScpChannel : IAsyncDisposable
     internal async Task<SshException> FailureAsync(string message)
     {
         // The program's own message (No such file or directory, Permission denied) usually explains it; give it a moment to arrive.
-        await Task.WhenAny(_errors, Task.Delay(TimeSpan.FromSeconds(2))).ConfigureAwait(false);
-        var errors = _errors.IsCompleted ? await _errors.ConfigureAwait(false) : string.Empty;
+        await ((Task)_errors).WaitAsync(TimeSpan.FromSeconds(2)).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+        var errors = _errors.IsCompletedSuccessfully ? _errors.Result : string.Empty;
         return new SshException(SshFailureReason.TransferFailed, errors.Length > 0 ? $"{message} {errors.Trim()}" : message);
     }
 

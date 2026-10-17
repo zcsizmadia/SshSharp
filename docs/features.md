@@ -70,7 +70,7 @@ The four packages share one version: `SshSharp` (the client), `SshSharp.Extensio
 | Issue certificates | Sign user and host certificates as a CA, with the CA key in a file, an agent or a KMS <span class="badge text-bg-primary">1.1</span> | <xref:SshSharp.SshCertificateBuilder> | [Certificates](how-to/certificates.md) |
 | Check certificates | Signature, validity period, principal and authority, as `sshd` checks them <span class="badge text-bg-primary">1.1</span> | `SshCertificate.VerifySignature`, `IsValidAt`, `IsValidFor` | [Certificates](how-to/certificates.md) |
 | Revocation lists | Checks keys and certificates against an OpenSSH KRL or a key list, as `ssh-keygen -Q` <span class="badge text-bg-primary">1.1</span> | <xref:SshSharp.SshKeyRevocationList> | [Certificates](how-to/certificates.md) |
-| Kerberos | `gssapi-with-mic` with the current user's ticket or given credentials (.NET 10) | `SshClientOptions.Gssapi`; `GSSAPIAuthentication`, `GSSAPIDelegateCredentials` | [Kerberos](how-to/kerberos.md) |
+| Kerberos | `gssapi-with-mic` with the current user's ticket or given credentials (.NET 10 and later) | `SshClientOptions.Gssapi`; `GSSAPIAuthentication`, `GSSAPIDelegateCredentials` | [Kerberos](how-to/kerberos.md) |
 | SSH signatures | Sign and verify files and git commits, with allowed-signers files, as `ssh-keygen -Y` | `SshSignature`, `SshAllowedSigners` | [Signing files and commits](signing.md) |
 
 ## Sessions and commands
@@ -137,7 +137,7 @@ The four packages share one version: `SshSharp` (the client), `SshSharp.Extensio
 | Modern algorithms only | Curve25519, ECDH, SHA-2 finite-field DH (group exchange and group 18 <span class="badge text-bg-primary">1.1</span>); ChaCha20-Poly1305, AES-GCM, AES-CTR with HMAC-SHA2 (plain `hmac-sha2-*` <span class="badge text-bg-primary">1.1</span>); Ed25519, ECDSA, RSA with SHA-2. No CBC, SHA-1 or `ssh-rsa` | defaults | [Algorithms](reference/algorithms.md) |
 | Algorithm choices in code | Key exchange, host key, cipher and MAC lists with `ssh_config`'s `+`, `-` and `^` forms; unknown names fail when set <span class="badge text-bg-primary">1.1</span> | `KexAlgorithms`, `HostKeyAlgorithms`, `Ciphers`, `Macs` (<xref:SshSharp.SshAlgorithmList>) | [Choose algorithms](how-to/algorithms-and-authentication-order.md) |
 | Strict key exchange | The Terrapin countermeasure, always on | built in | [Algorithms](reference/algorithms.md) |
-| FIPS mode | FIPS-approved algorithms only, including post-quantum `mlkem768nistp256-sha256` and `mlkem1024nistp384-sha384` on .NET 10 | `SshClientOptions.FipsMode` | [FIPS mode](how-to/fips-mode.md) |
+| FIPS mode | FIPS-approved algorithms only, including post-quantum `mlkem768nistp256-sha256` and `mlkem1024nistp384-sha384` on .NET 10 and later | `SshClientOptions.FipsMode` | [FIPS mode](how-to/fips-mode.md) |
 | Delayed compression | `zlib@openssh.com`, started after authentication, off by default as in `ssh` <span class="badge text-bg-primary">1.1</span> | `SshClientOptions.Compression`; `Compression` | [Tune and inspect a connection](how-to/tune-and-inspect-connections.md) |
 
 ## .NET integration

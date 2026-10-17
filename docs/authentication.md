@@ -410,7 +410,7 @@ await using var client = await SshClient.ConnectAsync("build.corp.example", 22, 
   ticket.
 - The client asks for mutual authentication, and the MIC binds the Kerberos exchange to this SSH session. The host key is
   verified as always: `gssapi-keyex` (Kerberos instead of host keys) is not supported.
-- Needs .NET 10 (`SshGssapiOptions.IsSupported`): it relies on `NegotiateAuthentication.ComputeIntegrityCheck`, which .NET 8
+- Needs .NET 10 or later (`SshGssapiOptions.IsSupported`): it relies on `NegotiateAuthentication.ComputeIntegrityCheck`, which .NET 8
   lacks. On .NET 8 the method is not offered and the other methods are used.
 
 With `ssh_config`, `GSSAPIAuthentication yes` and `GSSAPIDelegateCredentials yes` turn it on, with `HostName` as the target, and
