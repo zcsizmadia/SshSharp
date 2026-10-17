@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <!-- SshSharp in an ASP.NET Core minimal API, through the dependency injection package. Built with the solution, so it keeps compiling
+       as the API changes. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <UserSecretsId>sshsharp-samples-aspnetcore</UserSecretsId>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/SshSharp/SshSharp.csproj" />
+    <ProjectReference Include="../../src/SshSharp.Extensions.DependencyInjection/SshSharp.Extensions.DependencyInjection.csproj" />
+    <ProjectReference Include="../../src/SshSharp.FileProviders/SshSharp.FileProviders.csproj" />
+  </ItemGroup>
+</Project>
