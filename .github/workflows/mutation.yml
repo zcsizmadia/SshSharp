@@ -50,7 +50,7 @@ jobs:
             tests: Crypto/BcryptPbkdfTests.cs;Keys/*Tests.cs
           - scope: ecdh-dh
             mutate: -m "**/Crypto/NistCurve.cs" -m "**/Crypto/ModpGroup.cs"
-            tests: Crypto/NistCurveTests.cs;Crypto/ModpGroupTests.cs;Crypto/WycheproofTests.cs;Protocol/ClientKeyExchangeTests.cs;Keys/ExternalKeyTests.cs
+            tests: Crypto/NistCurveTests.cs;Crypto/ModpGroupTests.cs;Crypto/WycheproofTests.cs;Protocol/ClientKeyExchangeTests.cs;Keys/ExternalKeyTests.cs;Agent/AgentTests.cs
           - scope: sntrup761
             mutate: -m "**/Crypto/Sntrup761.cs"
             tests: Crypto/Sntrup761Tests.cs;Protocol/SntrupKexTests.cs
@@ -59,10 +59,10 @@ jobs:
             tests: Protocol/PacketCodecTests.cs;Protocol/KexNegotiationTests.cs;Protocol/SshWireTests.cs;Fuzz/ParserRobustnessTests.cs
           - scope: config-parser
             mutate: -m "**/Config/SshConfig.cs" -m "**/Config/SshConfigLine.cs"
-            tests: Config/*Tests.cs;Fuzz/ParserRobustnessTests.cs
+            tests: Config/*Tests.cs;Fuzz/ParserRobustnessTests.cs;ConfigConnectTests.cs;ConfigForwardingTests.cs;KeyboardInteractiveTests.cs;ObscureKeystrokeTimingTests.cs;Agent/AgentKeyManagementTests.cs
           - scope: config-tokens-glob
             mutate: -m "**/Config/SshTokens.cs" -m "**/Config/Glob.cs"
-            tests: Config/*Tests.cs;Fuzz/ParserRobustnessTests.cs
+            tests: Config/*Tests.cs;Fuzz/ParserRobustnessTests.cs;ConfigConnectTests.cs
           - scope: config-resolver
             mutate: -m "**/Config/SshConfigResolver.cs" -m "**/Config/SshConfigResolveOptions.cs" -m "**/Config/SshHostConfig.cs" -m "**/Config/SshAlgorithmList.cs"
             tests: Config/*Tests.cs;ConfigConnectTests.cs;ConfigForwardingTests.cs
