@@ -72,6 +72,38 @@ public sealed class SftpDirectoryTests : IDisposable
     }
 
     [Test]
+    public async Task DownloadDirectory_FetchesANameListedTwice_Once()
+    {
+        // A broken or hostile server lists each entry twice. With Preserve, a directory's permissions are applied after its contents; a
+        // second copy written into a directory already made read-only would fail the transfer.
+        var files = new FakeSftpServer { ListEntriesTwice = true };
+        files.AddDirectory(Home + "/tree");
+        files.AddDirectory(Home + "/tree/locked");
+        files.AddFile(Home + "/tree/locked/f", "data"u8.ToArray());
+        files.SetMode(Home + "/tree/locked", 0x16D); // 0555: read-only once its contents are in
+        var rig = await StartAsync(files);
+        var target = Path.Combine(_dir, "twice");
+        try
+        {
+            var summary = await rig.Sftp.DownloadDirectoryAsync("tree", target, new SftpTransferOptions { Preserve = true }, Timeout());
+
+            await Assert.That(summary.Files).IsEqualTo(1);
+            await Assert.That(summary.Directories).IsEqualTo(1);
+            await Assert.That(summary.Skipped).IsEqualTo(2); // the second "locked" and the second "f"
+            await Assert.That(await File.ReadAllTextAsync(Path.Combine(target, "locked", "f"))).IsEqualTo("data");
+        }
+        finally
+        {
+            if (!OperatingSystem.IsWindows() && Directory.Exists(Path.Combine(target, "locked")))
+            {
+                File.SetUnixFileMode(Path.Combine(target, "locked"), (UnixFileMode)0x1ED); // so the test's directory can be removed
+            }
+
+            await StopAsync(rig);
+        }
+    }
+
+    [Test]
     [Arguments("..\\..\\escaped")]
     [Arguments("c:evil")]
     [Arguments("nul.txt")]

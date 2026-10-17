@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using System.Runtime.ExceptionServices;
 
 namespace SshSharp.Extensions.DependencyInjection;
 
@@ -40,7 +39,10 @@ internal sealed class SshConnectionProvider(SshClientFactory factory, TimeProvid
 
             if (entry.LastError is { } last && _time.GetUtcNow() < entry.RetryAt)
             {
-                ExceptionDispatchInfo.Throw(last); // still waiting before the next attempt
+                // Still waiting before the next attempt. A new exception for each caller, with the failure inside: rethrowing the one
+                // instance to every caller would grow its stack trace with each of them, from several threads at once.
+                throw new SshException(last is SshException ssh ? ssh.Reason : SshFailureReason.ConnectFailed,
+                    $"The SSH endpoint '{name}' failed to connect; the next attempt is at {entry.RetryAt:u}. {last.Message}", last);
             }
 
             try

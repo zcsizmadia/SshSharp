@@ -45,7 +45,7 @@ internal static class RealServer
             return null;
         }
 
-        var key = KeyFile is { } keyFile && File.Exists(keyFile) ? await SshPrivateKey.LoadFileAsync(keyFile) : null;
+        var key = KeyFile is { } keyFile && File.Exists(keyFile) ? await SshPrivateKey.LoadAsync(keyFile) : null;
         return new SshClientOptions
         {
             UserName = Environment.GetEnvironmentVariable("SSHSHARP_TEST_USER")!,

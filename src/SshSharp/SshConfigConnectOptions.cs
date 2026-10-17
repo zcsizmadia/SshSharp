@@ -17,14 +17,15 @@ public sealed class SshConfigConnectOptions
     public SshConfigResolveOptions? ResolveOptions { get; init; }
 
     /// <summary>
-    /// The password, sent with the <c>password</c> method unless <c>PasswordAuthentication</c> is <c>no</c>, or through
-    /// keyboard-interactive (see <see cref="SshClientOptions.Password"/>) unless <c>KbdInteractiveAuthentication</c> is <c>no</c>.
+    /// The destination's password, sent with the <c>password</c> method unless <c>PasswordAuthentication</c> is <c>no</c>, or through
+    /// keyboard-interactive (see <see cref="SshClientOptions.Password"/>) unless <c>KbdInteractiveAuthentication</c> is <c>no</c>. Never
+    /// offered to a ProxyJump hop, which logs in with keys or the agent.
     /// </summary>
     public string? Password { get; init; }
 
     /// <summary>
-    /// Answers keyboard-interactive authentication (see <see cref="SshClientOptions.KeyboardInteractive"/>). Not called in <c>BatchMode</c>
-    /// or with <c>KbdInteractiveAuthentication no</c>.
+    /// Answers the destination's keyboard-interactive authentication (see <see cref="SshClientOptions.KeyboardInteractive"/>). Not called
+    /// in <c>BatchMode</c>, with <c>KbdInteractiveAuthentication no</c>, or for a ProxyJump hop.
     /// </summary>
     public Func<SshKeyboardInteractiveRequest, CancellationToken, ValueTask<IReadOnlyList<string>?>>? KeyboardInteractive { get; init; }
 

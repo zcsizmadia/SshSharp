@@ -105,7 +105,7 @@ public sealed class SshAgent
     /// PuTTY's Pageant (0.75 and later), on the named pipe it creates for the current user (<c>\\.\pipe\pageant.&lt;user&gt;.&lt;hash&gt;</c>),
     /// or null when Pageant is not running or this is not Windows. Its keys work like any agent's.
     /// </summary>
-    public static SshAgent? Pageant() => PageantAsync().AsTask().GetAwaiter().GetResult();
+    public static SshAgent? FromPageant() => PageantAsync().AsTask().GetAwaiter().GetResult();
 
     private static async ValueTask<SshAgent?> PageantAsync() =>
         OperatingSystem.IsWindows() && PageantPipe.Name() is { } name && await PipeListedAsync(name).ConfigureAwait(false) == true

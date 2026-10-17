@@ -23,7 +23,7 @@
     <!-- Each release is checked against the previous one on nuget.org: an unintended breaking change fails the pack. -->
     <PackageValidationBaselineVersion>0.6.0</PackageValidationBaselineVersion>
 
-    <!-- The version comes from git tags (v0.1.0, v1.0.0-preview.1, ...): MinVer gives untagged commits a 0.x prerelease version. -->
+    <!-- The version comes from git tags (v0.1.0, v1.0.0-preview.1, ...): MinVer gives untagged commits a prerelease of the next version. -->
     <MinVerTagPrefix>v</MinVerTagPrefix>
     <MinVerDefaultPreReleaseIdentifiers>preview.0</MinVerDefaultPreReleaseIdentifiers>
     <MinVerMinimumMajorMinor>0.1</MinVerMinimumMajorMinor>

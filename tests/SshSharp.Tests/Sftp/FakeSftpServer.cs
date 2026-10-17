@@ -81,6 +81,9 @@ internal sealed class FakeSftpServer
     /// <summary>Hold each reply back until the next request arrives, answering them in reverse pairs (replies may come in any order).</summary>
     public bool ReorderReplies { get; set; }
 
+    /// <summary>List every entry twice, as a broken or hostile server might.</summary>
+    public bool ListEntriesTwice { get; set; }
+
     /// <summary>Answer STAT and LSTAT of the paths this matches with PERMISSION_DENIED, as for a directory the user may not search.</summary>
     public Func<string, bool>? DenyStat { get; set; }
 
@@ -716,6 +719,11 @@ internal sealed class FakeSftpServer
                     .Where(n => n.Key.StartsWith(prefix, StringComparison.Ordinal) && n.Key.Length > prefix.Length && !n.Key[prefix.Length..].Contains('/'))
                     .OrderBy(n => n.Key, StringComparer.Ordinal)
                     .Select(n => (n.Key[prefix.Length..], n.Value)));
+                if (ListEntriesTwice)
+                {
+                    entries = [.. entries.SelectMany(e => new[] { e, e })];
+                }
+
                 var batch = entries.Skip(open.Position).Take(ListingBatch).ToList();
                 if (batch.Count == 0)
                 {

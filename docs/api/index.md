@@ -7,5 +7,8 @@
 - **SshSharp.Sftp**: the SFTP client (`client.OpenSftpAsync()`).
 - **SshSharp.FileProviders** (package `SshSharp.FileProviders`): `SftpFileProvider`, a remote directory as an `IFileProvider`.
 - **SshSharp.IO.Abstractions** (package `SshSharp.IO.Abstractions`): `SftpFileSystem`, SFTP as an `IFileSystem`.
+- **SshSharp.Extensions.DependencyInjection** (package `SshSharp.Extensions.DependencyInjection`): `SshEndpointOptions`,
+  `ISshClientFactory` and `ISshConnectionProvider`; `AddSshClient` and the `AddSsh` health check are in
+  `Microsoft.Extensions.DependencyInjection`.
 
 Start with `SshClient`, `SshClientOptions` and `SshConfigConnectOptions`.

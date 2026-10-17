@@ -5,6 +5,29 @@ namespace SshSharp.Tests.Agent;
 /// <summary>Destination constraints on agent keys (restrict-destination-v00@openssh.com, ssh-add -h).</summary>
 public class AgentDestinationTests
 {
+    [Test]
+    public async Task Destinations_CompareByContent_AndKeepTheirOwnCopies()
+    {
+        // The same key bytes in different arrays, and the same hosts in different lists: equal, as a value should be.
+        var bytes = new byte[] { 1, 2, 3 };
+        var keys = new List<SshAgentHostKey> { new(bytes.ToArray()) };
+        var a = new SshAgentDestination { To = new SshAgentHost("dest.example", keys) { UserName = "alice" } };
+        var b = new SshAgentDestination { To = new SshAgentHost("dest.example", [new SshAgentHostKey(bytes.ToArray())]) { UserName = "alice" } };
+
+        await Assert.That(a).IsEqualTo(b);
+        await Assert.That(a.GetHashCode()).IsEqualTo(b.GetHashCode());
+        await Assert.That(new SshAgentHostKey(bytes, IsCertificateAuthority: true)).IsNotEqualTo(new SshAgentHostKey(bytes));
+
+        // The host keeps its own copy of the keys: changing the caller's list afterwards changes nothing.
+        keys.Add(new SshAgentHostKey(new byte[] { 9 }));
+        await Assert.That(a.To.HostKeys.Count).IsEqualTo(1);
+
+        var destinations = new List<SshAgentDestination> { a };
+        var constraints = new SshAgentKeyConstraints { Destinations = destinations };
+        destinations.Clear();
+        await Assert.That(constraints.Destinations.Count).IsEqualTo(1);
+    }
+
     // Throwaway host keys and the restrict-destination constraint bodies OpenSSH 10.6's ssh-add sent for them, captured from
     // "ssh-add -H known_hosts -h dest.example id" and
     // "ssh-add -H known_hosts -h 'jump.example>alice@dest.example' -h bob@host1.corp.test -t 600 -c id".

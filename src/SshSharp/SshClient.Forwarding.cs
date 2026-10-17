@@ -275,10 +275,10 @@ public sealed partial class SshClient
 
     private async Task CancelRemoteSocketForwardAsync(SshRemoteSocketForwarder forwarder, CancellationToken cancellationToken)
     {
-        _remoteSocketForwards.TryRemove(new KeyValuePair<string, SshRemoteSocketForwarder>(forwarder.SocketPath, forwarder));
+        _remoteSocketForwards.TryRemove(new KeyValuePair<string, SshRemoteSocketForwarder>(forwarder.RemoteSocketPath, forwarder));
         if (_disposed == 0)
         {
-            await _connection.SendGlobalRequestAsync("cancel-streamlocal-forward@openssh.com", true, w => w.WriteString(forwarder.SocketPath), cancellationToken)
+            await _connection.SendGlobalRequestAsync("cancel-streamlocal-forward@openssh.com", true, w => w.WriteString(forwarder.RemoteSocketPath), cancellationToken)
                 .ConfigureAwait(false);
         }
     }

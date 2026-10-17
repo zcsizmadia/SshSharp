@@ -14,7 +14,7 @@ The decisions behind SshSharp and the rules the code follows. Work items live in
 | Public API | Tracked in `PublicAPI.Shipped/Unshipped.txt` (PublicApiAnalyzers), so every public change shows in review; package validation on pack |
 | Test framework | TUnit (Microsoft.Testing.Platform) |
 | Coverage | Target 95%+ line and branch per assembly; reported, **not a CI gate**; reviewed locally with `scripts/coverage.ps1` |
-| Versioning | MinVer: the version comes from `v*` git tags; untagged commits are `0.x` prereleases |
+| Versioning | MinVer: the version comes from `v*` git tags; untagged commits are prereleases of the next version |
 | Strong naming | Not strong-named. .NET (Core) does not validate strong names, and the .NET Framework consumers who need them cannot use SshSharp. Because modern .NET does not check the public key token either, a strong name could still be added later without breaking consumers. |
 | License | MIT |
 
@@ -58,12 +58,13 @@ Out: server-side SSH, `ControlMaster` multiplexing, GSSAPI key exchange (`gssapi
 | `SshSharp` | Transport, crypto, auth, channels, agent, forwarding, proxies, `known_hosts`, `ssh_config`, ProxyJump, SCP, SFTP (`SshSharp.Sftp` namespace), keys and signatures |
 | `SshSharp.FileProviders` | `SftpFileProvider`: a remote directory as a `Microsoft.Extensions.FileProviders.IFileProvider` |
 | `SshSharp.IO.Abstractions` | `SftpFileSystem`: SFTP as a System.IO.Abstractions `IFileSystem` |
+| `SshSharp.Extensions.DependencyInjection` | `AddSshClient`: named endpoints, `ISshClientFactory`, a shared reconnecting `ISshConnectionProvider`, a health check |
 
 - SCP is small (a text protocol over one exec channel), so it stays in the core; trimming removes it when unused.
 - SFTP lives in the core too (namespace `SshSharp.Sftp`, opened with `client.OpenSftpAsync()`), so it can share the channel
   internals. The adapters are separate packages because they
   bring their own dependencies, and they use only the core's public API.
-- Lockstep versions until 1.0.
+- Lockstep versions: every package is released together, with the same version.
 
 ## Repository layout
 
@@ -73,6 +74,7 @@ Directory.Packages.props   # central package versions
 src/SshSharp/              # the library
 src/SshSharp.FileProviders/   # IFileProvider over SFTP
 src/SshSharp.IO.Abstractions/ # IFileSystem over SFTP
+src/SshSharp.Extensions.DependencyInjection/ # DI: endpoints, a factory, a shared connection, a health check
 tests/SshSharp.Tests/      # TUnit: in-memory unit tests, Fuzz/ (mutation fuzzing of every parser),
                            #   Integration/ (env-gated tests against real servers)
 tests/docker/              # the OpenSSH and Dropbear containers of the interop matrix
@@ -113,7 +115,7 @@ docs/                      # guides, design notes, the API reference site (DocFX
 
 - **Managed X25519/Ed25519** is the riskiest code: it signs with users' long-term keys. The managed sntrup761 handles the
   post-quantum half of a key exchange. Both are checked against official vectors, reviewed for constant time with a
-  dudect-style timing test (`docs/crypto-review.md`), and await an outside review before 1.0. The BCL is used wherever it
+  dudect-style timing test (`docs/crypto-review.md`), and await an outside review. The BCL is used wherever it
   provides the primitive on both target frameworks.
 - **`ssh_config` runs commands** (`Match exec`, `ProxyCommand`). Caller inputs are validated, `Match exec` is opt-in, and
   the threat model (`docs/threat-model.md`) records what is trusted.

@@ -73,7 +73,7 @@ internal sealed class SshClientFactory(
         {
             foreach (var file in endpoint.PrivateKeyFiles)
             {
-                keys.Add(await SshPrivateKey.LoadFileAsync(ExpandHome(file), endpoint.PrivateKeyPassphrase, cancellationToken).ConfigureAwait(false));
+                keys.Add(await SshPrivateKey.LoadAsync(ExpandHome(file), endpoint.PrivateKeyPassphrase, cancellationToken).ConfigureAwait(false));
             }
 
             string[] knownHosts = endpoint.KnownHostsFiles.Count > 0

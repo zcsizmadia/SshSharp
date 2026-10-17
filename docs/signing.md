@@ -7,7 +7,7 @@ verify with `ssh-keygen`, and the reverse is also true.
 ## Signing
 
 ```csharp
-using var key = await SshPrivateKey.LoadFileAsync("/home/me/.ssh/id_ed25519", passphrase);
+using var key = await SshPrivateKey.LoadAsync("/home/me/.ssh/id_ed25519", passphrase);
 await using var release = File.OpenRead("release.tar.gz");
 var signature = await SshSignature.SignAsync(key, release, "file");
 await File.WriteAllTextAsync("release.tar.gz.sig", signature.ToString());   // -----BEGIN SSH SIGNATURE----- ...
@@ -35,7 +35,7 @@ Verification asks two questions. Is the signature valid, and is the key that mad
 `SshAllowedSigners` answers both, as `ssh-keygen -Y verify` does:
 
 ```csharp
-var signers = await SshAllowedSigners.LoadFileAsync("/etc/ssh/allowed_signers");
+var signers = await SshAllowedSigners.LoadAsync("/etc/ssh/allowed_signers");
 var signature = SshSignature.Parse(await File.ReadAllTextAsync("release.tar.gz.sig"));
 await using var file = File.OpenRead("release.tar.gz");
 if (!await signers.VerifyAsync(signature, "release@example.com", file, "file"))

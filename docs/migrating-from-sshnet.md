@@ -25,7 +25,7 @@ Features that SSH.NET users have asked for in its issue tracker, and that SshSha
 |---|---|
 | Verify host keys against `known_hosts` | `KnownHostsVerifier`, with hashed hosts, `@cert-authority`, `@revoked` and `StrictHostKeyChecking` (see [Host keys](host-keys.md)) |
 | Jump hosts / bastions | `ProxyJump` chains and `ProxyCommand` from `ssh_config`, or by hand: `OpenTcpTunnelAsync` to the next host and `SshClient.ConnectAsync(stream, ...)` over it (see [Connecting](connecting.md)) |
-| Use the keys in `ssh-agent`; agent forwarding | `SshAgent` and `ForwardAgent`, on Unix sockets, the Windows OpenSSH agent and PuTTY's Pageant (`SshAgent.Pageant()`) |
+| Use the keys in `ssh-agent`; agent forwarding | `SshAgent` and `ForwardAgent`, on Unix sockets, the Windows OpenSSH agent and PuTTY's Pageant (`SshAgent.FromPageant()`) |
 | Add, remove and lock agent keys (`ssh-add`) | `agent.AddKeyAsync(key, constraints)` (lifetime, confirmation), `RemoveKeyAsync`, `RemoveAllKeysAsync`, `LockAsync` and `UnlockAsync`; `AddKeysToAgent` in `ssh_config` (see [Authentication](authentication.md)) |
 | A subsystem other than `sftp` | `client.StartSubsystemAsync(name)` |
 | A terminal for a single command (`ssh -t host cmd`) | `StartCommandAsync(command, new SshSessionOptions { Terminal = ... })` |
@@ -128,7 +128,7 @@ prompt, so you need no handler for it.
 
 | SSH.NET | SshSharp |
 |---|---|
-| `new PrivateKeyFile(path)`, `new PrivateKeyFile(path, passphrase)` | `await SshPrivateKey.LoadFileAsync(path, passphrase)` |
+| `new PrivateKeyFile(path)`, `new PrivateKeyFile(path, passphrase)` | `await SshPrivateKey.LoadAsync(path, passphrase)` |
 | `new PrivateKeyFile(stream)` | `SshPrivateKey.Parse(text, passphrase)` |
 | OpenSSH, PKCS#1, PKCS#8, PuTTY `.ppk` | the same, plus SEC1; ssh.com keys are not read (convert them with `ssh-keygen -i`) |
 | `ssh-rsa` (SHA-1) signatures | RSA keys sign with `rsa-sha2-256` or `rsa-sha2-512` only |

@@ -8,7 +8,7 @@ namespace SshSharp;
 /// <see cref="SshClientOptions.Gssapi"/>. The ticket comes from the platform: the logon session on Windows (SSPI), the credential cache
 /// (<c>kinit</c>) elsewhere (MIT or Heimdal GSS-API). Needs .NET 10; on .NET 8 the method is not offered.
 /// </summary>
-public sealed record SshGssapiOptions
+public sealed class SshGssapiOptions
 {
     /// <summary>
     /// The host name of the server's service principal (<c>host/&lt;name&gt;@REALM</c>). Null for the host name connected to; set it when

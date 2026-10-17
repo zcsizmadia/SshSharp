@@ -33,7 +33,11 @@ public enum SshFailureReason
     /// <summary>The SSH agent could not be reached, refused a request, or answered with something unexpected.</summary>
     AgentFailed,
 
-    /// <summary>A file transfer (SCP) failed: the remote side reported an error, or broke the protocol.</summary>
+    /// <summary>
+    /// A file transfer failed: an SCP transfer that the remote side reported an error in, or broke the protocol of, or an SFTP tree
+    /// transfer that the remote tree made unsafe (too deep, or a name that would leave the target). A single SFTP request that the server
+    /// refuses is <see cref="SftpFailed"/>.
+    /// </summary>
     TransferFailed,
 
     /// <summary>An SFTP request failed with an error status from the server (see <c>SftpException.Status</c>).</summary>

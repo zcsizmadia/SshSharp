@@ -22,7 +22,7 @@ public class ForwardingInteropTests
             return null;
         }
 
-        var key = keyFile is not null && File.Exists(keyFile) ? await SshPrivateKey.LoadFileAsync(keyFile) : null;
+        var key = keyFile is not null && File.Exists(keyFile) ? await SshPrivateKey.LoadAsync(keyFile) : null;
         return await SshClient.ConnectAsync(host, port, new SshClientOptions
         {
             UserName = user,

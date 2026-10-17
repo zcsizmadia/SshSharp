@@ -41,7 +41,7 @@ var keyDir = Environment.GetEnvironmentVariable("SSHSHARP_TEST_KEYDIR");
 var keys = new List<SshPrivateKey>();
 if (!string.IsNullOrEmpty(keyDir) && File.Exists(Path.Combine(keyDir, "ed25519")))
 {
-    keys.Add(await SshPrivateKey.LoadFileAsync(Path.Combine(keyDir, "ed25519"), cancellationToken: ct));
+    keys.Add(await SshPrivateKey.LoadAsync(Path.Combine(keyDir, "ed25519"), cancellationToken: ct));
 }
 
 await using var client = await SshClient.ConnectAsync(host, port, new SshClientOptions

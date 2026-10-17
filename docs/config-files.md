@@ -30,8 +30,9 @@ and `SshConfigResolveOptions` supplies the home directory, environment, local us
   `none` and no command, as ssh resolves the `ssh -W` it runs for each hop.
 - `RefuseConnection yes` (OpenSSH 10.0) makes connecting by that alias fail at once, before any network activity.
 
-`Match exec` runs a local command, so it is evaluated only when `SshConfigResolveOptions.ExecMatcher` is set (for example
-to `SshExecMatcher.RunShellAsync`, for configuration files you trust); without it, `Match exec` does not match. `ProxyCommand`
+`Match exec` runs a local command, so it is evaluated only when `SshConfigResolveOptions.ExecMatcher` is set, for configuration files
+you trust (`ExecMatcher = (command, ct) => new(SshExecMatcher.RunShellAsync(command, ct))` runs it in the system shell); without
+it, `Match exec` does not match. `ProxyCommand`
 and `Match exec` inputs from the caller (host and user names) are validated so they cannot inject shell syntax.
 
 `ExecMatcher` and `HostCanonicalizer` are asynchronous (they run a process, or look a name up), so a config that needs either

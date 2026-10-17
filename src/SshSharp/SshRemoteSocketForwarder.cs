@@ -6,7 +6,7 @@ namespace SshSharp;
 
 /// <summary>
 /// A remote Unix-socket forwarding (<c>ssh -R /remote/socket:target</c>) started by <see cref="SshClient.ForwardRemoteUnixSocketAsync(string, string, int, CancellationToken)"/>:
-/// the server listens on the Unix socket <see cref="SocketPath"/>, and each connection made to it is relayed to a TCP port
+/// the server listens on the Unix socket <see cref="RemoteSocketPath"/>, and each connection made to it is relayed to a TCP port
 /// (<see cref="LocalHost"/>:<see cref="LocalPort"/>) or a Unix socket (<see cref="LocalSocketPath"/>) reached from this machine. Dispose it
 /// to cancel the forwarding on the server and close the forwarded connections.
 /// </summary>
@@ -22,7 +22,7 @@ public sealed class SshRemoteSocketForwarder : IAsyncDisposable
     internal SshRemoteSocketForwarder(string socketPath, string? localHost, int localPort, string? localSocketPath, ILogger logger,
         Func<SshRemoteSocketForwarder, CancellationToken, Task> cancel, CancellationToken connectionClosed)
     {
-        SocketPath = socketPath;
+        RemoteSocketPath = socketPath;
         LocalHost = localHost;
         LocalPort = localPort;
         LocalSocketPath = localSocketPath;
@@ -32,7 +32,7 @@ public sealed class SshRemoteSocketForwarder : IAsyncDisposable
     }
 
     /// <summary>The Unix socket the server listens on.</summary>
-    public string SocketPath { get; }
+    public string RemoteSocketPath { get; }
 
     /// <summary>The host connections go to, from this machine; null when they go to <see cref="LocalSocketPath"/>.</summary>
     public string? LocalHost { get; }

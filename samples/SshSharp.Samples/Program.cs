@@ -36,7 +36,8 @@ Console.CancelKeyPress += (_, e) =>
 };
 
 // run-cng logs in with a key held in a Windows key store, in addition to the config's keys and the agent's.
-using var cngKey = args is ["run-cng", _, var keyName, _] ? SshPrivateKey.FromSigner(new LoginOnlySigner(OpenCngKey(keyName)), keyName) : null;
+using var cngRsa = args is ["run-cng", _, var keyName, _] ? OpenCngKey(keyName) : null;
+using var cngKey = cngRsa is null ? null : SshPrivateKey.FromSigner(new LoginOnlySigner(cngRsa), args[2]); // the RSA stays ours to dispose
 
 await using var client = await SshClient.ConnectAsync(args[1], new SshConfigConnectOptions
 {
@@ -56,7 +57,7 @@ switch (args[0])
         return result.ExitStatus ?? 255;
 
     case "tail" when args.Length == 3:
-        await using (var session = await client.StartCommandAsync($"tail -f '{args[2].Replace("'", "'\\''", StringComparison.Ordinal)}'", cancellationToken: stop.Token))
+        await using (var session = await client.StartCommandAsync($"tail -f -- '{args[2].Replace("'", "'\\''", StringComparison.Ordinal)}'", cancellationToken: stop.Token))
         {
             using var reader = new StreamReader(session.StandardOutput);
             try

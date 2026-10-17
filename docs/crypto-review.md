@@ -3,7 +3,7 @@
 SshSharp implements X25519, Ed25519, sntrup761, ChaCha20, Poly1305, bcrypt_pbkdf, BLAKE2b and Argon2 in managed code, because the .NET base
 library does not provide them on every target. Everything else (AES, SHA-2, HMAC, RSA, ECDSA, ECDH, random numbers) comes from the
 platform. This page records what was reviewed, how, and what is still open. It is an internal review, not an independent audit; an
-outside review is planned before 1.0.
+outside review is planned (1.0 shipped with this internal review as its basis).
 
 ## Correctness
 
@@ -115,4 +115,4 @@ are cleared after writing; the string `ToOpenSshPrivateKey` returns cannot be.
 ## Open
 
 - A vectorised ChaCha20 would need the same review again.
-- An independent review before 1.0.
+- An independent review.

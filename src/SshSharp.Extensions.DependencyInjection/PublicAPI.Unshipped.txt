@@ -1,3 +1,4 @@
+#nullable enable
 Microsoft.Extensions.DependencyInjection.SshServiceCollectionExtensions
 SshSharp.Extensions.DependencyInjection.ISshClientFactory
 SshSharp.Extensions.DependencyInjection.ISshClientFactory.ConnectAsync(string! name, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SshSharp.SshClient!>!

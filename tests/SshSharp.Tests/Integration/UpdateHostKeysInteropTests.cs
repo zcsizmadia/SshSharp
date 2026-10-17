@@ -32,7 +32,7 @@ public sealed class UpdateHostKeysInteropTests : IDisposable
             return;
         }
 
-        using var key = keyFile is not null && File.Exists(keyFile) ? await SshPrivateKey.LoadFileAsync(keyFile) : null;
+        using var key = keyFile is not null && File.Exists(keyFile) ? await SshPrivateKey.LoadAsync(keyFile) : null;
         var knownHosts = Path.Combine(_dir, "known_hosts");
         var options = new SshClientOptions
         {

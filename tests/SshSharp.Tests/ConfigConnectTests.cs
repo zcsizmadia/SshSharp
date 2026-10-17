@@ -17,6 +17,17 @@ public sealed class ConfigConnectTests : IDisposable
 
     private string KnownHosts => Path.Combine(_dir, "known_hosts");
 
+    /// <summary>The key the jump hosts accept: a hop is never offered the destination's password.</summary>
+    private static readonly SshPrivateKey HopKey = SshPrivateKey.Generate(SshKeyType.Ed25519);
+
+    /// <summary>A jump host that takes <see cref="HopKey"/>, and the password too, so a password offered to it would be accepted and seen.</summary>
+    private static FakeSessionServer JumpHost(FakeHostKey? hostKey = null) =>
+        new(new FakeServerOptions { HostKey = hostKey ?? FakeHostKey.Ed25519() })
+        {
+            AuthorizedKeys = [HopKey.PublicKey.ToArray()],
+            AdvertisedMethods = ["publickey", "password"],
+        };
+
     private SshConfigResolveOptions Resolve => new() { LocalUser = "local", HomeDirectory = _dir, LocalHostName = "box" };
 
     /// <summary>"TCP" that reaches fake servers by host name.</summary>
@@ -47,8 +58,8 @@ public sealed class ConfigConnectTests : IDisposable
         var keys = new[] { FakeHostKey.Ed25519(), FakeHostKey.Ed25519(), FakeHostKey.Ed25519() };
         (FakeSessionServer Jump1, FakeSessionServer Jump2, FakeSessionServer Target) Chain()
         {
-            var jump1 = new FakeSessionServer(new FakeServerOptions { HostKey = keys[0] });
-            var jump2 = new FakeSessionServer(new FakeServerOptions { HostKey = keys[1] });
+            var jump1 = JumpHost(keys[0]);
+            var jump2 = JumpHost(keys[1]);
             var target = new FakeSessionServer(new FakeServerOptions { HostKey = keys[2] });
             jump1.DirectTcpIp = Routes(("j2.internal", jump2));
             jump2.DirectTcpIp = Routes(("target.internal", target));
@@ -79,6 +90,7 @@ public sealed class ConfigConnectTests : IDisposable
             Config = SshConfig.Parse(Config("accept-new")),
             ResolveOptions = Resolve,
             Password = "secret",
+            PrivateKeys = [HopKey],
             TcpConnector = Network(("j1.example.com", jump1)),
         }, Timeout());
 
@@ -87,6 +99,11 @@ public sealed class ConfigConnectTests : IDisposable
         await Assert.That(target.Commands).IsEquivalentTo(new[] { "hostname" });
         await Assert.That(jump1.DirectTcpIpRequests).IsEquivalentTo(new[] { "j2.internal:22" });
         await Assert.That(jump2.DirectTcpIpRequests).IsEquivalentTo(new[] { "target.internal:22" });
+
+        // The password went to the destination only: the jump hosts, which would have taken it, were never offered it.
+        await Assert.That(jump1.AuthAttempts).DoesNotContain("password");
+        await Assert.That(jump2.AuthAttempts).DoesNotContain("password");
+        await Assert.That(target.AuthAttempts).Contains("password");
 
         // accept-new recorded each hop under its HostName.
         var known = KnownHostsFile.Load(KnownHosts);
@@ -110,15 +127,45 @@ public sealed class ConfigConnectTests : IDisposable
             Config = SshConfig.Parse(Config("yes")),
             ResolveOptions = Resolve,
             Password = "secret",
+            PrivateKeys = [HopKey],
             TcpConnector = Network(("j1.example.com", again1)),
         }, Timeout());
         await Assert.That(again.IsConnected).IsTrue();
     }
 
     [Test]
+    public async Task AJumpHost_IsNeverOfferedTheDestinationsPassword()
+    {
+        // A jump host that takes passwords only (and would take this one): it must not be offered it, so the chain fails there.
+        await using var jump = new FakeSessionServer { AdvertisedMethods = ["password"] };
+        await using var target = new FakeSessionServer();
+        jump.DirectTcpIp = Routes(("t", target));
+        var answered = 0;
+
+        var error = await Assert.ThrowsAsync<SshException>(async () => await SshClient.ConnectAsync("t", new SshConfigConnectOptions
+        {
+            UseAgent = false,
+            Config = SshConfig.Parse("Host t\n ProxyJump j\nHost *\n User tester\n StrictHostKeyChecking no\n UserKnownHostsFile none\n"),
+            ResolveOptions = Resolve,
+            Password = "secret",
+            KeyboardInteractive = (_, _) =>
+            {
+                Interlocked.Increment(ref answered);
+                return ValueTask.FromResult<IReadOnlyList<string>?>(["secret"]);
+            },
+            TcpConnector = Network(("j", jump)),
+        }, Timeout()));
+
+        await Assert.That(error!.Reason).IsEqualTo(SshFailureReason.AuthenticationFailed);
+        await Assert.That(jump.AuthAttempts).DoesNotContain("password");
+        await Assert.That(answered).IsEqualTo(0);
+        await Assert.That(target.Commands).IsEmpty();
+    }
+
+    [Test]
     public async Task DisposingTheClient_ClosesTheJumpHostsToo()
     {
-        await using var jump = new FakeSessionServer();
+        await using var jump = JumpHost();
         await using var target = new FakeSessionServer();
         jump.DirectTcpIp = Routes(("t", target));
         var client = await SshClient.ConnectAsync("t", new SshConfigConnectOptions
@@ -127,6 +174,7 @@ public sealed class ConfigConnectTests : IDisposable
             Config = SshConfig.Parse("Host t\n ProxyJump j\nHost *\n User tester\n StrictHostKeyChecking no\n UserKnownHostsFile none\n"),
             ResolveOptions = Resolve,
             Password = "secret",
+            PrivateKeys = [HopKey],
             TcpConnector = Network(("j", jump)),
         }, Timeout());
 

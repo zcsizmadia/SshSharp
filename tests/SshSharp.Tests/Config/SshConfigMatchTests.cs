@@ -120,7 +120,7 @@ public class SshConfigMatchTests
         {
             LocalUser = "local",
             HomeDirectory = "/h",
-            ExecMatcher = (command, _) => { commands.Add(command); return Task.FromResult(command.StartsWith("check", StringComparison.Ordinal)); },
+            ExecMatcher = (command, _) => { commands.Add(command); return ValueTask.FromResult(command.StartsWith("check", StringComparison.Ordinal)); },
         };
         await Assert.That(Resolve(config, "a", options).Port).IsEqualTo(51);
         await Assert.That(commands.Single()).IsEqualTo("check a local");
@@ -130,7 +130,7 @@ public class SshConfigMatchTests
     public async Task Exec_IsNotRunWhenAnEarlierCriterionAlreadyFailed()
     {
         var ran = false;
-        var options = new SshConfigResolveOptions { LocalUser = "l", HomeDirectory = "/h", ExecMatcher = (_, _) => Task.FromResult(ran = true) };
+        var options = new SshConfigResolveOptions { LocalUser = "l", HomeDirectory = "/h", ExecMatcher = (_, _) => ValueTask.FromResult(ran = true) };
         Resolve("Match host other exec \"x\"\n Port 5\n", "a", options);
         await Assert.That(ran).IsFalse();
     }
@@ -194,7 +194,7 @@ public class SshConfigMatchTests
     }
 
     private static SshConfigResolveOptions Canonicalizing(Func<string, IReadOnlyList<string>, string?> canonicalizer) =>
-        new() { LocalUser = "l", HomeDirectory = "/h", HostCanonicalizer = (host, domains, _) => Task.FromResult(canonicalizer(host, domains)) };
+        new() { LocalUser = "l", HomeDirectory = "/h", HostCanonicalizer = (host, domains, _) => ValueTask.FromResult(canonicalizer(host, domains)) };
 
     [Test]
     public async Task Canonicalization_ReplacesTheHostName_AndEnablesMatchCanonical()

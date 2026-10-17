@@ -10,12 +10,36 @@ namespace SshSharp;
 /// <param name="HostKeys">The keys that prove the host's identity; at least one.</param>
 public sealed record SshAgentHost(string HostName, IReadOnlyList<SshAgentHostKey> HostKeys)
 {
+    /// <summary>The keys that prove the host's identity (a copy of the list given).</summary>
+    public IReadOnlyList<SshAgentHostKey> HostKeys { get; init; } = [.. HostKeys ?? throw new ArgumentNullException(nameof(HostKeys))];
+
     /// <summary>The user the key may sign in as on this host; null for any user. Only a destination's <see cref="SshAgentDestination.To"/> may name one.</summary>
     public string? UserName { get; init; }
+
+    /// <summary>Equal when the name, the user and the keys (in order) are.</summary>
+    public bool Equals(SshAgentHost? other) =>
+        other is not null && HostName == other.HostName && UserName == other.UserName && HostKeys.SequenceEqual(other.HostKeys);
+
+    /// <inheritdoc/>
+    public override int GetHashCode() => HashCode.Combine(HostName, UserName, HostKeys.Count);
 }
 
 /// <summary>A host key in a destination constraint, in SSH wire format; with <paramref name="IsCertificateAuthority"/>, a CA key whose host certificates count.</summary>
-public sealed record SshAgentHostKey(ReadOnlyMemory<byte> PublicKey, bool IsCertificateAuthority = false);
+public sealed record SshAgentHostKey(ReadOnlyMemory<byte> PublicKey, bool IsCertificateAuthority = false)
+{
+    /// <summary>Equal when the key bytes and <see cref="IsCertificateAuthority"/> are.</summary>
+    public bool Equals(SshAgentHostKey? other) =>
+        other is not null && IsCertificateAuthority == other.IsCertificateAuthority && PublicKey.Span.SequenceEqual(other.PublicKey.Span);
+
+    /// <inheritdoc/>
+    public override int GetHashCode()
+    {
+        var hash = new HashCode();
+        hash.AddBytes(PublicKey.Span);
+        hash.Add(IsCertificateAuthority);
+        return hash.ToHashCode();
+    }
+}
 
 /// <summary>
 /// One destination constraint on an agent key (OpenSSH's <c>restrict-destination-v00@openssh.com</c>, <c>ssh-add -h</c>): the key may be

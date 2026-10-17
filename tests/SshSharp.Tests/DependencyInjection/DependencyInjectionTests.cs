@@ -140,10 +140,15 @@ public sealed class DependencyInjectionTests : IDisposable
         var first = await Assert.ThrowsAsync<SshException>(async () => await connections.GetClientAsync("box", Timeout()));
         await Assert.That(server.Connections).IsEqualTo(1);
 
-        // Within the wait (10 s after the first failure), the last error comes back at once, without connecting.
+        // Within the wait (10 s after the first failure), the last error comes back at once, without connecting: inside a new
+        // exception for each caller, so the shared one's stack trace does not grow with every caller.
         time.Advance(TimeSpan.FromSeconds(9));
         var again = await Assert.ThrowsAsync<SshException>(async () => await connections.GetClientAsync("box", Timeout()));
-        await Assert.That(ReferenceEquals(again, first)).IsTrue();
+        var third = await Assert.ThrowsAsync<SshException>(async () => await connections.GetClientAsync("box", Timeout()));
+        await Assert.That(ReferenceEquals(again!.InnerException, first)).IsTrue();
+        await Assert.That(ReferenceEquals(third!.InnerException, first)).IsTrue();
+        await Assert.That(ReferenceEquals(again, third)).IsFalse();
+        await Assert.That(again.Reason).IsEqualTo(first!.Reason);
         await Assert.That(server.Connections).IsEqualTo(1);
 
         // After it, one attempt; it fails too, so the next wait is twice as long.
@@ -188,6 +193,7 @@ public sealed class DependencyInjectionTests : IDisposable
         var healthy = await health.CheckHealthAsync(Timeout());
         await Assert.That(healthy.Status).IsEqualTo(HealthStatus.Healthy);
         await Assert.That(healthy.Entries["ssh-box"].Description).Contains("ping");
+        await Assert.That(healthy.Entries["ssh-box"].Description).DoesNotContain("SSH-2.0"); // nothing from the server: /healthz is often public
 
         server.Refuse = true;
         server.DropAll();

@@ -122,8 +122,8 @@ public class AgentInteropTests
         // Both keys are in the server's authorized_keys; only the agent's constraints tell them apart.
         var allowedFile = Path.Combine(keyDir, "ecdsa256");
         var otherFile = Path.Combine(keyDir, "ecdsa384");
-        using var allowedKey = await SshPrivateKey.LoadFileAsync(allowedFile, cancellationToken: token);
-        using var otherKey = await SshPrivateKey.LoadFileAsync(otherFile, cancellationToken: token);
+        using var allowedKey = await SshPrivateKey.LoadAsync(allowedFile, cancellationToken: token);
+        using var otherKey = await SshPrivateKey.LoadAsync(otherFile, cancellationToken: token);
         try
         {
             await RunAsync(sshAdd, ["-q", "-H", knownHosts, "-h", "sshsharp-destination", allowedFile], token);

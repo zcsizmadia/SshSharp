@@ -115,6 +115,13 @@
   </Suppression>
   <Suppression>
     <DiagnosticId>CP0002</DiagnosticId>
+    <Target>M:SshSharp.Scp.SshScpProgress.#ctor</Target>
+    <Left>lib/net10.0/SshSharp.dll</Left>
+    <Right>lib/net10.0/SshSharp.dll</Right>
+    <IsBaselineSuppression>true</IsBaselineSuppression>
+  </Suppression>
+  <Suppression>
+    <DiagnosticId>CP0002</DiagnosticId>
     <Target>M:SshSharp.Sftp.SftpTransferOptions.get_PreserveTimes</Target>
     <Left>lib/net10.0/SshSharp.dll</Left>
     <Right>lib/net10.0/SshSharp.dll</Right>
@@ -130,6 +137,20 @@
   <Suppression>
     <DiagnosticId>CP0002</DiagnosticId>
     <Target>M:SshSharp.Sftp.SftpTransferOptions.set_PreserveTimes(System.Boolean)</Target>
+    <Left>lib/net10.0/SshSharp.dll</Left>
+    <Right>lib/net10.0/SshSharp.dll</Right>
+    <IsBaselineSuppression>true</IsBaselineSuppression>
+  </Suppression>
+  <Suppression>
+    <DiagnosticId>CP0002</DiagnosticId>
+    <Target>M:SshSharp.SshAgent.Pageant</Target>
+    <Left>lib/net10.0/SshSharp.dll</Left>
+    <Right>lib/net10.0/SshSharp.dll</Right>
+    <IsBaselineSuppression>true</IsBaselineSuppression>
+  </Suppression>
+  <Suppression>
+    <DiagnosticId>CP0002</DiagnosticId>
+    <Target>M:SshSharp.SshAllowedSigners.LoadFileAsync(System.String,System.Threading.CancellationToken)</Target>
     <Left>lib/net10.0/SshSharp.dll</Left>
     <Right>lib/net10.0/SshSharp.dll</Right>
     <IsBaselineSuppression>true</IsBaselineSuppression>
@@ -178,6 +199,27 @@
   </Suppression>
   <Suppression>
     <DiagnosticId>CP0002</DiagnosticId>
+    <Target>M:SshSharp.SshGssapiOptions.{Clone}$</Target>
+    <Left>lib/net10.0/SshSharp.dll</Left>
+    <Right>lib/net10.0/SshSharp.dll</Right>
+    <IsBaselineSuppression>true</IsBaselineSuppression>
+  </Suppression>
+  <Suppression>
+    <DiagnosticId>CP0002</DiagnosticId>
+    <Target>M:SshSharp.SshGssapiOptions.op_Equality(SshSharp.SshGssapiOptions,SshSharp.SshGssapiOptions)</Target>
+    <Left>lib/net10.0/SshSharp.dll</Left>
+    <Right>lib/net10.0/SshSharp.dll</Right>
+    <IsBaselineSuppression>true</IsBaselineSuppression>
+  </Suppression>
+  <Suppression>
+    <DiagnosticId>CP0002</DiagnosticId>
+    <Target>M:SshSharp.SshGssapiOptions.op_Inequality(SshSharp.SshGssapiOptions,SshSharp.SshGssapiOptions)</Target>
+    <Left>lib/net10.0/SshSharp.dll</Left>
+    <Right>lib/net10.0/SshSharp.dll</Right>
+    <IsBaselineSuppression>true</IsBaselineSuppression>
+  </Suppression>
+  <Suppression>
+    <DiagnosticId>CP0002</DiagnosticId>
     <Target>M:SshSharp.SshHostKeyContext.get_KnownHostsLookup</Target>
     <Left>lib/net10.0/SshSharp.dll</Left>
     <Right>lib/net10.0/SshSharp.dll</Right>
@@ -185,7 +227,21 @@
   </Suppression>
   <Suppression>
     <DiagnosticId>CP0002</DiagnosticId>
+    <Target>M:SshSharp.SshPrivateKey.LoadFileAsync(System.String,System.String,System.Threading.CancellationToken)</Target>
+    <Left>lib/net10.0/SshSharp.dll</Left>
+    <Right>lib/net10.0/SshSharp.dll</Right>
+    <IsBaselineSuppression>true</IsBaselineSuppression>
+  </Suppression>
+  <Suppression>
+    <DiagnosticId>CP0002</DiagnosticId>
     <Target>M:SshSharp.SshRemotePortForwarder.get_Port</Target>
+    <Left>lib/net10.0/SshSharp.dll</Left>
+    <Right>lib/net10.0/SshSharp.dll</Right>
+    <IsBaselineSuppression>true</IsBaselineSuppression>
+  </Suppression>
+  <Suppression>
+    <DiagnosticId>CP0002</DiagnosticId>
+    <Target>M:SshSharp.SshRemoteSocketForwarder.get_SocketPath</Target>
     <Left>lib/net10.0/SshSharp.dll</Left>
     <Right>lib/net10.0/SshSharp.dll</Right>
     <IsBaselineSuppression>true</IsBaselineSuppression>
@@ -276,6 +332,13 @@
   </Suppression>
   <Suppression>
     <DiagnosticId>CP0002</DiagnosticId>
+    <Target>M:SshSharp.Scp.SshScpProgress.#ctor</Target>
+    <Left>lib/net8.0/SshSharp.dll</Left>
+    <Right>lib/net8.0/SshSharp.dll</Right>
+    <IsBaselineSuppression>true</IsBaselineSuppression>
+  </Suppression>
+  <Suppression>
+    <DiagnosticId>CP0002</DiagnosticId>
     <Target>M:SshSharp.Sftp.SftpTransferOptions.get_PreserveTimes</Target>
     <Left>lib/net8.0/SshSharp.dll</Left>
     <Right>lib/net8.0/SshSharp.dll</Right>
@@ -291,6 +354,20 @@
   <Suppression>
     <DiagnosticId>CP0002</DiagnosticId>
     <Target>M:SshSharp.Sftp.SftpTransferOptions.set_PreserveTimes(System.Boolean)</Target>
+    <Left>lib/net8.0/SshSharp.dll</Left>
+    <Right>lib/net8.0/SshSharp.dll</Right>
+    <IsBaselineSuppression>true</IsBaselineSuppression>
+  </Suppression>
+  <Suppression>
+    <DiagnosticId>CP0002</DiagnosticId>
+    <Target>M:SshSharp.SshAgent.Pageant</Target>
+    <Left>lib/net8.0/SshSharp.dll</Left>
+    <Right>lib/net8.0/SshSharp.dll</Right>
+    <IsBaselineSuppression>true</IsBaselineSuppression>
+  </Suppression>
+  <Suppression>
+    <DiagnosticId>CP0002</DiagnosticId>
+    <Target>M:SshSharp.SshAllowedSigners.LoadFileAsync(System.String,System.Threading.CancellationToken)</Target>
     <Left>lib/net8.0/SshSharp.dll</Left>
     <Right>lib/net8.0/SshSharp.dll</Right>
     <IsBaselineSuppression>true</IsBaselineSuppression>
@@ -339,6 +416,27 @@
   </Suppression>
   <Suppression>
     <DiagnosticId>CP0002</DiagnosticId>
+    <Target>M:SshSharp.SshGssapiOptions.{Clone}$</Target>
+    <Left>lib/net8.0/SshSharp.dll</Left>
+    <Right>lib/net8.0/SshSharp.dll</Right>
+    <IsBaselineSuppression>true</IsBaselineSuppression>
+  </Suppression>
+  <Suppression>
+    <DiagnosticId>CP0002</DiagnosticId>
+    <Target>M:SshSharp.SshGssapiOptions.op_Equality(SshSharp.SshGssapiOptions,SshSharp.SshGssapiOptions)</Target>
+    <Left>lib/net8.0/SshSharp.dll</Left>
+    <Right>lib/net8.0/SshSharp.dll</Right>
+    <IsBaselineSuppression>true</IsBaselineSuppression>
+  </Suppression>
+  <Suppression>
+    <DiagnosticId>CP0002</DiagnosticId>
+    <Target>M:SshSharp.SshGssapiOptions.op_Inequality(SshSharp.SshGssapiOptions,SshSharp.SshGssapiOptions)</Target>
+    <Left>lib/net8.0/SshSharp.dll</Left>
+    <Right>lib/net8.0/SshSharp.dll</Right>
+    <IsBaselineSuppression>true</IsBaselineSuppression>
+  </Suppression>
+  <Suppression>
+    <DiagnosticId>CP0002</DiagnosticId>
     <Target>M:SshSharp.SshHostKeyContext.get_KnownHostsLookup</Target>
     <Left>lib/net8.0/SshSharp.dll</Left>
     <Right>lib/net8.0/SshSharp.dll</Right>
@@ -346,7 +444,21 @@
   </Suppression>
   <Suppression>
     <DiagnosticId>CP0002</DiagnosticId>
+    <Target>M:SshSharp.SshPrivateKey.LoadFileAsync(System.String,System.String,System.Threading.CancellationToken)</Target>
+    <Left>lib/net8.0/SshSharp.dll</Left>
+    <Right>lib/net8.0/SshSharp.dll</Right>
+    <IsBaselineSuppression>true</IsBaselineSuppression>
+  </Suppression>
+  <Suppression>
+    <DiagnosticId>CP0002</DiagnosticId>
     <Target>M:SshSharp.SshRemotePortForwarder.get_Port</Target>
+    <Left>lib/net8.0/SshSharp.dll</Left>
+    <Right>lib/net8.0/SshSharp.dll</Right>
+    <IsBaselineSuppression>true</IsBaselineSuppression>
+  </Suppression>
+  <Suppression>
+    <DiagnosticId>CP0002</DiagnosticId>
+    <Target>M:SshSharp.SshRemoteSocketForwarder.get_SocketPath</Target>
     <Left>lib/net8.0/SshSharp.dll</Left>
     <Right>lib/net8.0/SshSharp.dll</Right>
     <IsBaselineSuppression>true</IsBaselineSuppression>
@@ -361,6 +473,34 @@
   <Suppression>
     <DiagnosticId>CP0002</DiagnosticId>
     <Target>M:SshSharp.SshSession.get_ExitSignal</Target>
+    <Left>lib/net8.0/SshSharp.dll</Left>
+    <Right>lib/net8.0/SshSharp.dll</Right>
+    <IsBaselineSuppression>true</IsBaselineSuppression>
+  </Suppression>
+  <Suppression>
+    <DiagnosticId>CP0007</DiagnosticId>
+    <Target>T:SshSharp.Scp.SshScpProgress</Target>
+    <Left>lib/net10.0/SshSharp.dll</Left>
+    <Right>lib/net10.0/SshSharp.dll</Right>
+    <IsBaselineSuppression>true</IsBaselineSuppression>
+  </Suppression>
+  <Suppression>
+    <DiagnosticId>CP0007</DiagnosticId>
+    <Target>T:SshSharp.Scp.SshScpProgress</Target>
+    <Left>lib/net8.0/SshSharp.dll</Left>
+    <Right>lib/net8.0/SshSharp.dll</Right>
+    <IsBaselineSuppression>true</IsBaselineSuppression>
+  </Suppression>
+  <Suppression>
+    <DiagnosticId>CP0008</DiagnosticId>
+    <Target>T:SshSharp.SshGssapiOptions</Target>
+    <Left>lib/net10.0/SshSharp.dll</Left>
+    <Right>lib/net10.0/SshSharp.dll</Right>
+    <IsBaselineSuppression>true</IsBaselineSuppression>
+  </Suppression>
+  <Suppression>
+    <DiagnosticId>CP0008</DiagnosticId>
+    <Target>T:SshSharp.SshGssapiOptions</Target>
     <Left>lib/net8.0/SshSharp.dll</Left>
     <Right>lib/net8.0/SshSharp.dll</Right>
     <IsBaselineSuppression>true</IsBaselineSuppression>

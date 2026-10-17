@@ -162,7 +162,7 @@ public class KeyGenerationTests
 
             await key.SaveAsync(path, "secret");
 
-            using var loaded = await SshPrivateKey.LoadFileAsync(path, "secret");
+            using var loaded = await SshPrivateKey.LoadAsync(path, "secret");
             await Assert.That(loaded.Fingerprint).IsEqualTo(key.Fingerprint);
             await Assert.That(await File.ReadAllTextAsync(path + ".pub")).IsEqualTo(key.ToAuthorizedKeysLine() + "\n");
 

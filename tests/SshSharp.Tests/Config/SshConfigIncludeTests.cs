@@ -80,6 +80,23 @@ public sealed class SshConfigIncludeTests : IDisposable
     }
 
     [Test]
+    public async Task AnIncludeFanOut_IsCut_RatherThanParsedForEver()
+    {
+        // 15 levels of 4 files, each including the whole next level: within the depth limit, but 4^15 parses. Cut at 1024 files.
+        for (var level = 0; level < 15; level++)
+        {
+            Directory.CreateDirectory(Path.Combine(_dir, $"l{level}"));
+            for (var file = 0; file < 4; file++)
+            {
+                File_($"l{level}/{file}.conf", level < 14 ? $"Include {P($"l{level + 1}")}/*.conf\n" : "Port 2\n");
+            }
+        }
+
+        var error = await Assert.That(() => Resolve($"Include {P("l0")}/*.conf\n", "a")).Throws<FormatException>();
+        await Assert.That(error!.Message).Contains("1024 files");
+    }
+
+    [Test]
     public async Task Globs_AreInLexicalOrder_MissingFilesAreIgnored()
     {
         File_("conf.d/b.conf", "Port 31\n");

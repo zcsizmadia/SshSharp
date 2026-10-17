@@ -121,6 +121,27 @@ public class SshClientTests
     }
 
     [Test]
+    public async Task AnExitSignalName_IsKeptShort_AndFreeOfControlCharacters()
+    {
+        // The name is logged: a hostile server's newlines (forged log lines) or a megabyte of text must not reach the log as they are.
+        await using var server = new FakeSessionServer
+        {
+            OnExec = async script =>
+            {
+                await script.ExitSignalAsync("TERM\r\nforged log line" + new string('x', 1000));
+                await script.EofAsync();
+                await script.CloseAsync();
+            },
+        };
+        await using var client = await ConnectAsync(server);
+
+        var name = (await client.RunCommandAsync("doomed", Timeout())).ExitSignal!.Name;
+        await Assert.That(name.Any(char.IsControl)).IsFalse();
+        await Assert.That(name.Length).IsLessThanOrEqualTo(64);
+        await Assert.That(name).StartsWith("TERMforged log line");
+    }
+
+    [Test]
     public async Task ReportsAnExitSignalWithoutAStatus()
     {
         await using var server = new FakeSessionServer
@@ -502,7 +523,7 @@ public class SshClientTests
         await Assert.That(ex.HostKey!.Fingerprint).StartsWith("SHA256:");
         await Assert.That(seen!.Host).IsNull(); // over a stream the host is not known
         await Assert.That(seen.HostKeyAlias).IsEqualTo("my-alias");
-        await Assert.That(seen.KnownHostsLookup).IsEqualTo(new SshKnownHostsLookup("my-alias", 22));
+        await Assert.That(seen.KnownHostsLookup).IsEqualTo(new KnownHostsLookup("my-alias", 22));
     }
 
     [Test]

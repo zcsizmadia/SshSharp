@@ -28,11 +28,17 @@
     <PackageReference Include="Microsoft.SourceLink.GitHub" PrivateAssets="All" />
     <PackageReference Include="Microsoft.CodeAnalysis.PublicApiAnalyzers" PrivateAssets="All" />
     <PackageReference Include="MinVer" PrivateAssets="All" />
-    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
-    <PackageReference Include="Microsoft.Extensions.Options" />
-    <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" />
-    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
-    <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks" />
+    <!-- The oldest version each target supports, so an app on .NET 8 keeps its framework's 8.x packages. -->
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" VersionOverride="8.0.0" Condition="'$(TargetFramework)' == 'net8.0'" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Condition="'$(TargetFramework)' != 'net8.0'" />
+    <PackageReference Include="Microsoft.Extensions.Options" VersionOverride="8.0.0" Condition="'$(TargetFramework)' == 'net8.0'" />
+    <PackageReference Include="Microsoft.Extensions.Options" Condition="'$(TargetFramework)' != 'net8.0'" />
+    <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" VersionOverride="8.0.0" Condition="'$(TargetFramework)' == 'net8.0'" />
+    <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Condition="'$(TargetFramework)' != 'net8.0'" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" VersionOverride="8.0.0" Condition="'$(TargetFramework)' == 'net8.0'" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Condition="'$(TargetFramework)' != 'net8.0'" />
+    <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks" VersionOverride="8.0.0" Condition="'$(TargetFramework)' == 'net8.0'" />
+    <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks" Condition="'$(TargetFramework)' != 'net8.0'" />
     <ProjectReference Include="../SshSharp/SshSharp.csproj" />
     <InternalsVisibleTo Include="SshSharp.Tests" />
     <None Include="README.md" Pack="true" PackagePath="/" />

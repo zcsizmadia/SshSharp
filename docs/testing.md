@@ -140,7 +140,7 @@ runs, the instrumented build and the fault tests are what found them.
 
 ## Not covered yet
 
-- **An independent review of the managed cryptography,** planned before 1.0. Until then, it is checked against the reference
+- **An independent review of the managed cryptography,** still planned. Until then, it is checked against the reference
   vectors, Wycheproof and the timing test.
 - **Interop coverage** in the coverage figure.
 - **Commercial negative-testing suites** (thousands of malformed messages against the client). Fuzzing covers the parsers, but not
