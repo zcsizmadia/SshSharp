@@ -123,14 +123,20 @@ public class PingAndExtInfoTests
         }, leaveOpen: true, Timeout());
         server.AnswerPings = false;
 
-        // One silent interval, and the probe it sends must reach the server before time runs on: under load the client could otherwise
-        // give up while its pings still sit in the outbox, and the server would count none.
-        time.Advance(TimeSpan.FromSeconds(30));
-        for (var waited = 0; server.PingsReceived == 0 && waited < 200; waited++)
+        // Silent intervals until the first probe reaches the server, before time runs on: under load the client could otherwise give up
+        // while its pings still sit in the outbox, and the server would count none. The keep-alive loop starts on the thread pool, so
+        // an advance before it has set its timer does nothing (seen on windows-11-arm): advance again until a ping arrives. An advance
+        // while a ping is still on its way counts one missed probe, which CountMax = 2 allows.
+        for (var i = 0; i < 20 && server.PingsReceived == 0 && client.IsConnected; i++)
         {
-            await Task.Delay(50);
+            time.Advance(TimeSpan.FromSeconds(30));
+            for (var waited = 0; server.PingsReceived == 0 && waited < 20; waited++)
+            {
+                await Task.Delay(50);
+            }
         }
 
+        await Assert.That(server.PingsReceived).IsGreaterThanOrEqualTo(1);
         for (var i = 0; i < 100 && client.IsConnected; i++)
         {
             time.Advance(TimeSpan.FromSeconds(30));
@@ -139,7 +145,6 @@ public class PingAndExtInfoTests
 
         await Assert.That(client.IsConnected).IsFalse();
         await Assert.That(((SshException)client.ConnectionError!).Reason).IsEqualTo(SshFailureReason.Timeout);
-        await Assert.That(server.PingsReceived).IsGreaterThanOrEqualTo(1);
         await Assert.That(server.GlobalRequests).DoesNotContain("keepalive@openssh.com");
     }
 }
