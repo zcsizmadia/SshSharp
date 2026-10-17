@@ -242,12 +242,12 @@ public class FaultInteropTests
                 }
                 catch (Exception ex)
                 {
-                    problems.Add($"{(toServer ? "to the server" : "to the client")} after {cut} bytes: {ex.GetType().Name}: {ex.Message}");
+                    problems.Add($"{(toServer ? "to the server" : "to the client")} after {cut} bytes: {ex.GetType().Name}: {ex.Message} ({proxy.Describe()})");
                 }
 
                 if (watch.Elapsed > TimeSpan.FromSeconds(15))
                 {
-                    problems.Add($"{(toServer ? "to the server" : "to the client")} after {cut} bytes: took {watch.Elapsed.TotalSeconds:F1} s");
+                    problems.Add($"{(toServer ? "to the server" : "to the client")} after {cut} bytes: took {watch.Elapsed.TotalSeconds:F1} s ({proxy.Describe()})");
                 }
             }
         }
