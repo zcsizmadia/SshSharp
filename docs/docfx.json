@@ -17,7 +17,7 @@
   "build": {
     "content": [
       { "files": [ "api/**.yml", "api/index.md" ] },
-      { "files": [ "*.md", "toc.yml" ], "exclude": [ "README.md" ] }
+      { "files": [ "**/*.md", "**/toc.yml" ], "exclude": [ "README.md", "_site/**", "api/**", "snippets/**" ] }
     ],
     "resource": [
       { "files": [ "images/**" ] }
@@ -28,10 +28,12 @@
     "globalMetadata": {
       "_appName": "SshSharp",
       "_appTitle": "SshSharp",
-      "_appFooter": "SshSharp: managed SSH for .NET. MIT license.",
+      "_appFooter": "SshSharp: a managed, async-first SSH client for .NET. MIT license. <a href=\"https://github.com/zcsizmadia/SshSharp\">Source on GitHub</a>.",
       "_appLogoPath": "images/sshsharp.svg",
       "_appFaviconPath": "images/sshsharp.svg",
-      "_enableSearch": true
+      "_enableSearch": true,
+      "_disableContribution": false,
+      "_gitContribute": { "repo": "https://github.com/zcsizmadia/SshSharp", "branch": "main" }
     },
     "warningsAsErrors": true
   }

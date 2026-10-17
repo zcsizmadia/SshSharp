@@ -76,3 +76,8 @@ Git signs by running `ssh-keygen -Y sign -n git` over the commit object and stor
 `gpgsig` header. To check a commit in .NET, verify `SshSignature.Parse(gpgsig)` against the commit object without that
 header, with namespace `git`. The allowed-signers file is the one `gpg.ssh.allowedSignersFile` names, and the principal is
 the committer's email.
+
+## See also
+
+- [Keys and the SSH agent](how-to/agent-and-keys.md): loading, generating and holding the keys that sign
+- <xref:SshSharp.SshSignature> and <xref:SshSharp.SshAllowedSigners> in the API reference

@@ -1,40 +1,11 @@
-- name: Guides
-  items:
-    - name: Getting started
-      href: getting-started.md
-    - name: Connecting
-      href: connecting.md
-    - name: Authentication
-      href: authentication.md
-    - name: Host keys
-      href: host-keys.md
-    - name: Commands and shells
-      href: sessions.md
-    - name: File transfer (SFTP)
-      href: sftp.md
-    - name: File transfer (SCP)
-      href: scp.md
-    - name: Signing files and commits
-      href: signing.md
-    - name: Configuration files
-      href: config-files.md
-    - name: Dependency injection
-      href: dependency-injection.md
-    - name: Errors and diagnostics
-      href: diagnostics.md
-    - name: Migrating from SSH.NET
-      href: migrating-from-sshnet.md
+# The navigation bar. The documentation's sidebar is guide/toc.yml; the API reference's is generated (api/toc.yml).
+- name: Documentation
+  href: guide/
+  homepage: getting-started.md
 - name: API reference
   href: api/
-- name: Project
-  items:
-    - name: Design notes
-      href: design.md
-    - name: Testing and validation
-      href: testing.md
-    - name: Threat model
-      href: threat-model.md
-    - name: Cryptography review
-      href: crypto-review.md
-    - name: Benchmarks
-      href: benchmarks.md
+  homepage: api/index.md
+- name: Samples
+  href: https://github.com/zcsizmadia/SshSharp/tree/main/samples
+- name: GitHub
+  href: https://github.com/zcsizmadia/SshSharp

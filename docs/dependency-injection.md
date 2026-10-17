@@ -106,3 +106,9 @@ Clients log through the container's `ILoggerFactory`, under the category `SshSha
 
 Runnable examples: [an ASP.NET Core minimal API](https://github.com/zcsizmadia/SshSharp/tree/main/samples/SshSharp.Samples.AspNetCore)
 and [a worker service](https://github.com/zcsizmadia/SshSharp/tree/main/samples/SshSharp.Samples.Worker).
+
+## See also
+
+- [ASP.NET Core and dependency injection](how-to/aspnetcore-and-di.md): how the pieces fit together, with a diagram
+- [A background worker](scenarios/background-worker.md)
+- [Keep-alive and reconnecting](how-to/keepalive-and-reconnect.md)

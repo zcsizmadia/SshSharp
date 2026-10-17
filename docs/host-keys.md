@@ -126,3 +126,9 @@ or keeps to FIPS-approved algorithms (`FipsMode`); `Timeout` bounds each connect
 
 `client.HostKey` is the verified key (`KeyType`, `Algorithm`, `Fingerprint`, `PublicKey`, `KeySizeBits`, and `Certificate`
 when the server presented a host certificate).
+
+## See also
+
+- [Verify host keys](how-to/verify-host-keys.md): choosing a policy, with short examples
+- [Configuration files: known_hosts](config-files.md#known_hosts)
+- [Security model](concepts/security-model.md)

@@ -192,3 +192,9 @@ Prefer SFTP. It can list, resume and change files, and OpenSSH 9.0 switched its 
 
 The [sample tool](https://github.com/zcsizmadia/SshSharp/tree/main/samples/SshSharp.Samples)'s `get`, `put` and `tree` commands show transfers
 with `Preserve`, progress, segments and resuming, and `IFileSystem` over SFTP.
+
+## See also
+
+- How-to guides: [Transfer files with SFTP](how-to/transfer-files-sftp.md) (with a diagram of a pipelined transfer),
+  [IFileSystem and IFileProvider](how-to/file-system-adapters.md)
+- Scenarios: [A file sync job](scenarios/file-sync.md), [A background worker](scenarios/background-worker.md)

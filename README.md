@@ -173,7 +173,18 @@ var keys = agent is null ? [] : await agent.GetKeysAsync();
 **[zcsizmadia.github.io/SshSharp](https://zcsizmadia.github.io/SshSharp/)**: the guides below and the full API reference, for the
 latest release.
 
-- [Getting started](https://github.com/zcsizmadia/SshSharp/blob/main/docs/getting-started.md)
+- [Getting started](https://github.com/zcsizmadia/SshSharp/blob/main/docs/getting-started.md) and a
+  [tutorial](https://github.com/zcsizmadia/SshSharp/blob/main/docs/tutorial.md)
+- On the documentation site: task-oriented [how-to guides](https://github.com/zcsizmadia/SshSharp/blob/main/docs/how-to/index.md),
+  complete [scenarios](https://github.com/zcsizmadia/SshSharp/blob/main/docs/scenarios/index.md) (a deployment script, a fleet
+  health check, a file sync job, a database through a jump host, a background worker), concept pages
+  ([architecture](https://github.com/zcsizmadia/SshSharp/blob/main/docs/concepts/architecture.md),
+  [security model](https://github.com/zcsizmadia/SshSharp/blob/main/docs/concepts/security-model.md)), and reference pages
+  ([ssh_config directives](https://github.com/zcsizmadia/SshSharp/blob/main/docs/reference/ssh-config.md),
+  [algorithms](https://github.com/zcsizmadia/SshSharp/blob/main/docs/reference/algorithms.md),
+  [errors](https://github.com/zcsizmadia/SshSharp/blob/main/docs/reference/errors.md),
+  [FAQ](https://github.com/zcsizmadia/SshSharp/blob/main/docs/reference/faq.md),
+  [troubleshooting](https://github.com/zcsizmadia/SshSharp/blob/main/docs/reference/troubleshooting.md))
 - [Connecting](https://github.com/zcsizmadia/SshSharp/blob/main/docs/connecting.md): TCP, streams, `ssh_config` aliases,
   ProxyJump, keep-alive, algorithms
 - [Authentication](https://github.com/zcsizmadia/SshSharp/blob/main/docs/authentication.md): passwords, keys,

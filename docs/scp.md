@@ -55,3 +55,8 @@ Remote paths are passed to the server's shell as one single-quoted word, so spac
 downloading, every name the server sends must be a single path component (no `/`, `\`, `:`, `.`, `..` or control characters),
 and a single-file download accepts exactly one file: a hostile server cannot write outside the target or slip in extra files
 (CVE-2019-6111). Permission bits from the server are applied without set-id or sticky bits, and only with `Preserve`.
+
+## See also
+
+- [Transfer files with SCP](how-to/transfer-files-scp.md)
+- [File transfer (SFTP)](sftp.md#sftp-or-scp): which to choose

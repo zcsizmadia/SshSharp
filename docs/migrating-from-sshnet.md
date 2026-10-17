@@ -346,3 +346,9 @@ See [File transfer (SCP)](scp.md).
 | `ScpException` | `SshException` with `Reason = TransferFailed` |
 
 See [Errors and diagnostics](diagnostics.md) for logging (`SshClientOptions.Logger`), tracing and metrics.
+
+## See also
+
+- [Getting started](getting-started.md) and the [how-to guides](how-to/index.md)
+- [FAQ](reference/faq.md)
+- [Unit-test code that uses SshSharp](how-to/unit-testing.md): SshSharp has no interfaces to mock, by design
