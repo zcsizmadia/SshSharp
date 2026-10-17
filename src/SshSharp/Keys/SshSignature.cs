@@ -242,8 +242,11 @@ public sealed class SshSignature
         CancellationToken cancellationToken)
     {
         // The key's preferred algorithm: rsa-sha2-512 for RSA, as ssh-keygen; a certificate signs as its key.
-        var signature = await key.SignAsync(key.SignatureAlgorithms[0], SignedData(@namespace, hashAlgorithm, digest), binding: null, cancellationToken)
-            .ConfigureAwait(false);
+        var request = new SshSignRequest(key.SignatureAlgorithms[0], SignedData(@namespace, hashAlgorithm, digest), SshSignaturePurpose.FileSignature)
+        {
+            Namespace = @namespace,
+        };
+        var signature = await key.SignAsync(request, binding: null, cancellationToken).ConfigureAwait(false);
         var publicKey = key.PublicKey.ToArray();
         var blob = SshPrivateKey.Encode(w =>
         {

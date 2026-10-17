@@ -58,9 +58,10 @@ for each signature.
 - **A key .NET's `RSA` or `ECDsa` holds:** `SshPrivateKey.FromRsa(rsa)` and `SshPrivateKey.FromECDsa(ecdsa)`, for a software key
   or a non-exportable one, for example a Windows CNG key in the TPM (Microsoft Platform Crypto Provider). The `RSA` or `ECDsa` stays
   yours; disposing the SSH key does not dispose it.
-- **Any other signer:** derive from `SshKeySigner` and pass it to `SshPrivateKey.FromSigner`. It gets the SSH algorithm (which
-  fixes the hash) and the data, and returns the signature as .NET produces it: PKCS#1 v1.5 for RSA, r‖s for ECDSA (or DER, by
-  overriding `EcdsaSignatureFormat`), 64 bytes for Ed25519.
+- **Any other signer:** derive from `SshKeySigner` and pass it to `SshPrivateKey.FromSigner`. Each `SshSignRequest` it gets carries
+  the SSH algorithm (which fixes the hash), the data, and what the signature is for: `Purpose` is `Authentication` (logging in) or
+  `FileSignature` (an SSH signature, with its `Namespace`), so a signer can apply a policy or ask its user. It returns the signature as
+  .NET produces it: PKCS#1 v1.5 for RSA, r‖s for ECDSA (or DER, by overriding `EcdsaSignatureFormat`), 64 bytes for Ed25519.
 
 ```csharp
 sealed class VaultSigner(VaultClient vault, byte[] publicKey) : SshKeySigner(publicKey)
@@ -68,8 +69,10 @@ sealed class VaultSigner(VaultClient vault, byte[] publicKey) : SshKeySigner(pub
     // ECDSA P-256 in the vault: it signs a SHA-256 digest and answers DER.
     public override DSASignatureFormat EcdsaSignatureFormat => DSASignatureFormat.Rfc3279DerSequence;
 
-    public override async ValueTask<byte[]> SignAsync(string algorithm, ReadOnlyMemory<byte> data, CancellationToken cancellationToken) =>
-        await vault.SignDigestAsync(SHA256.HashData(data.Span), cancellationToken);
+    public override async ValueTask<byte[]> SignAsync(SshSignRequest request, CancellationToken cancellationToken) =>
+        request.Purpose == SshSignaturePurpose.Authentication
+            ? await vault.SignDigestAsync(SHA256.HashData(request.Data.Span), cancellationToken)
+            : throw new UnauthorizedAccessException("The deploy key is for logging in only.");
 }
 
 using var key = SshPrivateKey.FromSigner(new VaultSigner(vault, publicKeyBlob), comment: "vault:deploy");

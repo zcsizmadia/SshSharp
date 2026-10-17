@@ -38,14 +38,15 @@ internal sealed class ExternalKey : SshPrivateKey
     internal override byte[] Sign(string algorithm, ReadOnlySpan<byte> data) =>
         throw new NotSupportedException("A key held by an external signer signs only asynchronously.");
 
-    internal override async ValueTask<byte[]> SignAsync(string algorithm, ReadOnlyMemory<byte> data, AgentBinding? binding, CancellationToken cancellationToken)
+    internal override async ValueTask<byte[]> SignAsync(SshSignRequest request, AgentBinding? binding, CancellationToken cancellationToken)
     {
+        var algorithm = request.Algorithm;
         if (!SignatureAlgorithms.Contains(algorithm, StringComparer.Ordinal))
         {
-            throw new ArgumentException($"This {KeyType} key does not sign with '{algorithm}'.", nameof(algorithm));
+            throw new ArgumentException($"This {KeyType} key does not sign with '{algorithm}'.", nameof(request));
         }
 
-        var signature = await _signer.SignAsync(algorithm, data, cancellationToken).ConfigureAwait(false)
+        var signature = await _signer.SignAsync(request, cancellationToken).ConfigureAwait(false)
             ?? throw new CryptographicException("The key's signer returned no signature.");
         var blob = Encode(w =>
         {
@@ -53,7 +54,7 @@ internal sealed class ExternalKey : SshPrivateKey
             w.WriteString(KeyType.StartsWith("ecdsa-", StringComparison.Ordinal) ? EcdsaSignature(signature) : signature);
         });
 
-        if (!_publicKey.VerifySignature(algorithm, blob, data.Span))
+        if (!_publicKey.VerifySignature(algorithm, blob, request.Data.Span))
         {
             throw new CryptographicException(
                 $"The {KeyType} key's signer returned a signature that does not verify against its public key ({Fingerprint}): check that it " +
@@ -153,18 +154,18 @@ internal sealed class ExternalKey : SshPrivateKey
     /// <summary>Signs with an <see cref="RSA"/> instance the caller owns (<see cref="SshPrivateKey.FromRsa"/>).</summary>
     internal sealed class RsaSigner(RSA rsa) : SshKeySigner(RsaKey.PublicBlob(rsa))
     {
-        public override ValueTask<byte[]> SignAsync(string algorithm, ReadOnlyMemory<byte> data, CancellationToken cancellationToken)
+        public override ValueTask<byte[]> SignAsync(SshSignRequest request, CancellationToken cancellationToken)
         {
-            var hash = algorithm == SshAlgorithms.RsaSha2_256 ? HashAlgorithmName.SHA256 : HashAlgorithmName.SHA512;
-            return ValueTask.FromResult(rsa.SignData(data.Span, hash, RSASignaturePadding.Pkcs1));
+            var hash = request.Algorithm == SshAlgorithms.RsaSha2_256 ? HashAlgorithmName.SHA256 : HashAlgorithmName.SHA512;
+            return ValueTask.FromResult(rsa.SignData(request.Data.Span, hash, RSASignaturePadding.Pkcs1));
         }
     }
 
     /// <summary>Signs with an <see cref="ECDsa"/> instance the caller owns (<see cref="SshPrivateKey.FromECDsa"/>).</summary>
     internal sealed class EcdsaSigner(ECDsa ecdsa, NistCurve curve) : SshKeySigner(EcdsaKey.PublicBlob(curve, ecdsa))
     {
-        public override ValueTask<byte[]> SignAsync(string algorithm, ReadOnlyMemory<byte> data, CancellationToken cancellationToken) =>
-            ValueTask.FromResult(ecdsa.SignData(data.Span, curve.Hash, DSASignatureFormat.IeeeP1363FixedFieldConcatenation));
+        public override ValueTask<byte[]> SignAsync(SshSignRequest request, CancellationToken cancellationToken) =>
+            ValueTask.FromResult(ecdsa.SignData(request.Data.Span, curve.Hash, DSASignatureFormat.IeeeP1363FixedFieldConcatenation));
     }
 
     /// <summary>The NIST curve of <paramref name="ecdsa"/>: by its OID or name where the platform reports one, otherwise by its size.</summary>

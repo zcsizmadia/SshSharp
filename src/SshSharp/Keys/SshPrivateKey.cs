@@ -47,11 +47,11 @@ public abstract class SshPrivateKey : IDisposable
     internal abstract byte[] Sign(string algorithm, ReadOnlySpan<byte> data);
 
     /// <summary>
-    /// Signs like <see cref="Sign"/>; keys held elsewhere (an SSH agent) sign only this way. <paramref name="binding"/> is the SSH session
-    /// an agent connection is bound to before signing (for destination-constrained agent keys); local keys ignore it.
+    /// Signs like <see cref="Sign"/>; keys held elsewhere (an SSH agent, an external signer) sign only this way. <paramref name="binding"/>
+    /// is the SSH session an agent connection is bound to before signing (for destination-constrained agent keys); local keys ignore it.
     /// </summary>
-    internal virtual ValueTask<byte[]> SignAsync(string algorithm, ReadOnlyMemory<byte> data, AgentBinding? binding, CancellationToken cancellationToken) =>
-        ValueTask.FromResult(Sign(algorithm, data.Span));
+    internal virtual ValueTask<byte[]> SignAsync(SshSignRequest request, AgentBinding? binding, CancellationToken cancellationToken) =>
+        ValueTask.FromResult(Sign(request.Algorithm, request.Data.Span));
 
     /// <summary>Parses a private key.</summary>
     /// <param name="text">The key file's contents.</param>
@@ -125,12 +125,19 @@ public abstract class SshPrivateKey : IDisposable
     /// </summary>
     /// <param name="rsa">The key. It stays the caller's: disposing the returned key does not dispose it.</param>
     /// <param name="comment">A comment for the key, often <c>user@host</c>.</param>
-    /// <exception cref="FormatException">The key is under 2048 bits.</exception>
+    /// <exception cref="ArgumentException">The key is under 2048 bits.</exception>
     /// <remarks>The returned key cannot be exported or added to an agent.</remarks>
     public static SshPrivateKey FromRsa(RSA rsa, string? comment = null)
     {
         ArgumentNullException.ThrowIfNull(rsa);
-        return new ExternalKey(new ExternalKey.RsaSigner(rsa), comment);
+        try
+        {
+            return new ExternalKey(new ExternalKey.RsaSigner(rsa), comment);
+        }
+        catch (FormatException ex)
+        {
+            throw new ArgumentException(ex.Message, nameof(rsa), ex); // the key given is unusable, as FromECDsa reports a wrong curve
+        }
     }
 
     /// <summary>
@@ -332,8 +339,8 @@ public abstract class SshPrivateKey : IDisposable
 
         internal override byte[] Sign(string algorithm, ReadOnlySpan<byte> data) => _key.Sign(SshCertificate.BaseAlgorithm(algorithm), data);
 
-        internal override ValueTask<byte[]> SignAsync(string algorithm, ReadOnlyMemory<byte> data, AgentBinding? binding, CancellationToken cancellationToken) =>
-            _key.SignAsync(SshCertificate.BaseAlgorithm(algorithm), data, binding, cancellationToken);
+        internal override ValueTask<byte[]> SignAsync(SshSignRequest request, AgentBinding? binding, CancellationToken cancellationToken) =>
+            _key.SignAsync(request.WithAlgorithm(SshCertificate.BaseAlgorithm(request.Algorithm)), binding, cancellationToken);
 
         /// <summary>
         /// A certified key as an agent takes it (PROTOCOL.certkeys): the certificate type and the certificate, then the private fields

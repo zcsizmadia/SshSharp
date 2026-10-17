@@ -5,7 +5,6 @@ SshSharp.SshKeySigner
 SshSharp.SshKeySigner.KeyType.get -> string!
 SshSharp.SshKeySigner.PublicKey.get -> System.ReadOnlyMemory<byte>
 SshSharp.SshKeySigner.SshKeySigner(System.ReadOnlyMemory<byte> publicKey) -> void
-abstract SshSharp.SshKeySigner.SignAsync(string! algorithm, System.ReadOnlyMemory<byte> data, System.Threading.CancellationToken cancellationToken) -> System.Threading.Tasks.ValueTask<byte[]!>
 virtual SshSharp.SshKeySigner.EcdsaSignatureFormat.get -> System.Security.Cryptography.DSASignatureFormat
 virtual SshSharp.SshKeySigner.SignatureAlgorithms.get -> System.Collections.Generic.IReadOnlyList<string!>!
 static SshSharp.SshPrivateKey.FromECDsa(System.Security.Cryptography.ECDsa! ecdsa, string? comment = null) -> SshSharp.SshPrivateKey!
@@ -143,3 +142,14 @@ static SshSharp.SshKnownHostsLookup.operator ==(SshSharp.SshKnownHostsLookup? le
 [SSHSHARP001]static SshSharp.Sftp.SftpOwnerNames.operator ==(SshSharp.Sftp.SftpOwnerNames? left, SshSharp.Sftp.SftpOwnerNames? right) -> bool
 [SSHSHARP001]static SshSharp.Sftp.SftpTransferProgress.operator !=(SshSharp.Sftp.SftpTransferProgress? left, SshSharp.Sftp.SftpTransferProgress? right) -> bool
 [SSHSHARP001]static SshSharp.Sftp.SftpTransferProgress.operator ==(SshSharp.Sftp.SftpTransferProgress? left, SshSharp.Sftp.SftpTransferProgress? right) -> bool
+abstract SshSharp.SshKeySigner.SignAsync(SshSharp.SshSignRequest! request, System.Threading.CancellationToken cancellationToken) -> System.Threading.Tasks.ValueTask<byte[]!>
+SshSharp.SshSignaturePurpose
+SshSharp.SshSignaturePurpose.Authentication = 0 -> SshSharp.SshSignaturePurpose
+SshSharp.SshSignaturePurpose.FileSignature = 1 -> SshSharp.SshSignaturePurpose
+SshSharp.SshSignRequest
+SshSharp.SshSignRequest.Algorithm.get -> string!
+SshSharp.SshSignRequest.Data.get -> System.ReadOnlyMemory<byte>
+SshSharp.SshSignRequest.Namespace.get -> string?
+SshSharp.SshSignRequest.Namespace.init -> void
+SshSharp.SshSignRequest.Purpose.get -> SshSharp.SshSignaturePurpose
+SshSharp.SshSignRequest.SshSignRequest(string! algorithm, System.ReadOnlyMemory<byte> data, SshSharp.SshSignaturePurpose purpose) -> void

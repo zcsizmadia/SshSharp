@@ -100,7 +100,8 @@ internal sealed class SshUserAuth(SshTransport transport, string userName, Func<
                 w.WriteString(hostKey.Span);
             }
         });
-        var signature = await key.SignAsync(algorithm, signed, transport.AgentBinding, cancellationToken).ConfigureAwait(false);
+        var signature = await key.SignAsync(new SshSignRequest(algorithm, signed, SshSignaturePurpose.Authentication), transport.AgentBinding, cancellationToken)
+            .ConfigureAwait(false);
         return await RequestAsync(method, w =>
         {
             w.WriteBoolean(true);
