@@ -21,7 +21,7 @@
     <!-- The public API is tracked in PublicAPI.*.txt (RS0016/RS0017), and packing validates it against earlier versions. -->
     <EnablePackageValidation>true</EnablePackageValidation>
     <!-- Each release is checked against the previous one on nuget.org: an unintended breaking change fails the pack. -->
-    <PackageValidationBaselineVersion>0.6.0</PackageValidationBaselineVersion>
+    <PackageValidationBaselineVersion>1.0.0</PackageValidationBaselineVersion>
 
     <!-- The version comes from git tags (v0.1.0, v1.0.0-preview.1, ...): MinVer gives untagged commits a prerelease of the next version. -->
     <MinVerTagPrefix>v</MinVerTagPrefix>
