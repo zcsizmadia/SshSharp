@@ -1,7 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <!-- The SFTP API is marked [Experimental] for its callers; the library and its tests use it on purpose. -->
-    <NoWarn>$(NoWarn);SSHSHARP001</NoWarn>
     <TargetFrameworks>net8.0;net10.0</TargetFrameworks>
     <RootNamespace>SshSharp</RootNamespace>
     <AllowUnsafeBlocks>false</AllowUnsafeBlocks>

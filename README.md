@@ -45,7 +45,7 @@ Console.WriteLine(result.StandardOutputText);
   ECDH and DH group 14/16 key exchange; ChaCha20-Poly1305, AES-GCM and
   AES-CTR with HMAC-SHA2 ETM; Ed25519, ECDSA and RSA (SHA-2) keys; strict key exchange (Terrapin) always on; a FIPS mode.
 - **File transfer:** SFTP (version 3 with OpenSSH's extensions: pipelined uploads and downloads, seekable remote file
-  streams, directories, links and attributes; the API is experimental for now), and SCP uploads and downloads of files,
+  streams, directories, links and attributes), and SCP uploads and downloads of files,
   streams and directories, with progress, kept times, and checks that stop a hostile server from writing outside the target.
 - **Files for the rest of .NET:** `SshSharp.IO.Abstractions` implements System.IO.Abstractions' `IFileSystem` over SFTP (code written
   against `IFileSystem` reads and writes the server unchanged), and `SshSharp.FileProviders` serves a directory as an `IFileProvider`, for
@@ -105,7 +105,7 @@ Console.WriteLine(result.StandardOutputText);
 | `HttpClient` through the SSH connection (`SocketsHttpHandler.ConnectCallback`) | ✅ | ❌ |
 | FIPS mode (FIPS-approved algorithms only) | ✅ | ❌ |
 | SCP | ✅ | ✅ |
-| SFTP | ✅ (version 3 with OpenSSH extensions, pipelined transfers; experimental API) | ✅ |
+| SFTP | ✅ (version 3 with OpenSSH extensions, pipelined transfers) | ✅ |
 | Segmented SFTP downloads (one file in parallel ranges over several sessions) | ✅ | ❌ |
 | SFTP `fsync@openssh.com` (durable uploads), `hardlink@openssh.com` and `limits@openssh.com` | ✅ | ❌ |
 | Remote files as an `IFileSystem` (System.IO.Abstractions: `File`, `Directory`, `Path`, streams) | ✅ (`SshSharp.IO.Abstractions`) | ❌ |
@@ -117,7 +117,7 @@ Console.WriteLine(result.StandardOutputText);
 | Mutation testing | ✅ (Stryker.NET, weekly) | ❌ |
 | Maturity | New, pre-1.0; managed crypto awaiting an outside review | More than a decade of production use |
 
-**Use SSH.NET instead** when you need .NET Framework or .NET Standard, a settled (non-experimental) SFTP API, servers that only speak legacy algorithms,
+**Use SSH.NET instead** when you need .NET Framework or .NET Standard, servers that only speak legacy algorithms,
 or a long track record. Moving from SSH.NET? See the
 [migration guide](https://github.com/zcsizmadia/SshSharp/blob/main/docs/migrating-from-sshnet.md).
 

@@ -1,4 +1,3 @@
-using System.Diagnostics.CodeAnalysis;
 using System.IO.Abstractions;
 using SshSharp.Sftp;
 
@@ -27,7 +26,6 @@ namespace SshSharp.IO.Abstractions;
 /// <see cref="FileVersionInfo"/>, <see cref="RandomAccess"/> and the <c>SafeFileHandle</c> overloads throw <see cref="NotSupportedException"/>.
 /// </para>
 /// </remarks>
-[Experimental(SftpClient.ExperimentalId)]
 public sealed class SftpFileSystem : IFileSystem
 {
     private string? _currentDirectory;
@@ -263,7 +261,6 @@ public sealed class SftpFileSystem : IFileSystem
 }
 
 /// <summary>Options for <see cref="SftpFileSystem"/>.</summary>
-[Experimental(SftpClient.ExperimentalId)]
 public sealed class SftpFileSystemOptions
 {
     /// <summary>

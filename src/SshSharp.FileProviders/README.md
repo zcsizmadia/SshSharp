@@ -4,14 +4,6 @@ An `IFileProvider` over SFTP, built on [SshSharp](https://www.nuget.org/packages
 SSH server to ASP.NET Core static files, Razor views, configuration, and anything else that reads through
 `Microsoft.Extensions.FileProviders`. Nothing is mounted, so only your application sees the files.
 
-The API is experimental: using it reports diagnostic `SSHSHARP001`, which is an error until you acknowledge it in the project file:
-
-```xml
-<PropertyGroup>
-  <NoWarn>$(NoWarn);SSHSHARP001</NoWarn>
-</PropertyGroup>
-```
-
 ```csharp
 using SshSharp;
 using SshSharp.FileProviders;

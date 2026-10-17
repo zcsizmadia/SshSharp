@@ -39,25 +39,6 @@ public static class SshExecMatcher
         }
     }
 
-    /// <summary>Runs <paramref name="command"/> with the system shell and returns whether it exited with status 0. Gives up after 30 seconds.</summary>
-    [Obsolete("Use RunShellAsync: ExecMatcher is asynchronous (#88).")]
-    public static bool RunShell(string command)
-    {
-        using var process = Start(command);
-        if (process is null)
-        {
-            return false;
-        }
-
-        if (process.WaitForExit(Limit))
-        {
-            return process.ExitCode == 0;
-        }
-
-        process.Kill(entireProcessTree: true);
-        return false;
-    }
-
     private static Process? Start(string command)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(command);

@@ -47,10 +47,6 @@ public sealed class SshCertificate
     /// <summary>The certificate's type name, for example <c>ssh-ed25519-cert-v01@openssh.com</c>.</summary>
     public string Algorithm { get; }
 
-    /// <summary>The certificate's key type: <see cref="Algorithm"/>.</summary>
-    [Obsolete("Use Algorithm (#88).")]
-    public string CertificateType => Algorithm;
-
     /// <summary>The certified key's type, for example <c>ssh-ed25519</c>.</summary>
     public string KeyType => Key.KeyType;
 

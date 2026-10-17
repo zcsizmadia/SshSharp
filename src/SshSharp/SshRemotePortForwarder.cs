@@ -55,10 +55,6 @@ public sealed class SshRemotePortForwarder : IAsyncDisposable
     /// <summary>The port the server listens on (the one it picked when 0 was asked for).</summary>
     public int RemotePort { get; }
 
-    /// <summary>The port the server listens on: <see cref="RemotePort"/>.</summary>
-    [Obsolete("Use RemotePort, named as on SshLocalPortForwarder (#88).")]
-    public int Port => RemotePort;
-
     /// <summary>Where each forwarded connection goes, as reached from this machine.</summary>
     public string LocalHost { get; }
 
