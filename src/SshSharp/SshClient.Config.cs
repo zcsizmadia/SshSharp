@@ -130,12 +130,15 @@ public sealed partial class SshClient
                 stream = tcpStream;
             }
 
+            // The password and the keyboard-interactive answers are the destination's: a ProxyJump hop (depth > 0), perhaps run by
+            // someone else, is never offered them, as ssh asks for each host's password separately. Hops log in with keys or the agent.
+            var destination = depth == 0;
             var clientOptions = new SshClientOptions
             {
                 UserName = hostConfig.User,
-                Password = hostConfig.PasswordAuthentication || hostConfig.KbdInteractiveAuthentication ? options.Password : null,
+                Password = destination && (hostConfig.PasswordAuthentication || hostConfig.KbdInteractiveAuthentication) ? options.Password : null,
                 PrivateKeys = hostConfig.PubkeyAuthentication ? [.. options.PrivateKeys, .. keys] : [],
-                KeyboardInteractive = hostConfig.BatchMode ? null : options.KeyboardInteractive,
+                KeyboardInteractive = destination && !hostConfig.BatchMode ? options.KeyboardInteractive : null,
                 AuthenticationBanner = options.AuthenticationBanner,
                 AuthenticationOrder = AuthenticationOrder(hostConfig),
                 ForwardAgent = hostConfig.ForwardAgent ? agent : null,
