@@ -178,6 +178,34 @@ public class SessionInteropTests
     }
 
     [Test]
+    public async Task ReadLine_ReadsARealShellsOutput_UpToASentinelLine()
+    {
+        RealServer.SkipUnlessItRunsCommands();
+        await using var client = await ConnectAsync();
+        if (client is null)
+        {
+            Skip.Test("SSHSHARP_TEST_SSHD and SSHSHARP_TEST_USER with SSHSHARP_TEST_PASSWORD or SSHSHARP_TEST_KEYDIR are needed.");
+            return;
+        }
+
+        var terminal = new SshTerminalOptions { TerminalType = "dumb", Columns = 132, Rows = 50 };
+        await using var session = await client.StartShellAsync(new SshSessionOptions { Terminal = terminal }, Timeout());
+        var expect = new SshExpect(session);
+
+        // As docs/sessions.md shows: the command ends with a line of its own, since the prompt after it has no line feed. Before the
+        // output come the login banner, the prompt and the echo of the command, which the sentinel's quoting keeps from matching.
+        await expect.SendLineAsync("printf 'alpha\\nbeta\\n'; echo '--''end--'", Timeout());
+        var lines = new List<string>();
+        while (await expect.ReadLineAsync(Timeout()) is { } line && line != "--end--")
+        {
+            lines.Add(line);
+        }
+
+        await Assert.That(lines.Count).IsGreaterThanOrEqualTo(2);
+        await Assert.That(lines[^2..]).IsEquivalentTo(["alpha", "beta"]);
+    }
+
+    [Test]
     public async Task TheSftpSubsystem_AnswersTheVersionHandshake()
     {
         await using var client = await ConnectAsync();
