@@ -200,12 +200,9 @@ public class RemoteDynamicForwardingTests
     [Test]
     public async Task NothingListeningAtTheDestination_IsRefused()
     {
-        int unused;
-        using (var probe = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp))
-        {
-            probe.Bind(new IPEndPoint(IPAddress.Loopback, 0));
-            unused = ((IPEndPoint)probe.LocalEndPoint!).Port;
-        }
+        // Port 1 on loopback: nothing listens there. A port bound and released could be taken by another test's listener before it is
+        // used (a stress run saw a SOCKS proxy answer on one).
+        const int unused = 1;
 
         await using var server = new FakeSessionServer();
         await using var client = await ConnectAsync(server);

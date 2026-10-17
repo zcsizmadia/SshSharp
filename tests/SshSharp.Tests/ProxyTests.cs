@@ -362,12 +362,9 @@ public class ProxyTests
     [Test]
     public async Task AnUnreachableProxy_IsAConnectFailure()
     {
-        int unused;
-        using (var probe = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp))
-        {
-            probe.Bind(new IPEndPoint(IPAddress.Loopback, 0));
-            unused = ((IPEndPoint)probe.LocalEndPoint!).Port;
-        }
+        // Port 1 on loopback: nothing listens there. A port bound and released could be taken by another test's listener before it is
+        // used (a stress run saw a SOCKS proxy answer on one).
+        const int unused = 1;
 
         var ex = await Assert.That(async () => await SshProxy.Socks5("127.0.0.1", unused).ConnectAsync("h", 22, Timeout())).Throws<SshException>();
 
