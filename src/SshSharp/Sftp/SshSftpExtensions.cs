@@ -1,9 +1,7 @@
-using System.Diagnostics.CodeAnalysis;
 
 namespace SshSharp.Sftp;
 
 /// <summary>SFTP on an <see cref="SshClient"/>.</summary>
-[Experimental(SftpClient.ExperimentalId)]
 public static class SshSftpExtensions
 {
     /// <summary>

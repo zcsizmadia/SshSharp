@@ -1,4 +1,3 @@
-using System.Diagnostics.CodeAnalysis;
 using SshSharp.Protocol;
 
 namespace SshSharp.Sftp;
@@ -288,6 +287,5 @@ public sealed partial class SftpClient
 /// <param name="AvailableFiles">Free file entries the server's user may use.</param>
 /// <param name="IsReadOnly">Whether the file system is mounted read-only.</param>
 /// <param name="MaxNameLength">The longest file name it accepts.</param>
-[Experimental(SftpClient.ExperimentalId)]
 public sealed record SftpFileSystemInfo(long TotalBytes, long FreeBytes, long AvailableBytes, long TotalFiles, long FreeFiles, long AvailableFiles,
     bool IsReadOnly, int MaxNameLength);

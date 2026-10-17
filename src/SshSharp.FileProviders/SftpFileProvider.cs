@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using System.Diagnostics.CodeAnalysis;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Primitives;
 using SshSharp.Sftp;
@@ -22,7 +21,6 @@ namespace SshSharp.FileProviders;
 /// server, which decides where they lead). <see cref="Watch"/> never signals: SFTP has no change notifications.
 /// </para>
 /// </remarks>
-[Experimental(SftpClient.ExperimentalId)]
 public sealed class SftpFileProvider : IFileProvider
 {
     private readonly SftpClient _sftp;
@@ -246,7 +244,6 @@ public sealed class SftpFileProvider : IFileProvider
 }
 
 /// <summary>Options for <see cref="SftpFileProvider"/>.</summary>
-[Experimental(SftpClient.ExperimentalId)]
 public sealed class SftpFileProviderOptions
 {
     /// <summary>

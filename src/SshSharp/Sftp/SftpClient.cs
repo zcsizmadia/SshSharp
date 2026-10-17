@@ -13,15 +13,10 @@ namespace SshSharp.Sftp;
 /// </summary>
 /// <remarks>
 /// Remote paths are passed to the server as they are: relative ones are relative to the login directory, and <c>/</c> is the
-/// separator, whatever this machine uses. This API is experimental (diagnostic <c>SSHSHARP001</c>) until it settles; it may still
-/// change between minor releases.
+/// separator, whatever this machine uses.
 /// </remarks>
-[Experimental(ExperimentalId)]
 public sealed partial class SftpClient : IAsyncDisposable
 {
-    /// <summary>The diagnostic id of the experimental SFTP API.</summary>
-    public const string ExperimentalId = "SSHSHARP001";
-
     /// <summary>The most entries one directory listing returns before the server is taken to be looping.</summary>
     internal const long MaxListingEntries = 1_000_000;
 
@@ -1197,7 +1192,6 @@ public sealed partial class SftpClient : IAsyncDisposable
 /// <param name="MaxReadLength">The largest read requested.</param>
 /// <param name="MaxWriteLength">The largest write sent.</param>
 /// <param name="MaxOpenHandles">How many files may be open at once, if the server says.</param>
-[Experimental(SftpClient.ExperimentalId)]
 public sealed record SftpLimits(int MaxReadLength, int MaxWriteLength, int? MaxOpenHandles);
 
 /// <summary>A directory entry from <see cref="SftpClient.ListDirectoryAsync"/>.</summary>
@@ -1205,24 +1199,20 @@ public sealed record SftpLimits(int MaxReadLength, int MaxWriteLength, int? MaxO
 /// <param name="FullPath">The directory's path joined with the name.</param>
 /// <param name="LongName">The server's <c>ls -l</c> style line for the entry (informational; its format is not standard).</param>
 /// <param name="Attributes">The entry's attributes; a symbolic link is described itself, not its target.</param>
-[Experimental(SftpClient.ExperimentalId)]
 public sealed record SftpFileInfo(string Name, string FullPath, string LongName, SftpFileAttributes Attributes);
 
 /// <summary>The names of user and group ids, from <see cref="SftpClient.GetOwnerNamesAsync"/>.</summary>
 /// <param name="UserNames">The user names by id; an id the server cannot name is left out.</param>
 /// <param name="GroupNames">The group names by id; an id the server cannot name is left out.</param>
-[Experimental(SftpClient.ExperimentalId)]
 public sealed record SftpOwnerNames(IReadOnlyDictionary<uint, string> UserNames, IReadOnlyDictionary<uint, string> GroupNames);
 
 /// <summary>The progress of one file in an SFTP transfer (<see cref="SftpTransferOptions.Progress"/>).</summary>
 /// <param name="Path">The file's remote path.</param>
 /// <param name="BytesTransferred">The file's bytes transferred so far, including what a resumed transfer found there already.</param>
 /// <param name="TotalBytes">The file's size, or null when it is not known (an upload from a stream that cannot tell its length).</param>
-[Experimental(SftpClient.ExperimentalId)]
 public sealed record SftpTransferProgress(string Path, long BytesTransferred, long? TotalBytes);
 
 /// <summary>Options for <see cref="SftpClient"/>'s uploads and downloads.</summary>
-[Experimental(SftpClient.ExperimentalId)]
 public sealed class SftpTransferOptions
 {
     /// <summary>Replace an existing destination file (default true, as <c>sftp put</c> and <c>get</c> do); otherwise it is an error.</summary>

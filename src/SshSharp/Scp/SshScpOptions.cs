@@ -9,10 +9,6 @@ public sealed class SshScpOptions
     /// </summary>
     public bool Preserve { get; init; }
 
-    /// <summary>Keep times and permission bits: <see cref="Preserve"/>, which is what this always did.</summary>
-    [Obsolete("Use Preserve: it keeps the permission bits too, as scp -p does (#88).")]
-    public bool PreserveTimes { get => Preserve; init => Preserve = value; }
-
     /// <summary>Receives progress per file: its path, the bytes done so far, and its size.</summary>
     public IProgress<SshScpProgress>? Progress { get; init; }
 

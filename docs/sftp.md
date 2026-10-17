@@ -4,10 +4,6 @@ SFTP is the file protocol of SSH: browse directories, read and write files in pl
 as your commands. SshSharp speaks SFTP version 3, the version OpenSSH's `sftp-server` and `internal-sftp` implement, with
 OpenSSH's extensions.
 
-> **Experimental.** The SFTP API is new and may still change between minor releases. Its types are marked
-> `[Experimental("SSHSHARP001")]`, so the compiler reports error SSHSHARP001 where you use them until you opt in, in the project
-> file (`<NoWarn>$(NoWarn);SSHSHARP001</NoWarn>`) or around the code (`#pragma warning disable SSHSHARP001`).
-
 ```csharp
 using SshSharp.Sftp;
 

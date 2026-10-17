@@ -91,10 +91,6 @@ public sealed class KnownHostsVerifier : SshHostKeyVerifier
     /// </summary>
     public Func<SshHostKeyPrompt, CancellationToken, ValueTask<bool>>? AskHostKey { get; init; }
 
-    /// <summary>The prompt for an unknown key: <see cref="AskHostKey"/>.</summary>
-    [Obsolete("Use AskHostKey, named as on SshConfigConnectOptions (#88).")]
-    public Func<SshHostKeyPrompt, CancellationToken, ValueTask<bool>>? Ask { get => AskHostKey; init => AskHostKey = value; }
-
     /// <summary>The user's <c>~/.ssh/known_hosts</c> and <c>known_hosts2</c>, plus the system-wide files, as <c>ssh</c> uses by default.</summary>
     public static KnownHostsVerifier ForCurrentUser(StrictHostKeyChecking policy = StrictHostKeyChecking.Ask)
     {

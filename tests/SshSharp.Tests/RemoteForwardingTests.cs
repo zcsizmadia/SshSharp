@@ -95,9 +95,6 @@ public class RemoteForwardingTests
 
         // Port 0: the server picked one and said which.
         await Assert.That(forwarder.RemotePort).IsEqualTo(40000);
-#pragma warning disable CS0618 // the 0.6.0 name still works (#88)
-        await Assert.That(forwarder.Port).IsEqualTo(forwarder.RemotePort);
-#pragma warning restore CS0618
         await Assert.That(forwarder.BindAddress).IsEqualTo("localhost");
         await Assert.That(forwarder.LocalPort).IsEqualTo(service.Port);
         await Assert.That(server.RemoteForwards[40000]).IsEqualTo("localhost");

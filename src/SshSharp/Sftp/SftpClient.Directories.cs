@@ -1,4 +1,3 @@
-using System.Diagnostics.CodeAnalysis;
 using SshSharp.Scp;
 
 namespace SshSharp.Sftp;
@@ -263,5 +262,4 @@ public sealed partial class SftpClient
 /// <param name="Directories">Directories created or entered below the top one.</param>
 /// <param name="Bytes">Bytes transferred.</param>
 /// <param name="Skipped">Entries left out: symbolic links, special files, reparse points, and names this system cannot hold.</param>
-[Experimental(SftpClient.ExperimentalId)]
 public sealed record SftpTransferSummary(int Files, int Directories, long Bytes, int Skipped);

@@ -1,10 +1,8 @@
-using System.Diagnostics.CodeAnalysis;
 using SshSharp.Protocol;
 
 namespace SshSharp.Sftp;
 
 /// <summary>What kind of file an <see cref="SftpFileAttributes"/> describes, from the file type bits of its permissions.</summary>
-[Experimental(SftpClient.ExperimentalId)]
 public enum SftpFileType
 {
     /// <summary>The server did not say (no permissions in the attributes), or an unknown type.</summary>
@@ -27,7 +25,6 @@ public enum SftpFileType
 /// File attributes in SFTP (version 3): each is null when the server did not send it. To change some with
 /// <see cref="SftpClient.SetAttributesAsync(string, SftpFileAttributes, CancellationToken)"/>, set only those.
 /// </summary>
-[Experimental(SftpClient.ExperimentalId)]
 public sealed class SftpFileAttributes
 {
     private const uint TypeMask = 0xF000;

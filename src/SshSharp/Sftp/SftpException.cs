@@ -1,9 +1,7 @@
-using System.Diagnostics.CodeAnalysis;
 
 namespace SshSharp.Sftp;
 
 /// <summary>An SFTP status code (draft-ietf-secsh-filexfer-02 section 7).</summary>
-[Experimental(SftpClient.ExperimentalId)]
 public enum SftpStatusCode
 {
     /// <summary>Success.</summary>
@@ -35,7 +33,6 @@ public enum SftpStatusCode
 }
 
 /// <summary>An SFTP request failed: the server answered with an error status (<see cref="Status"/>), about <see cref="Path"/>.</summary>
-[Experimental(SftpClient.ExperimentalId)]
 public sealed class SftpException : SshException
 {
     /// <summary>Creates the exception.</summary>

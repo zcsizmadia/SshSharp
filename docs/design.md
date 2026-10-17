@@ -42,7 +42,7 @@ only), `ext-info-in-auth@openssh.com`, certificates, agents (OpenSSH's agent and
 (`AddKeyAsync`, `RemoveKeyAsync`, `RemoveAllKeysAsync`, `LockAsync`, `AddKeysToAgent`), exec/shell/PTY sessions, BREAK
 (`SendBreakAsync`, RFC 4335) and `expect`-style scripting, port forwarding (local, remote, dynamic SOCKS 4/4a/5, remote dynamic,
 remote Unix socket), agent forwarding and destination-constrained agent keys (`restrict-destination-v00@openssh.com`), SCP, SFTP
-(experimental API) with segmented downloads, ProxyJump, ProxyCommand and HTTP/SOCKS proxies, `known_hosts`, `KnownHostsCommand`,
+with segmented downloads, ProxyJump, ProxyCommand and HTTP/SOCKS proxies, `known_hosts`, `KnownHostsCommand`,
 revoked host keys (`RevokedHostKeys`: OpenSSH KRLs and key lists), host key scanning, `ssh_config` (including `Match localnetwork`,
 `sessiontype` and `command`, and `RefuseConnection`), config-driven connect, connect over any `Stream`, key generation, SSH
 signatures (SSHSIG), typed exceptions, keep-alive, `ping@openssh.com` (`PingAsync`), client-side channel idle timeouts
@@ -61,7 +61,7 @@ Out: server-side SSH, `ControlMaster` multiplexing, GSSAPI key exchange (`gssapi
 
 - SCP is small (a text protocol over one exec channel), so it stays in the core; trimming removes it when unused.
 - SFTP lives in the core too (namespace `SshSharp.Sftp`, opened with `client.OpenSftpAsync()`), so it can share the channel
-  internals; its API is marked `[Experimental("SSHSHARP001")]` until it settles. The adapters are separate packages because they
+  internals. The adapters are separate packages because they
   bring their own dependencies, and they use only the core's public API.
 - Lockstep versions until 1.0.
 

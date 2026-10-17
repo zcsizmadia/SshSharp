@@ -4,14 +4,6 @@ An `IFileSystem` ([System.IO.Abstractions](https://github.com/TestableIO/System.
 [SshSharp](https://www.nuget.org/packages/SshSharp): code written against `IFileSystem` instead of `File`, `Directory` and `Path`
 reads and writes files on an SSH server. Nothing is mounted, so only your application sees them.
 
-The API is experimental: using it reports diagnostic `SSHSHARP001`, which is an error until you acknowledge it in the project file:
-
-```xml
-<PropertyGroup>
-  <NoWarn>$(NoWarn);SSHSHARP001</NoWarn>
-</PropertyGroup>
-```
-
 ```csharp
 using System.IO.Abstractions;
 using SshSharp;
