@@ -24,14 +24,21 @@ app.MapGet("/uptime", async (ISshConnectionProvider connections, CancellationTok
 {
     var client = await connections.GetClientAsync("server", cancellationToken); // owned by the provider: not disposed here
     var result = await client.RunCommandAsync("uptime", cancellationToken);
-    return result.ExitStatus == 0 ? Results.Text(result.StandardOutputText) : Results.Problem(result.StandardErrorText);
+    return result.ExitStatus == 0 ? Results.Text(result.StandardOutputText) : Results.Problem("uptime failed on the server."); // not its stderr
 });
 
-// A file from one directory on the server, streamed as it arrives. The path comes from the client, so it stays inside that directory.
-var filesRoot = (app.Configuration["Ssh:FilesRoot"] ?? "files").TrimEnd('/');
+// A file from one directory on the server, streamed as it arrives. The path comes from the client, so it must stay inside that
+// directory: an empty or "/" root would expose the whole file system, and a Windows server (Win32-OpenSSH) takes '\' as a separator
+// too. This endpoint has no authentication: add it before serving anything that is not public. The server follows symbolic links.
+var filesRoot = (app.Configuration["Ssh:FilesRoot"] is { Length: > 0 } configured ? configured : "files").TrimEnd('/');
+if (filesRoot.Length == 0)
+{
+    throw new InvalidOperationException("Ssh:FilesRoot must name a directory, not the root of the file system.");
+}
+
 app.MapGet("/files/{**path}", async (string path, ISshConnectionProvider connections, HttpContext http, CancellationToken cancellationToken) =>
 {
-    if (path.Split('/').Any(segment => segment is "" or "." or ".."))
+    if (path.Split('/', '\\').Any(segment => segment is "" or "." or "..") || path.Contains('\0'))
     {
         return Results.BadRequest();
     }

@@ -23,11 +23,15 @@ internal sealed partial class RemoteLogFollower(ISshConnectionProvider connectio
                 var client = await connections.GetClientAsync("server", stoppingToken);
 
                 // tail -F follows the file by name, so it carries on after the log is rotated; -n 0 starts at its end.
-                await using var session = await client.StartCommandAsync($"tail -n 0 -F {Quote(file)}", cancellationToken: stoppingToken);
+                await using var session = await client.StartCommandAsync($"tail -n 0 -F -- {Quote(file)}", cancellationToken: stoppingToken);
                 using var reader = new StreamReader(session.StandardOutput);
                 while (await reader.ReadLineAsync(stoppingToken) is { } line)
                 {
-                    LogLine(file, line);
+                    if (logger.IsEnabled(LogLevel.Information))
+                    {
+                        var text = Printable(line); // the remote file's text, so no control characters (terminal escapes) in this log
+                        LogLine(file, text);
+                    }
                 }
 
                 LogEnded(file); // tail exited (the file's directory went away, say): start it again
@@ -46,6 +50,8 @@ internal sealed partial class RemoteLogFollower(ISshConnectionProvider connectio
             await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
         }
     }
+
+    private static string Printable(string text) => string.Concat(text.Select(c => char.IsControl(c) && c != '\t' ? '?' : c));
 
     /// <summary>Quotes a value for the remote POSIX shell.</summary>
     private static string Quote(string value) => "'" + value.Replace("'", "'\\''", StringComparison.Ordinal) + "'";
