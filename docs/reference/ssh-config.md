@@ -26,8 +26,8 @@ value.
 | `User` | `User` | Yes; `user@` in the destination wins. |
 | `ProxyJump` | `ProxyJump` | Yes: each hop resolved, verified and authenticated with its own settings. |
 | `ProxyCommand` | `ProxyCommand` | Yes, unless `SshConfigConnectOptions.AllowProxyCommand = false`. |
-| `ConnectTimeout` | `ConnectTimeout` | Yes, per hop; fails with `SshFailureReason.Timeout`. |
-| `AddressFamily` | `AddressFamily` | Yes (`any`, `inet`, `inet6`). |
+| `ConnectTimeout` | `ConnectTimeout` | Yes, per hop, from before the identity files are loaded through authentication; fails with `SshFailureReason.Timeout`, as `SshClientOptions.ConnectTimeout` does. `0` means no limit, as in OpenSSH. |
+| `AddressFamily` | `AddressFamily` | Yes (`any`, `inet`, `inet6`), as `SshClientOptions.AddressFamily`. Not with a `ProxyCommand` or a proxy, which make the connection. |
 | `BindAddress`, `BindInterface` | `BindAddress`, `BindInterface` | Yes: the local address of the connection (and of the connection to a proxy). |
 | `ServerAliveInterval`, `ServerAliveCountMax` | same names | Yes: `KeepAliveInterval` and `KeepAliveCountMax`. |
 | `ChannelTimeout` | `ChannelTimeouts` | Yes: `SshClientOptions.ChannelTimeouts`. |

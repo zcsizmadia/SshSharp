@@ -91,7 +91,7 @@ See [Connecting](connecting.md) for streams, jump hosts and timeouts.
 | `new SshClient(connectionInfo)` | `SshClientOptions`; or `ssh_config` with `SshClient.ConnectAsync(destination)` |
 | `client.Connect()`, `ConnectAsync(ct)` | `SshClient.ConnectAsync(...)`: returns a connected client |
 | `client.Disconnect()`, `Dispose()` | `await client.DisposeAsync()` |
-| `ConnectionInfo.Timeout` | a `CancellationToken` (for example `new CancellationTokenSource(TimeSpan.FromSeconds(10))`), or `ConnectTimeout` in `ssh_config` |
+| `ConnectionInfo.Timeout` | `SshClientOptions.ConnectTimeout` (`ConnectTimeout` in `ssh_config`); it covers the TCP connection, key exchange and authentication. A `CancellationToken` works too |
 | `client.KeepAliveInterval` | `SshClientOptions.KeepAliveInterval` and `KeepAliveCountMax` (`ServerAliveInterval` in `ssh_config`) |
 | `ConnectionInfo.Encryptions` / `KeyExchangeAlgorithms` / `HostKeyAlgorithms` (removing entries) | `Ciphers`, `KexAlgorithms`, `HostKeyAlgorithms` in `ssh_config` (the defaults are modern only; `SshClientOptions.FipsMode` restricts them to FIPS algorithms) |
 | `ConnectionInfo.ProxyType`, `ProxyHost`, `ProxyPort`, `ProxyUsername`, `ProxyPassword` | `SshClientOptions.Proxy = SshProxy.Http(host, port, credentials)` (or `Socks5`, `Socks4`, or `SshProxy.FromUri(new Uri("socks5://proxy:1080"))`) |
@@ -341,7 +341,7 @@ See [File transfer (SCP)](scp.md).
 |---|---|
 | `SshConnectionException` | `SshException` with `Reason` (`ConnectFailed`, `ConnectionClosed`, `ProtocolError`, `KeyExchangeFailed`, ...) |
 | `SshAuthenticationException` | `SshAuthenticationException` (a subclass of `SshException`) |
-| `SshOperationTimeoutException` | `OperationCanceledException` when your token was cancelled; `SshException` with `Reason = Timeout` for `ConnectTimeout` |
+| `SshOperationTimeoutException` | `OperationCanceledException` when your token was cancelled; `SshException` with `Reason = Timeout` for `SshClientOptions.ConnectTimeout` (or `ConnectTimeout` in `ssh_config`) |
 | `ProxyException` | `SshException` with `Reason = ConnectFailed`, saying what the proxy answered |
 | `ScpException` | `SshException` with `Reason = TransferFailed` |
 

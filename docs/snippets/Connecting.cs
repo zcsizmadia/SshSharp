@@ -3,7 +3,7 @@ using SshSharp.Config;
 
 namespace SshSharp.Docs.Snippets;
 
-/// <summary>docs/how-to/jump-hosts.md and docs/how-to/ssh-config-and-known-hosts.md.</summary>
+/// <summary>docs/how-to/jump-hosts.md, docs/how-to/ssh-config-and-known-hosts.md and docs/connecting.md.</summary>
 internal static class Connecting
 {
     public static async Task AliasAsync(CancellationToken cancellationToken)
@@ -125,6 +125,21 @@ internal static class Connecting
                 throw new InvalidOperationException("The host key does not match known_hosts.");
         }
         // </known-hosts>
+    }
+
+    public static async Task AddressFamilyAsync(IReadOnlyList<SshPrivateKey> keys, SshHostKeyVerifier verifier, CancellationToken cancellationToken)
+    {
+        // <address-family>
+        // Only the server's IPv4 addresses are tried (ssh -4, AddressFamily inet): for a network whose IPv6 route is broken.
+        await using var client = await SshClient.ConnectAsync("example.com", 22, new SshClientOptions
+        {
+            UserName = "deploy",
+            PrivateKeys = keys,
+            HostKeyVerifier = verifier,
+            AddressFamily = SshAddressFamily.Inet,       // or Inet6; Any (the default) tries every address
+            ConnectTimeout = TimeSpan.FromSeconds(15),
+        }, cancellationToken);
+        // </address-family>
     }
 
     public static SshHostKeyVerifier VerifierFromConfig()

@@ -29,7 +29,7 @@ Exception
 | `ProtocolError` | The server sent something that violates the protocol. | `SshProtocolException` | Report it with a `Debug` log; usually a server bug or interference on the path. |
 | `ConnectionClosed` | The connection was lost, or the server or the client closed it. | `SshException` | Reconnect; decide whether interrupted work is safe to repeat. |
 | `ChannelClosed` | A channel was refused or closed: a command, terminal, subsystem or tunnel the server refused, or a session that ended. | `SshException` | Check server policy (`AllowTcpForwarding`, `Subsystem`, `MaxSessions`). The connection is still usable. |
-| `Timeout` | `ConnectTimeout` from `ssh_config` passed, or the server missed `KeepAliveCountMax` keep-alives. | `SshException` | Reconnect; check the network path. |
+| `Timeout` | `SshClientOptions.ConnectTimeout` or `ConnectTimeout` from `ssh_config` passed (the inner exception is a `TimeoutException`), a proxy did not finish its handshake, or the server missed `KeepAliveCountMax` keep-alives. | `SshException` | Reconnect; check the network path. |
 | `AgentFailed` | The SSH agent could not be reached, or refused a request. | `SshException` | Check `SSH_AUTH_SOCK` or the agent service; a locked agent refuses. |
 | `TransferFailed` | An SCP transfer failed on the server's side, or a directory download met a name it will not write. | `SshException` | The message has the server's words. |
 | `SftpFailed` | An SFTP request failed. | `SftpException` | `Status` (`NoSuchFile`, `PermissionDenied`, `Failure`, ...) and `Path` say what and where. |

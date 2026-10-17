@@ -119,9 +119,29 @@ internal static class Resilience
         // </retry>
     }
 
-    public static async Task ConnectTimeoutAsync(SshClientOptions options, CancellationToken cancellationToken)
+    public static async Task ConnectTimeoutAsync(SshHostKeyVerifier verifier, CancellationToken cancellationToken)
     {
         // <connect-timeout>
+        try
+        {
+            await using var client = await SshClient.ConnectAsync("example.com", 22, new SshClientOptions
+            {
+                UserName = "deploy",
+                PrivateKeys = await LoadKeysAsync(cancellationToken),
+                HostKeyVerifier = verifier,
+                ConnectTimeout = TimeSpan.FromSeconds(15),   // TCP, key exchange and authentication together
+            }, cancellationToken);
+        }
+        catch (SshException ex) when (ex.Reason == SshFailureReason.Timeout)
+        {
+            Console.WriteLine($"Gave up: {ex.Message}");  // the caller cancelling is an OperationCanceledException instead
+        }
+        // </connect-timeout>
+    }
+
+    public static async Task ConnectTimeoutTokenAsync(SshClientOptions options, CancellationToken cancellationToken)
+    {
+        // <connect-timeout-token>
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(TimeSpan.FromSeconds(15));   // TCP, key exchange and authentication together
         try
@@ -132,7 +152,7 @@ internal static class Resilience
         {
             throw new TimeoutException("example.com did not answer within 15 seconds.");
         }
-        // </connect-timeout>
+        // </connect-timeout-token>
     }
 
     public static async Task CommandTimeoutAsync(SshClient client, CancellationToken cancellationToken)
