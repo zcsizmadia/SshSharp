@@ -91,15 +91,9 @@ internal static class Deployment
         return false;
     }
 
-    /// <summary>Runs a command and throws, with its stderr, when it fails.</summary>
-    private static async Task RunAsync(SshClient client, string command, CancellationToken cancellationToken)
-    {
-        var result = await client.RunCommandAsync(command, cancellationToken);
-        if (result.ExitStatus != 0)
-        {
-            throw new InvalidOperationException($"'{command}' failed with exit status {result.ExitStatus}: {result.StandardErrorText.Trim()}");
-        }
-    }
+    /// <summary>Runs a command; a failure throws SshCommandException, with its exit status and the end of its stderr.</summary>
+    private static async Task RunAsync(SshClient client, string command, CancellationToken cancellationToken) =>
+        (await client.RunCommandAsync(command, cancellationToken)).EnsureSuccess();
 
     private static string Quote(string value) => "'" + value.Replace("'", "'\\''", StringComparison.Ordinal) + "'";
     // </deploy>
@@ -114,9 +108,18 @@ internal static class Deployment
         var (version, archive, hosts) = (args[0], args[1], args[2..]);
         foreach (var host in hosts)
         {
-            if (!await DeployAsync(host, archive, version, cancel.Token))
+            try
             {
-                return 1;   // the rest of the fleet keeps the old version
+                if (!await DeployAsync(host, archive, version, cancel.Token))
+                {
+                    return 1;   // the rest of the fleet keeps the old version
+                }
+            }
+            catch (SshCommandException ex)
+            {
+                // A step failed on the server: its exit status, and what it said on stderr.
+                Console.Error.WriteLine($"{host}: {ex.Message}\n{ex.StandardErrorText.Trim()}");
+                return 1;
             }
         }
 

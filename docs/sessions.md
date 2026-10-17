@@ -12,6 +12,30 @@ Console.Error.WriteLine(result.StandardErrorText);
 Output is collected in memory, up to `SshClientOptions.MaxCommandOutputBytes` (128 MiB by default). The command text is a
 shell command line on the server: quote untrusted input.
 
+`EnsureSuccess()` turns a failed command into an exception. It returns the result when the exit status is 0, and otherwise throws
+`SshCommandException` (`Reason` `CommandFailed`) with the exit status, the signal and the last 4 KiB of stderr:
+
+```csharp
+var head = (await client.RunCommandAsync("git -C /srv/app rev-parse HEAD")).EnsureSuccess().StandardOutputText.Trim();
+```
+
+### Input, environment and a terminal
+
+An overload takes the `SshSessionOptions` that `StartCommandAsync` takes (`Environment`, `Terminal`), and the command's standard
+input as an `SshCommandInput`: text, bytes or a stream. The input is written while the output is collected, then end-of-file, so
+the command sees the end of its input and can finish:
+
+```csharp
+var options = new SshSessionOptions { Environment = new Dictionary<string, string> { ["LANG"] = "C.UTF-8" } };
+var result = await client.RunCommandAsync("sh -s", options, SshCommandInput.FromText("cd /srv/app\n./build.sh\n"));
+result.EnsureSuccess();
+```
+
+Without input (`null`), end-of-file is sent at once. The session is set up as for `StartCommandAsync`: the terminal, agent
+forwarding and the environment are requested in that order, then the command. A command that exits without reading all its input
+is not an error: as with a pipe, the rest is dropped. The 1.0 form, `RunCommandAsync(command)`, is unchanged: a bare `exec` with
+the input left open. See [Run a command](how-to/run-a-command.md#send-standard-input) for the details.
+
 ## Stream a command's input and output
 
 `StartCommandAsync` returns an `SshSession` with the program's standard streams. Read output as it arrives, and write input.
@@ -78,7 +102,8 @@ of RFC 4254 section 8, named as in POSIX `termios`.
 it connects to (to reach a router's ROM monitor, for example), and sshd sends it to the session's terminal. It returns whether
 the server performed it; without a terminal, OpenSSH declines.
 
-`StartCommandAsync(command, options)` takes the same options, for commands that need a terminal (`sudo`, `top`, editors).
+`StartCommandAsync(command, options)` takes the same options, for commands that need a terminal (`sudo`, `top`, editors), and so
+does `RunCommandAsync(command, options, standardInput)` for one whose output you collect at the end.
 
 ### Hiding keystroke timing
 

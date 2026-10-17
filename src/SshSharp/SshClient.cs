@@ -153,21 +153,67 @@ public sealed partial class SshClient : IAsyncDisposable
     }
 
     /// <summary>Runs <paramref name="command"/> on the server and collects its output and exit status.</summary>
+    /// <remarks>
+    /// The command's standard input stays open and empty: a command that reads it waits until it is cancelled. To give it input, or to
+    /// close its input, use <see cref="RunCommandAsync(string, SshSessionOptions?, SshCommandInput?, CancellationToken)"/>.
+    /// </remarks>
     /// <exception cref="SshException">The server refused the command or the connection failed.</exception>
     /// <exception cref="InvalidOperationException">The output exceeded <see cref="SshClientOptions.MaxCommandOutputBytes"/>.</exception>
-    public async Task<SshCommandResult> RunCommandAsync(string command, CancellationToken cancellationToken = default)
+    public Task<SshCommandResult> RunCommandAsync(string command, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrEmpty(command);
         ObjectDisposedException.ThrowIf(_disposed != 0, this);
+        return RunCommandCoreAsync(command, session: null, standardInput: null, cancellationToken);
+    }
 
+    /// <summary>
+    /// Runs <paramref name="command"/> on the server with environment variables, a terminal or standard input, and collects its output and
+    /// exit status. The session is set up as <see cref="StartCommandAsync"/> sets it up. <paramref name="standardInput"/> is written while
+    /// the output is collected, and end-of-file follows it (at once when there is none), so a command that reads its input to the end
+    /// (<c>cat</c>, <c>sh -s</c>) finishes. A command that exits without reading all of its input is not an error.
+    /// </summary>
+    /// <param name="command">The command line, run by the user's login shell.</param>
+    /// <param name="options">Environment variables (sent as <c>env</c> requests, which servers accept only for the names they allow) and a
+    /// terminal; null for neither. With a terminal, the server merges standard error into standard output, and the input goes through the
+    /// terminal, which echoes it and does not pass end-of-file on to the program.</param>
+    /// <param name="standardInput">The command's standard input, or null for none (empty input).</param>
+    /// <param name="cancellationToken">Cancels the command: the session is closed, and the server hangs up on the program.</param>
+    /// <exception cref="SshException">The server refused the terminal or the command, or the connection failed.</exception>
+    /// <exception cref="InvalidOperationException">The output exceeded <see cref="SshClientOptions.MaxCommandOutputBytes"/>.</exception>
+    public Task<SshCommandResult> RunCommandAsync(string command, SshSessionOptions? options, SshCommandInput? standardInput = null, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(command);
+        ObjectDisposedException.ThrowIf(_disposed != 0, this);
+        var (terminal, environment) = ValidateSessionOptions(options);
+        return RunCommandCoreAsync(command, new SessionSetup(terminal, environment), standardInput, cancellationToken);
+    }
+
+    /// <summary>The validated terminal and environment of <see cref="SshSessionOptions"/>.</summary>
+    private readonly record struct SessionSetup(SshTerminalOptions? Terminal, IReadOnlyDictionary<string, string> Environment);
+
+    /// <summary>
+    /// Runs a command and collects its output. Without <paramref name="session"/>, as 1.0 does: a bare <c>exec</c>, with standard input left
+    /// open. With it, the session requests of <see cref="StartCommandAsync"/>, then the input and end-of-file.
+    /// </summary>
+    private async Task<SshCommandResult> RunCommandCoreAsync(string command, SessionSetup? session, SshCommandInput? standardInput, CancellationToken cancellationToken)
+    {
         using var activity = SshTelemetry.Activities.StartActivity("SshSharp.Command");
         var outcome = "error";
         string? errorType = null;
         var channel = await _connection.OpenSessionAsync(cancellationToken).ConfigureAwait(false);
+
+        // Stops the input writer when the command ends or fails, and stops the output reader when the input fails.
+        using var stop = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var writing = Task.CompletedTask;
         try
         {
             SshLog.CommandStarting(_logger, command.Length, channel.LocalId);
-            if (!await channel.RequestAsync("exec", true, w => w.WriteString(command), cancellationToken).ConfigureAwait(false))
+            if (session is { } setup)
+            {
+                await RequestSessionAsync(channel, "exec", command, setup, cancellationToken).ConfigureAwait(false);
+                writing = WriteInputAsync(channel, standardInput, stop);
+            }
+            else if (!await channel.RequestAsync("exec", true, w => w.WriteString(command), cancellationToken).ConfigureAwait(false))
             {
                 throw new SshException(SshFailureReason.ChannelClosed, "The server refused to execute the command.");
             }
@@ -175,7 +221,7 @@ public sealed partial class SshClient : IAsyncDisposable
             var stdout = new ArrayBufferWriter<byte>();
             var stderr = new ArrayBufferWriter<byte>();
             long total = 0;
-            while (await channel.ReadAsync(cancellationToken).ConfigureAwait(false) is { } chunk)
+            while (await channel.ReadAsync(stop.Token).ConfigureAwait(false) is { } chunk)
             {
                 using (chunk)
                 {
@@ -190,12 +236,24 @@ public sealed partial class SshClient : IAsyncDisposable
             }
 
             // The exit status arrives before the server's CLOSE.
-            await channel.WaitClosedAsync(cancellationToken).ConfigureAwait(false);
+            await channel.WaitClosedAsync(stop.Token).ConfigureAwait(false);
+
+            // Input the command never read is no failure; a local error reading the input stream is.
+            await stop.CancelAsync().ConfigureAwait(false);
+            await writing.ConfigureAwait(false);
             int? exitStatus = channel.ExitStatus is { } status ? (int)status : null;
             outcome = exitStatus == 0 ? "success" : "failure";
             activity?.SetTag("ssh.command.exit_status", exitStatus);
             SshLog.CommandFinished(_logger, channel.LocalId, exitStatus, channel.ExitSignal?.Name);
             return new SshCommandResult(exitStatus, channel.ExitSignal, stdout.WrittenMemory, stderr.WrittenMemory);
+        }
+        catch (OperationCanceledException) when (writing.IsFaulted && !cancellationToken.IsCancellationRequested)
+        {
+            // Writing the input failed (the stream threw, or the connection failed), which stopped the output reader: report that error.
+            var failure = System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(writing.Exception!.InnerException!);
+            errorType = SshTelemetry.Failed(activity, failure.SourceException);
+            failure.Throw();
+            throw;
         }
         catch (Exception ex)
         {
@@ -204,6 +262,10 @@ public sealed partial class SshClient : IAsyncDisposable
         }
         finally
         {
+            await stop.CancelAsync().ConfigureAwait(false);
+            // The writer's failure was already reported above, or the run failed first and that is what the caller sees.
+            await writing.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+
             var tags = new TagList { { "result", outcome } };
             if (errorType is not null)
             {
@@ -225,7 +287,7 @@ public sealed partial class SshClient : IAsyncDisposable
 
     /// <summary>
     /// Starts <paramref name="command"/> with its input and output as streams, for long-running or interactive commands. For a command whose
-    /// output fits in memory, <see cref="RunCommandAsync"/> is simpler.
+    /// output fits in memory, <see cref="RunCommandAsync(string, SshSessionOptions?, SshCommandInput?, CancellationToken)"/> is simpler.
     /// </summary>
     /// <exception cref="SshException">The server refused the terminal or the command, or the connection failed.</exception>
     public Task<SshSession> StartCommandAsync(string command, SshSessionOptions? options = null, CancellationToken cancellationToken = default)
@@ -255,9 +317,39 @@ public sealed partial class SshClient : IAsyncDisposable
         return StartSessionAsync("subsystem", name, options, cancellationToken);
     }
 
-    private async Task<SshSession> StartSessionAsync(string kind, string? command, SshSessionOptions? options, CancellationToken cancellationToken)
+    /// <summary>
+    /// Writes the input, then end-of-file. The command may stop reading its input, or exit, before all of it is sent: that is how a pipe
+    /// behaves, and not an error. Any other failure cancels <paramref name="stop"/>, so the output reader stops, and faults the task.
+    /// </summary>
+    private static async Task WriteInputAsync(SshChannel channel, SshCommandInput? input, CancellationTokenSource stop)
     {
-        ObjectDisposedException.ThrowIf(_disposed != 0, this);
+        try
+        {
+            if (input is not null)
+            {
+                await input.WriteToAsync(channel, stop.Token).ConfigureAwait(false);
+            }
+
+            await channel.SendEofAsync(stop.Token).ConfigureAwait(false);
+        }
+        catch (SshException ex) when (ex.Reason == SshFailureReason.ChannelClosed)
+        {
+            // The command closed its input (eow@openssh.com) or ended and the channel closed: the rest of the input is not wanted.
+        }
+        catch (OperationCanceledException) when (stop.IsCancellationRequested)
+        {
+            // The command ended, failed or was cancelled; the output reader reports which.
+        }
+        catch (Exception)
+        {
+            await stop.CancelAsync().ConfigureAwait(false);
+            throw;
+        }
+    }
+
+    /// <summary>Checks the terminal and environment of <paramref name="options"/> before anything is sent.</summary>
+    private static (SshTerminalOptions? Terminal, IReadOnlyDictionary<string, string> Environment) ValidateSessionOptions(SshSessionOptions? options)
+    {
         var terminal = options?.Terminal;
         terminal?.Validate();
         var environment = options?.Environment ?? new Dictionary<string, string>();
@@ -269,54 +361,18 @@ public sealed partial class SshClient : IAsyncDisposable
             }
         }
 
+        return (terminal, environment);
+    }
+
+    private async Task<SshSession> StartSessionAsync(string kind, string? command, SshSessionOptions? options, CancellationToken cancellationToken)
+    {
+        ObjectDisposedException.ThrowIf(_disposed != 0, this);
+        var (terminal, environment) = ValidateSessionOptions(options);
         var channel = await _connection.OpenSessionAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             channel.SplitExtended = true;
-
-            // In ssh's order: the terminal, agent forwarding, then the environment, then the program.
-            if (terminal is not null && !await channel.RequestAsync("pty-req", true, w =>
-            {
-                w.WriteString(terminal.TerminalType);
-                w.WriteUInt32((uint)terminal.Columns);
-                w.WriteUInt32((uint)terminal.Rows);
-                w.WriteUInt32((uint)terminal.WidthPixels);
-                w.WriteUInt32((uint)terminal.HeightPixels);
-                w.WriteString(terminal.EncodeModes());
-            }, cancellationToken).ConfigureAwait(false))
-            {
-                throw new SshException(SshFailureReason.ChannelClosed, "The server refused to allocate a terminal.");
-            }
-
-            if (_options.ForwardAgent is not null)
-            {
-                // No reply, as ssh sends it: a server that does not forward agents just ignores it. RFC 9987 names the request "agent-req",
-                // to be used only when the server announces "agent-forward"; otherwise OpenSSH's name, which servers have long understood.
-                EnsureChannelDispatch();
-                var request = _connection.ServerExtensions.ContainsKey("agent-forward") ? "agent-req" : "auth-agent-req@openssh.com";
-                await channel.RequestAsync(request, false, null, cancellationToken).ConfigureAwait(false);
-            }
-
-            foreach (var (name, value) in environment)
-            {
-                // No reply: servers drop names they do not accept (sshd's AcceptEnv), as ssh expects.
-                await channel.RequestAsync("env", false, w =>
-                {
-                    w.WriteString(name);
-                    w.WriteString(value);
-                }, cancellationToken).ConfigureAwait(false);
-            }
-
-            if (!await channel.RequestAsync(kind, true, command is null ? null : w => w.WriteString(command), cancellationToken).ConfigureAwait(false))
-            {
-                throw new SshException(SshFailureReason.ChannelClosed, kind switch
-                {
-                    "shell" => "The server refused to start a shell.",
-                    "subsystem" => $"The server does not offer the '{command}' subsystem, or refused it.",
-                    _ => "The server refused to execute the command.",
-                });
-            }
-
+            await RequestSessionAsync(channel, kind, command, new SessionSetup(terminal, environment), cancellationToken).ConfigureAwait(false);
             SshLog.SessionStarted(_logger, kind, channel.LocalId, terminal is not null);
             // As ssh: only a session with a terminal is typed into.
             var obfuscator = terminal is not null && _options.ObscureKeystrokeTiming is { } interval
@@ -329,6 +385,53 @@ public sealed partial class SshClient : IAsyncDisposable
             await channel.CloseAsync(CancellationToken.None).ConfigureAwait(false);
             channel.DiscardUnread();
             throw;
+        }
+    }
+
+    /// <summary>Sends a session's requests, in ssh's order: the terminal, agent forwarding, the environment, then the program.</summary>
+    private async Task RequestSessionAsync(SshChannel channel, string kind, string? command, SessionSetup setup, CancellationToken cancellationToken)
+    {
+        var (terminal, environment) = setup;
+        if (terminal is not null && !await channel.RequestAsync("pty-req", true, w =>
+        {
+            w.WriteString(terminal.TerminalType);
+            w.WriteUInt32((uint)terminal.Columns);
+            w.WriteUInt32((uint)terminal.Rows);
+            w.WriteUInt32((uint)terminal.WidthPixels);
+            w.WriteUInt32((uint)terminal.HeightPixels);
+            w.WriteString(terminal.EncodeModes());
+        }, cancellationToken).ConfigureAwait(false))
+        {
+            throw new SshException(SshFailureReason.ChannelClosed, "The server refused to allocate a terminal.");
+        }
+
+        if (_options.ForwardAgent is not null)
+        {
+            // No reply, as ssh sends it: a server that does not forward agents just ignores it. RFC 9987 names the request "agent-req",
+            // to be used only when the server announces "agent-forward"; otherwise OpenSSH's name, which servers have long understood.
+            EnsureChannelDispatch();
+            var request = _connection.ServerExtensions.ContainsKey("agent-forward") ? "agent-req" : "auth-agent-req@openssh.com";
+            await channel.RequestAsync(request, false, null, cancellationToken).ConfigureAwait(false);
+        }
+
+        foreach (var (name, value) in environment)
+        {
+            // No reply: servers drop names they do not accept (sshd's AcceptEnv), as ssh expects.
+            await channel.RequestAsync("env", false, w =>
+            {
+                w.WriteString(name);
+                w.WriteString(value);
+            }, cancellationToken).ConfigureAwait(false);
+        }
+
+        if (!await channel.RequestAsync(kind, true, command is null ? null : w => w.WriteString(command), cancellationToken).ConfigureAwait(false))
+        {
+            throw new SshException(SshFailureReason.ChannelClosed, kind switch
+            {
+                "shell" => "The server refused to start a shell.",
+                "subsystem" => $"The server does not offer the '{command}' subsystem, or refused it.",
+                _ => "The server refused to execute the command.",
+            });
         }
     }
 

@@ -36,6 +36,9 @@ end-of-file (`gzip`, `sort`, `tar -x`) finish only then.
 
 [!code-csharp[](../snippets/Commands.cs#stream-input)]
 
+When the output fits in memory, `RunCommandAsync` with an `SshCommandInput` does the same in one call: it sends the input (a
+stream too), then end-of-file, and collects the output. See [Run a command](run-a-command.md#send-standard-input).
+
 ## Stop early
 
 [!code-csharp[](../snippets/Commands.cs#stream-stop)]

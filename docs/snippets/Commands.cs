@@ -36,6 +36,95 @@ internal static class Commands
         // </run-checked>
     }
 
+    public static async Task EnsureSuccessAsync(SshClient client, CancellationToken cancellationToken)
+    {
+        // <run-ensure-success>
+        // Throws SshCommandException unless the exit status is 0; returns the result, so the calls chain.
+        var commit = (await client.RunCommandAsync("git -C /srv/app rev-parse HEAD", cancellationToken))
+            .EnsureSuccess()
+            .StandardOutputText.Trim();
+        // </run-ensure-success>
+        _ = commit;
+    }
+
+    public static async Task EnsureSuccessCatchAsync(SshClient client, CancellationToken cancellationToken)
+    {
+        // <run-ensure-catch>
+        try
+        {
+            (await client.RunCommandAsync("make -C /srv/app build", cancellationToken)).EnsureSuccess();
+        }
+        catch (SshCommandException ex)
+        {
+            // ExitStatus, or ExitSignal when a signal ended it; StandardErrorText holds the last 4 KiB of stderr.
+            var how = ex.ExitSignal is { } signal ? $"signal {signal.Name}" : $"exit status {ex.ExitStatus}";
+            Console.Error.WriteLine($"build failed ({how}):\n{ex.StandardErrorText}");
+        }
+        // </run-ensure-catch>
+    }
+
+    public static async Task StandardInputTextAsync(SshClient client, CancellationToken cancellationToken)
+    {
+        // <run-stdin-text>
+        // The input is written, then end-of-file, so the command reads it to the end and exits.
+        var config = "listen 8080\nworkers 4\n";
+        var result = await client.RunCommandAsync(
+            "cat > /srv/app/app.conf && wc -l < /srv/app/app.conf",
+            options: null,
+            SshCommandInput.FromText(config),          // UTF-8 unless you pass an Encoding
+            cancellationToken);
+        Console.WriteLine($"{result.EnsureSuccess().StandardOutputText.Trim()} lines written");
+        // </run-stdin-text>
+    }
+
+    public static async Task StandardInputScriptAsync(SshClient client, CancellationToken cancellationToken)
+    {
+        // <run-stdin-script>
+        // A multi-line script, run by sh -s from its standard input: no quoting of the script into a command line.
+        const string script = """
+            set -e
+            cd /srv/app
+            git pull --ff-only
+            ./build.sh
+            """;
+        var result = await client.RunCommandAsync("sh -s", null, SshCommandInput.FromText(script), cancellationToken);
+        result.EnsureSuccess();
+        // </run-stdin-script>
+    }
+
+    public static async Task StandardInputStreamAsync(SshClient client, CancellationToken cancellationToken)
+    {
+        // <run-stdin-stream>
+        // A file of any size as the input: it is read and sent while the command runs, not loaded into memory first.
+        await using var dump = File.OpenRead("appdb.sql");
+        var result = await client.RunCommandAsync("psql --quiet appdb", null, SshCommandInput.FromStream(dump), cancellationToken);
+        result.EnsureSuccess();
+        // </run-stdin-stream>
+    }
+
+    public static async Task EnvironmentAsync(SshClient client, CancellationToken cancellationToken)
+    {
+        // <run-environment>
+        var options = new SshSessionOptions
+        {
+            // Set only where the server allows the name (sshd's AcceptEnv); others are dropped without an error.
+            Environment = new Dictionary<string, string> { ["LANG"] = "C.UTF-8", ["LC_DEPLOY_STAGE"] = "staging" },
+        };
+        var result = await client.RunCommandAsync("printenv LANG LC_DEPLOY_STAGE", options, standardInput: null, cancellationToken);
+        Console.WriteLine(result.StandardOutputText);
+        // </run-environment>
+    }
+
+    public static async Task TerminalAsync(SshClient client, CancellationToken cancellationToken)
+    {
+        // <run-terminal>
+        // For a program that insists on a terminal, such as sudo under "Defaults requiretty". stderr arrives merged into stdout.
+        var options = new SshSessionOptions { Terminal = new SshTerminalOptions { TerminalType = "dumb" } };
+        var result = await client.RunCommandAsync("sudo -n systemctl restart myapp", options, null, cancellationToken);
+        Console.WriteLine(result.StandardOutputText);
+        // </run-terminal>
+    }
+
     // <quote>
     /// <summary>Quotes one argument for a POSIX shell (sh, bash): single quotes, with each ' written as '\''.</summary>
     public static string Quote(string value) => "'" + value.Replace("'", "'\\''", StringComparison.Ordinal) + "'";

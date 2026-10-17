@@ -155,11 +155,29 @@ Console.WriteLine($"exit {result.ExitStatus}: {result.StandardOutputText}");
 | SSH.NET | SshSharp |
 |---|---|
 | `client.RunCommand(text)`, `command.ExecuteAsync(ct)` | `await client.RunCommandAsync(text, ct)` |
+| `client.CreateCommand(text)`, then `command.Execute()` | `await client.RunCommandAsync(text, ct)`: one call, and each call is its own session |
 | `command.Result`, `command.Error` | `result.StandardOutputText`, `result.StandardErrorText` (or the raw bytes: `StandardOutput`, `StandardError`) |
 | `command.ExitStatus`, `command.ExitSignal` | `result.ExitStatus`, `result.ExitSignal?.Name` |
-| `command.OutputStream`, `ExtendedOutputStream`, `CreateInputStream()` | `await client.StartCommandAsync(text)`, then `session.StandardOutput`, `StandardError`, `StandardInput` |
+| `if (command.ExitStatus != 0) throw new Exception(command.Error)` | `result.EnsureSuccess()`: throws `SshCommandException` with `ExitStatus`, `ExitSignal` and the last 4 KiB of stderr |
+| `command.CreateInputStream()`, write, then dispose it, for input known up front | `await client.RunCommandAsync(text, null, SshCommandInput.FromText(input), ct)` (or `FromBytes`, `FromStream`): written, then end-of-file |
+| `command.OutputStream`, `ExtendedOutputStream`, `CreateInputStream()` while the command runs | `await client.StartCommandAsync(text)`, then `session.StandardOutput`, `StandardError`, `StandardInput` |
+| Environment variables or a terminal for a command (SSH.NET's `SshCommand` has neither) | `RunCommandAsync(text, new SshSessionOptions { Environment = ..., Terminal = ... }, null, ct)` |
 | `command.CancelAsync()` | cancel the token, or `session.SendSignalAsync("TERM")` |
 | `command.CommandTimeout` | a `CancellationToken` |
+
+A command that fails is a result in both libraries. Where SSH.NET code checks `ExitStatus` and throws, chain `EnsureSuccess()`:
+
+```csharp
+// SSH.NET
+var command = client.RunCommand("make -C /srv/app build");
+if (command.ExitStatus != 0)
+{
+    throw new InvalidOperationException(command.Error);
+}
+
+// SshSharp
+var result = (await client.RunCommandAsync("make -C /srv/app build")).EnsureSuccess();
+```
 
 `RunCommandAsync` collects all output in memory, up to `SshClientOptions.MaxCommandOutputBytes` (a safety limit). For large or
 endless output, stream it:
