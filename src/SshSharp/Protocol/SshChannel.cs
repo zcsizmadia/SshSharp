@@ -320,7 +320,15 @@ internal sealed class SshChannel
     /// </summary>
     public bool SplitExtended
     {
-        get => Volatile.Read(ref _extended) is not null;
+        get
+        {
+            // Under the lock, as the setter writes it (rarely read: the hot paths read the field itself).
+            lock (_lock)
+            {
+                return _extended is not null;
+            }
+        }
+
         set
         {
             if (!value)

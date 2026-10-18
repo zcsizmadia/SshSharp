@@ -237,6 +237,7 @@ internal sealed class PaddingRandom
     private readonly RandomFill _refill;
     private int _position;
 
+    /// <summary>A source of padding bytes that draws <paramref name="size"/> random bytes at a time.</summary>
     /// <param name="size">The block size.</param>
     /// <param name="refill">The source of the random bytes; <see cref="RandomNumberGenerator.Fill"/> unless a test gives another.</param>
     public PaddingRandom(int size = DefaultSize, RandomFill? refill = null)
