@@ -53,6 +53,56 @@ public class RunCommandOptionsTests
     }
 
     [Test]
+    public async Task LargeInput_IsSentIntact_AcrossManyDataPackets()
+    {
+        // Each packet's data goes from the caller's memory straight into the packet; 1 MiB crosses many packets and window refills.
+        var input = new byte[1024 * 1024 + 17];
+        new Random(9).NextBytes(input);
+        await using var server = Server(CatAsync);
+        await using var client = await ConnectAsync(server);
+        var result = await client.RunCommandAsync("cat", null, SshCommandInput.FromBytes(input), Timeout());
+        await Assert.That(result.ExitStatus).IsEqualTo(0);
+        await Assert.That(Convert.ToHexString(result.StandardOutput.Span)).IsEqualTo(Convert.ToHexString(input));
+        await Assert.That(result.StandardError.IsEmpty).IsTrue();
+    }
+
+    [Test]
+    public async Task Stderr_IsCollected_WithAndWithoutSplitting_AndIsEmptyWhenNothingIsWritten()
+    {
+        await using var server = Server(async script =>
+        {
+            await script.StdoutAsync(Encoding.UTF8.GetBytes("out:" + script.Command));
+            if (script.Command.StartsWith("loud", StringComparison.Ordinal))
+            {
+                await script.StderrAsync(Encoding.UTF8.GetBytes("err:" + script.Command));
+            }
+
+            await script.FinishAsync(0);
+        });
+        await using var client = await ConnectAsync(server);
+
+        // Collected (stderr is not split from the channel's output; it is told apart chunk by chunk).
+        var loud = await client.RunCommandAsync("loud", Timeout());
+        await Assert.That(loud.StandardOutputText).IsEqualTo("out:loud");
+        await Assert.That(loud.StandardErrorText).IsEqualTo("err:loud");
+        var quiet = await client.RunCommandAsync("quiet", null, null, Timeout());
+        await Assert.That(quiet.StandardOutputText).IsEqualTo("out:quiet");
+        await Assert.That(quiet.StandardError.IsEmpty).IsTrue();
+
+        // Streamed (stderr split into a stream of its own).
+        foreach (var command in new[] { "loud-session", "quiet-session" })
+        {
+            await using var session = await client.StartCommandAsync(command, cancellationToken: Timeout());
+            using var output = new MemoryStream();
+            using var error = new MemoryStream();
+            await Task.WhenAll(session.StandardOutput.CopyToAsync(output, Timeout()), session.StandardError.CopyToAsync(error, Timeout()));
+            await session.WaitForExitAsync(Timeout());
+            await Assert.That(Encoding.UTF8.GetString(output.ToArray())).IsEqualTo("out:" + command);
+            await Assert.That(Encoding.UTF8.GetString(error.ToArray())).IsEqualTo(command.StartsWith("loud", StringComparison.Ordinal) ? "err:" + command : "");
+        }
+    }
+
+    [Test]
     public async Task BytesAreTheCommandsInput_AndEndOfFileFollows_SoCatFinishes()
     {
         await using var server = Server(CatAsync);

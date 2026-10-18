@@ -30,6 +30,8 @@ code generation.
   `IBufferWriter<byte>`; no intermediate `byte[]` per packet.
 - Decrypt in place and verify MACs/AEAD tags over the same buffer. Channel data reaches the caller as slices of the pooled
   packet buffer, released when read, with `Stream` adapters on top.
+- Sent channel data is copied once, from the caller's buffer straight into the packet, behind its header; padding randomness is
+  drawn from the system RNG in blocks rather than once per packet.
 - Backpressure comes from the SSH channel window.
 - Secrets (keys, passwords) are zeroed after use (`CryptographicOperations.ZeroMemory`).
 - Allocation budgets are tested: allocation-assert tests on the hot path (encrypt, send, receive) and BenchmarkDotNet.

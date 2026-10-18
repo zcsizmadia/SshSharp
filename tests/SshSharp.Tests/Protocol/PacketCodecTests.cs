@@ -668,4 +668,205 @@ public class PacketCodecTests
             await Assert.That(wire.Length).IsEqualTo(4 + (int)length + 16);
         }
     }
+
+    // ---- a prefix and a body (channel data written straight into the packet) ----
+
+    /// <summary>Deterministic "random" bytes for padding: a running counter, so two sources made alike hand out the same bytes.</summary>
+    private static PaddingRandom CountingPadding(int size = PaddingRandom.DefaultSize, List<byte[]>? refills = null)
+    {
+        var next = 0;
+        return new PaddingRandom(size, destination =>
+        {
+            foreach (ref var b in destination)
+            {
+                b = (byte)next++;
+            }
+
+            refills?.Add(destination.ToArray());
+        });
+    }
+
+    private static readonly int[] DataSizes = [0, 1, 3, 7, 8, 9, 15, 16, 17, 31, 100, 1000, 32 * 1024, 200_000];
+
+    [Test]
+    [MethodDataSource(nameof(Suites))]
+    public async Task APrefixAndABody_EncodeTheSameBytesAsTheWholePayload(string suite)
+    {
+        // The same keys, the same sequence numbers and the same padding: the packets must be identical, byte for byte, so every protector
+        // encrypts and authenticates exactly the plaintext it did when the header and the data were first copied into one buffer.
+        using var whole = Create(suite);
+        using var split = Create(suite);
+        var wholePadding = CountingPadding();
+        var splitPadding = CountingPadding();
+        var rng = new Random(7);
+        uint sequence = 0;
+        foreach (var size in DataSizes)
+        {
+            var data = new byte[size];
+            rng.NextBytes(data);
+            var prefix = new byte[ChannelDataHeader.Size];
+            new ChannelDataHeader(42, (uint)size).Write(prefix);
+
+            var expected = new ArrayBufferWriter<byte>();
+            PacketCodec.Encode(expected, [], [.. prefix, .. data], whole, sequence, wholePadding);
+            var actual = new ArrayBufferWriter<byte>();
+            PacketCodec.Encode(actual, prefix, data, split, sequence, splitPadding);
+
+            await Assert.That(Convert.ToHexString(actual.WrittenSpan)).IsEqualTo(Convert.ToHexString(expected.WrittenSpan));
+            sequence++;
+        }
+    }
+
+    [Test]
+    [MethodDataSource(nameof(Suites))]
+    public async Task ChannelDataPackets_RoundTrip_AndMatchTheOneBufferEncodingAfterDecoding(string suite)
+    {
+        // Against the original encoding (random padding, so compared after decoding): the same payload arrives.
+        using var sender = Create(suite);
+        using var oneBufferSender = Create(suite);
+        using var receiver = Create(suite);
+        using var oneBufferReceiver = Create(suite);
+        var padding = new PaddingRandom();
+        var rng = new Random(11);
+        uint sequence = 0;
+        foreach (var size in DataSizes)
+        {
+            var data = new byte[size];
+            rng.NextBytes(data);
+            var header = new ChannelDataHeader(7, (uint)size);
+            var prefix = new byte[ChannelDataHeader.Size];
+            header.Write(prefix);
+
+            var wire = new ArrayBufferWriter<byte>();
+            PacketCodec.Encode(wire, prefix, data, sender, sequence, padding);
+            var oneBuffer = Encode(oneBufferSender, [.. prefix, .. data], sequence);
+
+            var (ok, decoded, consumed) = Decode(receiver, new ReadOnlySequence<byte>(wire.WrittenMemory), sequence);
+            var (oneBufferOk, oneBufferDecoded, _) = Decode(oneBufferReceiver, new ReadOnlySequence<byte>(oneBuffer), sequence);
+            await Assert.That(ok && oneBufferOk).IsTrue();
+            await Assert.That(consumed).IsEqualTo(wire.WrittenCount);
+            await Assert.That(wire.WrittenCount).IsEqualTo(oneBuffer.Length);
+            await Assert.That(Convert.ToHexString(decoded!)).IsEqualTo(Convert.ToHexString(oneBufferDecoded!));
+
+            // SSH_MSG_CHANNEL_DATA, the recipient channel, the length, then the data.
+            await Assert.That(decoded![0]).IsEqualTo(SshMessage.ChannelData);
+            await Assert.That(BinaryPrimitives.ReadUInt32BigEndian(decoded.AsSpan(1))).IsEqualTo(7u);
+            await Assert.That(BinaryPrimitives.ReadUInt32BigEndian(decoded.AsSpan(5))).IsEqualTo((uint)size);
+            await Assert.That(Convert.ToHexString(decoded.AsSpan(ChannelDataHeader.Size))).IsEqualTo(Convert.ToHexString(data));
+            sequence++;
+        }
+    }
+
+    [Test]
+    public async Task APrefixAndABody_OverTheLimit_AreRefusedTogether()
+    {
+        // The limit is on the whole payload: a body that fits alone does not fit after its prefix.
+        var buffer = new ArrayBufferWriter<byte>();
+        var prefix = new byte[ChannelDataHeader.Size];
+        var body = new byte[PacketCodec.MaxPacketLength - 1 - 4 - ChannelDataHeader.Size + 1];
+        await Assert.That(() => PacketCodec.Encode(buffer, prefix, body, PacketProtector.None, 0, null)).Throws<ArgumentException>();
+        await Assert.That(buffer.WrittenCount).IsEqualTo(0);
+        PacketCodec.Encode(buffer, [], body, PacketProtector.None, 0, null); // the body alone fits
+    }
+
+    // ---- padding randomness, drawn a block at a time ----
+
+    [Test]
+    public async Task PaddingRandom_HandsOutEachByteOnce_AndRefillsWhenUsedUp()
+    {
+        const int size = 32;
+        var refills = new List<byte[]>();
+        var padding = CountingPadding(size, refills);
+        var block = -1;
+        var position = size;
+        for (var i = 0; i < 1000; i++)
+        {
+            var count = 4 + (i % 16); // 4 to 19 bytes, as packets need
+            var taken = new byte[count];
+            padding.Fill(taken);
+
+            // The model: a request that does not fit in what is left starts a new block, and the rest of the old one is never used.
+            if (size - position < count)
+            {
+                block++;
+                position = 0;
+            }
+
+            await Assert.That(refills.Count).IsEqualTo(block + 1);
+            await Assert.That(Convert.ToHexString(taken)).IsEqualTo(Convert.ToHexString(refills[block].AsSpan(position, count)));
+            position += count;
+        }
+
+        // Every refill drew a whole block, and no byte was handed out twice (the counter source makes every byte of a block distinct).
+        await Assert.That(refills.All(r => r.Length == size)).IsTrue();
+        await Assert.That(block).IsGreaterThan(300);
+    }
+
+    [Test]
+    public async Task PaddingRandom_LargerThanItsBlock_ComesStraightFromTheSource_AndClearStartsAFreshBlock()
+    {
+        var refills = new List<byte[]>();
+        var padding = CountingPadding(16, refills);
+        var small = new byte[4];
+        padding.Fill(small);
+        await Assert.That(refills.Count).IsEqualTo(1);
+
+        var large = new byte[40];
+        padding.Fill(large);
+        await Assert.That(refills.Count).IsEqualTo(2);
+        await Assert.That(refills[1].Length).IsEqualTo(40);
+
+        // The block in use is untouched by the large request: the next small one continues it.
+        padding.Fill(small);
+        await Assert.That(refills.Count).IsEqualTo(2);
+        await Assert.That(Convert.ToHexString(small)).IsEqualTo(Convert.ToHexString(refills[0].AsSpan(4, 4)));
+
+        padding.Clear();
+        padding.Fill(small);
+        await Assert.That(refills.Count).IsEqualTo(3);
+        await Assert.That(Convert.ToHexString(small)).IsEqualTo(Convert.ToHexString(refills[2].AsSpan(0, 4)));
+    }
+
+    [Test]
+    [MethodDataSource(nameof(Suites))]
+    public async Task ThePaddingOfEachPacket_ComesFromThePaddingSource(string suite)
+    {
+        // A twin source hands out what the codec's should have used; the packet, decrypted, must carry exactly those bytes.
+        using var sender = Create(suite);
+        using var receiver = Create(suite);
+        var padding = CountingPadding(64);
+        var twin = CountingPadding(64);
+        var rng = new Random(5);
+        for (uint sequence = 0; sequence < 200; sequence++)
+        {
+            var payload = new byte[1 + rng.Next(300)];
+            rng.NextBytes(payload);
+            var wire = new ArrayBufferWriter<byte>();
+            PacketCodec.Encode(wire, [], payload, sender, sequence, padding);
+
+            // Decrypt in place to read the padding (TryDecode hands out only the payload).
+            var packet = wire.WrittenSpan.ToArray();
+            var length = (int)receiver.ReadLength(sequence, packet.AsSpan(0, 4));
+            await Assert.That(receiver.TryDecrypt(sequence, packet.AsSpan(0, 4 + length), packet.AsSpan(4 + length, receiver.TagSize))).IsTrue();
+            var paddingLength = packet[4];
+            var expected = new byte[paddingLength];
+            twin.Fill(expected);
+            await Assert.That(Convert.ToHexString(packet.AsSpan(4 + length - paddingLength, paddingLength))).IsEqualTo(Convert.ToHexString(expected));
+        }
+    }
+
+    [Test]
+    public async Task PaddingRandom_ByDefault_DrawsFromTheSystemRandomNumberGenerator()
+    {
+        var padding = new PaddingRandom();
+        var first = new byte[16];
+        var second = new byte[16];
+        padding.Fill(first);
+        padding.Fill(second);
+
+        // 2^-128 odds of a false failure each.
+        await Assert.That(first.Any(b => b != 0)).IsTrue();
+        await Assert.That(Convert.ToHexString(first)).IsNotEqualTo(Convert.ToHexString(second));
+        await Assert.That(() => new PaddingRandom(0)).Throws<ArgumentOutOfRangeException>();
+    }
 }

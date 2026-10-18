@@ -1,5 +1,7 @@
+using System.Buffers;
 using System.Globalization;
 using System.Text;
+using SshSharp.Protocol;
 
 namespace SshSharp.Scp;
 
@@ -12,25 +14,45 @@ internal sealed class ScpChannel : IAsyncDisposable
     private const int MaxLine = 64 * 1024;
     private const int MaxError = 64 * 1024;
 
+    private const int BufferSize = 64 * 1024;
+    private const int ErrorReadSize = 4096;
+
+    private static readonly byte[] Ack = [0];
+
     private readonly SshSession _session;
+    private readonly ArrayPool<byte> _pool;
     private readonly Task<string> _errors;
-    private readonly byte[] _buffer = new byte[64 * 1024];
+
+    // The read buffer, rented for the run and returned on disposal (null after that, so nothing can use it once it is back in the pool).
+    private byte[]? _buffer;
     private int _position;
     private int _length;
 
-    private ScpChannel(SshSession session)
+    private ScpChannel(SshSession session, ArrayPool<byte> pool)
     {
         _session = session;
-        _errors = ReadErrorsAsync(session.StandardError);
+        _pool = pool;
+        _buffer = pool.Rent(BufferSize);
+        Instrumentation.Rented(_buffer, nameof(ScpChannel));
+        _errors = ReadErrorsAsync(session.StandardError, pool);
     }
 
     /// <summary>Starts <c>scp {flags} -- {path}</c> on the server, with the path quoted for its shell.</summary>
-    public static async Task<ScpChannel> StartAsync(SshClient client, SshScpOptions options, string flags, string path, CancellationToken cancellationToken)
+    /// <param name="client">The connected client.</param>
+    /// <param name="options">The transfer's options.</param>
+    /// <param name="flags">The scp mode and flags.</param>
+    /// <param name="path">The remote path.</param>
+    /// <param name="cancellationToken">Cancels starting the program.</param>
+    /// <param name="pool">Where the transfer buffers come from: <see cref="ArrayPool{T}.Shared"/>, or a test's pool that checks their use.</param>
+    public static async Task<ScpChannel> StartAsync(SshClient client, SshScpOptions options, string flags, string path, CancellationToken cancellationToken,
+        ArrayPool<byte>? pool = null)
     {
         var command = $"{options.ScpCommand} {flags}{(options.Preserve ? " -p" : "")} -- {QuoteForShell(path)}";
         var session = await client.StartCommandAsync(command, cancellationToken: cancellationToken).ConfigureAwait(false);
-        return new ScpChannel(session);
+        return new ScpChannel(session, pool ?? ArrayPool<byte>.Shared);
     }
+
+    private byte[] Buffer => _buffer ?? throw new ObjectDisposedException(nameof(ScpChannel));
 
     /// <summary>A POSIX shell word for <paramref name="path"/>: single-quoted, with embedded quotes as <c>'\''</c>.</summary>
     internal static string QuoteForShell(string path)
@@ -53,7 +75,7 @@ internal sealed class ScpChannel : IAsyncDisposable
             return -1;
         }
 
-        return _buffer[_position++];
+        return Buffer[_position++];
     }
 
     /// <summary>A control line or message, up to the newline (not included).</summary>
@@ -111,7 +133,7 @@ internal sealed class ScpChannel : IAsyncDisposable
             }
 
             var take = (int)Math.Min(_length - _position, count - done);
-            await destination.WriteAsync(_buffer.AsMemory(_position, take), cancellationToken).ConfigureAwait(false);
+            await destination.WriteAsync(Buffer.AsMemory(_position, take), cancellationToken).ConfigureAwait(false);
             _position += take;
             done += take;
             progress(done);
@@ -121,7 +143,9 @@ internal sealed class ScpChannel : IAsyncDisposable
     private async ValueTask<bool> FillAsync(CancellationToken cancellationToken)
     {
         _position = 0;
-        _length = await _session.StandardOutput.ReadAsync(_buffer, cancellationToken).ConfigureAwait(false);
+        _length = 0;
+        var buffer = Buffer;
+        _length = await _session.StandardOutput.ReadAsync(buffer.AsMemory(0, BufferSize), cancellationToken).ConfigureAwait(false);
         return _length > 0;
     }
 
@@ -129,7 +153,7 @@ internal sealed class ScpChannel : IAsyncDisposable
 
     public Task SendLineAsync(string line, CancellationToken cancellationToken) => WriteAsync(Encoding.UTF8.GetBytes(line + "\n"), cancellationToken);
 
-    public Task SendAckAsync(CancellationToken cancellationToken) => WriteAsync(new byte[] { 0 }, cancellationToken);
+    public Task SendAckAsync(CancellationToken cancellationToken) => WriteAsync(Ack, cancellationToken);
 
     /// <summary>Writes to the remote scp's input; one that has already gone away is a transfer error, with its own message if it left one.</summary>
     private async Task WriteAsync(ReadOnlyMemory<byte> data, CancellationToken cancellationToken)
@@ -147,19 +171,30 @@ internal sealed class ScpChannel : IAsyncDisposable
     /// <summary>Sends exactly <paramref name="count"/> bytes of <paramref name="source"/>, then the end-of-data byte.</summary>
     public async Task SendDataAsync(Stream source, long count, Action<long> progress, CancellationToken cancellationToken)
     {
-        var buffer = new byte[64 * 1024];
-        long done = 0;
-        while (done < count)
+        // Returned when this file is done, failed or cancelled. Every write has completed by then (the channel copies the data into the
+        // packet before a write completes, even a cancelled one), so the buffer is not read after it is back in the pool.
+        var buffer = _pool.Rent(BufferSize);
+        Instrumentation.Rented(buffer, nameof(SendDataAsync));
+        try
         {
-            var read = await source.ReadAsync(buffer.AsMemory(0, (int)Math.Min(buffer.Length, count - done)), cancellationToken).ConfigureAwait(false);
-            if (read == 0)
+            long done = 0;
+            while (done < count)
             {
-                throw new IOException($"The source ended after {done} of {count} bytes.");
-            }
+                var read = await source.ReadAsync(buffer.AsMemory(0, (int)Math.Min(BufferSize, count - done)), cancellationToken).ConfigureAwait(false);
+                if (read == 0)
+                {
+                    throw new IOException($"The source ended after {done} of {count} bytes.");
+                }
 
-            await WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
-            done += read;
-            progress(done);
+                await WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
+                done += read;
+                progress(done);
+            }
+        }
+        finally
+        {
+            Instrumentation.Returning(buffer, nameof(SendDataAsync));
+            _pool.Return(buffer);
         }
 
         await SendAckAsync(cancellationToken).ConfigureAwait(false);
@@ -192,15 +227,18 @@ internal sealed class ScpChannel : IAsyncDisposable
         return new SshException(SshFailureReason.TransferFailed, errors.Length > 0 ? $"{message} {errors.Trim()}" : message);
     }
 
-    private static async Task<string> ReadErrorsAsync(Stream errors)
+    private static async Task<string> ReadErrorsAsync(Stream errors, ArrayPool<byte> pool)
     {
-        // Drained to the end whatever it holds (unread stderr would hold the channel window), keeping the first 64 KiB.
-        using var kept = new MemoryStream();
-        var buffer = new byte[4096];
+        // Drained to the end whatever it holds (unread stderr would hold the channel window), keeping the first 64 KiB. Usually there is
+        // nothing, so the copy kept is made only when something arrives. The read buffer is this task's own, returned when it ends.
+        MemoryStream? kept = null;
+        var buffer = pool.Rent(ErrorReadSize);
+        Instrumentation.Rented(buffer, nameof(ReadErrorsAsync));
         try
         {
-            while (await errors.ReadAsync(buffer).ConfigureAwait(false) is var read and > 0)
+            while (await errors.ReadAsync(buffer.AsMemory(0, ErrorReadSize)).ConfigureAwait(false) is var read and > 0)
             {
+                kept ??= new MemoryStream();
                 kept.Write(buffer, 0, (int)Math.Min(read, Math.Max(0, MaxError - kept.Length)));
             }
         }
@@ -208,9 +246,37 @@ internal sealed class ScpChannel : IAsyncDisposable
         {
             // The session ended.
         }
+        finally
+        {
+            Instrumentation.Returning(buffer, nameof(ReadErrorsAsync));
+            pool.Return(buffer);
+        }
 
-        return Encoding.UTF8.GetString(kept.ToArray());
+        if (kept is null)
+        {
+            return string.Empty;
+        }
+
+        using (kept)
+        {
+            return Encoding.UTF8.GetString(kept.GetBuffer(), 0, (int)kept.Length);
+        }
     }
 
-    public async ValueTask DisposeAsync() => await _session.DisposeAsync().ConfigureAwait(false);
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            await _session.DisposeAsync().ConfigureAwait(false);
+        }
+        finally
+        {
+            // Once, after the session: nothing reads into the buffer any more, and later use throws ObjectDisposedException.
+            if (Interlocked.Exchange(ref _buffer, null) is { } buffer)
+            {
+                Instrumentation.Returning(buffer, nameof(ScpChannel));
+                _pool.Return(buffer);
+            }
+        }
+    }
 }

@@ -83,12 +83,20 @@ internal sealed class SshChannel
     // Not single-reader: besides the reader, DiscardUnread and StopReceiving take what is queued, and can do so while a read is in
     // progress (a session disposed under a read). The single-reader queue is unsafe for that and can hand one item to both.
     private readonly Channel<ChannelData> _incoming = Channel.CreateUnbounded<ChannelData>(new UnboundedChannelOptions { SingleWriter = true });
-    private readonly Channel<ChannelData> _extended = Channel.CreateUnbounded<ChannelData>(new UnboundedChannelOptions { SingleWriter = true });
+    // Stderr, when it is split from stdout (SplitExtended); null otherwise, so a channel that never splits never creates the queue.
+    private Channel<ChannelData>? _extended;
+
+    // Whether the incoming data has ended (EOF, CLOSE or failure), and with what error: for a stderr queue created after that.
+    // Guarded by _lock.
+    private bool _inputEnded;
+    private Exception? _inputFailure;
     private readonly TaskCompletionSource _confirmed = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly TaskCompletionSource _closed = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly Queue<TaskCompletionSource<bool>> _pendingReplies = new();
     private readonly object _lock = new();
-    private SendWindow _sendWindow = new(0);
+
+    // The peer's window, from its confirmation of the open (null until then).
+    private SendWindow? _sendWindow;
     private long _localWindow = LocalWindowSize;
     private long _consumedSinceAdjust;
     private uint _remoteMaxPacket;
@@ -178,11 +186,7 @@ internal sealed class SshChannel
 
         try
         {
-            await _connection.SendAsync(Build(w =>
-            {
-                w.WriteByte(SshMessage.ChannelClose);
-                w.WriteUInt32(RemoteId);
-            }), cancellationToken).ConfigureAwait(false);
+            await _connection.SendAsync(FixedMessage(SshMessage.ChannelClose, RemoteId), cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is SshException or ObjectDisposedException or IOException)
         {
@@ -233,7 +237,13 @@ internal sealed class SshChannel
     /// <summary>The most data we put in one packet, whatever the peer allows: keeps every packet within <see cref="PacketCodec.MaxPacketLength"/>.</summary>
     internal const int MaxDataPerPacket = PacketCodec.MaxPacketLength - 1024;
 
-    /// <summary>Sends data, split to the peer's maximum packet size and paced by its window.</summary>
+    /// <summary>
+    /// Sends data, split to the peer's maximum packet size and paced by its window. Each packet's data is copied straight from
+    /// <paramref name="data"/> into the packet as it is encoded, so the caller must leave it unchanged until the returned task completes.
+    /// </summary>
+    // Pooled: completes asynchronously whenever the window is used up or the socket pushes back, and would otherwise allocate a state
+    // machine box each time.
+    [System.Runtime.CompilerServices.AsyncMethodBuilder(typeof(System.Runtime.CompilerServices.PoolingAsyncValueTaskMethodBuilder))]
     public async ValueTask SendDataAsync(ReadOnlyMemory<byte> data, CancellationToken cancellationToken)
     {
         if (Volatile.Read(ref _closeSent))
@@ -253,44 +263,36 @@ internal sealed class SshChannel
             throw new SshException(SshFailureReason.ChannelClosed, "The server no longer reads this channel's data: the remote program closed its input.");
         }
 
+        if (data.IsEmpty)
+        {
+            return;
+        }
+
+        var window = _sendWindow ?? throw new InvalidOperationException("The channel is not open yet.");
         while (!data.IsEmpty)
         {
-            var count = await _sendWindow.AcquireAsync((int)Math.Min(data.Length, _remoteMaxPacket), cancellationToken).ConfigureAwait(false);
-            var buffer = ArrayPool<byte>.Shared.Rent(9 + count);
-            Instrumentation.Rented(buffer, nameof(SendDataAsync));
+            var count = await window.AcquireAsync((int)Math.Min(data.Length, _remoteMaxPacket), cancellationToken).ConfigureAwait(false);
+            bool sent;
             try
             {
-                buffer[0] = SshMessage.ChannelData;
-                System.Buffers.Binary.BinaryPrimitives.WriteUInt32BigEndian(buffer.AsSpan(1), RemoteId);
-                System.Buffers.Binary.BinaryPrimitives.WriteUInt32BigEndian(buffer.AsSpan(5), (uint)count);
-                data.Span[..count].CopyTo(buffer.AsSpan(9));
-                bool sent;
-                try
-                {
-                    sent = await _connection.SendIfAsync(buffer.AsMemory(0, 9 + count), _isOpenForSending, cancellationToken).ConfigureAwait(false);
-                }
-                catch (OperationCanceledException)
-                {
-                    // Cancelled before the packet was committed (SendIfAsync reports a committed one as sent): the peer never sees these
-                    // bytes and will never grant them again, so give the window back.
-                    _sendWindow.Add((uint)count);
-                    throw;
-                }
-
-                if (!sent)
-                {
-                    // Closed while we were writing (the peer closed the channel): the rest cannot be sent.
-                    throw new SshException(SshFailureReason.ChannelClosed, "The channel was closed while data was being sent.");
-                }
-
-                Touch();
+                // The header is written in front of the data as the packet is encoded: the data is copied once, into the packet.
+                sent = await _connection.SendDataIfAsync(RemoteId, data[..count], _isOpenForSending, cancellationToken).ConfigureAwait(false);
             }
-            finally
+            catch (OperationCanceledException)
             {
-                Instrumentation.Returning(buffer, nameof(SendDataAsync));
-                ArrayPool<byte>.Shared.Return(buffer);
+                // Cancelled before the packet was committed (SendIfAsync reports a committed one as sent): the peer never sees these
+                // bytes and will never grant them again, so give the window back.
+                window.Add((uint)count);
+                throw;
             }
 
+            if (!sent)
+            {
+                // Closed while we were writing (the peer closed the channel): the rest cannot be sent.
+                throw new SshException(SshFailureReason.ChannelClosed, "The channel was closed while data was being sent.");
+            }
+
+            Touch();
             data = data[count..];
         }
     }
@@ -307,11 +309,7 @@ internal sealed class SshChannel
             return;
         }
 
-        await _connection.SendIfAsync(Build(w =>
-        {
-            w.WriteByte(SshMessage.ChannelEof);
-            w.WriteUInt32(RemoteId);
-        }), _isOpenForSending, cancellationToken).ConfigureAwait(false);
+        await _connection.SendIfAsync(FixedMessage(SshMessage.ChannelEof, RemoteId), _isOpenForSending, cancellationToken).ConfigureAwait(false);
     }
 
     // ---- receiving ----
@@ -320,13 +318,51 @@ internal sealed class SshChannel
     /// Deliver stderr separately, to <see cref="ReadExtendedAsync"/>, instead of interleaved with stdout in <see cref="ReadAsync"/>.
     /// Set before the channel's command starts.
     /// </summary>
-    public bool SplitExtended { get; set; }
+    public bool SplitExtended
+    {
+        get
+        {
+            // Under the lock, as the setter writes it (rarely read: the hot paths read the field itself).
+            lock (_lock)
+            {
+                return _extended is not null;
+            }
+        }
+
+        set
+        {
+            if (!value)
+            {
+                return; // never turned off once on; off is the default, with no queue at all
+            }
+
+            lock (_lock)
+            {
+                if (_extended is not null)
+                {
+                    return;
+                }
+
+                // Created only when stderr is split (sessions), not for every channel (commands, forwarded connections). An end already
+                // signalled (EOF, CLOSE, or the connection failing) is passed on, as it would have been to a queue made with the channel.
+                var extended = Channel.CreateUnbounded<ChannelData>(new UnboundedChannelOptions { SingleWriter = true });
+                if (_inputEnded)
+                {
+                    extended.Writer.TryComplete(_inputFailure);
+                }
+
+                Volatile.Write(ref _extended, extended);
+            }
+        }
+    }
 
     /// <summary>Returns the next chunk of data, or null once the peer has sent EOF (or closed) and everything has been read.</summary>
     public ValueTask<ChannelData?> ReadAsync(CancellationToken cancellationToken) => ReadQueueAsync(_incoming, cancellationToken);
 
     /// <summary>With <see cref="SplitExtended"/>: the next chunk of stderr, or null at its end.</summary>
-    public ValueTask<ChannelData?> ReadExtendedAsync(CancellationToken cancellationToken) => ReadQueueAsync(_extended, cancellationToken);
+    public ValueTask<ChannelData?> ReadExtendedAsync(CancellationToken cancellationToken) => Volatile.Read(ref _extended) is { } extended
+        ? ReadQueueAsync(extended, cancellationToken)
+        : throw new InvalidOperationException("Standard error is not split from this channel's output (SplitExtended).");
 
     /// <summary>
     /// Takes the next chunk of data if one is already queued, without waiting. False when none is (more may still come: only
@@ -335,7 +371,9 @@ internal sealed class SshChannel
     public bool TryRead([System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out ChannelData? data) => _incoming.Reader.TryRead(out data);
 
     /// <summary>With <see cref="SplitExtended"/>: <see cref="TryRead"/> for stderr.</summary>
-    public bool TryReadExtended([System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out ChannelData? data) => _extended.Reader.TryRead(out data);
+    public bool TryReadExtended([System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out ChannelData? data) => Volatile.Read(ref _extended) is { } extended
+        ? extended.Reader.TryRead(out data)
+        : throw new InvalidOperationException("Standard error is not split from this channel's output (SplitExtended).");
 
     // Pooled: completes asynchronously for nearly every packet, and would otherwise allocate a state machine box each time.
     [System.Runtime.CompilerServices.AsyncMethodBuilder(typeof(System.Runtime.CompilerServices.PoolingAsyncValueTaskMethodBuilder<>))]
@@ -360,9 +398,12 @@ internal sealed class SshChannel
             item.Dispose();
         }
 
-        while (_extended.Reader.TryRead(out var item))
+        if (Volatile.Read(ref _extended) is { } extended)
         {
-            item.Dispose();
+            while (extended.Reader.TryRead(out var item))
+            {
+                item.Dispose();
+            }
         }
     }
 
@@ -386,12 +427,8 @@ internal sealed class SshChannel
     }
 
     // A method of its own: a lambda capturing `adjust` in Consumed would allocate its closure on every call, which is every packet.
-    private void PostWindowAdjust(uint adjust) => _connection.PostIf(Build(w =>
-    {
-        w.WriteByte(SshMessage.ChannelWindowAdjust);
-        w.WriteUInt32(RemoteId);
-        w.WriteUInt32(adjust);
-    }), _isOpenForSending); // checked when it is sent: the receive loop may answer a CLOSE before then
+    private void PostWindowAdjust(uint adjust) =>
+        _connection.PostIf(FixedMessage(SshMessage.ChannelWindowAdjust, RemoteId, adjust), _isOpenForSending); // checked when it is sent: the receive loop may answer a CLOSE before then
 
     // ---- events from the connection's receive loop ----
 
@@ -450,11 +487,7 @@ internal sealed class SshChannel
             _closeSent = true;
         }
 
-        _connection.Post(Build(w =>
-        {
-            w.WriteByte(SshMessage.ChannelClose);
-            w.WriteUInt32(RemoteId);
-        }));
+        _connection.Post(FixedMessage(SshMessage.ChannelClose, RemoteId));
     }
 
     /// <summary>Data the peer sent that we do not deliver (an unknown extended data type): it still used the window, so give it back.</summary>
@@ -520,7 +553,7 @@ internal sealed class SshChannel
     internal void OnOpenFailed(uint reason, string description) =>
         _confirmed.TrySetException(new SshException(SshFailureReason.ChannelClosed, $"The server refused to open the channel (reason {reason}): {description}"));
 
-    internal void OnWindowAdjust(uint bytes) => _sendWindow.Add(bytes);
+    internal void OnWindowAdjust(uint bytes) => _sendWindow?.Add(bytes); // none before the open is confirmed: nothing to add to
 
     internal void OnData(DecodedPacket packet, int offset, int length, bool isExtended)
     {
@@ -536,7 +569,7 @@ internal sealed class SshChannel
         }
 
         // Nobody will read an abandoned channel; don't hold its buffers until it closes.
-        var queue = isExtended && SplitExtended ? _extended : _incoming;
+        var queue = isExtended && Volatile.Read(ref _extended) is { } extended ? extended : _incoming;
         if (queue == _incoming && Volatile.Read(ref _discardIncoming) != 0)
         {
             // Its reader is gone (StopReceiving): dropped, and the window given back as if read, until the peer stops sending.
@@ -568,17 +601,31 @@ internal sealed class SshChannel
         Interlocked.Add(ref _localWindow, -length);
     }
 
-    internal void OnEof()
+    internal void OnEof() => EndInput(null);
+
+    /// <summary>Ends the incoming data (and stderr, split or still to be split), normally or with <paramref name="failure"/>; the first end counts.</summary>
+    private void EndInput(Exception? failure)
     {
-        _incoming.Writer.TryComplete();
-        _extended.Writer.TryComplete();
+        Channel<ChannelData>? extended;
+        lock (_lock)
+        {
+            if (!_inputEnded)
+            {
+                _inputEnded = true;
+                _inputFailure = failure;
+            }
+
+            extended = _extended;
+        }
+
+        _incoming.Writer.TryComplete(failure);
+        extended?.Writer.TryComplete(failure);
     }
 
     internal void OnClose()
     {
         _remoteClosed = true;
-        _incoming.Writer.TryComplete();
-        _extended.Writer.TryComplete();
+        EndInput(null);
 
         // Reply to the peer's CLOSE (once), without waiting: this runs on the receive loop.
         var reply = false;
@@ -593,14 +640,10 @@ internal sealed class SshChannel
 
         if (reply)
         {
-            _connection.Post(Build(w =>
-            {
-                w.WriteByte(SshMessage.ChannelClose);
-                w.WriteUInt32(RemoteId);
-            }));
+            _connection.Post(FixedMessage(SshMessage.ChannelClose, RemoteId));
         }
 
-        _sendWindow.Fail(new SshException(SshFailureReason.ChannelClosed, "The channel is closed."));
+        _sendWindow?.Fail(new SshException(SshFailureReason.ChannelClosed, "The channel is closed."));
         FailReplies(new SshException(SshFailureReason.ChannelClosed, "The channel was closed before the request was answered."));
         _closed.TrySetResult();
     }
@@ -647,11 +690,7 @@ internal sealed class SshChannel
 
         if (wantReply)
         {
-            _connection.Post(Build(w =>
-            {
-                w.WriteByte(handled ? SshMessage.ChannelSuccess : SshMessage.ChannelFailure);
-                w.WriteUInt32(RemoteId);
-            }));
+            _connection.Post(FixedMessage(handled ? SshMessage.ChannelSuccess : SshMessage.ChannelFailure, RemoteId));
         }
     }
     /// <summary>The longest signal name kept (RFC 4254's names are a few letters; extension names add an <c>@domain</c>).</summary>
@@ -682,9 +721,8 @@ internal sealed class SshChannel
     internal void Fail(Exception exception)
     {
         _confirmed.TrySetException(exception);
-        _incoming.Writer.TryComplete(exception);
-        _extended.Writer.TryComplete(exception);
-        _sendWindow.Fail(exception);
+        EndInput(exception);
+        _sendWindow?.Fail(exception);
         FailReplies(exception);
         _closed.TrySetException(exception);
 
@@ -703,6 +741,22 @@ internal sealed class SshChannel
                 reply.TrySetException(exception);
             }
         }
+    }
+
+    /// <summary>
+    /// A message of a type and fixed-size fields (CLOSE, EOF, WINDOW_ADJUST, SUCCESS, FAILURE, an open confirmation), written straight into
+    /// an array of its size: these go out often, and the general builder would allocate a closure, a buffer writer and its array for each.
+    /// </summary>
+    internal static byte[] FixedMessage(byte type, params ReadOnlySpan<uint> fields)
+    {
+        var message = new byte[1 + (4 * fields.Length)];
+        message[0] = type;
+        for (var i = 0; i < fields.Length; i++)
+        {
+            System.Buffers.Binary.BinaryPrimitives.WriteUInt32BigEndian(message.AsSpan(1 + (4 * i)), fields[i]);
+        }
+
+        return message;
     }
 
     private static byte[] Build(Action<SshWriter> body)
