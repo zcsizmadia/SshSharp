@@ -51,7 +51,15 @@ internal sealed class SshTransport : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(stream);
         ArgumentNullException.ThrowIfNull(options);
         _options = options;
-        _reader = PipeReader.Create(stream, new StreamPipeReaderOptions(leaveOpen: true));
+
+        // Large socket reads. The defaults (4 KiB segments, 1 KiB minimum read) took nine or more reads for one 32 KiB data packet, each
+        // an asynchronous completion through the thread pool; streaming from a Windows client then cost about five times the CPU per GiB.
+        // A read now has room for a whole packet and usually returns several. The cost: a 128 KiB array from the shared pool, rented
+        // when a read is issued (the reader needs somewhere to read into) and returned once everything in it has been consumed. The
+        // receive loop always has a read outstanding, so in practice each open connection holds one, idle or not, and gives it back when
+        // it closes. The writer keeps its defaults: a packet is encoded into a span of its full size (a segment of its own when it is
+        // larger than 4 KiB), so a large packet still goes out in one write.
+        _reader = PipeReader.Create(stream, new StreamPipeReaderOptions(bufferSize: 128 * 1024, minimumReadSize: 32 * 1024, leaveOpen: true));
         _writer = PipeWriter.Create(stream, new StreamPipeWriterOptions(leaveOpen: true));
     }
 
@@ -712,11 +720,14 @@ internal sealed class SshTransport : IAsyncDisposable
     [System.Runtime.CompilerServices.AsyncMethodBuilder(typeof(System.Runtime.CompilerServices.PoolingAsyncValueTaskMethodBuilder<>))]
     private async ValueTask<DecodedPacket> ReadPacketAsync(CancellationToken cancellationToken)
     {
+        // How many bytes the packet needs: its length field first, then, once that is known, the whole packet. Waiting for all of it
+        // decodes the length once or twice per packet, not again for every piece that arrives (the length is decrypted each time).
+        var required = 4L;
         while (true)
         {
-            var result = await _reader.ReadAsync(cancellationToken).ConfigureAwait(false);
+            var result = await _reader.ReadAtLeastAsync((int)required, cancellationToken).ConfigureAwait(false);
             var buffer = result.Buffer;
-            if (PacketCodec.TryDecode(buffer, _receiveProtector, _receiveSequence, out var packet, out var consumed))
+            if (PacketCodec.TryDecode(buffer, _receiveProtector, _receiveSequence, out var packet, out var consumed, out required))
             {
                 _reader.AdvanceTo(buffer.GetPosition(consumed));
                 _receiveSequence++;

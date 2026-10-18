@@ -238,6 +238,99 @@ public class SessionTests
         await Assert.That(total).IsEqualTo(80L * 64 * 1024);
     }
 
+    /// <summary>Waits until the server sees the client's receive window at <paramref name="expected"/> (window adjustments are sent in the background).</summary>
+    private static async Task<long> WindowSettlesAtAsync(FakeSessionServer.ServerChannel channel, long expected)
+    {
+        for (var i = 0; i < 500 && FakeSessionServer.ClientWindowOf(channel) != expected; i++)
+        {
+            await Task.Delay(10);
+        }
+
+        return FakeSessionServer.ClientWindowOf(channel);
+    }
+
+    [Test]
+    public async Task OneRead_ReturnsEveryQueuedChunk_InOrder_AndGivesTheWindowBackAsBefore()
+    {
+        const int chunk = 32 * 1024;
+        const int chunks = 40; // 1.25 MiB: past the 1 MiB at which the client gives window back, within the 2 MiB window
+        var data = new byte[chunks * chunk];
+        new Random(71).NextBytes(data);
+        var sentAll = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var server = new FakeSessionServer
+        {
+            OnExec = async script =>
+            {
+                for (var i = 0; i < chunks; i++)
+                {
+                    await script.StdoutAsync(data[(i * chunk)..((i + 1) * chunk)]);
+                }
+
+                sentAll.SetResult();
+                while (await script.ReadInputAsync() is not null)
+                {
+                }
+
+                await script.FinishAsync(0);
+            },
+        };
+        await using var client = await ConnectAsync(server);
+        await using var session = await client.StartCommandAsync("cat big", cancellationToken: Timeout());
+        await sentAll.Task.WaitAsync(Timeout());
+        await client.PingAsync(Timeout()); // answered after the data, so all of it is queued at the client now
+        var channel = server.Channels.Single();
+        const long window = 2 * 1024 * 1024;
+        await Assert.That(FakeSessionServer.ClientWindowOf(channel)).IsEqualTo(window - data.Length);
+
+        // 31 whole chunks and the start of the 32nd: 31 are released, 31 KiB short of the half window, so no adjustment yet.
+        var received = new byte[data.Length + 100];
+        var first = await session.StandardOutput.ReadAsync(received.AsMemory(0, (31 * chunk) + 100), Timeout());
+        await Assert.That(first).IsEqualTo((31 * chunk) + 100);
+        await client.PingAsync(Timeout());
+        await Assert.That(FakeSessionServer.ClientWindowOf(channel)).IsEqualTo(window - data.Length);
+
+        // The rest of the 32nd chunk and the 8 after it, in one read. Releasing the 32nd reaches 1 MiB: exactly that is given back, once.
+        // The last chunk stays with the stream until the next read, as before.
+        var second = await session.StandardOutput.ReadAsync(received.AsMemory(first), Timeout());
+        await Assert.That(second).IsEqualTo(data.Length - first);
+        await Assert.That(received.AsSpan(0, data.Length).SequenceEqual(data)).IsTrue();
+        await Assert.That(await WindowSettlesAtAsync(channel, window - data.Length + (32 * chunk))).IsEqualTo(window - data.Length + (32 * chunk));
+
+        await session.CloseInputAsync(Timeout());
+        await Assert.That(await session.StandardOutput.ReadAsync(received, Timeout())).IsEqualTo(0);
+        await session.WaitForExitAsync(Timeout());
+    }
+
+    [Test]
+    public async Task QueuedChunks_ThenEndOfFile_AreReadInOneRead_WithStderrKeptApart()
+    {
+        await using var server = new FakeSessionServer
+        {
+            OnExec = async script =>
+            {
+                await script.StdoutAsync("one "u8.ToArray());
+                await script.StderrAsync("err 1\n"u8.ToArray());
+                await script.StdoutAsync("two "u8.ToArray());
+                await script.StderrAsync("err 2\n"u8.ToArray());
+                await script.StdoutAsync("three"u8.ToArray());
+                await script.FinishAsync(0);
+            },
+        };
+        await using var client = await ConnectAsync(server);
+        await using var session = await client.StartCommandAsync("build", cancellationToken: Timeout());
+        await session.WaitForExitAsync(Timeout()); // everything, end of file included, is queued at the client
+
+        var buffer = new byte[100];
+        var read = await session.StandardOutput.ReadAsync(buffer, Timeout());
+        await Assert.That(Encoding.UTF8.GetString(buffer, 0, read)).IsEqualTo("one two three");
+        await Assert.That(await session.StandardOutput.ReadAsync(buffer, Timeout())).IsEqualTo(0);
+        await Assert.That(await session.StandardOutput.ReadAsync(buffer, Timeout())).IsEqualTo(0);
+
+        read = await session.StandardError.ReadAsync(buffer, Timeout());
+        await Assert.That(Encoding.UTF8.GetString(buffer, 0, read)).IsEqualTo("err 1\nerr 2\n");
+        await Assert.That(await session.StandardError.ReadAsync(buffer, Timeout())).IsEqualTo(0);
+    }
+
     [Test]
     public async Task EnvironmentVariables_AreOfferedWithoutWaitingForReplies()
     {

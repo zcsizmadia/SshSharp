@@ -28,7 +28,8 @@ internal abstract class PacketProtector : IDisposable
 
     /// <summary>
     /// Returns the plaintext <c>packet_length</c> given the first four bytes as received. It must not change any state: the codec calls it
-    /// again each time more data arrives until the whole packet is there.
+    /// again for the same packet whenever it is asked to decode before the whole packet is there (the transport asks once more, when the
+    /// rest has arrived; other callers may ask as each piece arrives).
     /// </summary>
     public abstract uint ReadLength(uint sequenceNumber, ReadOnlySpan<byte> firstFourBytes);
 

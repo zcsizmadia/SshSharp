@@ -485,6 +485,102 @@ public class SshTransportTests
         }
     }
 
+    /// <summary>A stream whose reads return at most a few bytes each, as a slow or fragmenting network does.</summary>
+    private sealed class TrickleStream(Stream inner, int most) : Stream
+    {
+        public override bool CanRead => true;
+
+        public override bool CanWrite => true;
+
+        public override bool CanSeek => false;
+
+        public override long Length => throw new NotSupportedException();
+
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) =>
+            inner.ReadAsync(buffer[..Math.Min(buffer.Length, most)], cancellationToken);
+
+        public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default) =>
+            inner.WriteAsync(buffer, cancellationToken);
+
+        public override Task FlushAsync(CancellationToken cancellationToken) => inner.FlushAsync(cancellationToken);
+
+        public override void Flush() => inner.Flush();
+
+        public override int Read(byte[] buffer, int offset, int count) => inner.Read(buffer, offset, Math.Min(count, most));
+
+        public override void Write(byte[] buffer, int offset, int count) => inner.Write(buffer, offset, count);
+
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+
+        public override void SetLength(long value) => throw new NotSupportedException();
+    }
+
+    [Test]
+    [MethodDataSource(nameof(Ciphers))]
+    public async Task PacketsArrivingAFewBytesAtATime_AreReceivedWhole(string cipher)
+    {
+        // The transport waits for a packet's length, then for the whole packet: here every one arrives in many small reads.
+        await using var server = new FakeSshServer(new FakeServerOptions { Cipher = cipher });
+        await using var transport = new SshTransport(new TrickleStream(server.ClientStream, 7), Accepting(preferences: new AlgorithmPreferences { Ciphers = [cipher] }));
+        var token = Timeout();
+        var serverTask = server.StartAsync(token);
+        await transport.ConnectAsync(token);
+        await serverTask;
+
+        var rng = new Random(62);
+        foreach (var size in new[] { 1, 16, 1000, 32 * 1024 + 9, 200_000 })
+        {
+            var downstream = new byte[size];
+            rng.NextBytes(downstream);
+            downstream[0] = 94;
+            var sending = server.SendAsync(downstream, token); // the in-memory connection holds less than the largest packet
+            using var back = await transport.ReceiveAsync(token);
+            await sending;
+            await Assert.That(back.Payload.Span.SequenceEqual(downstream)).IsTrue();
+        }
+    }
+
+    [Test]
+    [MethodDataSource(nameof(Ciphers))]
+    public async Task ABurstOfPackets_IsReceivedInOrder(string cipher)
+    {
+        // Sent before the client reads any, so each socket read carries several packets, and a packet often straddles two reads; one is
+        // larger than the transport's 128 KiB read buffer.
+        var (transport, server) = await Connect(new FakeServerOptions { Cipher = cipher }, Accepting(preferences: new AlgorithmPreferences { Ciphers = [cipher] }));
+        await using (transport)
+        await using (server)
+        {
+            var token = Timeout();
+            var rng = new Random(63);
+            var sent = new List<byte[]>();
+            for (var i = 0; i < 60; i++)
+            {
+                var payload = new byte[i == 30 ? 200_000 : i % 2 == 0 ? 32 * 1024 + 9 : rng.Next(1, 500)];
+                rng.NextBytes(payload);
+                payload[0] = 94;
+                sent.Add(payload);
+            }
+
+            var sending = Task.Run(async () =>
+            {
+                foreach (var payload in sent)
+                {
+                    await server.SendAsync(payload, token);
+                }
+            });
+
+            foreach (var payload in sent)
+            {
+                using var back = await transport.ReceiveAsync(token);
+                await Assert.That(back.Payload.Span.SequenceEqual(payload)).IsTrue();
+            }
+
+            await sending;
+        }
+    }
+
     [Test]
     public async Task ManyMessagesInFlight_KeepTheSequenceInStep()
     {

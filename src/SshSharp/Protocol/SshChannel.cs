@@ -328,6 +328,15 @@ internal sealed class SshChannel
     /// <summary>With <see cref="SplitExtended"/>: the next chunk of stderr, or null at its end.</summary>
     public ValueTask<ChannelData?> ReadExtendedAsync(CancellationToken cancellationToken) => ReadQueueAsync(_extended, cancellationToken);
 
+    /// <summary>
+    /// Takes the next chunk of data if one is already queued, without waiting. False when none is (more may still come: only
+    /// <see cref="ReadAsync"/> tells the end of the data, or a failure, apart from a pause).
+    /// </summary>
+    public bool TryRead([System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out ChannelData? data) => _incoming.Reader.TryRead(out data);
+
+    /// <summary>With <see cref="SplitExtended"/>: <see cref="TryRead"/> for stderr.</summary>
+    public bool TryReadExtended([System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out ChannelData? data) => _extended.Reader.TryRead(out data);
+
     // Pooled: completes asynchronously for nearly every packet, and would otherwise allocate a state machine box each time.
     [System.Runtime.CompilerServices.AsyncMethodBuilder(typeof(System.Runtime.CompilerServices.PoolingAsyncValueTaskMethodBuilder<>))]
     private static async ValueTask<ChannelData?> ReadQueueAsync(Channel<ChannelData> queue, CancellationToken cancellationToken)

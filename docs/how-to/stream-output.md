@@ -56,6 +56,9 @@ is not sent only to be dropped; the program may then get `SIGPIPE` on its next w
 - **Text encoding.** The streams carry bytes. `StreamReader` decodes UTF-8 by default; pass another `Encoding` if the program
   prints something else.
 - **Lines that never end.** A progress bar that redraws with `\r` never completes a line; read raw bytes for such output.
+- **Read size.** A read returns as soon as some output has arrived, with all that has arrived, up to the size of your buffer. For
+  bulk output, a buffer of 64 KiB or more needs fewer reads (`CopyToAsync` uses 80 KiB). Read boundaries don't match the program's
+  writes. See [Receive buffering](../concepts/channels.md#receive-buffering).
 
 ## See also
 

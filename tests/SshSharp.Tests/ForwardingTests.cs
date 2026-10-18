@@ -100,6 +100,37 @@ public class ForwardingTests
     }
 
     [Test]
+    public async Task ATcpTunnelRead_ReturnsTheChunksAlreadyQueued_DroppingStderr_ThenEndOfFile()
+    {
+        var (near, far) = DuplexStream.CreatePair(); // the service itself says nothing: the test sends as the server
+        await using var server = new FakeSessionServer { DirectTcpIp = (_, _) => near };
+        await using var client = await ConnectAsync(server);
+        await using var tunnel = await client.OpenTcpTunnelAsync("db.example.com", 5432, Timeout());
+        var channel = server.Channels.Single();
+
+        await server.SendDataAsync(channel, "aaaa"u8.ToArray(), extended: false, fromScript: true);
+        await server.SendDataAsync(channel, "bbbb"u8.ToArray(), extended: false, fromScript: true);
+        await server.SendDataAsync(channel, "xx"u8.ToArray(), extended: true, fromScript: true);
+        await server.SendDataAsync(channel, "cccc"u8.ToArray(), extended: false, fromScript: true);
+        await client.PingAsync(Timeout()); // answered after the data, so all of it is queued at the client now
+
+        // The first read stops in the second chunk; the next takes the rest of it and the last chunk, skipping the stderr between.
+        var buffer = new byte[100];
+        var read = await tunnel.ReadAsync(buffer.AsMemory(0, 5), Timeout());
+        await Assert.That(Encoding.ASCII.GetString(buffer, 0, read)).IsEqualTo("aaaab");
+        read = await tunnel.ReadAsync(buffer, Timeout());
+        await Assert.That(Encoding.ASCII.GetString(buffer, 0, read)).IsEqualTo("bbbcccc");
+
+        await server.SendDataAsync(channel, "dd"u8.ToArray(), extended: false, fromScript: true);
+        await server.SendChannelAsync(SshSharp.Protocol.SshMessage.ChannelEof, channel, fromScript: true);
+        await client.PingAsync(Timeout());
+        read = await tunnel.ReadAsync(buffer, Timeout());
+        await Assert.That(Encoding.ASCII.GetString(buffer, 0, read)).IsEqualTo("dd");
+        await Assert.That(await tunnel.ReadAsync(buffer, Timeout())).IsEqualTo(0);
+        await far.DisposeAsync();
+    }
+
+    [Test]
     public async Task AUnixSocketTunnel_NamesThePathOnTheServer()
     {
         await using var server = new FakeSessionServer { DirectStreamLocal = _ => GreetingService("HTTP/1.1 200 OK\r\n") };

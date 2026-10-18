@@ -29,8 +29,8 @@ public sealed class SshSession : IAsyncDisposable
         _input = new SshChannelWriteStream(channel, obfuscator);
         // Disposing the output while the session goes on asks an OpenSSH server to stop sending it (eow@openssh.com), as ssh does when
         // its own output closes; what arrives meanwhile is dropped.
-        _output = new SshChannelReadStream(channel.ReadAsync, channel.StopReceiving);
-        _error = new SshChannelReadStream(channel.ReadExtendedAsync);
+        _output = new SshChannelReadStream(channel.ReadAsync, channel.TryRead, channel.StopReceiving);
+        _error = new SshChannelReadStream(channel.ReadExtendedAsync, channel.TryReadExtended);
     }
 
     /// <summary>

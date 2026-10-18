@@ -1,10 +1,19 @@
+using System.Diagnostics.CodeAnalysis;
+
 namespace SshSharp.Protocol;
+
+/// <summary>Takes a chunk of channel data that is already queued, without waiting (<see cref="SshChannel.TryRead"/>).</summary>
+internal delegate bool ChannelDataTryRead([NotNullWhen(true)] out ChannelData? data);
 
 /// <summary>
 /// One direction of a session's output (stdout or stderr) as a read-only, asynchronous <see cref="Stream"/>. Reads hand out the received
-/// packets' bytes without buffering them again; each packet is released, which lets the server send more, once it has been read.
+/// packets' bytes without buffering them again; each packet is released, which lets the server send more, once it has been read. A read
+/// waits for the first chunk only, then also copies the chunks that have already arrived while the caller's buffer has room.
 /// </summary>
-internal sealed class SshChannelReadStream(Func<CancellationToken, ValueTask<ChannelData?>> source, Action? disposed = null) : Stream
+/// <param name="source">Waits for the next chunk; null at the end of the data.</param>
+/// <param name="tryRead">Takes the next chunk if one is already queued.</param>
+/// <param name="disposed">Called once when the stream is disposed.</param>
+internal sealed class SshChannelReadStream(Func<CancellationToken, ValueTask<ChannelData?>> source, ChannelDataTryRead tryRead, Action? disposed = null) : Stream
 {
     private ChannelData? _current;
     private int _offset;
@@ -62,11 +71,25 @@ internal sealed class SshChannelReadStream(Func<CancellationToken, ValueTask<Cha
                 ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this); // disposed while this read waited
             }
 
-            var available = _current.Data.Span[_offset..];
-            var count = Math.Min(available.Length, buffer.Length);
-            available[..count].CopyTo(buffer.Span);
-            _offset += count;
-            return count;
+            // Then the chunks that have already arrived, without waiting for more: one read returns as much as is there, rather than one
+            // packet's worth (32 KiB at most) per call.
+            var total = 0;
+            while (true)
+            {
+                var available = _current.Data.Span[_offset..];
+                var count = Math.Min(available.Length, buffer.Length - total);
+                available[..count].CopyTo(buffer.Span[total..]);
+                _offset += count;
+                total += count;
+                if (total == buffer.Length || Volatile.Read(ref _disposed) != 0 || !tryRead(out var next))
+                {
+                    return total; // a chunk used up last stays current until the next read, which releases it
+                }
+
+                // This chunk is used up: released (its window given back) as the next takes its place.
+                Release();
+                _current = next;
+            }
         }
         finally
         {

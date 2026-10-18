@@ -164,6 +164,67 @@ public class PacketCodecTests
 
     [Test]
     [MethodDataSource(nameof(Suites))]
+    public async Task Required_IsTheLengthField_ThenTheWholePacket(string suite)
+    {
+        using var sender = Create(suite);
+        using var receiver = Create(suite);
+        var wire = Encode(sender, new byte[1000], 7);
+
+        foreach (var prefix in new[] { 0, 1, 3, 4, 5, 100, wire.Length - 1 })
+        {
+            var ok = PacketCodec.TryDecode(new ReadOnlySequence<byte>(wire.AsMemory(0, prefix)), receiver, 7, out var packet, out var consumed, out var required);
+            await Assert.That(ok).IsFalse();
+            await Assert.That(packet).IsNull();
+            await Assert.That(consumed).IsEqualTo(0L);
+            await Assert.That(required).IsEqualTo(prefix < 4 ? 4L : wire.Length);
+        }
+
+        // Asking about the length again and again changed nothing: the packet still decodes with the same receiver.
+        var decoded = PacketCodec.TryDecode(new ReadOnlySequence<byte>(wire), receiver, 7, out var whole, out var all, out _);
+        using (whole)
+        {
+            await Assert.That(decoded).IsTrue();
+            await Assert.That(all).IsEqualTo(wire.Length);
+            await Assert.That(whole!.Payload.Length).IsEqualTo(1000);
+        }
+    }
+
+    [Test]
+    [MethodDataSource(nameof(Suites))]
+    public async Task ManyPackets_DecodeFromOneLargeBuffer_AndFromTinySegments(string suite)
+    {
+        using var sender = Create(suite);
+        var rng = new Random(44);
+        var payloads = new List<byte[]>();
+        var wire = new List<byte>();
+        for (uint sequence = 0; sequence < 40; sequence++)
+        {
+            // Full 32 KiB data packets, small ones between them, and one larger than the transport's 128 KiB read buffer.
+            var payload = new byte[sequence == 20 ? 200_000 : sequence % 3 == 0 ? 32 * 1024 + 9 : rng.Next(1, 300)];
+            rng.NextBytes(payload);
+            payloads.Add(payload);
+            wire.AddRange(Encode(sender, payload, sequence));
+        }
+
+        var bytes = wire.ToArray();
+        foreach (var chunk in new[] { bytes.Length, 1, 3, 4096 })
+        {
+            using var receiver = Create(suite);
+            var input = Segmented(bytes, chunk);
+            for (var i = 0; i < payloads.Count; i++)
+            {
+                var (ok, payload, consumed) = Decode(receiver, input, (uint)i);
+                await Assert.That(ok).IsTrue();
+                await Assert.That(payload!.AsSpan().SequenceEqual(payloads[i])).IsTrue();
+                input = input.Slice(consumed);
+            }
+
+            await Assert.That(input.Length).IsEqualTo(0L);
+        }
+    }
+
+    [Test]
+    [MethodDataSource(nameof(Suites))]
     public async Task TrailingBytes_AreLeftAlone(string suite)
     {
         using var sender = Create(suite);
@@ -300,7 +361,7 @@ public class PacketCodecTests
         var wire = Encode(sender, new byte[40], 0);
         var expected = (uint)(wire.Length - receiver.TagSize - 4);
 
-        // The codec asks again each time more data arrives: the answer must not change, and the packet must still decode afterwards.
+        // The codec asks again when the rest of the packet has arrived: the answer must not change, and the packet must still decode.
         await Assert.That(receiver.ReadLength(0, wire.AsSpan(0, 4))).IsEqualTo(expected);
         await Assert.That(receiver.ReadLength(0, wire.AsSpan(0, 4))).IsEqualTo(expected);
         var (ok, payload, _) = Decode(receiver, new ReadOnlySequence<byte>(wire), 0);
@@ -501,6 +562,81 @@ public class PacketCodecTests
         packet.Dispose();
         packet.Dispose(); // idempotent
         await Assert.That(() => packet.Payload).Throws<ObjectDisposedException>();
+    }
+
+    /// <summary>
+    /// Plants a pooled array of the size a packet of <paramref name="used"/> bytes rents, filled with 0xAA, runs <paramref name="decode"/>
+    /// with a fresh <paramref name="suite"/> receiver (made first: making one may use the pool too), and rents again. On one thread with
+    /// nothing rented in between, the shared pool hands out the array it was last given back, so the decoder and the second rent both get
+    /// the planted array; the first attempt nearly always does, and a retry covers the pool having trimmed it meanwhile. Synchronous on
+    /// purpose: no await may move the work to another thread's pool cache.
+    /// </summary>
+    private static (byte[] Planted, byte[] Again) ThroughThePool(string suite, int used, Action<PacketProtector, byte[]> decode)
+    {
+        for (var attempt = 0; ; attempt++)
+        {
+            using var receiver = Create(suite);
+            var planted = ArrayPool<byte>.Shared.Rent(used);
+            planted.AsSpan().Fill(0xAA);
+            ArrayPool<byte>.Shared.Return(planted);
+            decode(receiver, planted);
+            var again = ArrayPool<byte>.Shared.Rent(used);
+            ArrayPool<byte>.Shared.Return(again);
+            if (ReferenceEquals(planted, again) || attempt == 4)
+            {
+                return (planted, again);
+            }
+        }
+    }
+
+    [Test]
+    [MethodDataSource(nameof(ProtectedSuites))]
+    public async Task DecodedPacket_ZeroesExactlyTheBytesThePacketUsed(string suite)
+    {
+        using var sender = Create(suite);
+        var wire = Encode(sender, [.. Enumerable.Range(1, 100).Select(i => (byte)i)], 3);
+        var sawPayloadInPlanted = false;
+
+        var (planted, again) = ThroughThePool(suite, wire.Length, (receiver, planted) =>
+        {
+            PacketCodec.TryDecode(new ReadOnlySequence<byte>(wire), receiver, 3, out var packet, out _);
+            sawPayloadInPlanted = System.Runtime.InteropServices.MemoryMarshal.TryGetArray(packet!.Payload, out var segment)
+                && ReferenceEquals(segment.Array, planted);
+            packet.Dispose();
+        });
+
+        await Assert.That(sawPayloadInPlanted).IsTrue();
+        await Assert.That(again).IsSameReferenceAs(planted);
+
+        // Everything the packet wrote, tag included, is zero; the rest was never written, so it was neither touched nor cleared again.
+        await Assert.That(planted.AsSpan(0, wire.Length).ContainsAnyExcept((byte)0)).IsFalse();
+        await Assert.That(planted.Length).IsGreaterThan(wire.Length);
+        await Assert.That(planted.AsSpan(wire.Length).ContainsAnyExcept((byte)0xAA)).IsFalse();
+    }
+
+    [Test]
+    [MethodDataSource(nameof(ProtectedSuites))]
+    public async Task APacketThatFailsAuthentication_IsZeroedToo(string suite)
+    {
+        using var sender = Create(suite);
+        var wire = Encode(sender, new byte[100], 3);
+        wire[^1] ^= 0x01;
+
+        var (planted, again) = ThroughThePool(suite, wire.Length, (receiver, buffer) =>
+        {
+            try
+            {
+                PacketCodec.TryDecode(new ReadOnlySequence<byte>(wire), receiver, 3, out _, out _);
+            }
+            catch (SshProtocolException)
+            {
+                // Expected: the tag does not match.
+            }
+        });
+
+        await Assert.That(again).IsSameReferenceAs(planted);
+        await Assert.That(planted.AsSpan(0, wire.Length).ContainsAnyExcept((byte)0)).IsFalse();
+        await Assert.That(planted.AsSpan(wire.Length).ContainsAnyExcept((byte)0xAA)).IsFalse();
     }
 
     [Test]
