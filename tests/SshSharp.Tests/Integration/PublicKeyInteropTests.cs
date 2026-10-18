@@ -101,4 +101,51 @@ public class PublicKeyInteropTests
             }
         }
     }
+
+    /// <summary>
+    /// A key held in the process signs its first request, with no query before it (RFC 4252 section 7 allows both). Runs wherever the
+    /// account has a password and a shell: the key goes into the account's authorized_keys for the test, so it also covers the servers of
+    /// the interop matrix that read authorized_keys (Dropbear, OpenSSH of several eras, OpenSSH for Windows).
+    /// </summary>
+    [Test]
+    [NotInParallel("authorized_keys")] // two tests editing the file at once could each drop the other's line
+    public async Task ALocalKey_SignsStraightAway_AfterARefusedOne()
+    {
+        var user = Environment.GetEnvironmentVariable("SSHSHARP_TEST_USER");
+        var password = Environment.GetEnvironmentVariable("SSHSHARP_TEST_PASSWORD");
+        if (RealServer.Endpoint is not var (host, port) || string.IsNullOrEmpty(user) || string.IsNullOrEmpty(password))
+        {
+            Skip.Test("SSHSHARP_TEST_SSHD, SSHSHARP_TEST_USER and SSHSHARP_TEST_PASSWORD are needed.");
+            return;
+        }
+
+        var trustAll = SshHostKeyVerifier.FromDelegate((_, _) => ValueTask.FromResult(true));
+        using var refused = SshPrivateKey.Generate(SshKeyType.Ed25519);
+        using var key = SshPrivateKey.Generate(SshKeyType.Ed25519);
+
+        // A refused signed request is an ordinary failure, with the methods the server still accepts.
+        var failed = await Assert.ThrowsAsync<SshAuthenticationException>(async () =>
+            await SshClient.ConnectAsync(host, port, new SshClientOptions { UserName = user, PrivateKeys = [refused], HostKeyVerifier = trustAll }, Timeout()));
+        if (!failed!.AllowedMethods.Contains("publickey"))
+        {
+            Skip.Test("The server does not offer publickey authentication.");
+            return;
+        }
+
+        var marker = "sshsharp-direct-" + Guid.NewGuid().ToString("N");
+        var line = $"{key.KeyType} {Convert.ToBase64String(key.PublicKey.Span)} {marker}";
+        await using var admin = await SshClient.ConnectAsync(host, port, new SshClientOptions { UserName = user, Password = password, HostKeyVerifier = trustAll }, Timeout());
+        var install = $"mkdir -p ~/.ssh && chmod 700 ~/.ssh && echo '{line}' >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys";
+        await Assert.That((await admin.RunCommandAsync(install, Timeout())).ExitStatus).IsEqualTo(0);
+        try
+        {
+            await using var client = await SshClient.ConnectAsync(host, port,
+                new SshClientOptions { UserName = user, PrivateKeys = [refused, key], HostKeyVerifier = trustAll }, Timeout());
+            await Assert.That((await client.RunCommandAsync("echo direct-ok", Timeout())).StandardOutputText.Trim()).IsEqualTo("direct-ok");
+        }
+        finally
+        {
+            await admin.RunCommandAsync($"sed -i '/{marker}/d' ~/.ssh/authorized_keys", Timeout());
+        }
+    }
 }

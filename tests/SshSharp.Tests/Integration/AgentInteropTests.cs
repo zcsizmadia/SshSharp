@@ -219,6 +219,7 @@ public class AgentInteropTests
     }
 
     [Test]
+    [NotInParallel("authorized_keys")] // two tests editing the file at once could each drop the other's line
     public async Task ADestinationConstrainedKey_SignsInOnlyWhereItIsAllowed()
     {
         var user = Environment.GetEnvironmentVariable("SSHSHARP_TEST_USER");

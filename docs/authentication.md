@@ -16,7 +16,7 @@ flowchart TD
     none["none<br/>learns which methods the server accepts"] --> gss{"Gssapi set and<br/>gssapi-with-mic offered?"}
     gss -- yes --> kerberos["gssapi-with-mic<br/>(Kerberos ticket)"]
     gss -- no --> keys
-    kerberos -- failed --> keys["publickey, each key in PrivateKeys order:<br/>ask if acceptable, then sign"]
+    kerberos -- failed --> keys["publickey, each key in PrivateKeys order:<br/>sign (a key held elsewhere: ask first)"]
     keys -- "no key accepted" --> kbd["keyboard-interactive<br/>(KeyboardInteractive handler, or Password<br/>for a single hidden prompt)"]
     kbd -- "failed or not offered" --> pw["password"]
     pw -- failed --> fail(["SshAuthenticationException<br/>with AllowedMethods"])
@@ -52,11 +52,44 @@ Formats: the OpenSSH format (`BEGIN OPENSSH PRIVATE KEY`, also encrypted), PKCS#
 PKCS#1 and SEC1 PEM, and PuTTY `.ppk` versions 2 and 3 (also encrypted). Key types: Ed25519, ECDSA (nistp256/384/521) and
 RSA (2048 bits or more; signs with `rsa-sha2-256/512` as the server's `server-sig-algs` allows). The client announces
 `ext-info-in-auth@openssh.com`, so a server can send `server-sig-algs` again during authentication (for example when a `Match`
-block changes them for this user), and each key uses the latest list. The server is asked
-whether it accepts a key before anything is signed. `SshPrivateKey.Parse` reads a key from a string.
+block changes them for this user), and each key uses the latest list. `SshPrivateKey.Parse` reads a key from a string.
 
 `Fingerprint`, `Comment`, `PublicKey` and `ToAuthorizedKeysLine()` describe a key. Dispose keys when done: it clears the
 private key material.
+
+### Signing straight away, or asking first
+
+RFC 4252 lets a client either send the signed request at once, or first ask whether the server would accept the key (a request
+without a signature, answered with `SSH_MSG_USERAUTH_PK_OK`) and sign only then. SshSharp chooses by where the private key is:
+
+- **A key in this process** (loaded from a file, parsed, generated, or paired with a certificate) signs straight away. A signature
+  costs it a fraction of a millisecond and has no side effects.
+- **A key held elsewhere** (an [agent](#ssh-agent)'s, an [`SshKeySigner`](#keys-held-elsewhere-key-vaults-hsms-tpm)'s,
+  `FromRsa`/`FromECDsa`, a FIDO key in an agent) is offered first. Its signature may ask the user to confirm, need a touch or a PIN,
+  or cost a call to a key service, so it is never made for a key the server would refuse.
+
+```mermaid
+sequenceDiagram
+    participant C as SshSharp
+    participant S as Server
+    Note over C,S: a key in this process
+    C->>S: publickey, signed
+    S-->>C: SUCCESS (or FAILURE: next key)
+    Note over C,S: a key held elsewhere
+    C->>S: publickey, no signature
+    S-->>C: PK_OK (or FAILURE: next key)
+    C->>S: publickey, signed by the agent or signer
+    S-->>C: SUCCESS
+```
+
+Asking first costs a round trip, and on OpenSSH more: sshd delays every answer to a failed or unfinished authentication request
+(other than `none`) to a minimum time, against timing attacks, and the "this key would do" answer is one of them. On a fast network
+that delay, a few milliseconds, is a large part of a connect. A refused key costs the same either way: one request, one failure, and
+one of sshd's `MaxAuthTries`. OpenSSH's `ssh` asks first for every key whose public half it has (agent keys, and identity files
+whose public key it can read), and signs straight away only when it has to load the private key to learn the public one; servers
+accept both forms. Everything else is the same on both paths: the signature algorithm chosen from `server-sig-algs`, host-bound
+authentication (`publickey-hostbound-v00@openssh.com`) when the server offers it, certificates, and a partial success when the server
+requires another method too.
 
 ### Generating keys
 

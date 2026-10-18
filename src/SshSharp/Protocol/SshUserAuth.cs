@@ -53,14 +53,24 @@ internal sealed class SshUserAuth(SshTransport transport, string userName, Func<
         }, Reply.None, cancellationToken);
 
     /// <summary>
-    /// The <c>publickey</c> method (RFC 4252 section 7). First asks whether the server would accept the key at all (no signature, so a
-    /// refused key costs no private-key operation), then signs: session id, the request, and the chosen algorithm and public key.
+    /// The <c>publickey</c> method (RFC 4252 section 7). A key whose private material is in this process signs straight away: session
+    /// id, the request, and the chosen algorithm and public key. Any other key (an agent's, an <see cref="SshKeySigner"/>'s) is first
+    /// offered without a signature, and signs only when the server answers that it would accept it (<c>SSH_MSG_USERAUTH_PK_OK</c>).
     /// </summary>
     /// <remarks>
+    /// <para>
+    /// Signing directly saves a round trip, and on OpenSSH more: sshd delays its answer to every request other than <c>none</c> that
+    /// does not log the user in (<c>ensure_minimum_time_since</c> in <c>auth2.c</c>, against timing attacks), the "this key would do"
+    /// answer to a query included. A refused key costs the same either way: one request and one failure. A local signature is cheap
+    /// and has no side effects; a key held elsewhere may ask the user to confirm, need a touch or a PIN, or cost a remote call, so it
+    /// never signs for a key the server would refuse.
+    /// </para>
+    /// <para>
     /// When the server advertises <c>publickey-hostbound@openssh.com</c> (OpenSSH 8.9 and later), the request is host-bound
     /// (<c>publickey-hostbound-v00@openssh.com</c>, PROTOCOL section 3.1): it also carries the server's host key, which is then part of
     /// what is signed, so an agent can check the destination of a constrained key (<c>ssh-add -h</c>). Agent keys sign on a connection
     /// bound to this session (<c>session-bind@openssh.com</c>).
+    /// </para>
     /// </remarks>
     public async Task<AuthOutcome> PublicKeyAsync(SshPrivateKey key, string algorithm, CancellationToken cancellationToken)
     {
@@ -69,20 +79,29 @@ internal sealed class SshUserAuth(SshTransport transport, string userName, Func<
         var method = hostBound ? HostBoundMethod : "publickey";
         var hostKey = hostBound ? transport.HostKey!.Presented : ReadOnlyMemory<byte>.Empty;
 
-        var query = await RequestAsync(method, w =>
+        // What follows the "has signature" flag in the query, in the signed data and in the signed request alike.
+        void WriteKey(SshWriter w)
         {
-            w.WriteBoolean(false);
             w.WriteString(algorithm);
             w.WriteString(publicKey.Span);
             if (hostBound)
             {
                 w.WriteString(hostKey.Span);
             }
-        }, Reply.PkOk, cancellationToken).ConfigureAwait(false);
-        if (!query.KeyAcceptable)
+        }
+
+        if (!key.HasLocalPrivateMaterial)
         {
-            // Refused (or, oddly, accepted without a signature): nothing to sign.
-            return query;
+            var query = await RequestAsync(method, w =>
+            {
+                w.WriteBoolean(false);
+                WriteKey(w);
+            }, Reply.PkOk, cancellationToken).ConfigureAwait(false);
+            if (!query.KeyAcceptable)
+            {
+                // Refused (or, oddly, accepted without a signature): nothing to sign.
+                return query;
+            }
         }
 
         var signed = Build(w =>
@@ -93,25 +112,14 @@ internal sealed class SshUserAuth(SshTransport transport, string userName, Func<
             w.WriteString(ConnectionService);
             w.WriteString(method);
             w.WriteBoolean(true);
-            w.WriteString(algorithm);
-            w.WriteString(publicKey.Span);
-            if (hostBound)
-            {
-                w.WriteString(hostKey.Span);
-            }
+            WriteKey(w);
         });
         var signature = await key.SignAsync(new SshSignRequest(algorithm, signed, SshSignaturePurpose.Authentication), transport.AgentBinding, cancellationToken)
             .ConfigureAwait(false);
         return await RequestAsync(method, w =>
         {
             w.WriteBoolean(true);
-            w.WriteString(algorithm);
-            w.WriteString(publicKey.Span);
-            if (hostBound)
-            {
-                w.WriteString(hostKey.Span);
-            }
-
+            WriteKey(w);
             w.WriteString(signature);
         }, Reply.None, cancellationToken).ConfigureAwait(false);
     }

@@ -200,7 +200,8 @@ public sealed class SshClientOptions
 
     /// <summary>
     /// Keys for public-key authentication, tried in order (load them with <see cref="SshPrivateKey.LoadAsync"/>). The client does not
-    /// dispose them. The server is asked whether it accepts each key before anything is signed.
+    /// dispose them. A key whose private material is in this process (loaded, parsed or generated) signs its request straight away; a
+    /// key held by an agent or an <see cref="SshKeySigner"/> is offered first, and signs only if the server would accept it.
     /// </summary>
     public IReadOnlyList<SshPrivateKey> PrivateKeys { get; init; } = [];
 

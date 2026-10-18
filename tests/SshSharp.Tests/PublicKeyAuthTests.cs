@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using SshSharp.Tests.Agent;
 using SshSharp.Tests.Keys;
 using SshSharp.Tests.Protocol;
 
@@ -32,7 +33,7 @@ public class PublicKeyAuthTests
 
     [Test]
     [MethodDataSource(nameof(Keys))]
-    public async Task EachKeyTypeAuthenticates_AfterAskingFirst((string Pem, byte[] Blob) generated)
+    public async Task EachKeyTypeAuthenticates_SigningStraightAway((string Pem, byte[] Blob) generated)
     {
         using var key = SshPrivateKey.Parse(generated.Pem);
         await using var server = new FakeSessionServer { AdvertisedMethods = ["publickey"], AuthorizedKeys = [generated.Blob] };
@@ -40,15 +41,15 @@ public class PublicKeyAuthTests
         var result = await client.RunCommandAsync("whoami", Timeout());
         await Assert.That(result.ExitStatus).IsEqualTo(0);
 
-        // none, then a query without signature, then the signed request; RSA uses SHA-512 when the server offers it.
-        var attempts = Attempts(server);
-        await Assert.That(attempts[0]).IsEqualTo("none");
-        await Assert.That(attempts.Count(a => a == "publickey")).IsEqualTo(2);
-        await Assert.That(attempts.Last()).IsEqualTo("publickey-signed:" + (key.KeyType == "ssh-rsa" ? "rsa-sha2-512" : key.KeyType));
+        // none, then the signed request at once: a key held in this process is not offered first. RSA uses SHA-512 when the server
+        // offers it.
+        var algorithm = key.KeyType == "ssh-rsa" ? "rsa-sha2-512" : key.KeyType;
+        await Assert.That(Attempts(server)).IsEquivalentTo(new[] { "none", "publickey", "publickey-signed:" + algorithm });
+        await Assert.That(Requests(server)).IsEquivalentTo(new[] { "signed:" + algorithm });
     }
 
     [Test]
-    public async Task RefusedKeysAreSkippedWithoutSigning_ThenTheNextKey_ThenThePassword()
+    public async Task RefusedLocalKeys_FallThroughToTheNextKey_ThenThePassword()
     {
         using var stranger = SshPrivateKey.Parse(TestKeys.OpenSshEd25519(out _));
         using var known = SshPrivateKey.Parse(TestKeys.OpenSshEd25519(out var knownBlob));
@@ -56,8 +57,8 @@ public class PublicKeyAuthTests
         await using (var server = new FakeSessionServer { AdvertisedMethods = ["publickey", "password"], AuthorizedKeys = [knownBlob] })
         {
             await using var client = await ConnectAsync(server, [stranger, known]);
-            var attempts = Attempts(server);
-            await Assert.That(attempts.Count(a => a.StartsWith("publickey-signed", StringComparison.Ordinal))).IsEqualTo(1);
+            await Assert.That(Attempts(server)).IsEquivalentTo(new[] { "none", "publickey", "publickey", "publickey-signed:ssh-ed25519" });
+            await Assert.That(Requests(server)).IsEquivalentTo(new[] { "signed:ssh-ed25519", "signed:ssh-ed25519" });
         }
 
         await using (var server = new FakeSessionServer { AdvertisedMethods = ["publickey", "password"] })
@@ -65,6 +66,57 @@ public class PublicKeyAuthTests
             await using var client = await ConnectAsync(server, [stranger], password: "secret");
             await Assert.That(Attempts(server)).IsEquivalentTo(new[] { "none", "publickey", "password" });
         }
+    }
+
+    [Test]
+    public async Task AgentKeys_AreOfferedFirst_AndSignOnlyWhenAccepted()
+    {
+        // An agent's key may ask the user to confirm, or need a touch: it signs only for a key the server said it would take.
+        await using var agent = new FakeAgent();
+        using var stranger = SshPrivateKey.Parse(TestKeys.OpenSshEd25519(out _));
+        using var known = SshPrivateKey.Parse(TestKeys.OpenSshEd25519(out var knownBlob));
+        agent.Keys.Add((stranger, "stranger"));
+        agent.Keys.Add((known, "known"));
+        var keys = await new SshAgent(agent.Path).GetKeysAsync(Timeout());
+        await using var server = new FakeSessionServer { AdvertisedMethods = ["publickey"], AuthorizedKeys = [knownBlob] };
+
+        await using var client = await ConnectAsync(server, keys);
+
+        await Assert.That(Requests(server)).IsEquivalentTo(new[] { "query:ssh-ed25519", "query:ssh-ed25519", "signed:ssh-ed25519" });
+        await Assert.That(agent.SignFlags.Count).IsEqualTo(1);
+    }
+
+    [Test]
+    public async Task SignerKeys_AreOfferedFirst_AndSignOnlyWhenAccepted()
+    {
+        // A key service (KMS, HSM) costs a remote call or a PIN per signature: none for a key the server would refuse.
+        using var stranger = SshPrivateKey.Parse(TestKeys.OpenSshEd25519(out _));
+        using var known = SshPrivateKey.Parse(TestKeys.OpenSshEd25519(out var knownBlob));
+        var strangerSigner = new AgentServerTests.KeySigner(stranger);
+        var knownSigner = new AgentServerTests.KeySigner(known);
+        using var strangerKey = SshPrivateKey.FromSigner(strangerSigner);
+        using var knownKey = SshPrivateKey.FromSigner(knownSigner);
+        await using var server = new FakeSessionServer { AdvertisedMethods = ["publickey"], AuthorizedKeys = [knownBlob] };
+
+        await using var client = await ConnectAsync(server, [strangerKey, knownKey]);
+
+        await Assert.That(Requests(server)).IsEquivalentTo(new[] { "query:ssh-ed25519", "query:ssh-ed25519", "signed:ssh-ed25519" });
+        await Assert.That(strangerSigner.Requests).IsEmpty();
+        await Assert.That(knownSigner.Requests.Count).IsEqualTo(1);
+    }
+
+    [Test]
+    public async Task ALocalKey_SignsHostBoundStraightAway()
+    {
+        using var key = SshPrivateKey.Parse(TestKeys.OpenSshEd25519(out var blob));
+        var hostBound = new FakeServerOptions { ExtraExtensions = new Dictionary<string, string> { ["publickey-hostbound@openssh.com"] = "0" } };
+        await using var server = new FakeSessionServer(hostBound) { AdvertisedMethods = ["publickey"], AuthorizedKeys = [blob] };
+
+        await using var client = await ConnectAsync(server, [key]);
+
+        await Assert.That(Attempts(server)).IsEquivalentTo(new[] { "none", "publickey-hostbound-v00@openssh.com", "publickey-hostbound-signed:ssh-ed25519" });
+        await Assert.That(Requests(server)).IsEquivalentTo(new[] { "signed:ssh-ed25519" });
+        await Assert.That(server.HostBoundKeys.Single()).IsEquivalentTo(client.HostKey.PublicKey.ToArray());
     }
 
     [Test]
@@ -92,7 +144,7 @@ public class PublicKeyAuthTests
         using var key = SshPrivateKey.Parse(TestKeys.OpenSshEd25519(out var blob));
         await using var server = new FakeSessionServer { AdvertisedMethods = ["publickey"], AuthorizedKeys = [blob], RequirePasswordAfterPublicKey = true };
         await using var client = await ConnectAsync(server, [key], password: "secret");
-        await Assert.That(Attempts(server)).IsEquivalentTo(new[] { "none", "publickey", "publickey", "publickey-signed:ssh-ed25519", "password" });
+        await Assert.That(Attempts(server)).IsEquivalentTo(new[] { "none", "publickey", "publickey-signed:ssh-ed25519", "password" });
     }
 
     private static string[] Attempts(FakeSessionServer server)
@@ -100,6 +152,14 @@ public class PublicKeyAuthTests
         lock (server.AuthAttempts)
         {
             return [.. server.AuthAttempts];
+        }
+    }
+
+    private static string[] Requests(FakeSessionServer server)
+    {
+        lock (server.PublicKeyRequests)
+        {
+            return [.. server.PublicKeyRequests];
         }
     }
 }
