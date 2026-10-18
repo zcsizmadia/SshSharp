@@ -371,7 +371,9 @@ internal sealed class SshChannel
     public bool TryRead([System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out ChannelData? data) => _incoming.Reader.TryRead(out data);
 
     /// <summary>With <see cref="SplitExtended"/>: <see cref="TryRead"/> for stderr.</summary>
-    public bool TryReadExtended([System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out ChannelData? data) => _extended.Reader.TryRead(out data);
+    public bool TryReadExtended([System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out ChannelData? data) => Volatile.Read(ref _extended) is { } extended
+        ? extended.Reader.TryRead(out data)
+        : throw new InvalidOperationException("Standard error is not split from this channel's output (SplitExtended).");
 
     // Pooled: completes asynchronously for nearly every packet, and would otherwise allocate a state machine box each time.
     [System.Runtime.CompilerServices.AsyncMethodBuilder(typeof(System.Runtime.CompilerServices.PoolingAsyncValueTaskMethodBuilder<>))]
