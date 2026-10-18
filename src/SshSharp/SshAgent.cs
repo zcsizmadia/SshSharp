@@ -4,6 +4,7 @@ using System.IO.Pipes;
 using System.Net.Sockets;
 using System.Runtime.Versioning;
 using System.Security.Principal;
+using Microsoft.Extensions.Logging.Abstractions;
 using SshSharp.Keys;
 using SshSharp.Protocol;
 
@@ -53,6 +54,9 @@ public sealed class SshAgent
     private const uint RsaSha2_256 = 2;
     private const uint RsaSha2_512 = 4;
 
+    /// <summary>What <see cref="Path"/> holds for an in-process agent (<see cref="FromKeys"/>).</summary>
+    internal const string InProcessPath = "(in-process)";
+
     private readonly Func<CancellationToken, ValueTask<Stream>> _connect;
 
     /// <summary>An agent at <paramref name="path"/>: a Unix domain socket, or on Windows a named pipe such as <c>\\.\pipe\openssh-ssh-agent</c>.</summary>
@@ -69,8 +73,57 @@ public sealed class SshAgent
         _connect = connect;
     }
 
-    /// <summary>The socket or pipe the agent listens on.</summary>
+    private SshAgent(AgentKeyring keyring)
+    {
+        Path = InProcessPath;
+        Keyring = keyring;
+
+        // Never called: requests to an in-process agent are answered here (RequestAsync), and forwarded channels are served (SshClient).
+        _connect = _ => throw new NotSupportedException("An in-process agent has no socket to connect to.");
+    }
+
+    /// <summary>
+    /// The socket or pipe the agent listens on. For an in-process agent (<see cref="FromKeys"/>), which listens nowhere, it is
+    /// <c>(in-process)</c>.
+    /// </summary>
     public string Path { get; }
+
+    /// <summary>Whether this agent runs in this process (<see cref="FromKeys"/>) rather than being reached through a socket or pipe.</summary>
+    public bool IsInProcess => Keyring is not null;
+
+    /// <summary>The keys of an in-process agent; null for one reached through a socket or pipe.</summary>
+    internal AgentKeyring? Keyring { get; }
+
+    /// <summary>
+    /// An agent served in this process from <paramref name="keys"/>: key files, generated keys, keys in a Windows key store
+    /// (<see cref="SshPrivateKey.FromRsa"/>), keys behind an <see cref="SshKeySigner"/> such as a cloud KMS or an HSM
+    /// (<see cref="SshPrivateKey.FromSigner"/>), and keys paired with certificates (<see cref="SshPrivateKey.WithCertificate"/>), which
+    /// it lists as <c>ssh-add</c> adds them: the key, then its certificate. Forward it with <see cref="SshClientOptions.ForwardAgent"/>
+    /// where no agent process runs (a container, a service), or to forward a key that is not in any agent.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// It speaks the agent protocol as <c>ssh-agent</c> does, read-only: it lists its keys and signs with them, binds connections to
+    /// sessions (<c>session-bind@openssh.com</c>) and answers <c>query</c>. Adding, removing and locking keys are refused
+    /// (<see cref="AddKeyAsync"/> and the others throw <see cref="SshException"/> with <see cref="SshFailureReason.AgentFailed"/>). RSA keys
+    /// sign with <c>rsa-sha2-256</c> or <c>rsa-sha2-512</c> as asked, never SHA-1. Like <c>ssh-agent</c>, it signs whatever data it is
+    /// asked to (other programs sign their own formats through agents, pam_ssh_agent_auth for one); a key behind an
+    /// <see cref="SshKeySigner"/> sees such data as <see cref="SshSignaturePurpose.Other"/>, and
+    /// <see cref="SshClientOptions.ForwardAgentFilter"/> can restrict what a forwarded agent signs to the purposes it knows.
+    /// </para>
+    /// <para>
+    /// The agent does not dispose the keys, and uses them until it is no longer used: keep them alive as long as the clients that
+    /// forward it. Keys loaded from files hold their private key in this process's memory; a key behind an <see cref="SshKeySigner"/>
+    /// never enters it.
+    /// </para>
+    /// </remarks>
+    /// <param name="keys">The keys, in the order they are listed; a key given twice is listed once.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="keys"/> or one of them is null.</exception>
+    public static SshAgent FromKeys(params SshPrivateKey[] keys)
+    {
+        ArgumentNullException.ThrowIfNull(keys);
+        return new SshAgent(new AgentKeyring(keys));
+    }
 
     /// <summary>
     /// The user's agent, as ssh finds it: <c>SSH_AUTH_SOCK</c>; on Windows, when that is not set, the OpenSSH agent service's pipe, or
@@ -442,6 +495,18 @@ public sealed class SshAgent
     /// </summary>
     private async Task<byte[]> RequestAsync(ReadOnlyMemory<byte> message, CancellationToken cancellationToken, AgentBinding? binding = null)
     {
+        if (Keyring is { } keyring)
+        {
+            // An in-process agent answers as a real one would on a fresh connection, binding included, so its keys behave the same.
+            var server = new AgentServer(keyring, filter: null, NullLogger.Instance);
+            if (binding is not null)
+            {
+                await server.HandleAsync(BindRequest(binding, forwarding: false), cancellationToken).ConfigureAwait(false);
+            }
+
+            return await server.HandleAsync(message, cancellationToken).ConfigureAwait(false);
+        }
+
         Stream stream;
         try
         {
@@ -478,21 +543,23 @@ public sealed class SshAgent
     /// </summary>
     internal static async Task<bool> BindAsync(Stream stream, AgentBinding binding, bool forwarding, CancellationToken cancellationToken)
     {
-        var request = SshPrivateKey.Encode(w =>
-        {
-            w.WriteByte(Extension);
-            w.WriteString("session-bind@openssh.com");
-            w.WriteString(binding.HostKey.Span);
-            w.WriteString(binding.SessionId.Span);
-            w.WriteString(binding.Signature.Span);
-            w.WriteBoolean(forwarding);
-        });
-        var reply = await ExchangeAsync(stream, request, cancellationToken).ConfigureAwait(false);
+        var reply = await ExchangeAsync(stream, BindRequest(binding, forwarding), cancellationToken).ConfigureAwait(false);
         return reply[0] == Success;
     }
 
+    /// <summary>The <c>session-bind@openssh.com</c> request for <paramref name="binding"/>.</summary>
+    internal static byte[] BindRequest(AgentBinding binding, bool forwarding) => SshPrivateKey.Encode(w =>
+    {
+        w.WriteByte(Extension);
+        w.WriteString("session-bind@openssh.com");
+        w.WriteString(binding.HostKey.Span);
+        w.WriteString(binding.SessionId.Span);
+        w.WriteString(binding.Signature.Span);
+        w.WriteBoolean(forwarding);
+    });
+
     /// <summary>Sends one framed message on an open agent connection and reads one framed reply.</summary>
-    private static async Task<byte[]> ExchangeAsync(Stream stream, ReadOnlyMemory<byte> message, CancellationToken cancellationToken)
+    internal static async Task<byte[]> ExchangeAsync(Stream stream, ReadOnlyMemory<byte> message, CancellationToken cancellationToken)
     {
         var frame = new byte[4 + message.Length];
         BinaryPrimitives.WriteUInt32BigEndian(frame, (uint)message.Length);

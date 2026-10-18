@@ -107,6 +107,8 @@
       href: ../scenarios/background-worker.md
     - name: Short-lived certificates for CI jobs
       href: ../scenarios/ci-certificates.md
+    - name: A KMS-held key forwarded through a bastion
+      href: ../scenarios/kms-agent-forwarding.md
 - name: Concepts
   items:
     - name: Architecture and connection lifecycle

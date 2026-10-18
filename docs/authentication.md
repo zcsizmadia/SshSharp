@@ -86,7 +86,7 @@ for each signature.
 - **Any other signer:** derive from `SshKeySigner` and pass it to `SshPrivateKey.FromSigner`. Each `SshSignRequest` it gets carries
   the SSH algorithm (which fixes the hash), the data, and what the signature is for: `Purpose` is `Authentication` (logging in),
   `FileSignature` (an SSH signature, with its `Namespace`) or `Certificate` (issuing a certificate as its authority, see
-  [Certificates](how-to/certificates.md#act-as-a-certificate-authority)), so a signer can apply a policy or ask its user. It returns the signature as
+  [Certificates](how-to/certificates.md#act-as-a-certificate-authority)), or `Other` (data of another form, signed through an in-process agent's forwarding, see [Agent forwarding](#agent-forwarding)), so a signer can apply a policy or ask its user. It returns the signature as
   .NET produces it: PKCS#1 v1.5 for RSA, r‖s for ECDSA (or DER, by overriding `EcdsaSignatureFormat`), 64 bytes for Ed25519.
 
 ```csharp
@@ -168,6 +168,8 @@ Which agent setting to use:
 | Authenticate with an agent's keys, connecting by alias | nothing (the default agent), `SshConfigConnectOptions.Agent` for another one, or `UseAgent = false` for none |
 | Forward an agent to the server, connecting with `SshClientOptions` | `SshClientOptions.ForwardAgent = agent` |
 | Forward an agent, connecting by alias | `ForwardAgent yes` in `ssh_config` (read as `SshHostConfig.ForwardAgent`); the agent forwarded is the one used for authentication |
+| Serve keys you hold (files, KMS or HSM signers) as an agent, to forward them | `SshAgent.FromKeys(...)`, then as any agent (`SshConfigConnectOptions.Agent` when connecting by alias) |
+| Decide what the server may do with a forwarded agent | `SshClientOptions.ForwardAgentFilter` (or `SshConfigConnectOptions.ForwardAgentFilter`) |
 
 ### Agent forwarding
 
@@ -189,6 +191,26 @@ announces RFC 9987's `agent-forward` (OpenSSH 10.3+) is asked with the standard 
 `auth-agent-req@openssh.com`. Forward only to
 servers you trust: while you are connected, anyone with enough rights on the server can make your agent sign (they cannot read
 the keys). Connecting by `ssh_config` alias follows `ForwardAgent yes`.
+
+**An agent in your process.** `SshAgent.FromKeys(keys)` serves keys this process holds over the agent protocol: key files,
+generated keys, Windows key store keys, keys behind an `SshKeySigner` (a cloud KMS, an HSM) and keys paired with certificates.
+Forwarded, it answers the server's agent channels here, so programs on the server can use keys that are in no agent process.
+Authenticating through it (`PrivateKeys = await agent.GetKeysAsync()`) behaves as with a real agent, including the session binding
+and host-bound authentication; passing the keys in `PrivateKeys` directly is equivalent. It is read-only (adding, removing and
+locking keys are refused) and signs RSA with SHA-2 only; like `ssh-agent`, it signs data of any form it is asked to. Keys loaded
+from files stay in this process's memory while it is used; for sensitive keys, serve an `SshKeySigner` key instead. See
+[Serve an agent from your own keys](how-to/agent-and-keys.md#serve-an-agent-from-your-own-keys).
+
+**Filtering forwarded requests.** `ForwardAgentFilter` decides each request that programs on the server make of the forwarded agent
+(in-process or real): which keys a listing shows, and whether each signature is made. It sees the key, what the signature is for
+(a login with its user name, an SSH signature with its namespace, a certificate), the host key of the server being logged in to when
+the program bound its session (OpenSSH 8.9 and later), and the servers the agent was forwarded through. Data of any other form (a
+pam_ssh_agent_auth challenge, say) has no purpose, and the filter decides it like the rest; allowing only known purposes keeps the
+agent from signing anything else. It can be asynchronous, to ask the user as `ssh-add -c` does. It is not asked for this client's own
+authentication through the agent, only for forwarded requests. A refused request is answered with `SSH_AGENT_FAILURE`. With a filter, a real agent's connection
+is read request by request instead of relayed byte for byte, and is read-only: requests to add, remove or lock keys never reach the
+agent. OpenSSH's `ssh` has no such filter; it narrows what a compromised server can do with your agent. See
+[Decide what a forwarded agent may do](how-to/agent-and-keys.md#decide-what-a-forwarded-agent-may-do).
 
 On Windows, when `SSH_AUTH_SOCK` is not set and the OpenSSH agent service is not running, `FromEnvironment()` finds PuTTY's Pageant
 (0.75 and later) on the pipe it creates for the current user; `SshAgent.FromPageant()` asks for Pageant specifically. Pageant's keys work like

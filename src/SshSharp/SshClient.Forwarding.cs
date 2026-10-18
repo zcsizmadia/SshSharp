@@ -535,9 +535,19 @@ public sealed partial class SshClient
     /// <summary>How many connections the server has forwarded to this client that are still open (all remote forwardings together).</summary>
     internal int ForwardedConnections => Volatile.Read(ref _forwardedConnections);
 
-    /// <summary>Relays one forwarded agent connection: the server's requests to the local agent and its answers back.</summary>
+    /// <summary>
+    /// Serves one forwarded agent connection. An in-process agent answers it here; a real agent's connection is relayed byte for byte,
+    /// or, with <see cref="SshClientOptions.ForwardAgentFilter"/>, request by request through the filter.
+    /// </summary>
     private async Task RelayAgentAsync(SshChannel channel, SshAgent agent)
     {
+        var filter = _options.ForwardAgentFilter;
+        if (agent.Keyring is { } keyring)
+        {
+            await AgentChannelServer.RunAsync(channel, NewAgentServer(keyring, filter), _connection.Closed).ConfigureAwait(false);
+            return;
+        }
+
         Stream stream;
         try
         {
@@ -570,8 +580,27 @@ public sealed partial class SshClient
                 }
             }
 
-            await StreamChannelRelay.RunAsync(stream, channel, _connection.Closed).ConfigureAwait(false);
+            if (filter is null)
+            {
+                await StreamChannelRelay.RunAsync(stream, channel, _connection.Closed).ConfigureAwait(false);
+            }
+            else
+            {
+                await AgentChannelServer.RunAsync(channel, NewAgentServer(new RelayedAgent(stream), filter), _connection.Closed).ConfigureAwait(false);
+            }
         }
+    }
+
+    /// <summary>An agent protocol server for one forwarded channel, knowing this connection's server as the first forwarding hop.</summary>
+    private AgentServer NewAgentServer(AgentBackend backend, Func<SshAgentRequest, CancellationToken, ValueTask<bool>>? filter)
+    {
+        var server = new AgentServer(backend, filter, _logger);
+        if (AgentBinding is { } binding)
+        {
+            server.AddForwardingHop(binding);
+        }
+
+        return server;
     }
 
     private readonly List<SshLocalPortForwarder> _localForwardings = [];

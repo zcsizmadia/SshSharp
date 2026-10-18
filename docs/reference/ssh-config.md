@@ -71,7 +71,7 @@ value.
 | `PubkeyAuthentication`, `PasswordAuthentication`, `KbdInteractiveAuthentication` (`ChallengeResponseAuthentication`) | same names | Yes. |
 | `GSSAPIAuthentication`, `GSSAPIDelegateCredentials` | `GssapiAuthentication`, `GssapiDelegateCredentials` | Yes (.NET 10). |
 | `BatchMode` | `BatchMode` | Yes: no prompts or passphrase requests. |
-| `ForwardAgent` | `ForwardAgent` | Yes: the agent used for authentication is forwarded. |
+| `ForwardAgent` | `ForwardAgent` | Yes: the agent used for authentication is forwarded; `SshConfigConnectOptions.ForwardAgentFilter` decides what the server may do with it. |
 
 ## Forwarding
 

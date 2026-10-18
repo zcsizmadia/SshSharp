@@ -82,3 +82,26 @@ SshSharp.SshForwardedConnection.OriginatorAddress.get -> string?
 SshSharp.SshForwardedConnection.OriginatorPort.get -> int?
 SshSharp.SshForwardedConnection.RemoteSocketPath.get -> string?
 SshSharp.SshForwardedConnection.Stream.get -> System.IO.Stream!
+SshSharp.SshAgent.IsInProcess.get -> bool
+static SshSharp.SshAgent.FromKeys(params SshSharp.SshPrivateKey![]! keys) -> SshSharp.SshAgent!
+SshSharp.SshAgentOperation
+SshSharp.SshAgentOperation.ListKeys = 0 -> SshSharp.SshAgentOperation
+SshSharp.SshAgentOperation.Sign = 1 -> SshSharp.SshAgentOperation
+SshSharp.SshAgentRequest
+SshSharp.SshAgentRequest.Certificate.get -> SshSharp.SshCertificate?
+SshSharp.SshAgentRequest.DestinationHostKey.get -> SshSharp.SshPublicKey?
+SshSharp.SshAgentRequest.ForwardingHostKeys.get -> System.Collections.Generic.IReadOnlyList<SshSharp.SshPublicKey!>!
+SshSharp.SshAgentRequest.Key.get -> SshSharp.SshPublicKey!
+SshSharp.SshAgentRequest.Namespace.get -> string?
+SshSharp.SshAgentRequest.Operation.get -> SshSharp.SshAgentOperation
+SshSharp.SshAgentRequest.Purpose.get -> SshSharp.SshSignaturePurpose?
+SshSharp.SshAgentRequest.UserName.get -> string?
+SshSharp.SshClientOptions.ForwardAgentFilter.get -> System.Func<SshSharp.SshAgentRequest!, System.Threading.CancellationToken, System.Threading.Tasks.ValueTask<bool>>?
+SshSharp.SshClientOptions.ForwardAgentFilter.init -> void
+SshSharp.SshConfigConnectOptions.ForwardAgentFilter.get -> System.Func<SshSharp.SshAgentRequest!, System.Threading.CancellationToken, System.Threading.Tasks.ValueTask<bool>>?
+SshSharp.SshConfigConnectOptions.ForwardAgentFilter.init -> void
+SshSharp.SshAgentRequest.SshAgentRequest(SshSharp.SshAgentOperation operation, SshSharp.SshPublicKey! key, SshSharp.SshCertificate? certificate = null, System.Collections.Generic.IReadOnlyList<SshSharp.SshPublicKey!>? forwardingHostKeys = null, SshSharp.SshPublicKey? destinationHostKey = null) -> void
+SshSharp.SshAgentRequest.Namespace.init -> void
+SshSharp.SshAgentRequest.Purpose.init -> void
+SshSharp.SshAgentRequest.UserName.init -> void
+SshSharp.SshSignaturePurpose.Other = 3 -> SshSharp.SshSignaturePurpose
