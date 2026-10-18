@@ -330,7 +330,9 @@ internal sealed class SftpFileStream(SftpClient client, byte[] handle, string pa
 
     private async ValueTask AcknowledgeOldestAsync(CancellationToken cancellationToken)
     {
-        await ((Task)_behind.Peek()).WaitAsync(cancellationToken).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+        // As a plain Task: SuppressThrowing is not allowed on a Task<T>; the write's own outcome is read by Acknowledge.
+        Task oldest = _behind.Peek();
+        await oldest.WaitAsync(cancellationToken).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
         cancellationToken.ThrowIfCancellationRequested(); // the write itself, if it is done, is acknowledged by the next call
         ThrowIfWriteFailed();
     }
@@ -344,14 +346,22 @@ internal sealed class SftpFileStream(SftpClient client, byte[] handle, string pa
             return;
         }
 
+        // Whatever the write failed with is kept and thrown later: a failure is never dropped.
+        if (!write.IsCompletedSuccessfully)
+        {
+            _fault = write.IsCanceled
+                ? ExceptionDispatchInfo.Capture(new TaskCanceledException(write))
+                : ExceptionDispatchInfo.Capture(write.Exception!.InnerException ?? write.Exception);
+            return;
+        }
+
         try
         {
-            SftpClient.ExpectWritten(write.GetAwaiter().GetResult(), path); // completed: this does not block
+            SftpClient.ExpectWritten(write.Result, path); // completed: this does not block
         }
-        catch (Exception ex)
+        catch (SshException ex)
         {
-            // Whatever the write failed with is kept and thrown later: a failure is never dropped.
-            _fault = ExceptionDispatchInfo.Capture(ex);
+            _fault = ExceptionDispatchInfo.Capture(ex); // the server refused the write (an SftpException), or sent a malformed reply
         }
     }
 
@@ -360,7 +370,8 @@ internal sealed class SftpFileStream(SftpClient client, byte[] handle, string pa
     {
         while (_behind.TryDequeue(out var write))
         {
-            await ((Task)write).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+            Task settled = write; // as a plain Task, for SuppressThrowing
+            await settled.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
             Acknowledge(write);
         }
     }
