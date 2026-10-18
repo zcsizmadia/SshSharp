@@ -256,6 +256,41 @@ public class PacketCodecTests
         await Assert.That(Convert.ToHexString(wire.AsSpan(packetSize))).IsEqualTo(Convert.ToHexString(expectedMac));
     }
 
+    /// <summary>
+    /// AES-GCM (RFC 5647), checked against the platform's AesGcm directly: the length is in clear as associated data and is a multiple of
+    /// 16, and the 12-byte nonce is the IV with its 64-bit invocation counter incremented after each packet.
+    /// </summary>
+    [Test]
+    [Arguments("aes128-gcm")]
+    [Arguments("aes256-gcm")]
+    public async Task Gcm_MatchesRfc5647_LayoutAndNonceSequence(string suite)
+    {
+        var key = suite == "aes128-gcm" ? Gcm128Key : Gcm256Key;
+        using var sender = Create(suite);
+        using var gcm = new AesGcm(key, 16);
+        var fixedField = BinaryPrimitives.ReadUInt32BigEndian(GcmIv);
+        var counter = BinaryPrimitives.ReadUInt64BigEndian(GcmIv.AsSpan(4));
+        for (uint packet = 0; packet < 3; packet++)
+        {
+            var payload = new byte[25 + (int)packet];
+            payload.AsSpan().Fill((byte)(packet + 1));
+            var wire = Encode(sender, payload, packet);
+
+            var length = BinaryPrimitives.ReadUInt32BigEndian(wire);
+            await Assert.That(length % 16).IsEqualTo(0u);
+            await Assert.That(wire.Length).IsEqualTo(4 + (int)length + 16);
+
+            var nonce = new byte[12];
+            BinaryPrimitives.WriteUInt32BigEndian(nonce, fixedField);
+            BinaryPrimitives.WriteUInt64BigEndian(nonce.AsSpan(4), counter + packet);
+            var plain = new byte[length];
+            gcm.Decrypt(nonce, wire.AsSpan(4, (int)length), wire.AsSpan(4 + (int)length), plain, wire.AsSpan(0, 4));
+            var padding = plain[0];
+            await Assert.That((int)padding).IsGreaterThanOrEqualTo(4);
+            await Assert.That(Convert.ToHexString(plain.AsSpan(1, plain.Length - 1 - padding))).IsEqualTo(Convert.ToHexString(payload));
+        }
+    }
+
     [Test]
     [MethodDataSource(nameof(PlainMacSuites))]
     public async Task PlainMac_ReadLengthDecryptsWithoutAdvancing(string suite)
@@ -369,6 +404,84 @@ public class PacketCodecTests
         var (decoded, payload, _) = Decode(none, new ReadOnlySequence<byte>(ok), 0);
         await Assert.That(decoded).IsTrue();
         await Assert.That(payload!.Length).IsEqualTo(7);
+
+        // The largest padding allowed, length - 1, leaves an empty payload: the codec accepts it, and the layer above judges the message.
+        (decoded, payload, _) = Decode(none, new ReadOnlySequence<byte>(RawNonePacket(12, 11, 12)), 0);
+        await Assert.That(decoded).IsTrue();
+        await Assert.That(payload!.Length).IsEqualTo(0);
+    }
+
+    public static IEnumerable<string> ProtectedSuites() => Suites().Where(s => s != "none");
+
+    [Test]
+    [MethodDataSource(nameof(ProtectedSuites))]
+    public async Task TamperedTag_FailsAuthentication_ItselfAndNotALaterCheck(string suite)
+    {
+        // Only the tag changes, so the packet itself would decrypt to a valid one: the authentication check alone must refuse it.
+        using var sender = Create(suite);
+        var wire = Encode(sender, new byte[30], 5);
+        var bad = (byte[])wire.Clone();
+        bad[^1] ^= 0x01;
+        using var receiver = Create(suite);
+        var ex = Assert.Throws<SshProtocolException>(() => Decode(receiver, new ReadOnlySequence<byte>(bad), 5));
+        await Assert.That(ex.Message).IsEqualTo(AuthenticationFailed);
+    }
+
+    private static byte[] EtmLengthOnly(uint length)
+    {
+        // Encrypt-then-MAC sends the length in clear and aligns it by itself, so any multiple of 16 reaches the length check alone.
+        var bytes = new byte[4];
+        BinaryPrimitives.WriteUInt32BigEndian(bytes, length);
+        return bytes;
+    }
+
+    [Test]
+    public async Task Decode_LengthLimit_IsExact()
+    {
+        using var etm = Create("aes128-ctr+hmac-sha2-256-etm");
+
+        // The largest length allowed waits for the rest of the packet.
+        var (ok, _, consumed) = Decode(etm, new ReadOnlySequence<byte>(EtmLengthOnly(PacketCodec.MaxPacketLength)), 0);
+        await Assert.That(ok).IsFalse();
+        await Assert.That(consumed).IsEqualTo(0);
+
+        // One block more is refused at once, before any of it is buffered, by the length check itself.
+        var tooLong = PacketCodec.MaxPacketLength + 16;
+        var ex = Assert.Throws<SshProtocolException>(() => Decode(etm, new ReadOnlySequence<byte>(EtmLengthOnly((uint)tooLong)), 0));
+        await Assert.That(ex.Message).IsEqualTo($"Invalid packet length {tooLong}.");
+
+        ex = Assert.Throws<SshProtocolException>(() => Decode(etm, new ReadOnlySequence<byte>(EtmLengthOnly(uint.MaxValue & ~15u)), 0));
+        await Assert.That(ex.Message).IsEqualTo($"Invalid packet length {uint.MaxValue & ~15u}.");
+    }
+
+    [Test]
+    public async Task Decode_ShortAndMisalignedLengths_FailTheirOwnChecks()
+    {
+        var none = PacketProtector.None;
+
+        // 4 is aligned (4 + 4 = 8) but leaves no room for the padding length byte and the minimum padding.
+        var ex = Assert.Throws<SshProtocolException>(() => Decode(none, new ReadOnlySequence<byte>(RawNonePacket(4, 4, 16)), 0));
+        await Assert.That(ex.Message).IsEqualTo("Invalid packet length 4.");
+
+        ex = Assert.Throws<SshProtocolException>(() => Decode(none, new ReadOnlySequence<byte>(RawNonePacket(13, 4, 16)), 0));
+        await Assert.That(ex.Message).IsEqualTo("Packet length 13 is not a multiple of the cipher block size.");
+    }
+
+    [Test]
+    public async Task Encode_LengthLimit_IsExact()
+    {
+        // With encrypt-then-MAC, payload MaxPacketLength - 5 needs exactly the minimum padding (4) to reach MaxPacketLength.
+        using var etm = Create("aes128-ctr+hmac-sha2-256-etm");
+        var largest = new byte[PacketCodec.MaxPacketLength - 5];
+        var wire = Encode(etm, largest, 0);
+        await Assert.That(BinaryPrimitives.ReadUInt32BigEndian(wire)).IsEqualTo((uint)PacketCodec.MaxPacketLength);
+        using var receiver = Create("aes128-ctr+hmac-sha2-256-etm");
+        var (ok, payload, _) = Decode(receiver, new ReadOnlySequence<byte>(wire), 0);
+        await Assert.That(ok).IsTrue();
+        await Assert.That(payload!.Length).IsEqualTo(largest.Length);
+
+        var buffer = new ArrayBufferWriter<byte>();
+        await Assert.That(() => PacketCodec.Encode(buffer, new byte[PacketCodec.MaxPacketLength - 4], etm, 1)).Throws<ArgumentException>();
     }
 
     [Test]
@@ -394,8 +507,29 @@ public class PacketCodecTests
     public async Task Protectors_ValidateTheirKeys()
     {
         await Assert.That(() => new AesGcmProtector(new byte[24], new byte[12])).Throws<ArgumentException>();
-        await Assert.That(() => new AesGcmProtector(new byte[16], new byte[11])).Throws<ArgumentException>();
+        // Refused by the check itself (ThrowsExactly: slicing a short IV would throw an ArgumentOutOfRangeException anyway).
+        await Assert.That(() => new AesGcmProtector(new byte[16], new byte[11])).ThrowsExactly<ArgumentException>();
+        using (new AesGcmProtector(new byte[16], new byte[16]))
+        {
+            // A longer IV is fine: the first 12 bytes are used, as the key derivation produces more than that.
+        }
+
         await Assert.That(() => new ChaCha20Poly1305Protector(new byte[10])).Throws<ArgumentException>();
         await Assert.That(PacketProtector.None.TagSize).IsEqualTo(0);
+    }
+
+    [Test]
+    public async Task ChaCha20Poly1305_AlignsThePacketLengthWithoutTheLengthField()
+    {
+        // chacha20-poly1305@openssh.com encrypts the length separately; packet_length itself (not length + 4) is a multiple of 8.
+        using var sender = Create("chacha20-poly1305");
+        for (uint packet = 0; packet < 20; packet++)
+        {
+            var wire = Encode(sender, new byte[(int)packet * 3], packet);
+            using var reader = Create("chacha20-poly1305");
+            var length = reader.ReadLength(packet, wire.AsSpan(0, 4));
+            await Assert.That(length % 8).IsEqualTo(0u);
+            await Assert.That(wire.Length).IsEqualTo(4 + (int)length + 16);
+        }
     }
 }
