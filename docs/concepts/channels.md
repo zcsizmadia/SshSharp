@@ -50,6 +50,20 @@ Consequences:
   why SFTP's `Segments` uses several channels.
 - **Channels do not block each other.** A stalled channel does not slow the others on the same connection.
 
+## Receive buffering
+
+Received data is copied as little as possible on its way to your code:
+
+- **Socket reads are large.** The connection reads from the network into a 128 KiB buffer, with room for at least 32 KiB in each
+  read, so one read usually brings in several packets. Smaller reads cost far more CPU per GiB, as each one is a separate
+  asynchronous completion. The buffer comes from the shared array pool, and only while data is being read: the connection waits for
+  data with no buffer (a zero-byte read), so an idle connection holds none.
+- **Each packet is decrypted into a pooled buffer** that holds its data until your code has read it. The bytes the packet used are
+  then zeroed and the buffer is returned to the pool, and the data counts as consumed for the window.
+- **Stream reads return what has arrived.** `ReadAsync` on `StandardOutput`, `StandardError` or a tunnel waits only until some data
+  is there. It then copies everything already received, across as many packets as fit in your buffer. A buffer of 64 KiB or more
+  takes a fast transfer in fewer reads. Read boundaries do not follow the server's writes or packets.
+
 ## Limits
 
 - **Sessions per connection.** Servers limit open session channels (sshd's `MaxSessions`, 10 by default). Commands, shells and SFTP

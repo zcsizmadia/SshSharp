@@ -3,7 +3,8 @@ namespace SshSharp.Protocol;
 /// <summary>
 /// A channel's data as a duplex <see cref="Stream"/> (asynchronous only): reads return channel data (extended data is dropped),
 /// writes are sent as channel data, and disposing sends EOF and CLOSE. Used to run SSH over a <c>direct-tcpip</c> channel (ProxyJump)
-/// and, later, for port forwarding.
+/// and, later, for port forwarding. A read waits for the first chunk only, then also copies the chunks that have already arrived while
+/// the caller's buffer has room.
 /// </summary>
 internal sealed class SshChannelStream(SshChannel channel) : Stream
 {
@@ -72,11 +73,25 @@ internal sealed class SshChannelStream(SshChannel channel) : Stream
                 ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this); // disposed while this read waited
             }
 
-            var available = _current.Data.Span[_offset..];
-            var count = Math.Min(available.Length, buffer.Length);
-            available[..count].CopyTo(buffer.Span);
-            _offset += count;
-            return count;
+            // Then the chunks that have already arrived, without waiting for more: one read returns as much as is there, rather than one
+            // packet's worth (32 KiB at most) per call.
+            var total = 0;
+            while (true)
+            {
+                var available = _current.Data.Span[_offset..];
+                var count = Math.Min(available.Length, buffer.Length - total);
+                available[..count].CopyTo(buffer.Span[total..]);
+                _offset += count;
+                total += count;
+                if (total == buffer.Length || Volatile.Read(ref _disposed) != 0 || !TryTakeQueued(out var next))
+                {
+                    return total; // a chunk used up last stays current until the next read, which releases it
+                }
+
+                // This chunk is used up: released (its window given back) as the next takes its place.
+                ReleaseCurrent();
+                _current = next;
+            }
         }
         finally
         {
@@ -86,6 +101,22 @@ internal sealed class SshChannelStream(SshChannel channel) : Stream
                 ReleaseCurrent(); // disposed during this read, which owned the chunk until now
             }
         }
+    }
+
+    /// <summary>Takes the next chunk that has already arrived, without waiting; stderr is dropped, as when waiting for one.</summary>
+    private bool TryTakeQueued([System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out ChannelData? next)
+    {
+        while (Channel.TryRead(out next))
+        {
+            if (!next.IsExtended)
+            {
+                return true;
+            }
+
+            next.Dispose(); // stderr has no place in a byte stream
+        }
+
+        return false;
     }
 
     /// <summary>Releases the current chunk on disposal, unless a read in progress owns it (that read releases it when it ends).</summary>
