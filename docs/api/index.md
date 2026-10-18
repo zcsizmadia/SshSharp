@@ -19,7 +19,7 @@ Generated from the XML documentation comments, which IntelliSense shows too. Sta
 |---|---|
 | Connect | <xref:SshSharp.SshClient>, <xref:SshSharp.SshClientOptions>, <xref:SshSharp.SshConfigConnectOptions>, <xref:SshSharp.SshProxy> |
 | Verify the server | <xref:SshSharp.KnownHostsVerifier>, <xref:SshSharp.SshHostKeyVerifier>, <xref:SshSharp.SshHostKey> |
-| Authenticate | <xref:SshSharp.SshPrivateKey>, <xref:SshSharp.SshAgent>, <xref:SshSharp.SshCertificate>, <xref:SshSharp.SshKeySigner>, <xref:SshSharp.SshGssapiOptions> |
+| Authenticate | <xref:SshSharp.SshPrivateKey>, <xref:SshSharp.SshPublicKey>, <xref:SshSharp.SshAgent>, <xref:SshSharp.SshCertificate>, <xref:SshSharp.SshKeySigner>, <xref:SshSharp.SshGssapiOptions> |
 | Run programs | <xref:SshSharp.SshCommandResult>, <xref:SshSharp.SshSession>, <xref:SshSharp.SshSessionOptions>, <xref:SshSharp.SshExpect> |
 | Transfer files | <xref:SshSharp.Sftp.SftpClient>, <xref:SshSharp.Sftp.SftpTransferOptions>, <xref:SshSharp.Scp.SshScpExtensions> |
 | Forward ports | <xref:SshSharp.SshLocalPortForwarder>, <xref:SshSharp.SshRemotePortForwarder>, <xref:SshSharp.SshDynamicPortForwarder> |

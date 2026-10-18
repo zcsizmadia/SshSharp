@@ -17,6 +17,9 @@ namespace SshSharp;
 /// </summary>
 public abstract class SshPrivateKey : IDisposable
 {
+    // Made on first use; two threads racing make equal keys, and either may be kept.
+    private SshPublicKey? _publicKey;
+
     private protected SshPrivateKey(string keyType, byte[] publicKey, string? comment)
     {
         KeyType = keyType;
@@ -35,6 +38,17 @@ public abstract class SshPrivateKey : IDisposable
 
     /// <summary>The OpenSSH-style SHA-256 fingerprint of the public key, as <c>ssh-keygen -lf</c> prints it.</summary>
     public string Fingerprint => "SHA256:" + Convert.ToBase64String(SHA256.HashData(PublicKey.Span)).TrimEnd('=');
+
+    /// <summary>
+    /// The public key as an <see cref="SshPublicKey"/>, with this key's <see cref="Comment"/>. For a key paired with a certificate
+    /// (<see cref="WithCertificate"/>), it is the certified key, not the certificate that <see cref="PublicKey"/> holds then.
+    /// </summary>
+    /// <exception cref="FormatException">The key is one <see cref="SshPublicKey"/> does not read: an agent's FIDO security-key
+    /// certificate.</exception>
+    public SshPublicKey GetPublicKey() =>
+        _publicKey ??= Certificate is { } certificate
+            ? SshPublicKey.FromVerifyingKey(certificate.Key, Comment)
+            : SshPublicKey.Read(PublicKey.Span, Comment);
 
     /// <summary>The public key as an <c>authorized_keys</c> line (type, base64, comment).</summary>
     public string ToAuthorizedKeysLine() =>

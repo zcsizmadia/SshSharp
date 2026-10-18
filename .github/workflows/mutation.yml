@@ -51,6 +51,9 @@ jobs:
           - scope: ecdh-dh
             mutate: -m "**/Crypto/NistCurve.cs" -m "**/Crypto/ModpGroup.cs" -m "**/Crypto/DhGroupValidator.cs" -m "**/Protocol/ClientKeyExchange.cs" -m "**/Protocol/DhGroupExchangeKeyExchange.cs"
             tests: Crypto/NistCurveTests.cs;Crypto/ModpGroupTests.cs;Crypto/DhGroupValidatorTests.cs;Crypto/WycheproofTests.cs;Protocol/ClientKeyExchangeTests.cs;Protocol/DhGroupExchangeTests.cs;Protocol/MlKemKexTests.cs;Protocol/SntrupKexTests.cs;Keys/ExternalKeyTests.cs;Agent/AgentTests.cs
+          - scope: public-key
+            mutate: -m "**/Keys/SshPublicKey.cs" -m "**/Keys/VerifyingKey.cs"
+            tests: Keys/*Tests.cs;Crypto/WycheproofTests.cs;Fuzz/ParserRobustnessTests.cs
           - scope: sntrup761
             mutate: -m "**/Crypto/Sntrup761.cs"
             tests: Crypto/Sntrup761Tests.cs;Protocol/SntrupKexTests.cs
@@ -68,7 +71,7 @@ jobs:
             tests: Config/*Tests.cs;ConfigConnectTests.cs;ConfigForwardingTests.cs
           - scope: config-known-hosts
             mutate: -m "**/Config/KnownHosts*.cs" -m "**/Config/ForwardSpec.cs" -m "**/Config/SshExecMatcher.cs" -m "**/Config/SshTime.cs"
-            tests: Config/*Tests.cs;KnownHostsVerifierTests.cs;ConfigForwardingTests.cs;Fuzz/ParserRobustnessTests.cs
+            tests: Config/*Tests.cs;KnownHostsVerifierTests.cs;ConfigForwardingTests.cs;Fuzz/ParserRobustnessTests.cs;Keys/SshPublicKeyTests.cs
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

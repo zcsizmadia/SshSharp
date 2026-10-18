@@ -85,6 +85,42 @@ internal static class Keys
         // </generate>
     }
 
+    public static async Task PublicKeysAsync(SshAgent agent, CancellationToken cancellationToken)
+    {
+        // <public-key>
+        // A .pub file, or one authorized_keys line without options: "<type> <base64> [comment]".
+        var key = SshPublicKey.Parse(await File.ReadAllTextAsync("id_ed25519.pub", cancellationToken));
+        Console.WriteLine($"{key.KeySizeBits} {key.Fingerprint} {key.Comment} ({key.KeyType})");   // as ssh-keygen -lf prints it
+        Console.WriteLine(key.GetFingerprint(HashAlgorithmName.MD5));                                // ssh-keygen -l -E md5: MD5:aa:bb:...
+
+        // Which of the agent's keys is it? Keys are equal when their key bytes are; comments are ignored.
+        var agentKeys = await agent.GetKeysAsync(cancellationToken);
+        var match = agentKeys.FirstOrDefault(k => k.GetPublicKey() == key);
+        // </public-key>
+        _ = match;
+    }
+
+    public static async Task<bool> VerifyBySignerKeyAsync(CancellationToken cancellationToken)
+    {
+        // <signer-key>
+        var releaseKey = SshPublicKey.Parse(await File.ReadAllTextAsync("release_ed25519.pub", cancellationToken));
+        var signature = SshSignature.Parse(await File.ReadAllTextAsync("release.tar.gz.sig", cancellationToken));
+        await using var file = File.OpenRead("release.tar.gz");
+        var valid = signature.GetPublicKey() == releaseKey && await signature.VerifyAsync(file, "file", cancellationToken);
+        // </signer-key>
+        return valid;
+    }
+
+    public static bool VerifySignature(SshPublicKey key, byte[] data, byte[] signature)
+    {
+        // <verify-signature>
+        // signature is in the SSH encoding (string algorithm, string signature), as an agent or an SshKeySigner makes it.
+        // False for a wrong or malformed signature, and for SHA-1 ssh-rsa.
+        var valid = key.VerifySignature(data, signature);
+        // </verify-signature>
+        return valid;
+    }
+
     [SupportedOSPlatform("windows")]
     public static async Task CngAsync(SshHostKeyVerifier verifier, CancellationToken cancellationToken)
     {

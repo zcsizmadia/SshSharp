@@ -390,7 +390,7 @@ public sealed class RevokedHostKeysTests : IDisposable
 
         File.WriteAllText(Path.Combine(_dir, "certs.spec"), spec.ToString());
         File.WriteAllText(Path.Combine(_dir, "keys.spec"),
-            $"sha1: {Line(bySha1.Blob)}\nhash: {SshSharp.Keys.SshPublicKey.Parse(byHash.Blob).Fingerprint}\n");
+            $"sha1: {Line(bySha1.Blob)}\nhash: {SshSharp.Keys.VerifyingKey.Parse(byHash.Blob).Fingerprint}\n");
 
         var krl = Path.Combine(_dir, "revoked.krl");
         await RunAsync(sshKeygen, "-k", "-f", krl, Path.Combine(_dir, "explicit.pub"), Path.Combine(_dir, "keys.spec"));

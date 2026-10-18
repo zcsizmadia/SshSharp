@@ -13,13 +13,13 @@ namespace SshSharp;
 internal sealed class ExternalKey : SshPrivateKey
 {
     private readonly SshKeySigner _signer;
-    private readonly SshPublicKey _publicKey;
+    private readonly VerifyingKey _publicKey;
 
     public ExternalKey(SshKeySigner signer, string? comment)
         : base(signer.KeyType, signer.PublicKey.ToArray(), comment)
     {
         _signer = signer;
-        _publicKey = SshPublicKey.Parse(signer.PublicKey.Span);
+        _publicKey = VerifyingKey.Parse(signer.PublicKey.Span);
         string[] supported = signer.KeyType == "ssh-rsa" ? [SshAlgorithms.RsaSha2_512, SshAlgorithms.RsaSha2_256] : [signer.KeyType];
         var offered = signer.SignatureAlgorithms;
         if (offered is null || offered.Count == 0 || offered.Any(a => !supported.Contains(a, StringComparer.Ordinal)))

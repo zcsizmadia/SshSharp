@@ -105,6 +105,10 @@ See [Connecting](connecting.md) for streams, jump hosts and timeouts.
 |---|---|
 | `HostKeyReceived` with `e.CanTrust = e.FingerPrintSHA256 == ...` | `SshHostKeyVerifier.Pinned("SHA256:...")` |
 | `HostKeyReceived` with your own logic | `SshHostKeyVerifier.FromDelegate((context, ct) => ...)`; `context.HostKey` has the key, type and fingerprint |
+| `HostKeyReceived` comparing `e.HostKey` with a key you hold | `SshHostKeyVerifier.Pinned(SshPublicKey.Parse(pubLine))` |
+| `e.HostKey` (the key bytes), `e.HostKeyName`, `e.KeyLength` | `context.HostKey.PublicKey`, `KeyType`, `KeySizeBits`; `context.HostKey.GetPublicKey()` as an `SshPublicKey` |
+| `e.FingerPrintSHA256` | `context.HostKey.Fingerprint`, with the `SHA256:` prefix |
+| `e.FingerPrintMD5` (`aa:bb:...`) | `context.HostKey.GetPublicKey().GetFingerprint(HashAlgorithmName.MD5)`, written `MD5:aa:bb:...` as `ssh-keygen -E md5` prints it |
 | (no handler: every key is accepted) | no equivalent: a verifier is required |
 | (no `known_hosts` support) | `KnownHostsVerifier.ForCurrentUser(StrictHostKeyChecking.Yes)` |
 
@@ -133,6 +137,8 @@ prompt, so you need no handler for it.
 | OpenSSH, PKCS#1, PKCS#8, PuTTY `.ppk` | the same, plus SEC1; ssh.com keys are not read (convert them with `ssh-keygen -i`) |
 | `ssh-rsa` (SHA-1) signatures | RSA keys sign with `rsa-sha2-256` or `rsa-sha2-512` only |
 | (no key generation) | `SshPrivateKey.Generate(SshKeyType.Ed25519)`, then `SaveAsync(path, passphrase)` (see [Authentication](authentication.md#generating-keys)) |
+| a `PrivateKeyFile`'s public key | `key.GetPublicKey()`: an `SshPublicKey` with `KeyType`, `Fingerprint` and `ToAuthorizedKeysLine()` |
+| (no public key type: `.pub` files and `authorized_keys` lines read by hand) | `SshPublicKey.Parse(line)` and `FromBlob(bytes)`, equal by key bytes, with `VerifySignature` (see [Read a public key](how-to/agent-and-keys.md#read-a-public-key-and-its-fingerprint)) |
 
 `SshPrivateKey` is `IDisposable`: disposing it clears the key material.
 

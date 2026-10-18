@@ -789,7 +789,7 @@ internal sealed class SshTransport : IAsyncDisposable
     {
         // A certificate host key (PROTOCOL.certkeys): the server proves possession of the certified key, signing with the base algorithm.
         // Whether the certificate itself is trusted (authority, principals, validity) is the verifier's decision.
-        SshPublicKey key;
+        VerifyingKey key;
         SshCertificate? certificate = null;
         var signatureAlgorithm = negotiated.HostKey;
         if (SshCertificate.IsCertificateAlgorithm(negotiated.HostKey))
@@ -813,7 +813,7 @@ internal sealed class SshTransport : IAsyncDisposable
         }
         else
         {
-            key = SshPublicKey.Parse(result.HostKeyBlob);
+            key = VerifyingKey.Parse(result.HostKeyBlob);
             var expectedType = negotiated.HostKey is SshAlgorithms.RsaSha2_256 or SshAlgorithms.RsaSha2_512 ? "ssh-rsa" : negotiated.HostKey;
             if (key.KeyType != expectedType)
             {

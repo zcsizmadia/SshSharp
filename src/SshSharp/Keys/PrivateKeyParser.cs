@@ -341,7 +341,7 @@ internal static class PrivateKeyParser
         {
             var data = "SshSharp private key consistency check"u8;
             var algorithm = key.SignatureAlgorithms[0];
-            if (SshPublicKey.Parse(key.PublicKey.Span).VerifySignature(algorithm, key.Sign(algorithm, data), data))
+            if (VerifyingKey.Parse(key.PublicKey.Span).VerifySignature(algorithm, key.Sign(algorithm, data), data))
             {
                 return key;
             }

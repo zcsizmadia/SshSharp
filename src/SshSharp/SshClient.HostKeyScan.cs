@@ -19,7 +19,7 @@ public sealed partial class SshClient
     /// when the server offers none of the requested types.</returns>
     /// <exception cref="SshException">A connection or key exchange failed for another reason than an unsupported key type.</exception>
     /// <remarks>To add the keys to <c>known_hosts</c>, pass each one's <see cref="SshHostKey.KeyType"/> and <see cref="SshHostKey.PublicKey"/>
-    /// to <see cref="Config.KnownHostsFile.Add"/>.</remarks>
+    /// to <see cref="Config.KnownHostsFile.Add(string, int, string, ReadOnlySpan{byte}, bool, string?, Config.KnownHostsMarker)"/>.</remarks>
     public static Task<IReadOnlyList<SshHostKey>> ScanHostKeysAsync(string host, int port = 22, SshHostKeyScanOptions? options = null, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(host);

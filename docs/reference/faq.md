@@ -63,6 +63,13 @@ From configuration, a secret store or an environment variable, never source code
 Yes: FIDO keys through the agent; Windows key stores and the TPM through `SshPrivateKey.FromRsa`/`FromECDsa`; anything else with
 `SshKeySigner`. See [Keys and the SSH agent](../how-to/agent-and-keys.md).
 
+**How do I get a key's fingerprint?**
+`Fingerprint` on a key, a host key or a certificate is the `SHA256:...` form `ssh-keygen -lf` prints. For a `.pub` file or an
+`authorized_keys` line, read it with `SshPublicKey.Parse(line)` first. `GetFingerprint(HashAlgorithmName.MD5)` gives the legacy
+`MD5:aa:bb:...` form (`ssh-keygen -l -E md5`) for inventories that still list it. `SshPrivateKey`, `SshHostKey`,
+`KnownHostsEntry`, `SshCertificate` and `SshSignature` all have `GetPublicKey()`. See
+[Read a public key and its fingerprint](../how-to/agent-and-keys.md#read-a-public-key-and-its-fingerprint).
+
 **Does it support `ssh-rsa` (SHA-1) or DSA keys?**
 No. RSA keys sign with `rsa-sha2-256` or `rsa-sha2-512`, which every OpenSSH since 7.2 accepts. DSA is not supported.
 

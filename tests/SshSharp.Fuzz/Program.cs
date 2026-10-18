@@ -25,7 +25,8 @@ internal static class Targets
     {
         ["packet"] = Packet,
         ["kexinit"] = data => Protocol(() => KexInitMessage.Parse(data)),
-        ["publickey"] = data => Protocol(() => SshPublicKey.Parse(data).VerifySignature(SshAlgorithms.SshEd25519, data, data)),
+        ["publickey"] = data => Protocol(() => VerifyingKey.Parse(data).VerifySignature(SshAlgorithms.SshEd25519, data, data)),
+        ["publickey-text"] = data => Format(() => PublicKeyText(Encoding.UTF8.GetString(data), data)),
         ["certificate"] = data => Protocol(() => SshCertificate.FromBlob(data).CheckForHost("host", DateTimeOffset.UtcNow)),
         ["privatekey"] = data => Format(() => SshPrivateKey.Parse(Encoding.UTF8.GetString(data), "passphrase").Dispose()),
         ["privatekey-binary"] = data => Format(() => SshPrivateKey.Parse(
@@ -62,6 +63,18 @@ internal static class Targets
                 sequence = sequence.Slice(consumed);
             }
         });
+    }
+
+    /// <summary>A .pub or authorized_keys line through the public SshPublicKey: whatever parses must survive fingerprints and verifying garbage.</summary>
+    private static void PublicKeyText(string line, byte[] data)
+    {
+        var key = SshPublicKey.Parse(line);
+        _ = key.GetFingerprint(System.Security.Cryptography.HashAlgorithmName.MD5);
+        _ = key.ToAuthorizedKeysLine();
+        if (!key.KeyType.StartsWith("sk-", StringComparison.Ordinal))
+        {
+            key.VerifySignature(data, data);
+        }
     }
 
     private static void Protocol(Action parse)

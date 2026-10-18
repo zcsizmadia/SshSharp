@@ -1317,7 +1317,7 @@ internal sealed class FakeSessionServer : IAsyncDisposable
         {
             return SshCertificate.IsCertificateAlgorithm(algorithm)
                 ? SshCertificate.FromBlob(blob).Key.VerifySignature(SshCertificate.BaseAlgorithm(algorithm), signature, signed)
-                : SshSharp.Keys.SshPublicKey.Parse(blob).VerifySignature(algorithm, signature, signed);
+                : SshSharp.Keys.VerifyingKey.Parse(blob).VerifySignature(algorithm, signature, signed);
         }
         catch (SshProtocolException)
         {

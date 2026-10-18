@@ -16,6 +16,14 @@ public sealed record SshHostKey(string Algorithm, string KeyType, string Fingerp
     /// </summary>
     public SshCertificate? Certificate { get; init; }
 
+    /// <summary>
+    /// <see cref="PublicKey"/> as an <see cref="SshPublicKey"/>, to compare with a key you hold (<c>hostKey.GetPublicKey() == expected</c>),
+    /// write as a line, or fingerprint with another hash. For a host certificate it is the certified key, as <see cref="PublicKey"/> is.
+    /// </summary>
+    /// <exception cref="FormatException"><see cref="PublicKey"/> is not a key <see cref="SshPublicKey"/> reads (only possible for a
+    /// host key made by hand).</exception>
+    public SshPublicKey GetPublicKey() => SshPublicKey.Read(PublicKey.Span);
+
     /// <summary>Equal when they describe the same key: the key bytes are compared, not the buffers that hold them.</summary>
     public bool Equals(SshHostKey? other) =>
         other is not null
@@ -164,7 +172,7 @@ public sealed class SshClientOptions
     public IReadOnlyList<SshPrivateKey> PrivateKeys { get; init; } = [];
 
     /// <summary>
-    /// Decides whether to trust the server's host key: a <see cref="KnownHostsVerifier"/>, <see cref="SshHostKeyVerifier.Pinned"/>,
+    /// Decides whether to trust the server's host key: a <see cref="KnownHostsVerifier"/>, <see cref="SshHostKeyVerifier.Pinned(string[])"/>,
     /// or your own (<see cref="SshHostKeyVerifier.FromDelegate"/>). There is deliberately no default: accepting unknown keys silently
     /// would defeat the purpose of host authentication.
     /// </summary>

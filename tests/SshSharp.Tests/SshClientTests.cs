@@ -541,7 +541,33 @@ public class SshClientTests
         var pinned = new SshClientOptions { UserName = "tester", Password = "secret", HostKeyVerifier = SshHostKeyVerifier.Pinned(fingerprint!) };
         var ex = await Assert.ThrowsAsync<SshHostKeyException>(async () => await SshClient.ConnectAsync(second.ClientStream, pinned, leaveOpen: true, Timeout()));
         await Assert.That(ex!.Message).Contains("pinned");
-        await Assert.That(() => SshHostKeyVerifier.Pinned()).Throws<ArgumentException>();
+        await Assert.That(() => SshHostKeyVerifier.Pinned(Array.Empty<string>())).Throws<ArgumentException>();
+    }
+
+    [Test]
+    public async Task PinnedKeys_AcceptOnlyThoseKeys()
+    {
+        var hostKey = FakeHostKey.Ecdsa(256);
+        var pinned = SshPublicKey.FromBlob(hostKey.Blob);
+        var otherKey = SshPublicKey.FromBlob(FakeHostKey.Ed25519().Blob);
+
+        await using (var server = new FakeSessionServer(new FakeServerOptions { HostKey = hostKey }))
+        {
+            await using var client = await ConnectAsync(server, PinnedOptions(otherKey, pinned));
+            await Assert.That(client.HostKey.GetPublicKey()).IsEqualTo(pinned);
+        }
+
+        await using var second = new FakeSessionServer(new FakeServerOptions { HostKey = hostKey });
+        _ = second.StartAsync();
+        var options = PinnedOptions(otherKey);
+        var ex = await Assert.ThrowsAsync<SshHostKeyException>(async () => await SshClient.ConnectAsync(second.ClientStream, options, leaveOpen: true, Timeout()));
+        await Assert.That(ex!.Message).Contains("pinned keys");
+
+        static SshClientOptions PinnedOptions(params SshPublicKey[] keys)
+        {
+            var options = Options();
+            return new SshClientOptions { UserName = options.UserName, Password = options.Password, HostKeyVerifier = SshHostKeyVerifier.Pinned(keys) };
+        }
     }
 
     private sealed class RecordingVerifier(Func<SshHostKeyContext, SshHostKeyVerdict> decide) : SshHostKeyVerifier

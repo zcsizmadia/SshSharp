@@ -24,10 +24,10 @@ public abstract class SshKeySigner
     /// <exception cref="FormatException">The public key is malformed, of an unsupported type, or an RSA key under 2048 bits.</exception>
     protected SshKeySigner(ReadOnlyMemory<byte> publicKey)
     {
-        SshPublicKey key;
+        VerifyingKey key;
         try
         {
-            key = SshPublicKey.Parse(publicKey.Span);
+            key = VerifyingKey.Parse(publicKey.Span);
         }
         catch (SshProtocolException ex)
         {

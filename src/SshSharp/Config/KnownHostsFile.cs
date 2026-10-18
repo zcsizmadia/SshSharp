@@ -131,6 +131,33 @@ public sealed class KnownHostsFile
         return matched ? KnownHostsCheckResult.Match : changed ? KnownHostsCheckResult.Changed : KnownHostsCheckResult.Unknown;
     }
 
+    /// <summary>Checks a presented host key on port 22, as <see cref="Check(string, int, SshPublicKey)"/> does.</summary>
+    public KnownHostsCheckResult Check(string host, SshPublicKey key) => Check(host, 22, key);
+
+    /// <summary>Checks a presented host key, as <see cref="Check(string, int, string, ReadOnlySpan{byte})"/> does with its type and blob.</summary>
+    public KnownHostsCheckResult Check(string host, int port, SshPublicKey key)
+    {
+        ArgumentNullException.ThrowIfNull(key);
+        return Check(host, port, key.KeyType, key.Blob.Span);
+    }
+
+    /// <summary>
+    /// Appends an entry for a host's key, as <see cref="Add(string, int, string, ReadOnlySpan{byte}, bool, string?, KnownHostsMarker)"/>
+    /// does with its type and blob. The key's own <see cref="SshPublicKey.Comment"/> is not written; pass <paramref name="comment"/> for one.
+    /// </summary>
+    /// <param name="host">The host name or address.</param>
+    /// <param name="port">The port.</param>
+    /// <param name="key">The host's key.</param>
+    /// <param name="hash">Whether to store the host hashed (<c>HashKnownHosts</c>).</param>
+    /// <param name="comment">An optional comment.</param>
+    /// <param name="marker">An optional marker.</param>
+    public KnownHostsEntry Add(string host, int port, SshPublicKey key, bool hash = false, string? comment = null,
+        KnownHostsMarker marker = KnownHostsMarker.None)
+    {
+        ArgumentNullException.ThrowIfNull(key);
+        return Add(host, port, key.KeyType, key.Blob.Span, hash, comment, marker);
+    }
+
     /// <summary>Appends an entry for a host.</summary>
     /// <param name="host">The host name or address.</param>
     /// <param name="port">The port.</param>
@@ -291,7 +318,7 @@ public sealed class KnownHostsFile
 
     /// <summary>
     /// Appends one entry to a file without rewriting it, as <see cref="AppendAsync(string, string, int, string, ReadOnlyMemory{byte}, bool, CancellationToken)"/>
-    /// does, with a comment and a marker, as <see cref="Add"/> takes them.
+    /// does, with a comment and a marker, as <see cref="Add(string, int, string, ReadOnlySpan{byte}, bool, string?, KnownHostsMarker)"/> takes them.
     /// </summary>
     /// <param name="path">The known_hosts file.</param>
     /// <param name="host">The host name or address.</param>

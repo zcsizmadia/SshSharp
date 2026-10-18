@@ -1,22 +1,39 @@
 using System.Buffers;
-using System.Numerics;
 using System.Security.Cryptography;
 using System.Text;
-using SshSharp.Crypto;
-using SshSharp.Keys;
+using SshSharp.Config;
 using SshSharp.Protocol;
 
 namespace SshSharp.Tests.Keys;
 
 /// <summary>
-/// Checks key parsing, fingerprints and signature verification against keys, fingerprints and SSHSIG signatures that
-/// OpenSSH's own ssh-keygen produced (fixtures/hostkeys_openssh.txt).
+/// The public <see cref="SshPublicKey"/>: parsing lines and blobs, fingerprints against what OpenSSH's ssh-keygen printed for the keys in
+/// fixtures/hostkeys_openssh.txt, equality, signature verification, hostile input, and the accessors on the types that hold key blobs.
 /// </summary>
 public class SshPublicKeyTests
 {
+    private static readonly byte[] Message = File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "Fixtures", "hostkey_message.txt"));
+
     public static IEnumerable<string> KeyNames() => ["ed25519", "rsa", "ecdsa256", "ecdsa384", "ecdsa521"];
 
-    private static readonly byte[] Message = File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "Fixtures", "hostkey_message.txt"));
+    public static IEnumerable<Func<(SshKeyType Type, int Bits)>> Types()
+    {
+        yield return () => (SshKeyType.Ed25519, 0);
+        yield return () => (SshKeyType.EcdsaNistp256, 0);
+        yield return () => (SshKeyType.EcdsaNistp384, 0);
+        yield return () => (SshKeyType.EcdsaNistp521, 0);
+        yield return () => (SshKeyType.Rsa, 2048);
+    }
+
+    // What `ssh-keygen -l -E md5 -f` printed for each fixture key.
+    private static string Md5Fingerprint(string name) => name switch
+    {
+        "ed25519" => "MD5:ae:e4:1d:af:48:a7:35:9e:08:9c:54:7c:e2:5e:22:4a",
+        "rsa" => "MD5:de:d8:4a:f7:c1:78:80:36:16:b0:75:f5:3c:7a:3e:01",
+        "ecdsa256" => "MD5:1e:8c:4e:e1:f2:5c:37:2a:46:18:a6:9e:b2:a4:d9:0a",
+        "ecdsa384" => "MD5:f9:90:7f:15:d7:b0:eb:e7:6b:fa:a1:5f:0e:41:3c:bd",
+        _ => "MD5:64:16:81:7b:55:e4:36:a0:b2:0a:35:43:55:90:98:a9",
+    };
 
     private sealed record Fixture(string Pub, string Fingerprint, string Armor);
 
@@ -24,403 +41,420 @@ public class SshPublicKeyTests
     {
         var lines = File.ReadAllLines(Path.Combine(AppContext.BaseDirectory, "Fixtures", "hostkeys_openssh.txt"));
         var start = Array.IndexOf(lines, $"[{name}]");
-        var pub = lines[start + 1]["pub=".Length..];
-        var fp = lines[start + 2]["fp=".Length..];
         var armor = new StringBuilder();
         for (var i = start + 4; lines[i] != ">>"; i++)
         {
             armor.Append(lines[i]);
         }
 
-        return new Fixture(pub, fp, armor.ToString());
+        return new Fixture(lines[start + 1]["pub=".Length..], lines[start + 2]["fp=".Length..], armor.ToString());
     }
 
-    private static byte[] PublicKeyBlob(string authorizedKeysLine) => Convert.FromBase64String(authorizedKeysLine.Split(' ')[1]);
-
-    // SSHSIG: "SSHSIG" || u32 version || string publickey || string namespace || string reserved || string hash_alg || string signature
-    private static (byte[] PublicKey, string Namespace, string HashAlgorithm, byte[] Signature) ParseSshSig(string armor)
+    // The SSHSIG fixture: the signature blob and the data it signs (PROTOCOL.sshsig).
+    private static (byte[] Signature, byte[] SignedData) SshSig(Fixture fixture)
     {
-        var body = armor.Replace("-----BEGIN SSH SIGNATURE-----", string.Empty).Replace("-----END SSH SIGNATURE-----", string.Empty);
-        var bytes = Convert.FromBase64String(body);
-        var reader = new SshReader(bytes);
+        var body = fixture.Armor.Replace("-----BEGIN SSH SIGNATURE-----", string.Empty).Replace("-----END SSH SIGNATURE-----", string.Empty);
+        var reader = new SshReader(Convert.FromBase64String(body));
         reader.ReadBytes(6);
         reader.ReadUInt32();
-        var publicKey = reader.ReadString().ToArray();
+        reader.ReadString();
         var ns = reader.ReadUtf8String();
         reader.ReadString();
         var hash = reader.ReadUtf8String();
         var signature = reader.ReadString().ToArray();
-        return (publicKey, ns, hash, signature);
-    }
 
-    private static byte[] SignedData(string ns, string hashAlgorithm, byte[] message)
-    {
         var buffer = new ArrayBufferWriter<byte>();
         buffer.Write("SSHSIG"u8);
         var writer = new SshWriter(buffer);
         writer.WriteString(ns);
         writer.WriteString(string.Empty);
-        writer.WriteString(hashAlgorithm);
-        writer.WriteString(hashAlgorithm == "sha512" ? SHA512.HashData(message) : SHA256.HashData(message));
-        return buffer.WrittenSpan.ToArray();
+        writer.WriteString(hash);
+        writer.WriteString(hash == "sha512" ? SHA512.HashData(Message) : SHA256.HashData(Message));
+        return (signature, buffer.WrittenSpan.ToArray());
     }
 
-    private static string InnerAlgorithm(byte[] signatureBlob) => new SshReader(signatureBlob).ReadUtf8String();
+    private static byte[] Blob(Action<SshWriter> write) => TestKeys.Blob(write);
+
+    private static string Line(byte[] blob, string? comment = null) =>
+        $"{new SshReader(blob).ReadUtf8String()} {Convert.ToBase64String(blob)}{(comment is null ? string.Empty : " " + comment)}";
+
+    private static SshPrivateKey Generate(SshKeyType type, int bits) => SshPrivateKey.Generate(type, "user@example.com", bits == 0 ? 3072 : bits);
 
     [Test]
     [MethodDataSource(nameof(KeyNames))]
-    public async Task Parse_MatchesOpenSshFingerprint(string name)
+    public async Task Parse_ReadsWhatSshKeygenWrote_AndMatchesItsFingerprints(string name)
     {
         var fixture = Load(name);
-        var blob = PublicKeyBlob(fixture.Pub);
-        var key = SshPublicKey.Parse(blob);
+        var key = SshPublicKey.Parse(fixture.Pub);
 
-        await Assert.That(key.Fingerprint).IsEqualTo(fixture.Fingerprint);
         await Assert.That(key.KeyType).IsEqualTo(fixture.Pub.Split(' ')[0]);
-        await Assert.That(Convert.ToHexString(key.Blob.Span)).IsEqualTo(Convert.ToHexString(blob));
         await Assert.That(key.KeySizeBits).IsEqualTo(name switch { "ed25519" => 256, "rsa" => 2048, "ecdsa256" => 256, "ecdsa384" => 384, _ => 521 });
+        await Assert.That(key.Comment).IsNull();
+        await Assert.That(Convert.ToBase64String(key.Blob.Span)).IsEqualTo(fixture.Pub.Split(' ')[1]);
+        await Assert.That(key.Fingerprint).IsEqualTo(fixture.Fingerprint);
+        await Assert.That(key.GetFingerprint(HashAlgorithmName.SHA256)).IsEqualTo(fixture.Fingerprint);
+        await Assert.That(key.GetFingerprint(HashAlgorithmName.MD5)).IsEqualTo(Md5Fingerprint(name));
+        await Assert.That(key.ToAuthorizedKeysLine()).IsEqualTo(fixture.Pub);
+        await Assert.That(key.ToString()).IsEqualTo(fixture.Pub);
     }
 
     [Test]
     [MethodDataSource(nameof(KeyNames))]
-    public async Task VerifiesTheSignatureOpenSshProduced(string name)
+    public async Task ALine_RoundTripsWithItsComment_AndTheBlobReadsTheSame(string name)
     {
         var fixture = Load(name);
-        var key = SshPublicKey.Parse(PublicKeyBlob(fixture.Pub));
-        var (sigKey, ns, hashAlgorithm, signature) = ParseSshSig(fixture.Armor);
-        var data = SignedData(ns, hashAlgorithm, Message);
-        var algorithm = InnerAlgorithm(signature);
+        var line = fixture.Pub + " deploy@example.com  key 1";
+        var key = SshPublicKey.Parse(line);
+        await Assert.That(key.Comment).IsEqualTo("deploy@example.com  key 1");
+        await Assert.That(key.ToAuthorizedKeysLine()).IsEqualTo(line);
+        await Assert.That(SshPublicKey.Parse(key.ToAuthorizedKeysLine()).Comment).IsEqualTo(key.Comment);
 
-        await Assert.That(Convert.ToHexString(sigKey)).IsEqualTo(Convert.ToHexString(key.Blob.Span));
-        await Assert.That(key.VerifySignature(algorithm, signature, data)).IsTrue();
+        var fromBlob = SshPublicKey.FromBlob(key.Blob.ToArray());
+        await Assert.That(fromBlob).IsEqualTo(key);
+        await Assert.That(fromBlob.Comment).IsNull();
+        await Assert.That(SshPublicKey.FromBlob(key.Blob, "other").Comment).IsEqualTo("other");
+        await Assert.That(SshPublicKey.FromBlob(key.Blob, string.Empty).Comment).IsNull();
+        await Assert.That(SshPublicKey.TryParse(line, out var parsed)).IsTrue();
+        await Assert.That(parsed).IsEqualTo(key);
     }
 
     [Test]
-    [MethodDataSource(nameof(KeyNames))]
-    public async Task RejectsTamperedMessageSignatureAndTruncation(string name)
+    public async Task Parse_TakesTheWhiteSpaceOpenSshDoes()
     {
-        var fixture = Load(name);
-        var key = SshPublicKey.Parse(PublicKeyBlob(fixture.Pub));
-        var (_, ns, hashAlgorithm, signature) = ParseSshSig(fixture.Armor);
-        var data = SignedData(ns, hashAlgorithm, Message);
-        var algorithm = InnerAlgorithm(signature);
+        var fixture = Load("ed25519");
+        var fields = fixture.Pub.Split(' ');
+        var key = SshPublicKey.Parse($"  \t{fields[0]}\t \t{fields[1]} \t comment \r\n");
+        await Assert.That(key.Fingerprint).IsEqualTo(fixture.Fingerprint);
+        await Assert.That(key.Comment).IsEqualTo("comment");
+        await Assert.That(SshPublicKey.Parse(fixture.Pub + "\n").Comment).IsNull();
+        await Assert.That(SshPublicKey.Parse(fixture.Pub + "   ").Comment).IsNull();
+    }
 
-        var otherData = SignedData(ns, hashAlgorithm, [.. Message, (byte)'!']);
-        await Assert.That(key.VerifySignature(algorithm, signature, otherData)).IsFalse();
+    [Test]
+    [MethodDataSource(nameof(Types))]
+    public async Task GeneratedKeys_RoundTrip_AndVerifyTheirSignatures(SshKeyType type, int bits)
+    {
+        using var privateKey = Generate(type, bits);
+        var key = privateKey.GetPublicKey();
 
-        for (var i = signature.Length - 1; i > signature.Length - 40; i -= 7)
+        await Assert.That(key.KeyType).IsEqualTo(privateKey.KeyType);
+        await Assert.That(key.Comment).IsEqualTo("user@example.com");
+        await Assert.That(key.Blob.ToArray().SequenceEqual(privateKey.PublicKey.ToArray())).IsTrue();
+        await Assert.That(key.Fingerprint).IsEqualTo(privateKey.Fingerprint);
+        await Assert.That(key.ToAuthorizedKeysLine()).IsEqualTo(privateKey.ToAuthorizedKeysLine());
+        await Assert.That(SshPublicKey.Parse(privateKey.ToAuthorizedKeysLine())).IsEqualTo(key);
+        await Assert.That(privateKey.GetPublicKey()).IsSameReferenceAs(key);
+
+        var data = "data to sign"u8.ToArray();
+        foreach (var algorithm in privateKey.SignatureAlgorithms)
         {
-            var bad = (byte[])signature.Clone();
-            bad[i] ^= 1;
-            await Assert.That(key.VerifySignature(algorithm, bad, data)).IsFalse();
+            var signature = privateKey.Sign(algorithm, data);
+            await Assert.That(key.VerifySignature(data, signature)).IsTrue();
+            await Assert.That(key.VerifySignature([.. data, 0], signature)).IsFalse();
+            await Assert.That(key.VerifySignature(data, signature.AsSpan(0, signature.Length - 1))).IsFalse();
+            await Assert.That(key.VerifySignature(data, [.. signature, 0])).IsFalse();
+            var flipped = (byte[])signature.Clone();
+            flipped[^1] ^= 1;
+            await Assert.That(key.VerifySignature(data, flipped)).IsFalse();
         }
-
-        await Assert.That(key.VerifySignature(algorithm, signature.AsSpan(0, signature.Length - 1), data)).IsFalse();
-        await Assert.That(key.VerifySignature(algorithm, [.. signature, 0], data)).IsFalse();
-        await Assert.That(key.VerifySignature(algorithm, [], data)).IsFalse();
-        await Assert.That(key.VerifySignature("ssh-dss", signature, data)).IsFalse();
     }
 
     [Test]
-    public async Task OneKeyNeverVerifiesAnotherKeysSignature()
+    [MethodDataSource(nameof(KeyNames))]
+    public async Task VerifySignature_AcceptsTheSignatureOpenSshMade_AndNoOtherKeys(string name)
     {
-        var ed = Load("ed25519");
-        var rsa = Load("rsa");
-        var edKey = SshPublicKey.Parse(PublicKeyBlob(ed.Pub));
-        var (_, ns, hash, rsaSignature) = ParseSshSig(rsa.Armor);
-        await Assert.That(edKey.VerifySignature(InnerAlgorithm(rsaSignature), rsaSignature, SignedData(ns, hash, Message))).IsFalse();
+        var fixture = Load(name);
+        var (signature, signed) = SshSig(fixture);
+        await Assert.That(SshPublicKey.Parse(fixture.Pub).VerifySignature(signed, signature)).IsTrue();
 
-        var e1 = SshPublicKey.Parse(PublicKeyBlob(Load("ecdsa256").Pub));
-        var (_, ns2, hash2, sig384) = ParseSshSig(Load("ecdsa384").Armor);
-        await Assert.That(e1.VerifySignature(InnerAlgorithm(sig384), sig384, SignedData(ns2, hash2, Message))).IsFalse();
-        await Assert.That(e1.VerifySignature("ecdsa-sha2-nistp256", sig384, SignedData(ns2, hash2, Message))).IsFalse();
+        foreach (var other in KeyNames().Where(n => n != name))
+        {
+            await Assert.That(SshPublicKey.Parse(Load(other).Pub).VerifySignature(signed, signature)).IsFalse();
+        }
     }
 
     [Test]
-    public async Task Rsa_AcceptsOnlyTheMatchingSha2Algorithm()
+    public async Task VerifySignature_RefusesMalformedSignatures_AndRsaSha1()
     {
         var fixture = Load("rsa");
-        var key = SshPublicKey.Parse(PublicKeyBlob(fixture.Pub));
-        var (_, ns, hash, signature) = ParseSshSig(fixture.Armor);
-        var data = SignedData(ns, hash, Message);
+        var key = SshPublicKey.Parse(fixture.Pub);
+        var (signature, signed) = SshSig(fixture);
+        var (algorithm, raw) = Split(signature);
+        await Assert.That(algorithm).IsEqualTo("rsa-sha2-512");
 
-        await Assert.That(InnerAlgorithm(signature)).IsEqualTo("rsa-sha2-512");
-        await Assert.That(key.VerifySignature("rsa-sha2-512", signature, data)).IsTrue();
-        await Assert.That(key.VerifySignature("rsa-sha2-256", signature, data)).IsFalse();
-        await Assert.That(key.VerifySignature("ssh-rsa", signature, data)).IsFalse();
+        // The same RSA signature bytes under another algorithm name: SHA-256 does not verify, and SHA-1 ssh-rsa is never accepted.
+        await Assert.That(key.VerifySignature(signed, Blob(w => { w.WriteString("rsa-sha2-256"); w.WriteString(raw); }))).IsFalse();
+        await Assert.That(key.VerifySignature(signed, Blob(w => { w.WriteString("ssh-rsa"); w.WriteString(raw); }))).IsFalse();
+        await Assert.That(key.VerifySignature(signed, [])).IsFalse();
+        await Assert.That(key.VerifySignature(signed, [0, 0, 0, 9, 1])).IsFalse();
+        await Assert.That(key.VerifySignature(signed, Blob(w => w.WriteString([0xff, 0xfe])))).IsFalse();
+    }
+
+    private static (string Algorithm, byte[] Raw) Split(byte[] signature)
+    {
+        var reader = new SshReader(signature);
+        return (reader.ReadUtf8String(), reader.ReadString().ToArray());
     }
 
     [Test]
-    [Arguments(new byte[] { 1 })]
-    [Arguments(new byte[] { 2 })]
-    [Arguments(new byte[] { 0x01, 0x00, 0x00 })]
-    [Arguments(new byte[0])]
-    public async Task Rsa_RejectsUnsafePublicExponents(byte[] exponent)
+    public async Task Equality_IsByKeyBytes_AndIgnoresTheComment()
     {
-        using var rsa = RSA.Create(2048);
-        var modulus = rsa.ExportParameters(false).Modulus!;
-        var blob = Blob(w =>
-        {
-            w.WriteString("ssh-rsa");
-            w.WriteMpint(exponent);
-            w.WriteMpint(modulus);
-        });
-        await Assert.That(() => SshPublicKey.Parse(blob)).Throws<SshProtocolException>();
+        var ed = Load("ed25519").Pub;
+        var a = SshPublicKey.Parse(ed + " one");
+        var b = SshPublicKey.Parse(ed + " two");
+        var other = SshPublicKey.Parse(Load("ecdsa256").Pub);
+
+        await Assert.That(a.Equals(b)).IsTrue();
+        await Assert.That(a == b).IsTrue();
+        await Assert.That(a != b).IsFalse();
+        await Assert.That(a.GetHashCode()).IsEqualTo(b.GetHashCode());
+        await Assert.That(a.Equals((object)b)).IsTrue();
+        await Assert.That(a.Equals(other)).IsFalse();
+        await Assert.That(a == other).IsFalse();
+        await Assert.That(a != other).IsTrue();
+        await Assert.That(a.Equals((object)ed)).IsFalse();
+        await Assert.That(new HashSet<SshPublicKey> { a, b, other }.Count).IsEqualTo(2);
+        await Assert.That(a.Equals(null)).IsFalse();
+        await Assert.That(a == null).IsFalse();
+        await Assert.That(null == b).IsFalse();
+        await Assert.That((SshPublicKey?)null == null).IsTrue();
     }
 
     [Test]
-    public async Task Rsa_AcceptsASignatureWithItsLeadingZeroBytesDropped()
+    public async Task GetFingerprint_RefusesOtherHashes()
     {
-        using var rsa = RSA.Create(2048);
-        var parameters = rsa.ExportParameters(false);
-        var key = SshPublicKey.Parse(Blob(w =>
-        {
-            w.WriteString("ssh-rsa");
-            w.WriteMpint(parameters.Exponent);
-            w.WriteMpint(parameters.Modulus);
-        }));
+        var key = SshPublicKey.Parse(Load("ed25519").Pub);
+        await Assert.That(() => key.GetFingerprint(HashAlgorithmName.SHA1)).ThrowsExactly<ArgumentException>();
+        await Assert.That(() => key.GetFingerprint(HashAlgorithmName.SHA512)).ThrowsExactly<ArgumentException>();
+        await Assert.That(() => key.GetFingerprint(default)).ThrowsExactly<ArgumentException>();
+    }
 
-        // About one signature in 256 starts with a zero byte; some servers send it without, and OpenSSH pads it back.
-        byte[] data, signature;
-        var i = 0;
-        do
+    public static IEnumerable<Func<string>> MalformedLines()
+    {
+        var ed = Load("ed25519").Pub;
+        var fields = ed.Split(' ');
+        var blob = Convert.FromBase64String(fields[1]);
+        yield return () => string.Empty;
+        yield return () => "   \t ";
+        yield return () => "ssh-ed25519";
+        yield return () => "ssh-ed25519 ";
+        yield return () => "ssh-ed25519 !!!!";
+        yield return () => "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5";                               // valid base64, truncated blob
+        yield return () => $"ssh-ed25519 {Convert.ToBase64String(blob[..^1])}";            // one byte short
+        yield return () => $"ssh-ed25519 {Convert.ToBase64String([.. blob, 0])}";           // trailing data
+        yield return () => $"ssh-rsa {fields[1]}";                                         // type field does not match the blob
+        yield return () => $"ecdsa-sha2-nistp256 {fields[1]}";
+        yield return () => $"ssh-dss {fields[1]}";                                         // unsupported type
+        yield return () => $"restrict,command=\"uptime\" {ed}";                            // authorized_keys options
+        yield return () => $"from=\"192.0.2.0/24\" {ed}";
+        yield return () => $"{ed} one\n{ed} two";                                          // two lines
+        yield return () => $"{ed} comment\rinjected";
+        yield return () => $"ssh-ed25519-cert-v01@openssh.com {fields[1]}";                // a certificate
+        yield return () => $"ssh-rsa {Convert.ToBase64String(new byte[SshPublicKey.MaxBlobLength + 1])}"; // oversized
+        yield return () => $"ssh-ed25519 {fields[1][..^1]}";                               // broken padding
+    }
+
+    [Test]
+    [MethodDataSource(nameof(MalformedLines))]
+    public async Task Parse_RefusesMalformedLines_WithAFormatException(string line)
+    {
+        await Assert.That(() => SshPublicKey.Parse(line)).ThrowsExactly<FormatException>();
+        await Assert.That(SshPublicKey.TryParse(line, out var key)).IsFalse();
+        await Assert.That(key).IsNull();
+    }
+
+    [Test]
+    public async Task Parse_RefusesNull()
+    {
+        await Assert.That(() => SshPublicKey.Parse(null!)).ThrowsExactly<ArgumentNullException>();
+        await Assert.That(SshPublicKey.TryParse(null, out var key)).IsFalse();
+        await Assert.That(key).IsNull();
+    }
+
+    [Test]
+    public async Task Parse_SaysWhatIsWrong_WithoutEchoingTheLine()
+    {
+        var ed = Load("ed25519").Pub;
+        var options = await Assert.That(() => SshPublicKey.Parse($"command=\"secret-token\" {ed}")).ThrowsExactly<FormatException>();
+        await Assert.That(options!.Message).Contains("options");
+        await Assert.That(options.Message).DoesNotContain("secret-token");
+        var certificate = await Assert.That(() => SshPublicKey.Parse($"ssh-ed25519-cert-v01@openssh.com {ed.Split(' ')[1]}")).ThrowsExactly<FormatException>();
+        await Assert.That(certificate!.Message).Contains("SshCertificate.Parse");
+    }
+
+    public static IEnumerable<Func<byte[]>> MalformedBlobs()
+    {
+        var ed = Convert.FromBase64String(Load("ed25519").Pub.Split(' ')[1]);
+        var ec = Convert.FromBase64String(Load("ecdsa256").Pub.Split(' ')[1]);
+        yield return () => [];
+        yield return () => [0, 0, 0];
+        yield return () => [0, 0, 0, 200, 1];
+        yield return () => ed[..^1];
+        yield return () => [.. ed, 1];
+        yield return () => Blob(w => w.WriteString("ssh-ed25519"));
+        yield return () => Blob(w => { w.WriteString("ssh-ed25519"); w.WriteString(new byte[31]); });
+        yield return () => Blob(w => { w.WriteString("ssh-dss"); w.WriteString(new byte[32]); });
+        yield return () => Blob(w => { w.WriteString("ssh-ed25519-cert-v01@openssh.com"); w.WriteString(new byte[32]); });
+        yield return () => Blob(w => { w.WriteString([0xff, 0xfe]); });
+        yield return () => [.. ec[..^1], (byte)(ec[^1] ^ 1)];                              // off the curve
+        yield return () => Blob(w => { w.WriteString("ecdsa-sha2-nistp256"); w.WriteString("nistp384"); w.WriteString(new byte[65]); });
+        yield return () => Blob(w => { w.WriteString("ssh-rsa"); w.WriteString(new byte[SshPublicKey.MaxBlobLength]); });
+    }
+
+    [Test]
+    [MethodDataSource(nameof(MalformedBlobs))]
+    public async Task FromBlob_RefusesMalformedBlobs_WithAFormatException(byte[] blob)
+    {
+        await Assert.That(() => SshPublicKey.FromBlob(blob)).ThrowsExactly<FormatException>();
+        await Assert.That(() => SshPublicKey.Parse($"ssh-ed25519 {Convert.ToBase64String(blob)}")).ThrowsExactly<FormatException>();
+    }
+
+    [Test]
+    public async Task FromBlob_RefusesACommentThatWouldAddALine()
+    {
+        var blob = Convert.FromBase64String(Load("ed25519").Pub.Split(' ')[1]);
+        await Assert.That(() => SshPublicKey.FromBlob(blob, "a\nssh-ed25519 AAAA")).ThrowsExactly<ArgumentException>();
+        await Assert.That(() => SshPublicKey.FromBlob(blob, "a\r")).ThrowsExactly<ArgumentException>();
+    }
+
+    [Test]
+    public async Task SecurityKeys_Parse_ButTheirSignaturesAreNotVerified()
+    {
+        var edPoint = RandomNumberGenerator.GetBytes(32);
+        var skEd = Blob(w => { w.WriteString("sk-ssh-ed25519@openssh.com"); w.WriteString(edPoint); w.WriteString("ssh:"); });
+        using var ecdsa = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var q = ecdsa.ExportParameters(false).Q;
+        byte[] point = [4, .. q.X!, .. q.Y!];
+        var skEc = Blob(w => { w.WriteString("sk-ecdsa-sha2-nistp256@openssh.com"); w.WriteString("nistp256"); w.WriteString(point); w.WriteString("ssh:"); });
+
+        foreach (var blob in new[] { skEd, skEc })
         {
-            data = BitConverter.GetBytes(i++);
-            signature = rsa.SignData(data, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+            var line = Line(blob, "yubikey@example.com");
+            var key = SshPublicKey.Parse(line);
+            await Assert.That(key.KeyType).IsEqualTo(new SshReader(blob).ReadUtf8String());
+            await Assert.That(key.KeySizeBits).IsEqualTo(256);
+            await Assert.That(key.Fingerprint).IsEqualTo("SHA256:" + Convert.ToBase64String(SHA256.HashData(blob)).TrimEnd('='));
+            await Assert.That(key.ToAuthorizedKeysLine()).IsEqualTo(line);
+            await Assert.That(SshPublicKey.FromBlob(blob)).IsEqualTo(key);
+            await Assert.That(() => key.VerifySignature(blob, blob)).ThrowsExactly<NotSupportedException>();
         }
-        while (signature[0] != 0);
 
-        var trimmed = signature.AsSpan().TrimStart((byte)0).ToArray();
-        await Assert.That(key.VerifySignature("rsa-sha2-256", SignatureBlob("rsa-sha2-256", w => w.WriteBytes(trimmed)), data)).IsTrue();
-        await Assert.That(key.VerifySignature("rsa-sha2-256", SignatureBlob("rsa-sha2-256", w => w.WriteBytes(signature)), data)).IsTrue();
-
-        // Longer than the modulus is never valid.
-        byte[] longer = [0, .. signature];
-        await Assert.That(key.VerifySignature("rsa-sha2-256", SignatureBlob("rsa-sha2-256", w => w.WriteBytes(longer)), data)).IsFalse();
-    }
-
-    private static byte[] Blob(Action<SshWriter> write)
-    {
-        var buffer = new ArrayBufferWriter<byte>();
-        write(new SshWriter(buffer));
-        return buffer.WrittenSpan.ToArray();
-    }
-
-    private static byte[] SignatureBlob(string type, Action<SshWriter> writeSignature)
-    {
-        var inner = Blob(writeSignature);
-        return Blob(w =>
+        byte[] offCurve = [.. point[..^1], (byte)(point[^1] ^ 1)];
+        byte[][] malformed =
+        [
+            Blob(w => { w.WriteString("sk-ssh-ed25519@openssh.com"); w.WriteString(edPoint); }),
+            Blob(w => { w.WriteString("sk-ssh-ed25519@openssh.com"); w.WriteString(edPoint.AsSpan(0, 31)); w.WriteString("ssh:"); }),
+            [.. skEd, 0],
+            Blob(w => { w.WriteString("sk-ecdsa-sha2-nistp256@openssh.com"); w.WriteString("nistp256"); w.WriteString(offCurve); w.WriteString("ssh:"); }),
+            Blob(w => { w.WriteString("sk-ecdsa-sha2-nistp256@openssh.com"); w.WriteString("nistp384"); w.WriteString(point); w.WriteString("ssh:"); }),
+            Blob(w => { w.WriteString("sk-ecdsa-sha2-nistp256@openssh.com"); w.WriteString("nistp256"); w.WriteString(point.AsSpan(0, point.Length - 1)); w.WriteString("ssh:"); }),
+        ];
+        foreach (var blob in malformed)
         {
-            w.WriteString(type);
-            w.WriteString(inner);
-        });
-    }
-
-    [Test]
-    public async Task Ed25519_SignaturesFromThisLibraryVerify()
-    {
-        var seed = new byte[32];
-        new Random(51).NextBytes(seed);
-        var pub = new byte[32];
-        Ed25519.GetPublicKey(seed, pub);
-        var key = SshPublicKey.Parse(Blob(w =>
-        {
-            w.WriteString("ssh-ed25519");
-            w.WriteString(pub);
-        }));
-
-        var data = "data"u8.ToArray();
-        var sig = new byte[64];
-        Ed25519.Sign(seed, data, sig);
-        var blob = SignatureBlob("ssh-ed25519", w => w.WriteBytes(sig));
-        await Assert.That(key.VerifySignature("ssh-ed25519", blob, data)).IsTrue();
-
-        // A signature of the wrong length is rejected before verification.
-        var shortBlob = Blob(w =>
-        {
-            w.WriteString("ssh-ed25519");
-            w.WriteString(sig.AsSpan(0, 63));
-        });
-        await Assert.That(key.VerifySignature("ssh-ed25519", shortBlob, data)).IsFalse();
-    }
-
-    [Test]
-    [Arguments(256)]
-    [Arguments(384)]
-    [Arguments(521)]
-    public async Task Ecdsa_ManySignatures_CoverMpintEdgeCases(int bits)
-    {
-        var (curve, name, size, hash) = bits switch
-        {
-            256 => (ECCurve.NamedCurves.nistP256, "nistp256", 32, HashAlgorithmName.SHA256),
-            384 => (ECCurve.NamedCurves.nistP384, "nistp384", 48, HashAlgorithmName.SHA384),
-            _ => (ECCurve.NamedCurves.nistP521, "nistp521", 66, HashAlgorithmName.SHA512),
-        };
-        using var ecdsa = ECDsa.Create(curve);
-        var parameters = ecdsa.ExportParameters(false);
-        var point = new byte[1 + (2 * size)];
-        point[0] = 4;
-        parameters.Q.X!.CopyTo(point, 1 + size - parameters.Q.X.Length);
-        parameters.Q.Y!.CopyTo(point, 1 + (2 * size) - parameters.Q.Y.Length);
-        var type = "ecdsa-sha2-" + name;
-        var key = SshPublicKey.Parse(Blob(w =>
-        {
-            w.WriteString(type);
-            w.WriteString(name);
-            w.WriteString(point);
-        }));
-
-        var sawHighBit = false;
-        for (var i = 0; i < 60; i++)
-        {
-            var data = BitConverter.GetBytes(i);
-            var raw = ecdsa.SignData(data, hash, DSASignatureFormat.IeeeP1363FixedFieldConcatenation);
-            sawHighBit |= (raw[0] & 0x80) != 0 || (raw[size] & 0x80) != 0;
-            var blob = SignatureBlob(type, w =>
-            {
-                w.WriteMpint(raw.AsSpan(0, size));
-                w.WriteMpint(raw.AsSpan(size));
-            });
-            await Assert.That(key.VerifySignature(type, blob, data)).IsTrue();
-        }
-
-        if (bits != 521)
-        {
-            // (P-521 values occupy 521 of 528 bits, so their first byte never has the top bit set.)
-            await Assert.That(sawHighBit).IsTrue();
-        }
-
-        // r or s longer than the field is rejected.
-        var oversized = SignatureBlob(type, w =>
-        {
-            w.WriteMpint(new byte[size + 1].Select((_, idx) => (byte)(idx == 0 ? 1 : 2)).ToArray());
-            w.WriteMpint([1]);
-        });
-        await Assert.That(key.VerifySignature(type, oversized, [1])).IsFalse();
-    }
-
-    [Test]
-    public async Task Rsa_SignaturesFromTheFrameworkVerify()
-    {
-        using var rsa = RSA.Create(2048);
-        var p = rsa.ExportParameters(false);
-        var key = SshPublicKey.Parse(Blob(w =>
-        {
-            w.WriteString("ssh-rsa");
-            w.WriteMpint(p.Exponent!);
-            w.WriteMpint(p.Modulus!);
-        }));
-        var data = "payload"u8.ToArray();
-
-        foreach (var (algorithm, hash) in new[] { ("rsa-sha2-256", HashAlgorithmName.SHA256), ("rsa-sha2-512", HashAlgorithmName.SHA512) })
-        {
-            var signature = rsa.SignData(data, hash, RSASignaturePadding.Pkcs1);
-            var blob = SignatureBlob(algorithm, w => w.WriteBytes(signature));
-            await Assert.That(key.VerifySignature(algorithm, blob, data)).IsTrue();
+            await Assert.That(() => SshPublicKey.FromBlob(blob)).ThrowsExactly<FormatException>();
         }
     }
 
     [Test]
-    public async Task Parse_RejectsMalformedKeys()
+    public async Task ACertifiedPrivateKey_GivesTheCertifiedKey_AndTheCertificateBothKeys()
     {
-        await Assert.That(() => SshPublicKey.Parse([])).Throws<SshProtocolException>();
-        await Assert.That(() => SshPublicKey.Parse(Blob(w => w.WriteString("ssh-dss")))).Throws<SshProtocolException>();
-        await Assert.That(() => SshPublicKey.Parse(Blob(w => w.WriteString("ssh-ed25519")))).Throws<SshProtocolException>();
+        using var authority = Generate(SshKeyType.Ed25519, 0);
+        using var key = Generate(SshKeyType.EcdsaNistp256, 0);
+        var certificate = SshCertificate.Parse(TestKeys.CertificateLine(TestKeys.Certificate(authority, key.PublicKey.ToArray(), SshCertificateType.User)));
+        using var certified = key.WithCertificate(certificate);
 
-        await Assert.That(() => SshPublicKey.Parse(Blob(w =>
-        {
-            w.WriteString("ssh-ed25519");
-            w.WriteString(new byte[31]);
-        }))).Throws<SshProtocolException>();
-
-        var good = PublicKeyBlob(Load("ed25519").Pub);
-        await Assert.That(() => SshPublicKey.Parse([.. good, 0])).Throws<SshProtocolException>();
+        await Assert.That(certified.KeyType).IsEqualTo("ecdsa-sha2-nistp256-cert-v01@openssh.com");
+        await Assert.That(certified.GetPublicKey()).IsEqualTo(key.GetPublicKey());
+        await Assert.That(certified.GetPublicKey().KeyType).IsEqualTo("ecdsa-sha2-nistp256");
+        await Assert.That(certificate.GetPublicKey()).IsEqualTo(key.GetPublicKey());
+        await Assert.That(certificate.GetPublicKey().Fingerprint).IsEqualTo(certificate.Fingerprint);
+        await Assert.That(certificate.GetAuthorityKey()).IsEqualTo(authority.GetPublicKey());
+        await Assert.That(certificate.GetAuthorityKey().Fingerprint).IsEqualTo(certificate.AuthorityFingerprint);
     }
 
     [Test]
-    public async Task Parse_RejectsBadEcdsaKeys()
+    public async Task AnOpenSshPrivateKeysCommentWithALineBreak_IsLeftOut()
     {
-        var good = PublicKeyBlob(Load("ecdsa256").Pub);
-
-        // Curve name that does not match the key type.
-        var mismatch = Blob(w =>
-        {
-            w.WriteString("ecdsa-sha2-nistp256");
-            w.WriteString("nistp384");
-            w.WriteString(new byte[65]);
-        });
-        await Assert.That(() => SshPublicKey.Parse(mismatch)).Throws<SshProtocolException>();
-
-        // Compressed point marker.
-        var compressed = Blob(w =>
-        {
-            w.WriteString("ecdsa-sha2-nistp256");
-            w.WriteString("nistp256");
-            var point = new byte[65];
-            point[0] = 2;
-            w.WriteString(point);
-        });
-        await Assert.That(() => SshPublicKey.Parse(compressed)).Throws<SshProtocolException>();
-
-        // A point that is not on the curve.
-        var offCurve = Blob(w =>
-        {
-            w.WriteString("ecdsa-sha2-nistp256");
-            w.WriteString("nistp256");
-            var point = new byte[65];
-            point[0] = 4;
-            point[32] = 1;
-            point[64] = 1;
-            w.WriteString(point);
-        });
-        await Assert.That(() => SshPublicKey.Parse(offCurve)).Throws<SshProtocolException>();
-        await Assert.That(SshPublicKey.Parse(good).KeyType).IsEqualTo("ecdsa-sha2-nistp256");
+        using var key = SshPrivateKey.Parse(TestKeys.OpenSshEd25519(out var blob, comment: "a\nb"));
+        await Assert.That(key.GetPublicKey().Comment).IsNull();
+        await Assert.That(key.GetPublicKey().Blob.ToArray().SequenceEqual(blob)).IsTrue();
     }
 
     [Test]
-    public async Task Parse_RejectsTinyRsaKeys()
+    public async Task Signatures_GiveTheSignersKey()
     {
-        var tiny = Blob(w =>
-        {
-            w.WriteString("ssh-rsa");
-            w.WriteMpint([1, 0, 1]);
-            w.WriteMpint(new byte[] { 0x80, 1, 2, 3 });
-        });
-        await Assert.That(() => SshPublicKey.Parse(tiny)).Throws<SshProtocolException>();
+        using var key = Generate(SshKeyType.Ed25519, 0);
+        var signature = SshSignature.Parse((await SshSignature.SignAsync(key, Message, "file")).ToString());
+        await Assert.That(signature.GetPublicKey()).IsEqualTo(key.GetPublicKey());
 
-        var noExponent = Blob(w =>
-        {
-            w.WriteString("ssh-rsa");
-            w.WriteMpint([]);
-            w.WriteMpint(Enumerable.Repeat((byte)0x81, 256).ToArray());
-        });
-        await Assert.That(() => SshPublicKey.Parse(noExponent)).Throws<SshProtocolException>();
+        using var authority = Generate(SshKeyType.Ed25519, 0);
+        var certificate = SshCertificate.Parse(TestKeys.CertificateLine(TestKeys.Certificate(authority, key.PublicKey.ToArray(), SshCertificateType.User)));
+        using var certified = key.WithCertificate(certificate);
+        var certifiedSignature = SshSignature.Parse((await SshSignature.SignAsync(certified, Message, "file")).ToString());
+        await Assert.That(certifiedSignature.Certificate).IsNotNull();
+        await Assert.That(certifiedSignature.GetPublicKey()).IsEqualTo(key.GetPublicKey());
     }
 
     [Test]
-    public async Task AnRsaSignatureNotReducedModuloN_IsRefused()
+    public async Task HostAndAgentKeys_GiveTheKeyTheirBlobHolds()
     {
-        // s + n verifies like s (RFC 8017's RSAVP1 refuses it: s must be below n). .NET on macOS accepted it where Linux and Windows
-        // did not (Wycheproof's "signature is not reduced"), so SshSharp checks it itself.
-        using var rsa = RSA.Create(2048);
-        var p = rsa.ExportParameters(false);
-        var key = SshPublicKey.Parse(Blob(w => { w.WriteString("ssh-rsa"); w.WriteMpint(p.Exponent); w.WriteMpint(p.Modulus); }));
-        var n = new BigInteger(p.Modulus, isUnsigned: true, isBigEndian: true);
-        for (var attempt = 0; attempt < 500; attempt++)
-        {
-            var data = RandomNumberGenerator.GetBytes(32);
-            var signature = rsa.SignData(data, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
-            var unreduced = (new BigInteger(signature, isUnsigned: true, isBigEndian: true) + n).ToByteArray(isUnsigned: true, isBigEndian: true);
-            if (unreduced.Length > p.Modulus!.Length)
-            {
-                continue; // s + n needs a longer encoding, which the length check refuses anyway: try another signature
-            }
+        var fixture = Load("ecdsa384");
+        var expected = SshPublicKey.Parse(fixture.Pub);
+        var hostKey = new SshHostKey("ecdsa-sha2-nistp384", "ecdsa-sha2-nistp384", fixture.Fingerprint, expected.Blob.ToArray(), 384);
+        await Assert.That(hostKey.GetPublicKey()).IsEqualTo(expected);
+        await Assert.That(hostKey.GetPublicKey().Fingerprint).IsEqualTo(hostKey.Fingerprint);
+        await Assert.That(new SshAgentHostKey(expected.Blob).GetPublicKey()).IsEqualTo(expected);
 
-            await Assert.That(key.VerifySignature("rsa-sha2-256", Blob(w => { w.WriteString("rsa-sha2-256"); w.WriteString(signature); }), data)).IsTrue();
-            await Assert.That(key.VerifySignature("rsa-sha2-256", Blob(w => { w.WriteString("rsa-sha2-256"); w.WriteString(unreduced); }), data)).IsFalse();
-            return;
-        }
+        // A host key made by hand with bytes that are not a key.
+        await Assert.That(() => (hostKey with { PublicKey = new byte[] { 1, 2, 3 } }).GetPublicKey()).ThrowsExactly<FormatException>();
+        await Assert.That(() => new SshAgentHostKey(new byte[] { 1, 2, 3 }).GetPublicKey()).ThrowsExactly<FormatException>();
+    }
 
-        Skip.Test("No signature of this key had s + n within the modulus's length (n is too close to 2^2048).");
+    [Test]
+    public async Task KnownHostsEntries_GiveTheirKey_AndTakeOne()
+    {
+        var ed = SshPublicKey.Parse(Load("ed25519").Pub);
+        var ec = SshPublicKey.Parse(Load("ecdsa256").Pub);
+        var file = KnownHostsFile.Parse($"host.example.com {ed.ToAuthorizedKeysLine()} a comment\n");
+
+        var entry = file.Entries[0];
+        await Assert.That(entry.GetPublicKey()).IsEqualTo(ed);
+        await Assert.That(entry.GetPublicKey().Comment).IsEqualTo("a comment");
+        await Assert.That(() => new KnownHostsEntry("h", "ssh-rsa", ed.Blob).GetPublicKey()).ThrowsExactly<FormatException>();
+        await Assert.That(() => new KnownHostsEntry("h", "ssh-dss", new byte[] { 0, 0, 0, 7 }).GetPublicKey()).ThrowsExactly<FormatException>();
+
+        await Assert.That(file.Check("host.example.com", ed)).IsEqualTo(KnownHostsCheckResult.Match);
+        await Assert.That(file.Check("host.example.com", 22, ed)).IsEqualTo(KnownHostsCheckResult.Match);
+        await Assert.That(file.Check("host.example.com", ec)).IsEqualTo(KnownHostsCheckResult.Unknown);
+        await Assert.That(file.Check("other.example.com", ed)).IsEqualTo(KnownHostsCheckResult.Unknown);
+
+        var added = file.Add("192.0.2.10", 2222, ec, comment: "added");
+        await Assert.That(added.HostPatterns).IsEqualTo("[192.0.2.10]:2222");
+        await Assert.That(added.KeyType).IsEqualTo(ec.KeyType);
+        await Assert.That(added.GetPublicKey()).IsEqualTo(ec);
+        await Assert.That(file.Check("192.0.2.10", 2222, ec)).IsEqualTo(KnownHostsCheckResult.Match);
+        await Assert.That(file.Check("192.0.2.10", 2222, ec.KeyType, ec.Blob.Span)).IsEqualTo(KnownHostsCheckResult.Match);
+        await Assert.That(file.Add("192.0.2.11", 22, ed, hash: true).IsHashed).IsTrue();
+        await Assert.That(file.Check("192.0.2.11", ed)).IsEqualTo(KnownHostsCheckResult.Match);
+        await Assert.That(() => file.Add("h", 22, (SshPublicKey)null!)).ThrowsExactly<ArgumentNullException>();
+        await Assert.That(() => file.Check("h", 22, (SshPublicKey)null!)).ThrowsExactly<ArgumentNullException>();
+    }
+
+    [Test]
+    public async Task PinnedKeys_AcceptOnlyThoseKeys()
+    {
+        var ed = SshPublicKey.Parse(Load("ed25519").Pub);
+        var ec = SshPublicKey.Parse(Load("ecdsa256").Pub);
+        var hostKey = new SshHostKey("ssh-ed25519", "ssh-ed25519", ed.Fingerprint, ed.Blob.ToArray(), 256);
+        var context = new SshHostKeyContext("host.example.com", 22, null, hostKey);
+
+        await Assert.That((await SshHostKeyVerifier.Pinned(ec, ed).VerifyAsync(context, default)).IsAccepted).IsTrue();
+        var refused = await SshHostKeyVerifier.Pinned(ec).VerifyAsync(context, default);
+        await Assert.That(refused.IsAccepted).IsFalse();
+        await Assert.That(refused.Reason).Contains("pinned keys");
+
+        await Assert.That(() => SshHostKeyVerifier.Pinned(Array.Empty<SshPublicKey>())).ThrowsExactly<ArgumentException>();
+        await Assert.That(() => SshHostKeyVerifier.Pinned((SshPublicKey[])null!)).ThrowsExactly<ArgumentNullException>();
+        await Assert.That(() => SshHostKeyVerifier.Pinned(ed, null!)).ThrowsExactly<ArgumentException>();
     }
 }

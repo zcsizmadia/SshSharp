@@ -54,6 +54,29 @@ each signature.
 `SaveAsync` writes the private key in the OpenSSH format (encrypted with `aes256-ctr` and `bcrypt_pbkdf` when given a passphrase),
 readable only by the current user, and the public key next to it as `.pub`. It never overwrites an existing file.
 
+## Read a public key and its fingerprint
+
+`SshPublicKey` is a public key on its own: a `.pub` file, an `authorized_keys` line, or the key of a private key
+(`GetPublicKey()`), an agent key, a host key or a `known_hosts` entry.
+
+[!code-csharp[](../snippets/Keys.cs#public-key)]
+
+`SshPublicKey.Parse` reads the plain `<type> <base64> [comment]` form. It refuses `authorized_keys` options in front of the key
+(`restrict,command="..." ssh-ed25519 ...`) rather than drop them, so a key you write back out never loses its restrictions; pass the
+key part of the line. `FromBlob` reads the SSH wire format (what the `PublicKey` members hold). A malformed key, a type name that does
+not match the key, or a type SshSharp does not read fails with `FormatException`; `TryParse` returns false instead.
+
+The types it reads are Ed25519, ECDSA (nistp256, nistp384, nistp521), RSA, and the FIDO security-key types
+`sk-ssh-ed25519@openssh.com` and `sk-ecdsa-sha2-nistp256@openssh.com`. Certificates (`-cert.pub`) are `SshCertificate.Parse`'s.
+
+To check a signature that the key's holder made (an agent's, or one from your `SshKeySigner`):
+
+[!code-csharp[](../snippets/Keys.cs#verify-signature)]
+
+A security key's signatures carry authenticator data (a user-presence flag and a counter) that `VerifySignature` does not check:
+for those keys it throws `NotSupportedException`. For signed files and commits, use [`SshSignature`](../signing.md), which also
+checks the namespace.
+
 ## Use a key in the Windows key store or the TPM
 
 [!code-csharp[](../snippets/Keys.cs#cng)]
@@ -85,4 +108,5 @@ the answer against the public key before using it.
 - [Authentication](../authentication.md) (in-depth: method order, agent constraints, keyboard-interactive, banners)
 - [Certificates](certificates.md)
 - [Signing files and commits](../signing.md)
-- <xref:SshSharp.SshPrivateKey>, <xref:SshSharp.SshAgent> and <xref:SshSharp.SshKeySigner> in the API reference
+- <xref:SshSharp.SshPrivateKey>, <xref:SshSharp.SshPublicKey>, <xref:SshSharp.SshAgent> and <xref:SshSharp.SshKeySigner> in the API
+  reference

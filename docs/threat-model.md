@@ -35,7 +35,9 @@ A man in the middle can read, change, drop and inject bytes. The server itself m
   SHA-1 signatures, RSA ≥ 2048 bits). Strict KEX (Terrapin, CVE-2023-48795) is negotiated whenever the server supports it.
 - **Malformed input:** every parser treats its input as hostile, rejecting it with a protocol error, never with an
   unexpected exception (mutation-fuzzed in every test run). Peer public keys are validated: points on the curve,
-  no small-order Ed25519 keys, an RSA exponent ≥ 3.
+  no small-order Ed25519 keys, an RSA exponent ≥ 3. Public keys the application reads itself (`SshPublicKey.Parse` and
+  `FromBlob`: `.pub` and `authorized_keys` lines, key blobs) get the same checks, are bounded to 8 KiB, and are refused with
+  `FormatException`; a line with `authorized_keys` options is refused rather than read without its restrictions.
 - **Resource exhaustion:** packets are limited to 256 KiB, channel data to the advertised window and maximum packet size,
   command output to `MaxCommandOutputBytes`, and banners, identification lines and `EXT_INFO` entries are bounded.
   A peer that overruns the window is a protocol error.

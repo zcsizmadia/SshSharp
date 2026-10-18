@@ -63,7 +63,7 @@ public readonly record struct SshHostKeyVerdict
 
 /// <summary>
 /// Decides whether to trust a server's host key. Use <see cref="KnownHostsVerifier"/> for OpenSSH <c>known_hosts</c> behaviour,
-/// <see cref="Pinned"/> for fixed fingerprints, or <see cref="FromDelegate"/> for your own logic.
+/// <see cref="Pinned(string[])"/> for fixed fingerprints or <see cref="Pinned(SshPublicKey[])"/> for fixed keys, or <see cref="FromDelegate"/> for your own logic.
 /// </summary>
 public abstract class SshHostKeyVerifier
 {
@@ -93,6 +93,27 @@ public abstract class SshHostKeyVerifier
         return new PinnedVerifier([.. fingerprints]);
     }
 
+    /// <summary>
+    /// Trusts only these keys: the server's key must be one of them, byte for byte (for a host certificate, the certified key). Read
+    /// them with <see cref="SshPublicKey.Parse"/> from the server's <c>/etc/ssh/ssh_host_*_key.pub</c> files.
+    /// </summary>
+    /// <exception cref="ArgumentException">No key was given, or a key is null.</exception>
+    public static SshHostKeyVerifier Pinned(params SshPublicKey[] keys)
+    {
+        ArgumentNullException.ThrowIfNull(keys);
+        if (keys.Length == 0)
+        {
+            throw new ArgumentException("At least one key is required.", nameof(keys));
+        }
+
+        if (Array.Exists(keys, k => k is null))
+        {
+            throw new ArgumentException("A pinned key must not be null.", nameof(keys));
+        }
+
+        return new PinnedKeysVerifier([.. keys]);
+    }
+
     private sealed class DelegateVerifier(Func<SshHostKeyContext, CancellationToken, ValueTask<bool>> verify) : SshHostKeyVerifier
     {
         public override async ValueTask<SshHostKeyVerdict> VerifyAsync(SshHostKeyContext context, CancellationToken cancellationToken) =>
@@ -107,5 +128,13 @@ public abstract class SshHostKeyVerifier
             ValueTask.FromResult(Array.Exists(fingerprints, f => string.Equals(f, context.HostKey.Fingerprint, StringComparison.Ordinal))
                 ? SshHostKeyVerdict.Accept()
                 : SshHostKeyVerdict.Reject($"The host key {context.HostKey.Fingerprint} is not one of the pinned fingerprints."));
+    }
+
+    private sealed class PinnedKeysVerifier(SshPublicKey[] keys) : SshHostKeyVerifier
+    {
+        public override ValueTask<SshHostKeyVerdict> VerifyAsync(SshHostKeyContext context, CancellationToken cancellationToken) =>
+            ValueTask.FromResult(Array.Exists(keys, k => k.Blob.Span.SequenceEqual(context.HostKey.PublicKey.Span))
+                ? SshHostKeyVerdict.Accept()
+                : SshHostKeyVerdict.Reject($"The host key {context.HostKey.Fingerprint} is not one of the pinned keys."));
     }
 }

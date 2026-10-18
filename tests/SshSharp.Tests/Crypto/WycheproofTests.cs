@@ -184,10 +184,10 @@ public class WycheproofTests
         foreach (var group in root.GetProperty("testGroups").EnumerateArray())
         {
             var point = Hex(group.GetProperty("publicKey"), "uncompressed");
-            SshPublicKey? key;
+            VerifyingKey? key;
             try
             {
-                key = SshPublicKey.Parse(Blob(w =>
+                key = VerifyingKey.Parse(Blob(w =>
                 {
                     w.WriteString(algorithm);
                     w.WriteString(curve);
@@ -245,7 +245,7 @@ public class WycheproofTests
         foreach (var group in root.GetProperty("testGroups").EnumerateArray())
         {
             var publicKey = group.GetProperty("publicKey");
-            var key = SshPublicKey.Parse(Blob(w =>
+            var key = VerifyingKey.Parse(Blob(w =>
             {
                 w.WriteString("ssh-rsa");
                 w.WriteMpint(Hex(publicKey, "publicExponent"));
