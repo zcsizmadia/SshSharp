@@ -399,13 +399,10 @@ public sealed class SshRemotePortForwarder : IAsyncDisposable
 
         // The connections never fault (see ServeAsync); this only waits for them.
         var all = Task.WhenAll(open.Select(t => t.ContinueWith(_ => { }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default)));
-        if (_handlers is { } handlers)
+        // A handler is the application's code: it may ignore its token, so the wait is bounded.
+        if (_handlers is { } handlers && !await handlers.StopAsync(all).ConfigureAwait(false))
         {
-            // A handler is the application's code: it may ignore its token, so the wait is bounded.
-            if (!await handlers.StopAsync(all).ConfigureAwait(false))
-            {
-                return; // handlers still running hold the token: _stop stays undisposed
-            }
+            return; // handlers still running hold the token: _stop stays undisposed
         }
 
         await all.ConfigureAwait(false);

@@ -38,9 +38,10 @@ internal sealed class ForwardedHandlerSet(Func<SshForwardedConnection, Cancellat
         {
             // The forwarding was disposed or the connection ended: the handler stopped as asked.
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
-            // Any exception: the handler is the application's code, and its failure must end this connection only.
+            // The handler is the application's code, and its failure must end this connection only (but not hide the process running
+            // out of memory).
             SshLog.RemoteForwardingHandlerFailed(logger, remotePort, ex.GetType().Name);
         }
         finally
