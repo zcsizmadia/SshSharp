@@ -65,6 +65,8 @@ Console.WriteLine(result.StandardOutputText);
 |---|---|---|
 | Target frameworks | .NET 8, .NET 10 | .NET Framework 4.6.2+, .NET Standard 2.0, .NET 8+ |
 | API | Async-only network API; `CancellationToken` on every network operation | Mostly synchronous; async connect, commands and SFTP |
+| Faster on the same server with the same algorithms: 8 parallel commands in half the time, SFTP stream writes 3x faster, downloads and streaming 20-40% faster | ✅ ([benchmarks](https://github.com/zcsizmadia/SshSharp/blob/main/docs/benchmarks.md#a-second-machine-windows-and-wsl)) | ❌ |
+| Fewer allocations: 3-7x less memory allocated per transfer (SCP, SFTP, command output), no large-object-heap garbage per SFTP request | ✅ ([benchmarks](https://github.com/zcsizmadia/SshSharp/blob/main/docs/benchmarks.md#a-second-machine-windows-and-wsl)) | ❌ |
 | `ssh_config` (`Host`, `Match` with `localnetwork`, `sessiontype` and `command`, `Include`; connect by alias; `KnownHostsCommand`, `RefuseConnection`) | ✅ | ❌ |
 | `known_hosts` verification (hashed hosts, `@cert-authority`, `@revoked`, `StrictHostKeyChecking`) | ✅ | ❌ (verify in a `HostKeyReceived` handler) |
 | Revoked host keys (`RevokedHostKeys`: OpenSSH KRLs from `ssh-keygen -k`, or key lists) | ✅ | ❌ |
