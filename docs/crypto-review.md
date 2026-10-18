@@ -12,7 +12,7 @@ outside review is planned (1.0 shipped with this internal review as its basis).
 | Field arithmetic (GF(2^255 - 19)) | `BigInteger` on random and edge values (non-canonical encodings, limb boundaries), long operation chains with limb bounds checked |
 | X25519 | RFC 7748 vectors including the 1,000-iteration one, OpenSSL-generated vectors, all-zero shared secret rejected |
 | Ed25519 | RFC 8032 vectors, OpenSSL and ssh-keygen signatures; non-canonical S, small-order and non-canonical public keys rejected |
-| ChaCha20, Poly1305, chacha20-poly1305@openssh.com | RFC 8439 vectors, OpenSSH's construction, interop with OpenSSH |
+| ChaCha20, Poly1305, chacha20-poly1305@openssh.com | RFC 8439 vectors, the framework's RFC 8439 AEAD, OpenSSH's construction, interop with OpenSSH; the vectorized ChaCha20 against the scalar code (below) |
 | bcrypt_pbkdf | pyca/bcrypt known answer; keys encrypted by ssh-keygen with every supported cipher |
 | BLAKE2b | RFC 7693 |
 | Argon2d/i/id | RFC 9106 section 5 vectors; .ppk files written by PuTTY's puttygen (CI) |
@@ -99,6 +99,42 @@ exchange. The secrets are ephemeral, but a leak in decapsulation would expose th
 
 Measured on Windows 11, .NET 10, x64. Decapsulation takes about 0.9 ms.
 
+## Constant-time review of the vectorized ChaCha20
+
+ChaCha20 computes several blocks at once with SIMD vectors (`Crypto/ChaCha20.Vector.cs`): 8 blocks with 256-bit vectors where the
+CPU has them (AVX2) and the runtime is .NET 10, 4 blocks with 128-bit vectors otherwise (SSE on x64, AdvSimd on Arm64). Whole groups
+of 8 and then 4 blocks take the vector code, and the rest, fewer than 4 blocks with the last one possibly partial, takes the scalar
+block function. Without vector hardware, or on a big-endian machine, the scalar code does everything. The key, the keystream and the
+data are secret; the counter and the nonce (the packet sequence number) are not.
+
+**Method.** Line-by-line reading of the vector code, inspection of the x64 JIT output (.NET 10, `DOTNET_JitDisasm`), a differential
+test against the scalar code, and the timing test below.
+
+**Findings.**
+
+- **Lane layout:** vector N holds state word N of consecutive blocks, one block per 32-bit lane. The rounds are the scalar rounds
+  applied to every lane at once (add, xor, rotate), and no operation moves data between lanes. Rotations by 12 and 7 are two shifts
+  and an OR; rotations by 16 and 8 are byte shuffles with constant indices. All of them take the same time whatever the data.
+- **Counter:** lane j holds counter + j. A lane whose low word wraps carries into the high word through a vector comparison turned
+  into a mask, with no branch; the counter is public anyway. A test checks the keystream across the 2^32 and 2^64 boundaries in
+  every lane against the scalar code and against the block function.
+- **Output:** each group of four words is transposed into one 16-byte row per block with constant-index shuffles and constant-mask
+  selects, then XORed with the input. Every load and store address depends only on the offset into the buffer.
+- **Control flow:** which path runs, and how many groups, depends only on the CPU, the runtime and the length. In the x64 JIT
+  output of `Xor8Blocks` and `Xor4Blocks`, every conditional jump is a loop counter or a span bounds check.
+- **Secrets in memory:** like the scalar code's locals, the vector state lives in registers and stack slots the method does not
+  clear.
+
+| Check (15,000 samples per class) | t (.NET 10) | t (.NET 8) | Verdict |
+|---|---|---|---|
+| ChaCha20 over 1,000 bytes (8 and 4 blocks, scalar tail): all-zero key vs random keys | -0.42 | -0.03 | no evidence of a leak |
+| The same, 4 blocks at once (128-bit vectors) | -1.33 | 0.69 | no evidence of a leak |
+| ChaCha20 over 1,000 bytes: all-zero data vs random data | -0.20 | 1.21 | no evidence of a leak |
+
+Measured on an Intel Core i7-12800H, Windows 11, x64 (on .NET 8 the first row also runs 4 blocks at once). The first run of the
+data check gave t = -16.9: the harness reused one array for the fixed class, which stayed in the cache while each random input was a
+fresh array. The fixed class now gets a fresh copy per sample, like the random class, and the other checks' results did not change.
+
 ## Private keys written to files
 
 `SaveAsync` and `ToOpenSshPrivateKey` build the private section in a buffer sized from the key up front, which zeroes any
@@ -120,5 +156,4 @@ are cleared after writing; the string `ToOpenSshPrivateKey` returns cannot be.
 
 ## Open
 
-- A vectorised ChaCha20 would need the same review again.
 - An independent review.

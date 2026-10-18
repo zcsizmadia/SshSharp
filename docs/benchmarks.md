@@ -23,7 +23,7 @@ Machine: Intel Core i7-12800H, Windows 11, .NET 10.0.12, `--job short` (3 iterat
 | aes256-gcm | 64 B | 201 ns | 481 ns | 0 B / 32 B |
 | aes256-gcm | 1 KiB | 318 ns | 751 ns | 0 B / 32 B |
 | aes256-gcm | 16 KiB | 1.96 µs | 4.57 µs | 0 B / 32 B |
-| chacha20-poly1305 (managed) | 16 KiB | 37.3 µs | 74.0 µs | 0 B / 32 B |
+| chacha20-poly1305 (managed) | 16 KiB | 17.9 µs | 36.5 µs | 0 B / 32 B |
 | aes256-ctr + hmac-sha2-256-etm | 16 KiB | 13.7 µs | 27.6 µs | 0 B / 32 B |
 
 The 32 B is the `DecodedPacket` wrapper; it does not grow with the payload. AES-GCM runs on the CPU's AES instructions, which is why it is
@@ -37,7 +37,42 @@ The first run showed two problems that are now fixed:
 * AES-CTR allocated in proportion to the payload (5.7 KB for a 16 KiB packet): the span-based `Aes.EncryptEcb` allocates on every call on
   Windows. It now uses one persistent encryptor with fixed scratch buffers: 0 B, and 3.1x faster.
 * The ChaCha20 core ran at about 150 MB/s. With the state in locals and a vectorized XOR it is 2.9x faster (37 µs for 16 KiB, about 440 MB/s).
-  Vectorizing the block function itself is a possible later step.
+  The block function is now vectorized as well (see below).
+
+## ChaCha20-Poly1305 (vectorized ChaCha20)
+
+ChaCha20 computes 8 blocks at once with 256-bit vectors (AVX2, .NET 10) or 4 with 128-bit vectors (SSE or AdvSimd, and .NET 8), and
+the scalar block function only for the last few blocks of a packet or without vector hardware. The lane layout and its constant-time
+review are in the [cryptography review](crypto-review.md#constant-time-review-of-the-vectorized-chacha20).
+
+Machine: Intel Core i7-12800H, Windows 11, .NET 10.0.12 and 8.0.31, `--job medium`. Before is the scalar code (main before the
+change); MB/s is bytes of payload per second.
+
+| Benchmark | Runtime | Before | After | Speed-up |
+|---|---|---:|---:|---:|
+| ChaCha20, 32 KiB | .NET 10 | 49.4 µs (663 MB/s) | 16.6 µs (1,979 MB/s) | 3.0x |
+| ChaCha20, 32 KiB | .NET 8 | 40.4 µs (811 MB/s) | 22.0 µs (1,493 MB/s) | 1.8x |
+| Packet encode (seal), 16 KiB | .NET 10 | 35.4 µs (463 MB/s) | 17.9 µs (915 MB/s) | 2.0x |
+| Packet encode (seal), 16 KiB | .NET 8 | 30.5 µs (537 MB/s) | 21.3 µs (769 MB/s) | 1.4x |
+| Packet encode + decode (seal and open), 16 KiB | .NET 10 | 70.4 µs | 36.5 µs | 1.9x |
+| Packet encode + decode (seal and open), 16 KiB | .NET 8 | 64.1 µs | 44.0 µs | 1.5x |
+| Packet encode, 1 KiB | .NET 10 | 2.63 µs | 1.46 µs | 1.8x |
+| Packet encode, 64 B | .NET 10 | 483 ns | 460 ns | 1.0x |
+
+`CryptoBenchmarks` also runs each path on its own (`ChaCha20 32 KiB, 4 blocks` and `ChaCha20 32 KiB, scalar`): on .NET 10, 21.1 µs
+with 4 blocks at once and 50.1 µs scalar.
+
+* **Why .NET 8 stops at 4 blocks:** on .NET 8 the JIT did not inline the 8-block path's output stage (the transpose and XOR), which
+  made it slower (30 µs for 32 KiB) than the 4-block path (22 µs).
+* **Register pressure:** the 16 state vectors fill the 16 vector registers of x64 without AVX-512, so the JIT keeps some rotation
+  temporaries on the stack. That is why 8 blocks at once is 1.3x, not 2x, faster than 4.
+* **Tiering:** the vector kernels are compiled fully optimized up front (`AggressiveOptimization`). With tiered compilation, which tier
+  a benchmark ended in made the ChaCha20 timing vary by a factor of two between runs.
+* **Poly1305 now costs more than ChaCha20:** 20.0 µs for 32 KiB (about 1,640 MB/s), so roughly 10 µs of the 17.9 µs packet. It is
+  left as it is. Vectorizing it needs a 32×32→64-bit lane multiply, which the cross-platform `Vector128`/`Vector256` API does not
+  have (64-bit lane multiplication is emulated on x64 without AVX-512), so it would need x64- and Arm64-specific intrinsics with the
+  scalar code as the fallback. A scalar version with 64-bit limbs (`Math.BigMul`, as the X25519 field already uses) is the other
+  candidate. Either would at most make the 16 KiB packet about 1.4x faster again.
 
 ## Public key operations (one operation)
 

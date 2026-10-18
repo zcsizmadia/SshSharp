@@ -46,7 +46,8 @@ public class ChaChaPolyTests
         var nonce12 = new byte[12];
         nonce8.CopyTo(nonce12, 4);
 
-        foreach (var length in new[] { 0, 1, 63, 64, 65, 127, 128, 129, 500 })
+        // The longer lengths go through the vectorized code (groups of 8 and 4 blocks) as well as the scalar tail.
+        foreach (var length in new[] { 0, 1, 63, 64, 65, 127, 128, 129, 500, 512, 513, 767, 768, 1000, 4100 })
         {
             var plain = new byte[length];
             rng.NextBytes(plain);
@@ -97,9 +98,10 @@ public class ChaChaPolyTests
     [Test]
     public async Task ChaCha20_ChecksSizes()
     {
-        await Assert.That(() => ChaCha20.Xor(new byte[31], new byte[8], 0, [], [])).Throws<ArgumentException>();
-        await Assert.That(() => ChaCha20.Xor(new byte[32], new byte[7], 0, [], [])).Throws<ArgumentException>();
-        await Assert.That(() => ChaCha20.Xor(new byte[32], new byte[8], 0, new byte[4], new byte[3])).Throws<ArgumentException>();
+        // Exactly ArgumentException: a check that let a bad size through would fail later with ArgumentOutOfRangeException instead.
+        await Assert.That(() => ChaCha20.Xor(new byte[31], new byte[8], 0, [], [])).ThrowsExactly<ArgumentException>();
+        await Assert.That(() => ChaCha20.Xor(new byte[32], new byte[7], 0, [], [])).ThrowsExactly<ArgumentException>();
+        await Assert.That(() => ChaCha20.Xor(new byte[32], new byte[8], 0, new byte[4], new byte[3])).ThrowsExactly<ArgumentException>();
     }
 
     [Test]
