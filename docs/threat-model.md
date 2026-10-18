@@ -90,8 +90,29 @@ A man in the middle can read, change, drop and inject bytes. The server itself m
   authenticate the peer. Each forwarding serves at most `maxConnections` (100 by default) at once and refuses the server's channels
   above it; a handler that throws closes its own connection only, and its exception is logged by type, never with its message.
 - **Agent forwarding** relays the agent protocol unchanged, as `ssh -A` does: while the connection is up, the server can ask the
-  agent to sign with any of its keys. Forward the agent only to servers you trust, and use the agent's own confirmation
-  (`ssh-add -c`) for sensitive keys.
+  agent to sign with any of its keys. Forward the agent only to servers you trust, and narrow what it can do: with
+  `ForwardAgentFilter`, destination constraints (`ssh-add -h`), or the agent's own confirmation (`ssh-add -c`) for sensitive keys.
+- **`ForwardAgentFilter`** puts the application between the server and the agent. A compromised server (or anyone with root on it)
+  can then get only what the filter allows: each listed key and each signature is the filter's decision, and requests to add, remove
+  or lock keys are refused, so they never reach a real agent. What it judges by:
+  - The key, the purpose and the user name come from the request: the server's side chooses them. The purpose is what the data's form
+    shows (a login request, an SSH signature, a certificate); data of any other form is not signed at all.
+  - `DestinationHostKey` is set only from a session binding (`session-bind@openssh.com`) whose host key signature over the session
+    identifier verified, and a login request must then be for that session (and, host-bound, name that host key) or it is refused.
+    It proves which server's key exchange the program on the server took part in, not that the server is honest; an older `ssh` that
+    does not bind gives no destination.
+  - `ForwardingHostKeys`' first entry is this client's own server (from its key exchange); later hops are as the hops reported them.
+  - A refused request is `SSH_AGENT_FAILURE`, as a declined confirmation is. Anything the filter throws refuses the request.
+  - Without a filter, nothing changes: a real agent's connection is relayed byte for byte.
+- **The in-process agent** (`SshAgent.FromKeys`) answers forwarded agent channels in this process. A program on the server reaches
+  only its protocol server, which parses every request in full before acting, bounds each message at 256 KiB (OpenSSH's limit; a
+  larger or empty one closes the channel, not the connection), answers malformed requests with `SSH_AGENT_FAILURE`, and serves each
+  channel on its own. It is read-only, never signs RSA with SHA-1, and signs only login requests, SSH signatures and certificates, so
+  it cannot be used as a signing oracle for other protocols. Its keys are the application's: a key loaded from a file is held in
+  this process's memory for as long as the agent is used, where a crash dump or a debugger can reach it, as with any key passed in
+  `PrivateKeys`, whereas `ssh-agent` keeps keys in another process. For sensitive keys, serve a key behind an `SshKeySigner` (a KMS,
+  an HSM, a smart card): its private half never enters the process, and the signer's own policy (`SshSignRequest.Purpose`) is a
+  second check after the filter.
 - **Transport pings** (`ping@openssh.com`) are answered with a pong, as OpenSSH answers them. Pongs not yet sent are capped
   (256 KiB), so a server that pings but stops reading cannot grow the client's memory; pings past the cap go unanswered.
 - Forwarded connections the server opens are capped (`SshClientOptions.MaxForwardedConnections`, 1,000 by default, and a
@@ -107,6 +128,9 @@ A man in the middle can read, change, drop and inject bytes. The server itself m
 - **Adding keys** (`AddKeyAsync`, `AddKeysToAgent`): the private key goes to the agent the application named. `AddKeysToAgent`
   adds only identity-file keys the server accepted, never keys the application passed in `PrivateKeys`. The lock passphrase
   (`LockAsync`) is a managed string and cannot be wiped.
+- **An in-process agent** (`SshAgent.FromKeys`) is trusted like the keys it holds: it is the application's own code and keys, reached
+  through no socket or pipe, so no other local user can pose as it or connect to it. It refuses to add, remove or lock keys, so
+  `AddKeysToAgent` and `AddKeyAsync` cannot put keys into it.
 
 ### Local listeners (port forwarding and SOCKS)
 

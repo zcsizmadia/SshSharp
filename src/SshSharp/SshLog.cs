@@ -122,4 +122,11 @@ internal static partial class SshLog
     // The exception's type only: its message is the application's, and can name hosts or carry the data it was handling.
     [LoggerMessage(EventId = 44, Level = LogLevel.Warning, Message = "The handler for a connection forwarded from remote port {RemotePort} (0 for a Unix socket) failed with {ExceptionType}; that connection was closed")]
     public static partial void RemoteForwardingHandlerFailed(ILogger logger, int remotePort, string exceptionType);
+
+    [LoggerMessage(EventId = 45, Level = LogLevel.Information, Message = "A forwarded agent request ({Operation}) for key {Fingerprint} was refused by ForwardAgentFilter")]
+    public static partial void ForwardedAgentRequestRefused(ILogger logger, SshAgentOperation operation, string fingerprint);
+
+    // The exception's type only, as for forwarding handlers: its message is the application's.
+    [LoggerMessage(EventId = 46, Level = LogLevel.Warning, Message = "ForwardAgentFilter failed with {ExceptionType}; the forwarded agent request was refused")]
+    public static partial void AgentFilterFailed(ILogger logger, string exceptionType);
 }

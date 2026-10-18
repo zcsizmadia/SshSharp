@@ -144,6 +144,7 @@ public sealed partial class SshClient
                 AuthenticationBanner = options.AuthenticationBanner,
                 AuthenticationOrder = AuthenticationOrder(hostConfig),
                 ForwardAgent = hostConfig.ForwardAgent ? agent : null,
+                ForwardAgentFilter = options.ForwardAgentFilter,
                 Gssapi = hostConfig.GssapiAuthentication
                     ? new SshGssapiOptions
                     {

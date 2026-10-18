@@ -57,6 +57,9 @@ jobs:
           - scope: certificates
             mutate: -m "**/SshCertificate.cs" -m "**/SshCertificateBuilder.cs"
             tests: CertificateTests.cs;Keys/SshCertificate*Tests.cs;Keys/ExternalKeyTests.cs;Keys/SshSignatureTests.cs;KnownHostsVerifierTests.cs;Fuzz/ParserRobustnessTests.cs
+          - scope: agent-server
+            mutate: -m "**/Protocol/AgentServer.cs"
+            tests: Agent/AgentServerTests.cs;Agent/InProcessAgentTests.cs
           - scope: sntrup761
             mutate: -m "**/Crypto/Sntrup761.cs"
             tests: Crypto/Sntrup761Tests.cs;Protocol/SntrupKexTests.cs

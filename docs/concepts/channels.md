@@ -13,7 +13,7 @@ operations run in parallel, why unread output stalls a program, and what the ser
 | `direct-streamlocal@openssh.com` | client | `OpenUnixSocketTunnelAsync` |
 | `forwarded-tcpip` | server | each connection to a remote forwarding (`ForwardRemotePortAsync`, to a host and port or to a handler, `ForwardRemoteDynamicPortAsync`) |
 | `forwarded-streamlocal@openssh.com` | server | each connection to a remote Unix-socket forwarding |
-| `auth-agent@openssh.com` | server | each use of a forwarded agent |
+| `auth-agent@openssh.com` | server | each use of a forwarded agent: relayed to the agent, or answered request by request for an in-process agent (`SshAgent.FromKeys`) or behind `ForwardAgentFilter` |
 
 Channels the server opens are accepted only when you asked for them (a forwarding, agent forwarding); anything else is refused.
 

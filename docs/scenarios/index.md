@@ -12,6 +12,7 @@ library in CI), and lists what to change for production. Copy them as a starting
 | [A webhook receiver behind NAT](webhook-receiver.md) | Serve webhooks that reach a public server's port from your own code, over an outbound SSH connection, with no local port. |
 | [A background worker](background-worker.md) | A hosted service that fetches files on a schedule over a shared, reconnecting connection. |
 | [Short-lived certificates for CI jobs](ci-certificates.md) | Be the SSH certificate authority: issue each CI job a certificate for one user, for twenty minutes, from a CA key in a KMS or agent. |
+| [A KMS-held key forwarded through a bastion](kms-agent-forwarding.md) | Forward an agent served in-process from a KMS key, and let the bastion use it only to log in to known servers. |
 
 The [samples](https://github.com/zcsizmadia/SshSharp/tree/main/samples) are runnable projects: an `ssh`-like command-line tool, an
 ASP.NET Core API, and a worker service.

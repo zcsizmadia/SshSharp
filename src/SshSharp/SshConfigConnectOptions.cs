@@ -47,8 +47,17 @@ public sealed class SshConfigConnectOptions
     /// </summary>
     public bool UseAgent { get; init; } = true;
 
-    /// <summary>The agent to use instead of the configured or environment one.</summary>
+    /// <summary>
+    /// The agent to use instead of the configured or environment one: another agent's path, or an in-process one
+    /// (<see cref="SshAgent.FromKeys"/>). It is also the agent <c>ForwardAgent yes</c> forwards.
+    /// </summary>
     public SshAgent? Agent { get; init; }
+
+    /// <summary>
+    /// Decides what programs on the server may do with the forwarded agent (<c>ForwardAgent yes</c>), for the destination and every
+    /// <c>ProxyJump</c> hop that forwards it; see <see cref="SshClientOptions.ForwardAgentFilter"/>.
+    /// </summary>
+    public Func<SshAgentRequest, CancellationToken, ValueTask<bool>>? ForwardAgentFilter { get; init; }
 
     /// <summary>
     /// Start the destination's <c>LocalForward</c>, <c>RemoteForward</c> and <c>DynamicForward</c> forwardings once connected, as ssh does

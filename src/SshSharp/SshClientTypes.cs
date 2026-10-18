@@ -153,8 +153,35 @@ public sealed class SshClientOptions
     /// Forward this agent to the server (<c>ssh -A</c>, <c>ForwardAgent yes</c>): sessions ask the server to offer it, so programs there
     /// (ssh, git) can authenticate onward with your keys. Null (the default) forwards nothing. Only forward to servers you trust: while
     /// connected, anyone with enough rights on the server can use the agent to sign with your keys (not read them).
+    /// An in-process agent (<see cref="SshAgent.FromKeys"/>) is answered here, with no agent process; <see cref="ForwardAgentFilter"/>
+    /// decides what the server's side may do with either kind.
     /// </summary>
     public SshAgent? ForwardAgent { get; init; }
+
+    /// <summary>
+    /// Decides each request a program on the server makes of the forwarded agent (<see cref="ForwardAgent"/>): which keys it lists and
+    /// whether each signature is made. Return true to allow. It can be asynchronous, to ask the user (as <c>ssh-add -c</c> does) or
+    /// another service. Null (the default) allows everything, as <c>ssh -A</c> does.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The filter is asked once for each key in a listing (<see cref="SshAgentOperation.ListKeys"/>; a refused key is left out) and
+    /// for every signature (<see cref="SshAgentOperation.Sign"/>; a refused one is answered with <c>SSH_AGENT_FAILURE</c>, as an agent
+    /// whose user declines a confirmation answers). A key is checked again when it signs, whether or not it was listed: a public key is no
+    /// secret, so hiding it does not stop a request for it. To confirm each use as <c>ssh-add -c</c> does, allow every listing and ask
+    /// on <see cref="SshAgentOperation.Sign"/>.
+    /// </para>
+    /// <para>
+    /// With a filter, the forwarded agent is read-only and narrowed: requests to add, remove or lock keys are refused, RSA keys never
+    /// sign with SHA-1, data that is not a login request, an SSH signature or a certificate is not signed, and keys whose type
+    /// <see cref="SshPublicKey"/> does not read are hidden. Without one, a real agent's connection is relayed byte for byte, as before.
+    /// </para>
+    /// <para>
+    /// It runs on the connection's background work, possibly for several agent channels at once; it gets a token that is cancelled when
+    /// the connection closes. Anything it throws refuses the request (and is logged).
+    /// </para>
+    /// </remarks>
+    public Func<SshAgentRequest, CancellationToken, ValueTask<bool>>? ForwardAgentFilter { get; init; }
 
     /// <summary>The methods to try and their order (ssh's <c>PreferredAuthentications</c>); null for publickey, keyboard-interactive, password.</summary>
     internal IReadOnlyList<string>? AuthenticationOrder { get; init; }

@@ -67,6 +67,73 @@ internal static class Keys
         // </agent-forwarding>
     }
 
+    public static async Task InProcessAgentAsync(SshKeySigner kmsSigner, SshHostKeyVerifier verifier, CancellationToken cancellationToken)
+    {
+        // <agent-in-process>
+        // An agent served by this process: no ssh-agent needed. Keys from files, generated keys, and keys behind an SshKeySigner.
+        using var deployKey = await SshPrivateKey.LoadAsync("deploy_ed25519", Environment.GetEnvironmentVariable("SSH_KEY_PASSPHRASE"), cancellationToken);
+        using var kmsKey = SshPrivateKey.FromSigner(kmsSigner, comment: "kms:deploy");   // the private key stays in the KMS
+        var agent = SshAgent.FromKeys(deployKey, kmsKey);
+
+        await using var client = await SshClient.ConnectAsync("build.example.com", 22, new SshClientOptions
+        {
+            UserName = "deploy",
+            PrivateKeys = await agent.GetKeysAsync(cancellationToken),   // authenticate through it, as with any agent
+            HostKeyVerifier = verifier,
+            ForwardAgent = agent,   // and forward it: ssh and git on the server sign through this process
+        }, cancellationToken);
+        await client.RunCommandAsync("git -C /srv/app pull", cancellationToken);
+        // </agent-in-process>
+    }
+
+    public static async Task AgentFilterAsync(SshAgent agent, IReadOnlySet<SshPublicKey> appServers, SshHostKeyVerifier verifier,
+        CancellationToken cancellationToken)
+    {
+        // <agent-filter>
+        // appServers: the host keys of the servers the bastion may log in to with your keys (from their known_hosts lines).
+        await using var client = await SshClient.ConnectAsync("bastion.example.com", 22, new SshClientOptions
+        {
+            UserName = "deploy",
+            PrivateKeys = await agent.GetKeysAsync(cancellationToken),
+            HostKeyVerifier = verifier,
+            ForwardAgent = agent,
+            ForwardAgentFilter = (request, _) => ValueTask.FromResult(request switch
+            {
+                // List every key; decide when one is used.
+                { Operation: SshAgentOperation.ListKeys } => true,
+
+                // Logins onward, as deploy, to those servers only (OpenSSH 8.9 or later on the bastion reports where it logs in to).
+                // Never file or commit signatures, and nothing for a destination that is not known.
+                { Purpose: SshSignaturePurpose.Authentication, UserName: "deploy", DestinationHostKey: { } destination }
+                    => appServers.Contains(destination),
+                _ => false,
+            }),
+        }, cancellationToken);
+        // </agent-filter>
+    }
+
+    public static async Task AgentConfirmAsync(SshAgent agent, SshHostKeyVerifier verifier, Func<string, CancellationToken, Task<bool>> askUser,
+        CancellationToken cancellationToken)
+    {
+        // <agent-confirm>
+        // As ssh-add -c: each signature waits for the user. askUser is your UI (a dialog, a push notification).
+        var options = new SshClientOptions
+        {
+            UserName = "deploy",
+            PrivateKeys = await agent.GetKeysAsync(cancellationToken),
+            HostKeyVerifier = verifier,
+            ForwardAgent = agent,
+            ForwardAgentFilter = async (request, ct) =>
+                request.Operation == SshAgentOperation.ListKeys
+                || await askUser(
+                    $"Allow a {request.Purpose} signature with {request.Key.Fingerprint} ({request.Key.Comment})" +
+                    (request.DestinationHostKey is { } destination ? $" for the server with host key {destination.Fingerprint}?" : "?"),
+                    ct),
+        };
+        // </agent-confirm>
+        await using var client = await SshClient.ConnectAsync("build.example.com", 22, options, cancellationToken);
+    }
+
     public static async Task AddToAgentAsync(CancellationToken cancellationToken)
     {
         // <agent-add>
