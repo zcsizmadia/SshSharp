@@ -6,29 +6,52 @@ using SshSharp.Protocol;
 namespace SshSharp.Benchmarks;
 
 /// <summary>
-/// Where a connect's time goes: the ssh_config route against a direct connect with the same algorithms, the phases as the debug log
-/// shows them, and the cost of the managed X25519 and Ed25519 on this CPU. Run with <c>-- --connect-profile</c>.
+/// Where a connect's time goes: the first (cold) connect in the process, then, after a warm-up, the ssh_config route against a direct
+/// connect with the same algorithms, the phases as the debug log shows them, and the cost of the managed X25519 and Ed25519 on this
+/// CPU. Run with <c>-- --connect-profile</c>.
 /// </summary>
 internal static class ConnectProfile
 {
     private const int Rounds = 20;
 
+    /// <summary>Warm-up connects per route before the measured rounds (SSHSHARP_BENCH_WARMUP overrides it).</summary>
+    private const int WarmUpConnects = 100;
+
     public static async Task RunAsync()
     {
         var (host, port, user, password) = ComparisonBenchmarks.Server;
+
+        // With SSHSHARP_BENCH_KEY the direct route logs in with that key (loaded once), as the ssh_config route does.
+        IReadOnlyList<SshPrivateKey> keys = ComparisonBenchmarks.KeyFile is { } keyFile ? [await SshPrivateKey.LoadAsync(keyFile)] : [];
         var direct = new SshClientOptions
         {
             UserName = user,
-            Password = password,
+            Password = password.Length > 0 ? password : null,
+            PrivateKeys = keys,
             HostKeyVerifier = SshHostKeyVerifier.FromDelegate((_, _) => ValueTask.FromResult(true)),
-            AlgorithmPreferences = new AlgorithmPreferences { Kex = [SshAlgorithms.Curve25519Sha256], Ciphers = ["aes256-gcm@openssh.com"], HostKeys = [SshAlgorithms.SshEd25519] },
+            AlgorithmPreferences = new AlgorithmPreferences { Kex = [SshAlgorithms.Curve25519Sha256], Ciphers = [ComparisonBenchmarks.Cipher], HostKeys = [SshAlgorithms.SshEd25519] },
         };
 
-        // Warm up both paths (JIT, first DNS and socket setup).
-        await (await ComparisonBenchmarks.ConnectSshSharpAsync()).DisposeAsync();
-        await (await SshClient.ConnectAsync(host, port, direct)).DisposeAsync();
-
+        // Cold: the first connect in the process, as a command-line tool that connects once sees it. It includes compiling every method
+        // on the way (in the unoptimized tier, except the kernels marked AggressiveOptimization), the first DNS lookup and socket setup.
         var watch = Stopwatch.StartNew();
+        await (await ComparisonBenchmarks.ConnectSshSharpAsync()).DisposeAsync();
+        Console.WriteLine($"cold, first connect in the process (ssh_config route): {watch.Elapsed.TotalMilliseconds:F1} ms (with dispose)");
+
+        // Warm: a method moves to the optimized tier after 30 calls and a quiet spell with no new methods to compile, and a connect calls
+        // most of its methods once. One warm-up connect left them unoptimized for every measured round; this many, and a pause for the
+        // background compiler, put the measured rounds in steady state: what a long-running service that connects often sees.
+        var warmUp = int.TryParse(Environment.GetEnvironmentVariable("SSHSHARP_BENCH_WARMUP"), out var count) ? count : WarmUpConnects;
+        for (var i = 0; i < warmUp; i++)
+        {
+            await (await ComparisonBenchmarks.ConnectSshSharpAsync()).DisposeAsync();
+            await (await SshClient.ConnectAsync(host, port, direct)).DisposeAsync();
+        }
+
+        await Task.Delay(TimeSpan.FromSeconds(1));
+        Console.WriteLine($"warm, after {warmUp} connects of each route (steady state):");
+
+        watch.Restart();
         for (var i = 0; i < Rounds; i++)
         {
             await (await ComparisonBenchmarks.ConnectSshSharpAsync()).DisposeAsync();
@@ -65,7 +88,8 @@ internal static class ConnectProfile
         var logged = new SshClientOptions
         {
             UserName = user,
-            Password = password,
+            Password = direct.Password,
+            PrivateKeys = keys,
             HostKeyVerifier = direct.HostKeyVerifier,
             AlgorithmPreferences = direct.AlgorithmPreferences,
             Logger = factory.CreateLogger("profile"),
@@ -131,6 +155,14 @@ internal static class ConnectProfile
         }
 
         Console.WriteLine($"Ed25519 verify: {watch.Elapsed.TotalMilliseconds / 200:F2} ms");
+
+        watch.Restart();
+        for (var i = 0; i < 200; i++)
+        {
+            Ed25519.Sign(seed, publicKey, output, signature);
+        }
+
+        Console.WriteLine($"Ed25519 sign (public key known): {watch.Elapsed.TotalMilliseconds / 200:F2} ms");
     }
 
     private static void Report(string route)

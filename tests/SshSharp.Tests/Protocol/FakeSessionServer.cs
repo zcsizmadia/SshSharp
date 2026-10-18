@@ -328,6 +328,9 @@ internal sealed class FakeSessionServer : IAsyncDisposable
     /// <summary>The signature algorithm of every publickey request, in order.</summary>
     public List<string> PublicKeyAlgorithms { get; } = [];
 
+    /// <summary>Every publickey request, in order, accepted or not: "query:alg" without a signature, "signed:alg" with one.</summary>
+    public List<string> PublicKeyRequests { get; } = [];
+
     /// <summary>Extensions to send in a second EXT_INFO during authentication, to a client that announced ext-info-in-auth@openssh.com.</summary>
     public IReadOnlyDictionary<string, string>? ExtInfoDuringAuth { get; init; }
 
@@ -576,6 +579,11 @@ internal sealed class FakeSessionServer : IAsyncDisposable
                     lock (PublicKeyAlgorithms)
                     {
                         PublicKeyAlgorithms.Add(algorithm);
+                    }
+
+                    lock (PublicKeyRequests)
+                    {
+                        PublicKeyRequests.Add((hasSignature ? "signed:" : "query:") + algorithm);
                     }
 
                     // Host-bound (PROTOCOL 3.1): the client names the host key it verified, which must be the one this server presented.

@@ -7,8 +7,9 @@ using SshNet = Renci.SshNet;
 namespace SshSharp.Benchmarks;
 
 /// <summary>
-/// SshSharp against SSH.NET on the same server, with the same algorithms forced on both (curve25519-sha256, aes256-gcm@openssh.com,
-/// ssh-ed25519): connect, small-command latency, a download, an SCP upload and parallel commands. Point it at a server with
+/// SshSharp against SSH.NET on the same server, with the same algorithms forced on both (curve25519-sha256, the
+/// <see cref="Cipher"/>, ssh-ed25519): connect, small-command latency, a download, an SCP upload and parallel commands. Point it at a
+/// server with
 /// SSHSHARP_BENCH_SSHD (host:port), SSHSHARP_BENCH_USER and SSHSHARP_BENCH_PASSWORD (or the SSHSHARP_TEST_* ones, as set by
 /// scripts/test-server.ps1). See docs/benchmarks.md for the setup and the results.
 /// </summary>
@@ -30,6 +31,13 @@ public class ComparisonBenchmarks
     /// <summary>A private key to authenticate with instead of the password (SSHSHARP_BENCH_KEY, a file in OpenSSH format).</summary>
     internal static string? KeyFile => Environment.GetEnvironmentVariable("SSHSHARP_BENCH_KEY");
 
+    /// <summary>
+    /// The cipher forced on both libraries (SSHSHARP_BENCH_CIPHER), aes256-gcm@openssh.com by default. With
+    /// chacha20-poly1305@openssh.com the comparison measures SshSharp's managed ChaCha20-Poly1305 against SSH.NET's (BouncyCastle);
+    /// with AES-GCM both use the platform's.
+    /// </summary>
+    internal static string Cipher => Environment.GetEnvironmentVariable("SSHSHARP_BENCH_CIPHER") is { Length: > 0 } cipher ? cipher : "aes256-gcm@openssh.com";
+
     internal static (string Host, int Port, string User, string Password) Server
     {
         get
@@ -44,12 +52,25 @@ public class ComparisonBenchmarks
         }
     }
 
-    /// <summary>SshSharp, through its public ssh_config route to force the algorithms.</summary>
-    internal static Task<SshClient> ConnectSshSharpAsync(Microsoft.Extensions.Logging.ILogger? logger = null)
+    /// <summary>
+    /// SshSharp, through its public ssh_config route to force the algorithms. The config is built and parsed once, outside the timed
+    /// connects, as an application would hold it; SSH.NET's ConnectionInfo is likewise plain objects. Each connect still resolves the
+    /// host's settings from it and reads the key file, as SSH.NET reads its PrivateKeyFile.
+    /// </summary>
+    internal static Task<SshClient> ConnectSshSharpAsync(Microsoft.Extensions.Logging.ILogger? logger = null) =>
+        SshClient.ConnectAsync("bench", new SshConfigConnectOptions
+        {
+            Config = BenchConfig.Value.Config,
+            Password = BenchConfig.Value.Password,
+            UseAgent = false,
+            Logger = logger,
+        });
+
+    private static readonly Lazy<(SshConfig Config, string? Password)> BenchConfig = new(() =>
     {
         var (host, port, user, password) = Server;
         var config = $"Host bench\n HostName {host}\n Port {port}\n User {user}\n KexAlgorithms curve25519-sha256\n"
-            + " Ciphers aes256-gcm@openssh.com\n HostKeyAlgorithms ssh-ed25519\n StrictHostKeyChecking no\n UserKnownHostsFile none\n"
+            + $" Ciphers {Cipher}\n HostKeyAlgorithms ssh-ed25519\n StrictHostKeyChecking no\n UserKnownHostsFile none\n"
             // Without a key, no default identity files are loaded (the account running the benchmark may have some); SSH.NET loads none either.
             // One method, as SSH.NET is given: ssh's default order would try keyboard-interactive first, and sshd delays every failure.
             + (KeyFile is null ? " PubkeyAuthentication no\n PreferredAuthentications password\n" : " PreferredAuthentications publickey\n");
@@ -58,8 +79,8 @@ public class ComparisonBenchmarks
             config += $" IdentityFile \"{KeyFile}\"\n IdentitiesOnly yes\n";
         }
 
-        return SshClient.ConnectAsync("bench", new SshConfigConnectOptions { Config = SshConfig.Parse(config), Password = password.Length > 0 ? password : null, UseAgent = false, Logger = logger });
-    }
+        return (SshConfig.Parse(config), password.Length > 0 ? password : null);
+    });
 
     /// <summary>SSH.NET with the same algorithms: everything else removed from its tables.</summary>
     internal static SshNet.ConnectionInfo SshNetConnection()
@@ -70,7 +91,7 @@ public class ComparisonBenchmarks
             : new SshNet.PasswordAuthenticationMethod(user, password);
         var info = new SshNet.ConnectionInfo(host, port, user, method);
         Keep(info.KeyExchangeAlgorithms, "curve25519-sha256");
-        Keep(info.Encryptions, "aes256-gcm@openssh.com");
+        Keep(info.Encryptions, Cipher);
         Keep(info.HostKeyAlgorithms, "ssh-ed25519");
         return info;
 

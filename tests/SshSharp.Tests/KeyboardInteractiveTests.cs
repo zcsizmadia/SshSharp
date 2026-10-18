@@ -185,7 +185,7 @@ public class KeyboardInteractiveTests
             KeyboardInteractiveRounds = [CodeRound],
         };
         await using var client = await ConnectAsync(server, Answers([], ["123456"]), keys: [key]);
-        await Assert.That(Attempts(server)).IsEquivalentTo(new[] { "none", "publickey", "publickey", "publickey-signed:ssh-ed25519", "keyboard-interactive" });
+        await Assert.That(Attempts(server)).IsEquivalentTo(new[] { "none", "publickey", "publickey-signed:ssh-ed25519", "keyboard-interactive" });
     }
 
     [Test]
@@ -195,7 +195,7 @@ public class KeyboardInteractiveTests
         using var key = SshPrivateKey.Parse(TestKeys.OpenSshEd25519(out var blob));
         await using var server = new FakeSessionServer { AuthorizedKeys = [blob], AuthenticationChain = ["password", "publickey"] };
         await using var client = await ConnectAsync(server, password: "secret", keys: [key]);
-        await Assert.That(Attempts(server)).IsEquivalentTo(new[] { "none", "password", "publickey", "publickey", "publickey-signed:ssh-ed25519" });
+        await Assert.That(Attempts(server)).IsEquivalentTo(new[] { "none", "password", "publickey", "publickey-signed:ssh-ed25519" });
     }
 
     [Test]

@@ -63,6 +63,8 @@ internal static class Field25519
 
     public static void Zero(Span<long> result) => result[..Limbs].Clear();
 
+    // The ladder operations are fully optimized at the first call: see Multiply.
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     public static void Add(Span<long> result, ReadOnlySpan<long> a, ReadOnlySpan<long> b) => Reduce(
         result,
         (ulong)a[0] + (ulong)b[0],
@@ -71,6 +73,7 @@ internal static class Field25519
         (ulong)a[3] + (ulong)b[3],
         (ulong)a[4] + (ulong)b[4]);
 
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     public static void Sub(Span<long> result, ReadOnlySpan<long> a, ReadOnlySpan<long> b) => Reduce(
         result,
         (ulong)a[0] + TwoP0 - (ulong)b[0],
@@ -80,6 +83,7 @@ internal static class Field25519
         (ulong)a[4] + TwoP - (ulong)b[4]);
 
     /// <summary>Constant-time conditional swap: swaps <paramref name="p"/> and <paramref name="q"/> when <paramref name="bit"/> is 1.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     public static void ConditionalSwap(Span<long> p, Span<long> q, int bit)
     {
         var mask = ~(long)(bit - 1);
@@ -91,6 +95,13 @@ internal static class Field25519
         }
     }
 
+    // Tiered compilation first runs a method unoptimized, and replaces it only after 30 calls and a quiet spell of 100 ms with no new
+    // methods being compiled. A connect is a burst of new methods, so in a short-lived process (a command-line tool, a job that connects
+    // once) the key exchange, the host key check and the signature run entirely in unoptimized code, where Mul and Reduce are not
+    // inlined and the limbs live on the stack instead of in registers: several times slower. These kernels, and the Edwards and
+    // Montgomery operations built on them, are compiled fully optimized at the first call instead. The cost is one optimizing compile
+    // per method and no profile-guided recompilation, which straight-line arithmetic does not need.
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     public static void Multiply(Span<long> result, ReadOnlySpan<long> a, ReadOnlySpan<long> b)
     {
         ulong a0 = (ulong)a[0], a1 = (ulong)a[1], a2 = (ulong)a[2], a3 = (ulong)a[3], a4 = (ulong)a[4];
@@ -106,6 +117,7 @@ internal static class Field25519
         Reduce(result, r0, r1, r2, r3, r4);
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     public static void Square(Span<long> result, ReadOnlySpan<long> a)
     {
         ulong a0 = (ulong)a[0], a1 = (ulong)a[1], a2 = (ulong)a[2], a3 = (ulong)a[3], a4 = (ulong)a[4];

@@ -60,6 +60,43 @@ It does not run in CI, because shared runners are too noisy for a statistical ti
 Measured with the 51-bit field on an Intel Core i7-12800H, Windows 11, .NET 10, x64 (the 16-bit field it replaced measured 0.90 and
 -0.77). |t| below 4.5 means no evidence; it is not a proof.
 
+## Ed25519 signing with the key's own public key
+
+`Ed25519.Sign` derived the public key from the seed on every signature, because the challenge hashes it: a fixed-base scalar
+multiplication, one of the two that make up nearly all of the signing cost (the other computes R). An overload takes the public key
+instead, and `SshPrivateKey.Ed25519Key` passes the one it derived from its seed when it was made.
+
+**Why this needs care.** RFC 8032 derives the nonce from the seed's second half and the message only. Two signatures of one message
+under two different public keys would share R and differ in S by (h - h') · a, which gives the secret scalar a away; a test
+(`AMismatchedPublicKey_WouldGiveTheSecretScalarAway`) shows the shared R. So the public key passed must be the seed's own.
+
+**How it is guaranteed.** `Ed25519Key` has one public constructor, which takes only the seed and derives the public key itself; the
+public key is a private field, set nowhere else. The parsers (OpenSSH, PuTTY, PKCS#8) pass only the seed; a public key in the file
+(OpenSSH and PuTTY have one) is only compared with the derived one, and the file is refused when they differ (tested with a file whose public key is consistent
+in all three places and is not the seed's). A disposed key, whose seed is zeros, refuses to sign or export. The signature from the overload is
+checked to equal the one that derives the public key afresh, and the overload against the RFC 8032 and OpenSSL vectors.
+
+## Optimized at the first call
+
+The tiered JIT first compiles a method without optimization, and recompiles it optimized only after 30 calls and a spell of 100 ms
+in which no new methods were compiled. A connect is a burst of new methods, so in a process that connects once, or in the first
+connects of any process, the key exchange, the host key verification and the signature ran entirely in unoptimized code, where the
+helpers marked `AggressiveInlining` are not inlined and locals live in memory: several times slower (measured by comparing with
+`DOTNET_TieredCompilation=0` against OpenSSH: about 5.8 ms less client CPU in each early connect). The heavy, once-per-connect methods are now marked
+`MethodImplOptions.AggressiveOptimization`, as the vectorized ChaCha20 kernels already were, so they are compiled optimized at their
+first call:
+
+- `Field25519`: `Add`, `Sub`, `ConditionalSwap`, `Multiply`, `Square` (the operations inside every ladder step and point addition;
+  the inversion chains and encodings built on them are cheap loops around these calls);
+- `X25519`'s ladder (`ScalarMult`);
+- `Ed25519`: `Sign` (the overload that does the work), `Verify`, the point addition `Add`, its `ConditionalSwap`, `ScalarMult`,
+  `DoubleScalarMultPublic` and `ModL`. `ScalarBase` and `GetPublicKey` only set up and call `ScalarMult`, so they are left alone.
+
+**Effect on constant time.** None intended: the code is the same and is now compiled by the same optimizing compiler that compiled
+it before once it was hot, minus profile-guided optimization. The tier-0 code it replaces had the same structure (no branches on
+secrets) but was never the code reviewed above, which is the optimized output. The cost is one optimizing compile per method and no
+dynamic PGO for them, which straight-line arithmetic does not need. The timing test above should be re-run on this code.
+
 ## Constant-time review of sntrup761
 
 `sntrup761x25519-sha512` makes the client generate an sntrup761 key pair and decapsulate the server's ciphertext once per key

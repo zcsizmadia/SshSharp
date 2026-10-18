@@ -394,30 +394,53 @@ public abstract class SshPrivateKey : IDisposable
     {
         private readonly byte[] _seed;
 
+        // Derived from _seed here and nowhere else, so signing can skip deriving it again. A public key from a key file is never stored
+        // in its place: the parsers compare it with this one and refuse the file when they differ (Ed25519.Sign says why that matters).
+        private readonly byte[] _rawPublicKey;
+
+        private bool _disposed;
+
         public Ed25519Key(byte[] seed, string? comment)
-            : base(SshAlgorithms.SshEd25519, PublicBlob(seed), comment) => _seed = seed;
+            : this(seed, DerivePublicKey(seed), comment)
+        {
+        }
+
+        private Ed25519Key(byte[] seed, byte[] publicKey, string? comment)
+            : base(SshAlgorithms.SshEd25519, PublicBlob(publicKey), comment)
+        {
+            _seed = seed;
+            _rawPublicKey = publicKey;
+        }
 
         internal override IReadOnlyList<string> SignatureAlgorithms { get; } = [SshAlgorithms.SshEd25519];
 
         internal override byte[] Sign(string algorithm, ReadOnlySpan<byte> data)
         {
             RequireAlgorithm(algorithm, SshAlgorithms.SshEd25519);
+
+            // A disposed key's seed is zeros, which no longer match the public key.
+            ObjectDisposedException.ThrowIf(_disposed, this);
             Span<byte> signature = stackalloc byte[Ed25519.SignatureSize];
-            Ed25519.Sign(_seed, data, signature);
+            Ed25519.Sign(_seed, _rawPublicKey, data, signature);
             return SignatureBlob(algorithm, signature);
         }
 
-        private protected override void DisposeCore() => CryptographicOperations.ZeroMemory(_seed);
+        private protected override void DisposeCore()
+        {
+            _disposed = true;
+            CryptographicOperations.ZeroMemory(_seed);
+        }
 
         // string public key, string (seed || public key).
         internal override void WritePrivateFields(SshWriter writer)
         {
+            ObjectDisposedException.ThrowIf(_disposed, this);
             Span<byte> secret = stackalloc byte[Ed25519.SeedSize + Ed25519.PublicKeySize];
             try
             {
                 _seed.CopyTo(secret);
-                Ed25519.GetPublicKey(_seed, secret[Ed25519.SeedSize..]);
-                writer.WriteString(secret[Ed25519.SeedSize..]);
+                _rawPublicKey.CopyTo(secret[Ed25519.SeedSize..]);
+                writer.WriteString(_rawPublicKey);
                 writer.WriteString(secret);
             }
             finally
@@ -426,17 +449,18 @@ public abstract class SshPrivateKey : IDisposable
             }
         }
 
-        internal static byte[] PublicBlob(ReadOnlySpan<byte> seed)
+        private static byte[] DerivePublicKey(ReadOnlySpan<byte> seed)
         {
-            Span<byte> publicKey = stackalloc byte[Ed25519.PublicKeySize];
+            var publicKey = new byte[Ed25519.PublicKeySize];
             Ed25519.GetPublicKey(seed, publicKey);
-            var key = publicKey.ToArray();
-            return Encode(w =>
-            {
-                w.WriteString(SshAlgorithms.SshEd25519);
-                w.WriteString(key);
-            });
+            return publicKey;
         }
+
+        private static byte[] PublicBlob(byte[] publicKey) => Encode(w =>
+        {
+            w.WriteString(SshAlgorithms.SshEd25519);
+            w.WriteString(publicKey);
+        });
     }
 
     internal sealed class EcdsaKey : SshPrivateKey

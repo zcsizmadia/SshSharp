@@ -229,6 +229,15 @@ public sealed class CertificateTests : IDisposable
         }
 
         await Assert.That(attempts).Contains("publickey-signed:ssh-ed25519-cert-v01@openssh.com");
+
+        // The certificate's key is held here, so it signs straight away, without offering the certificate first.
+        string[] requests;
+        lock (server.PublicKeyRequests)
+        {
+            requests = [.. server.PublicKeyRequests];
+        }
+
+        await Assert.That(requests).IsEquivalentTo(new[] { "signed:ssh-ed25519-cert-v01@openssh.com" });
     }
 
     [Test]

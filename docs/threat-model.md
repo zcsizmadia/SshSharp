@@ -31,6 +31,13 @@ A man in the middle can read, change, drop and inject bytes. The server itself m
 
 - **Host authentication:** the server must prove possession of a host key, and the application's verifier decides whether
   to trust it. There is deliberately no accept-everything default. A re-exchange must prove the same key.
+- **Public-key signatures for keys the server refuses:** a key held in the process signs its first `publickey` request, without
+  asking first whether the server accepts it ([why](authentication.md#signing-straight-away-or-asking-first)), so a server that
+  refuses the key still receives a signature from it. That gives the server nothing it could not have had otherwise: the public
+  key is in the request either way, a malicious server could answer "accepted" to a query and get the same signature, and the
+  signed data starts with this session's identifier (and, host-bound, names this server's host key), so the signature logs in
+  nowhere else. Keys held by an agent or a signer, whose signature may need the user's confirmation, a touch or a remote call, are
+  still offered first and sign only for a server that accepts them.
 - **Downgrade and prefix attacks:** only modern algorithms are offered (no SHA-1 KEX or MACs, no CBC, no `ssh-rsa`
   SHA-1 signatures, RSA ≥ 2048 bits). Strict KEX (Terrapin, CVE-2023-48795) is negotiated whenever the server supports it.
 - **Malformed input:** every parser treats its input as hostile, rejecting it with a protocol error, never with an

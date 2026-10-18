@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 
 namespace SshSharp.Crypto;
@@ -26,6 +27,8 @@ internal static class X25519
         return !CryptographicOperations.FixedTimeEquals(sharedSecret[..KeySize], zero);
     }
 
+    // The ladder runs once or twice per key exchange: fully optimized at the first call, see Field25519.Multiply.
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     private static void ScalarMult(Span<byte> output, ReadOnlySpan<byte> scalar, ReadOnlySpan<byte> point)
     {
         if (scalar.Length != KeySize || point.Length != KeySize || output.Length < KeySize)

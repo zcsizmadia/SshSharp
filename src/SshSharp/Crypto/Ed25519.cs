@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 
 namespace SshSharp.Crypto;
@@ -32,15 +33,36 @@ internal static class Ed25519
     /// <summary>Signs <paramref name="message"/> with the key derived from <paramref name="seed"/>.</summary>
     public static void Sign(ReadOnlySpan<byte> seed, ReadOnlySpan<byte> message, Span<byte> signature)
     {
+        Span<byte> publicKey = stackalloc byte[PublicKeySize];
+        GetPublicKey(seed, publicKey);
+        Sign(seed, publicKey, message, signature);
+    }
+
+    /// <summary>
+    /// Signs <paramref name="message"/> with the key derived from <paramref name="seed"/>, whose public key the caller already has, which
+    /// saves the fixed-base scalar multiplication that derives it.
+    /// </summary>
+    /// <remarks>
+    /// <paramref name="publicKey"/> must be the one derived from <paramref name="seed"/> (<see cref="GetPublicKey"/>). It is hashed
+    /// into the challenge, and RFC 8032 section 5.1.6 derives the nonce from the seed and the message alone: two signatures of one
+    /// message under two public keys would share the nonce and give away the secret scalar. So only a key that derived its public
+    /// key from its own seed calls this (<c>SshPrivateKey.Ed25519Key</c>); a public key read from a file is never passed here, only
+    /// compared with the derived one.
+    /// </remarks>
+    // Fully optimized at the first call, like the other kernels a connect runs once: see Field25519.Multiply.
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    public static void Sign(ReadOnlySpan<byte> seed, ReadOnlySpan<byte> publicKey, ReadOnlySpan<byte> message, Span<byte> signature)
+    {
         RequireSizes(seed, SeedSize, signature, SignatureSize);
+        if (publicKey.Length != PublicKeySize)
+        {
+            throw new ArgumentException($"Expected a {PublicKeySize}-byte public key.", nameof(publicKey));
+        }
+
         Span<byte> d = stackalloc byte[64];
         SHA512.HashData(seed, d);
         Clamp(d);
-
-        Span<byte> publicKey = stackalloc byte[PublicKeySize];
         Span<long> p = stackalloc long[PointSize];
-        ScalarBase(p, d[..32]);
-        Pack(publicKey, p);
 
         // r = H(prefix || M) mod L; R = r*B
         Span<byte> r = stackalloc byte[64];
@@ -78,6 +100,7 @@ internal static class Ed25519
     }
 
     /// <summary>Verifies a signature. Rejects non-canonical S (S >= L) as RFC 8032 requires.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)] // the server's host key signature, once per connect: see Field25519.Multiply
     public static bool Verify(ReadOnlySpan<byte> publicKey, ReadOnlySpan<byte> message, ReadOnlySpan<byte> signature)
     {
         if (publicKey.Length != PublicKeySize || signature.Length != SignatureSize)
@@ -155,6 +178,8 @@ internal static class Ed25519
 
     private static Span<long> Coord(Span<long> point, int index) => point.Slice(index * Field25519.Limbs, Field25519.Limbs);
 
+    // The point operations and scalar multiplications are fully optimized at the first call: see Field25519.Multiply.
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     private static void Add(Span<long> p, ReadOnlySpan<long> q)
     {
         Span<long> a = stackalloc long[Field25519.Limbs];
@@ -195,6 +220,7 @@ internal static class Ed25519
         Field25519.Multiply(p3, e, h);
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     private static void ConditionalSwap(Span<long> p, Span<long> q, int bit)
     {
         for (var i = 0; i < 4; i++)
@@ -215,6 +241,7 @@ internal static class Ed25519
         output[31] ^= (byte)(Field25519.Parity(tx) << 7);
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     private static void ScalarMult(Span<long> p, Span<long> q, ReadOnlySpan<byte> s)
     {
         Field25519.Zero(Coord(p, 0));
@@ -235,6 +262,7 @@ internal static class Ed25519
     /// p = s1*q1 + s2*q2 by a joint double-and-add (Straus–Shamir): one doubling per bit and at most one addition. Branches on the
     /// scalars, so only for public inputs (signature verification).
     /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     private static void DoubleScalarMultPublic(Span<long> p, ReadOnlySpan<long> q1, ReadOnlySpan<byte> s1, ReadOnlySpan<long> q2, ReadOnlySpan<byte> s2)
     {
         Span<long> sum = stackalloc long[PointSize];
@@ -394,6 +422,7 @@ internal static class Ed25519
         return less == 1;
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     private static void ModL(Span<byte> r, Span<long> x)
     {
         long carry;

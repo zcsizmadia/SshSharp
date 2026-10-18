@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using SshSharp.Crypto;
 using SshSharp.Keys;
 using SshSharp.Protocol;
 
@@ -98,6 +99,54 @@ public class SshPrivateKeyTests
         {
             await AssertSignsAndVerifies(key, edBlob);
         }
+    }
+
+    [Test]
+    public async Task Ed25519_SignsWithThePublicKeyDerivedFromItsSeed()
+    {
+        // The key keeps the public key it derived and signs with it; the signature must be exactly the one that derives it afresh.
+        var seed = RandomNumberGenerator.GetBytes(Ed25519.SeedSize);
+        var expected = new byte[Ed25519.SignatureSize];
+        Ed25519.Sign(seed, Data, expected);
+        var publicKey = new byte[Ed25519.PublicKeySize];
+        Ed25519.GetPublicKey(seed, publicKey);
+
+        using var made = new SshPrivateKey.Ed25519Key((byte[])seed.Clone(), null);
+        using var parsed = SshPrivateKey.Parse(TestKeys.OpenSshEd25519(seed, publicKey));
+        foreach (var key in new[] { made, parsed })
+        {
+            var (algorithm, signature) = ReadSignature(key.Sign("ssh-ed25519", Data));
+            await Assert.That(algorithm).IsEqualTo("ssh-ed25519");
+            await Assert.That(signature).IsEquivalentTo(expected);
+        }
+    }
+
+    private static (string Algorithm, byte[] Signature) ReadSignature(byte[] blob)
+    {
+        var reader = new SshReader(blob);
+        return (reader.ReadUtf8String(), reader.ReadString().ToArray());
+    }
+
+    [Test]
+    public async Task Ed25519_AKeyFileWhosePublicKeyIsNotTheSeeds_IsRefused()
+    {
+        // Consistent everywhere in the file, and wrong: the public key the parser reads is only ever compared with the derived one, never
+        // signed with (a mismatched public key in the signature would give the private key away; see Ed25519Tests).
+        var seed = RandomNumberGenerator.GetBytes(Ed25519.SeedSize);
+        var other = new byte[Ed25519.PublicKeySize];
+        Ed25519.GetPublicKey(RandomNumberGenerator.GetBytes(Ed25519.SeedSize), other);
+        await Assert.That(() => SshPrivateKey.Parse(TestKeys.OpenSshEd25519(seed, other))).Throws<FormatException>()
+            .WithMessageContaining("does not match its public key");
+    }
+
+    [Test]
+    public async Task Ed25519_ADisposedKeyNeitherSignsNorExports()
+    {
+        // Disposing zeroes the seed, which then no longer belongs to the public key the key holds.
+        var key = SshPrivateKey.Parse(TestKeys.OpenSshEd25519(out _));
+        key.Dispose();
+        await Assert.That(() => key.Sign("ssh-ed25519", Data)).Throws<ObjectDisposedException>();
+        await Assert.That(() => key.ToOpenSshPrivateKey()).Throws<ObjectDisposedException>();
     }
 
     [Test]

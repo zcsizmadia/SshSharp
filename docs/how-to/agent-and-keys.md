@@ -191,7 +191,9 @@ the answer against the public key before using it.
 
 ## Notes and pitfalls
 
-- **Order.** Keys are tried in the order given, and the server is asked whether it accepts each one before anything is signed. A
+- **Order.** Keys are tried in the order given. A key held in your process signs its request straight away; an agent's or a
+  signer's key is offered first and signs only if the server would accept it (see
+  [Signing straight away, or asking first](../authentication.md#signing-straight-away-or-asking-first)). A
   server that allows few attempts (sshd's `MaxAuthTries`, 6 by default) may disconnect before it reaches a key late in a long
   list: put the right key first.
 - **Dispose keys.** Disposing a loaded key clears its private key material. The client does not dispose the keys you pass it.
