@@ -14,5 +14,7 @@ await using var client = await clientFactory.ConnectAsync("deploy", cancellation
 var shared = await connections.GetClientAsync("deploy", cancellationToken);
 ```
 
-Unknown hosts fail by default (`AcceptNewHostKeys` opts in to recording them). See the
+Unknown hosts fail by default (`AcceptNewHostKeys` opts in to recording them). In containers, pin the server's host key with
+`HostKeyFingerprints` and give private keys as values with `PrivateKeys` (for example `Ssh__Deploy__PrivateKeys__0__Key` from a
+secret), with no files in `~/.ssh`. See the
 [dependency injection guide](https://zcsizmadia.github.io/SshSharp/dependency-injection.html).

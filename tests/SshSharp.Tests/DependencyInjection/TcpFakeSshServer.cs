@@ -25,6 +25,15 @@ internal sealed class TcpFakeSshServer : IAsyncDisposable
 
     public int Port => ((IPEndPoint)_listener.LocalEndpoint).Port;
 
+    /// <summary>The server's host key fingerprint (<c>SHA256:...</c>), the same for every connection.</summary>
+    public string HostKeyFingerprint => _options.HostKey.Fingerprint;
+
+    /// <summary>
+    /// Public keys (SSH wire format) every connection's server accepts. When set, the servers offer only public key authentication;
+    /// otherwise only the password.
+    /// </summary>
+    public List<byte[]> AuthorizedKeys { get; init; } = [];
+
     /// <summary>How many TCP connections were accepted, refused ones included.</summary>
     public int Connections => Volatile.Read(ref _connections);
 
@@ -73,7 +82,9 @@ internal sealed class TcpFakeSshServer : IAsyncDisposable
                 continue;
             }
 
-            var server = new FakeSessionServer(_options);
+            var server = AuthorizedKeys.Count > 0
+                ? new FakeSessionServer(_options) { AdvertisedMethods = ["publickey"], AuthorizedKeys = AuthorizedKeys }
+                : new FakeSessionServer(_options);
             _ = server.StartAsync();
             lock (_live)
             {

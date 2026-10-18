@@ -4,7 +4,9 @@ using SshSharp.FileProviders;
 using SshSharp.Sftp;
 
 // SshSharp in an ASP.NET Core minimal API, through SshSharp.Extensions.DependencyInjection. The server is the "Ssh:Server" section of
-// appsettings.json; keep its password or key passphrase in user secrets (dotnet user-secrets set "Ssh:Server:Password" "...").
+// appsettings.json; keep its password or key passphrase in user secrets (dotnet user-secrets set "Ssh:Server:Password" "..."). In a
+// container, the key itself and the pinned host key come from the environment instead (Ssh__Server__PrivateKeys__0__Key,
+// Ssh__Server__HostKeyFingerprints__0; see README.md).
 //
 //   GET /uptime          runs a command over the shared connection
 //   GET /files/{path}    streams a file from Ssh:FilesRoot on the server, through SFTP

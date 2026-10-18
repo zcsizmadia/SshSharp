@@ -1,1 +1,14 @@
 #nullable enable
+override SshSharp.Extensions.DependencyInjection.SshEndpointPrivateKey.ToString() -> string!
+SshSharp.Extensions.DependencyInjection.SshEndpointOptions.HostKeyFingerprints.get -> System.Collections.Generic.IList<string!>!
+SshSharp.Extensions.DependencyInjection.SshEndpointOptions.HostKeyFingerprints.set -> void
+SshSharp.Extensions.DependencyInjection.SshEndpointOptions.PrivateKeys.get -> System.Collections.Generic.IList<SshSharp.Extensions.DependencyInjection.SshEndpointPrivateKey!>!
+SshSharp.Extensions.DependencyInjection.SshEndpointOptions.PrivateKeys.set -> void
+SshSharp.Extensions.DependencyInjection.SshEndpointOptions.Proxy.get -> string?
+SshSharp.Extensions.DependencyInjection.SshEndpointOptions.Proxy.set -> void
+SshSharp.Extensions.DependencyInjection.SshEndpointPrivateKey
+SshSharp.Extensions.DependencyInjection.SshEndpointPrivateKey.Key.get -> string?
+SshSharp.Extensions.DependencyInjection.SshEndpointPrivateKey.Key.set -> void
+SshSharp.Extensions.DependencyInjection.SshEndpointPrivateKey.Passphrase.get -> string?
+SshSharp.Extensions.DependencyInjection.SshEndpointPrivateKey.Passphrase.set -> void
+SshSharp.Extensions.DependencyInjection.SshEndpointPrivateKey.SshEndpointPrivateKey() -> void

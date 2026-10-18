@@ -1,3 +1,5 @@
+using System.Diagnostics;
+
 namespace SshSharp.Extensions.DependencyInjection;
 
 /// <summary>
@@ -17,13 +19,23 @@ public sealed class SshEndpointOptions
     public string? UserName { get; set; }
 
     /// <summary>A password, tried after any keys. Keep it out of source control: bind it from a secret store.</summary>
+    [DebuggerBrowsable(DebuggerBrowsableState.Never)]
     public string? Password { get; set; }
 
     /// <summary>Private key files (OpenSSH, PEM or PuTTY format) to authenticate with, tried in order.</summary>
     public IList<string> PrivateKeyFiles { get; set; } = [];
 
     /// <summary>The passphrase of encrypted <see cref="PrivateKeyFiles"/>.</summary>
+    [DebuggerBrowsable(DebuggerBrowsableState.Never)]
     public string? PrivateKeyPassphrase { get; set; }
+
+    /// <summary>
+    /// Private keys given as values instead of files (from environment variables, a mounted secret, Key Vault or user secrets), each with
+    /// its own optional passphrase. They are offered after <see cref="PrivateKeyFiles"/>, in order. Each is checked when the settings are
+    /// validated (at start with <c>ValidateOnStart</c>), and read again for each connection, which does not keep it after authenticating.
+    /// Cannot be combined with <see cref="ConfigAlias"/>.
+    /// </summary>
+    public IList<SshEndpointPrivateKey> PrivateKeys { get; set; } = [];
 
     /// <summary>
     /// The known_hosts files that hold the server's host keys (default: the user's <c>~/.ssh/known_hosts</c>). New keys are recorded in
@@ -38,9 +50,28 @@ public sealed class SshEndpointOptions
     public bool AcceptNewHostKeys { get; set; }
 
     /// <summary>
+    /// Trust only host keys with one of these SHA-256 fingerprints, in OpenSSH's format (<c>SHA256:</c> and 43 base64 characters, as
+    /// <c>ssh-keygen -lf</c> prints them), as <see cref="SshHostKeyVerifier.Pinned"/> does. They replace known_hosts: setting
+    /// <see cref="KnownHostsFiles"/>, <see cref="AcceptNewHostKeys"/> or <see cref="ConfigAlias"/> as well fails validation, so it is
+    /// never unclear which of them decides. List more than one to allow for a host key rotation.
+    /// </summary>
+    public IList<string> HostKeyFingerprints { get; set; } = [];
+
+    /// <summary>
+    /// An HTTP or SOCKS proxy to connect through, as a URI: <c>http://proxy.example.com:3128</c>, <c>socks5://</c>, <c>socks5h://</c>,
+    /// <c>socks4://</c> or <c>socks4a://</c>, with optional percent-encoded <c>user:password@</c> (see <see cref="SshProxy.FromUri"/>).
+    /// Bind it from a secret store when it holds a password. Cannot be combined with <see cref="ConfigAlias"/>, where ssh_config's
+    /// <c>ProxyJump</c> or <c>ProxyCommand</c> apply.
+    /// </summary>
+    [DebuggerBrowsable(DebuggerBrowsableState.Never)]
+    public string? Proxy { get; set; }
+
+    /// <summary>
     /// Connect by this <c>ssh_config</c> alias instead (ProxyJump, IdentityFile, known_hosts and the rest come from the user's and the
     /// system's ssh_config). <see cref="Host"/>, <see cref="Port"/>, <see cref="UserName"/>, <see cref="PrivateKeyFiles"/> and
-    /// <see cref="KnownHostsFiles"/> are then ignored; <see cref="Password"/> is still offered.
+    /// <see cref="KnownHostsFiles"/> are then ignored; <see cref="Password"/> is still offered. <see cref="PrivateKeys"/>,
+    /// <see cref="HostKeyFingerprints"/> and <see cref="Proxy"/> cannot be combined with it (validation fails), as ssh_config decides
+    /// keys, host keys and proxies there.
     /// </summary>
     public string? ConfigAlias { get; set; }
 

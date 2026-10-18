@@ -63,6 +63,43 @@ internal static class DependencyInjection
     }
     // </provider>
 
+    public static void Containers(WebApplicationBuilder builder)
+    {
+        // <containers>
+        // Program.cs: the same registration as anywhere else. In the container, the configuration comes from environment variables
+        // or a secret store, and holds the key's text and the pinned fingerprints instead of file paths.
+        builder.Services.AddSshClient("deploy")
+            .BindConfiguration("Ssh:Deploy")
+            .ValidateOnStart();   // a malformed fingerprint, an unreadable key or a wrong passphrase stops the start, by index only
+        // </containers>
+    }
+
+    public static void PinInCode(IServiceCollection services, IConfiguration configuration)
+    {
+        // <pin-in-code>
+        services.AddSshClient("deploy", o =>
+        {
+            o.Host = "deploy.example.com";
+            o.UserName = "deploy";
+
+            // Both values are secrets (or, for the fingerprint, trust anchors): read them from configuration, never write them here.
+            o.HostKeyFingerprints.Add(configuration["Ssh:Deploy:HostKeyFingerprint"]
+                ?? throw new InvalidOperationException("Set Ssh:Deploy:HostKeyFingerprint."));
+            o.PrivateKeys.Add(new SshEndpointPrivateKey
+            {
+                Key = configuration["Ssh:Deploy:Key"],
+                Passphrase = configuration["Ssh:Deploy:KeyPassphrase"],   // null for an unencrypted key
+            });
+        });
+        // </pin-in-code>
+    }
+
+    /// <summary>A trust store the application already has (a CMDB, an inventory service).</summary>
+    public interface IHostKeyInventory
+    {
+        ValueTask<bool> IsTrustedAsync(string? host, string fingerprint, CancellationToken cancellationToken);
+    }
+
     public static void Customize(IServiceCollection services)
     {
         // <customize>
@@ -78,13 +115,13 @@ internal static class DependencyInjection
                 UserName = built.UserName,
                 Password = built.Password,
                 PrivateKeys = built.PrivateKeys,
+                Proxy = built.Proxy,
                 KeepAliveInterval = built.KeepAliveInterval,
+                ConnectTimeout = built.ConnectTimeout,
                 Logger = built.Logger,
-                // Changed: the host key pinned in configuration instead of known_hosts, and an outbound HTTP proxy.
-                HostKeyVerifier = SshHostKeyVerifier.Pinned(
-                    provider.GetRequiredService<IConfiguration>()["Ssh:Deploy:HostKeyFingerprint"]
-                    ?? throw new InvalidOperationException("Set Ssh:Deploy:HostKeyFingerprint.")),
-                Proxy = SshProxy.Http("proxy.example.com", 3128),
+                // Changed: host keys checked by a service from the container instead of known_hosts or pinned fingerprints.
+                HostKeyVerifier = SshHostKeyVerifier.FromDelegate((context, cancellationToken) =>
+                    provider.GetRequiredService<IHostKeyInventory>().IsTrustedAsync(context.Host, context.HostKey.Fingerprint, cancellationToken)),
             };
         });
         // </customize>

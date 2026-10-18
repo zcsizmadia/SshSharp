@@ -41,13 +41,107 @@ builder.Services.AddSshClient("db", o => o.ConfigAlias = "prod-db"); // everythi
 | `UserName` | The user. Required unless `ConfigAlias` is set. |
 | `Password` | A password, tried after any keys. Bind it from a secret store, not from a checked-in file. |
 | `PrivateKeyFiles`, `PrivateKeyPassphrase` | Keys to authenticate with (OpenSSH, PEM or PuTTY files; `~/` is the user's home). |
+| `PrivateKeys` | Keys given as values, not files: a list of entries, each with `Key` (the key's text, OpenSSH, PEM or PuTTY) and an optional `Passphrase`. Offered after `PrivateKeyFiles`. See [Containers and Kubernetes](#containers-and-kubernetes). |
 | `KnownHostsFiles` | Where the server's host key is checked (default `~/.ssh/known_hosts`). |
 | `AcceptNewHostKeys` | Record the key of a host not in those files yet (`StrictHostKeyChecking accept-new`). Off by default: an unknown host fails the connection, and a changed key always does. |
-| `ConfigAlias` | Connect through ssh_config by this alias instead: ProxyJump, IdentityFile, known_hosts and the rest come from there, and `Host`, `Port`, `UserName`, `PrivateKeyFiles`, `KnownHostsFiles`, `AcceptNewHostKeys` and `KeepAliveInterval` are ignored (ssh_config's `ServerAliveInterval` applies). `Password` is still offered, to the destination only, never to a ProxyJump hop. |
+| `HostKeyFingerprints` | Trust only host keys with these SHA-256 fingerprints (`SHA256:...`, as `ssh-keygen -lf` prints), instead of known_hosts. Cannot be combined with `KnownHostsFiles` or `AcceptNewHostKeys`. |
+| `Proxy` | An HTTP or SOCKS proxy as a URI (`http://proxy.example.com:3128`, `socks5://...`), with optional `user:password@`. |
+| `ConfigAlias` | Connect through ssh_config by this alias instead: ProxyJump, IdentityFile, known_hosts and the rest come from there, and `Host`, `Port`, `UserName`, `PrivateKeyFiles`, `KnownHostsFiles`, `AcceptNewHostKeys` and `KeepAliveInterval` are ignored (ssh_config's `ServerAliveInterval` applies). `Password` is still offered, to the destination only, never to a ProxyJump hop. `PrivateKeys`, `HostKeyFingerprints` and `Proxy` fail validation with it, rather than being ignored. |
 | `KeepAliveInterval` | Keep-alives, so a dead connection is noticed. |
 | `ConnectTimeout` | How long one attempt may take, authentication included (default 30 s); then a `TimeoutException`. It is also the built `SshClientOptions.ConnectTimeout`, which `ConfigureClientOptions` may shorten but not extend. |
 | `ReconnectDelay`, `MaxReconnectDelay` | The shared connection's wait after a failed attempt (default 1 s, doubling up to 1 min). |
 | `ConfigureClientOptions` | A function from the services and the built `SshClientOptions` to the options to use: an agent, a custom host key verifier, keys held elsewhere (`SshPrivateKey.FromSigner`), a proxy. Not used with `ConfigAlias`. |
+
+## Containers and Kubernetes
+
+A container usually gets its secrets as values (environment variables, a mounted Kubernetes secret, Key Vault), not as files in
+`~/.ssh`, and has no `known_hosts` worth trusting. Two settings cover that without code:
+
+- **`PrivateKeys`**: the key's text itself, with its passphrase if it has one.
+- **`HostKeyFingerprints`**: the server's host key, pinned by fingerprint.
+
+Keep the non-secret part in `appsettings.json`. A fingerprint is not a secret, but it decides what is trusted, so it belongs with the
+deployment's configuration, not in code:
+
+```json
+{
+  "Ssh": {
+    "Deploy": {
+      "Host": "deploy.example.com",
+      "UserName": "deploy",
+      "HostKeyFingerprints": [ "SHA256:47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU" ]
+    }
+  }
+}
+```
+
+The key and its passphrase come from elsewhere. Any configuration source works, because they are ordinary settings:
+
+| Source | Key | Passphrase |
+|---|---|---|
+| Environment variables | `Ssh__Deploy__PrivateKeys__0__Key` | `Ssh__Deploy__PrivateKeys__0__Passphrase` |
+| User secrets (development) | `dotnet user-secrets set "Ssh:Deploy:PrivateKeys:0:Key" "$(cat ~/.ssh/deploy_ed25519)"` | `Ssh:Deploy:PrivateKeys:0:Passphrase` |
+| Azure Key Vault (configuration provider) | secret `Ssh--Deploy--PrivateKeys--0--Key` | secret `Ssh--Deploy--PrivateKeys--0--Passphrase` |
+
+The registration is the usual one; `ValidateOnStart` checks the fingerprints' format and reads each key with its passphrase when the
+host starts:
+
+[!code-csharp[](snippets/DependencyInjection.cs#containers)]
+
+In Kubernetes, put the key in a secret and map its entries to those variables:
+
+```shell
+kubectl create secret generic deploy-ssh \
+  --from-file=key=./deploy_ed25519 \
+  --from-file=passphrase=./deploy_ed25519.passphrase
+```
+
+```yaml
+# In the Deployment's container spec.
+env:
+  - name: Ssh__Deploy__PrivateKeys__0__Key
+    valueFrom:
+      secretKeyRef: { name: deploy-ssh, key: key }
+  - name: Ssh__Deploy__PrivateKeys__0__Passphrase
+    valueFrom:
+      secretKeyRef: { name: deploy-ssh, key: passphrase }
+  - name: Ssh__Deploy__HostKeyFingerprints__0
+    value: "SHA256:47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU"
+```
+
+A multi-line key is fine in an environment variable, and white space around a fingerprint (the trailing newline of a file) is
+ignored. A secret mounted as files works too, through the key-per-file configuration provider
+(`AddKeyPerFile("/run/secrets/ssh")` with files named `Ssh__Deploy__PrivateKeys__0__Key`, and so on).
+
+### How the host key is checked
+
+| Settings | The host key is trusted when |
+|---|---|
+| Neither `HostKeyFingerprints` nor `KnownHostsFiles` | it is in `~/.ssh/known_hosts` |
+| `KnownHostsFiles` (with or without `AcceptNewHostKeys`) | it is in those files (or, with `AcceptNewHostKeys`, the host is not in them yet: then it is recorded) |
+| `HostKeyFingerprints` | its fingerprint is one of them; known_hosts is not read, and nothing is recorded |
+| `HostKeyFingerprints` with `KnownHostsFiles`, `AcceptNewHostKeys` or `ConfigAlias` | never: validation fails, so it is never unclear which one decided |
+
+Pinned fingerprints replace known_hosts rather than add to it. Trusting a key that either allows would make the trust as wide as the
+looser of the two (a stale or writable known_hosts could let in a key the pin excludes); requiring both would bring back the file
+that pinning is meant to remove. List several fingerprints to roll a host key over: the old and the new, until the server has
+changed. Get a server's fingerprint with `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` on the server, or see
+[Get a new server's keys](how-to/verify-host-keys.md#get-a-new-servers-keys).
+
+### Keys given as values
+
+- Each entry's `Key` is the whole key file's text: OpenSSH (`-----BEGIN OPENSSH PRIVATE KEY-----`), PEM (PKCS#8, PKCS#1 or SEC1)
+  or PuTTY (`.ppk`). `Passphrase` is ignored for an unencrypted key.
+- Keys are offered in order: `PrivateKeyFiles` first, then `PrivateKeys`, then `Password`.
+- Validation reads each key, so a key that cannot be read, or a wrong or missing passphrase, fails at startup with
+  `ValidateOnStart`. The error names the entry (`PrivateKeys[0]`) and the problem, never the key or the passphrase.
+- Each connection reads the keys again, as it reads key files, and does not keep them after authenticating.
+- Neither keys nor passphrases are logged, and `SshEndpointPrivateKey.ToString()` and the debugger show only whether they are set.
+  `Password`, `PrivateKeyPassphrase` and `Proxy` (which may hold a password) are hidden from the debugger too.
+
+The same settings can be set in code, from configuration you read yourself:
+
+[!code-csharp[](snippets/DependencyInjection.cs#pin-in-code)]
 
 ## New connections: `ISshClientFactory`
 
