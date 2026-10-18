@@ -27,13 +27,21 @@ public enum SshAgentOperation
 /// </remarks>
 public sealed class SshAgentRequest
 {
-    internal SshAgentRequest(SshAgentOperation operation, SshPublicKey key, SshCertificate? certificate, IReadOnlyList<SshPublicKey> forwardingHostKeys,
-        SshPublicKey? destinationHostKey)
+    /// <summary>Creates a request (SshSharp makes them; this is for testing a filter).</summary>
+    /// <param name="operation">Listing the keys, or signing with one.</param>
+    /// <param name="key">The key, or the key a certificate certifies.</param>
+    /// <param name="certificate">The certificate, when the agent's identity is one.</param>
+    /// <param name="forwardingHostKeys">The host keys of the servers the agent was forwarded through; null for none.</param>
+    /// <param name="destinationHostKey">The host key of the server being logged in to, when known.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="key"/> is null.</exception>
+    public SshAgentRequest(SshAgentOperation operation, SshPublicKey key, SshCertificate? certificate = null,
+        IReadOnlyList<SshPublicKey>? forwardingHostKeys = null, SshPublicKey? destinationHostKey = null)
     {
+        ArgumentNullException.ThrowIfNull(key);
         Operation = operation;
         Key = key;
         Certificate = certificate;
-        ForwardingHostKeys = forwardingHostKeys;
+        ForwardingHostKeys = forwardingHostKeys ?? [];
         DestinationHostKey = destinationHostKey;
     }
 
@@ -49,16 +57,17 @@ public sealed class SshAgentRequest
     /// <summary>
     /// For <see cref="SshAgentOperation.Sign"/>, what the signature is for, as the data to sign shows it: logging in to a server
     /// (<see cref="SshSignaturePurpose.Authentication"/>), an SSH signature over a file or commit (<see cref="SshSignaturePurpose.FileSignature"/>,
-    /// with its <see cref="Namespace"/>), or issuing a certificate (<see cref="SshSignaturePurpose.Certificate"/>). Null for a listing.
-    /// Data that is none of these is refused before the filter is asked.
+    /// with its <see cref="Namespace"/>), or issuing a certificate (<see cref="SshSignaturePurpose.Certificate"/>). Null for a listing, and
+    /// null for a signature over data of none of these forms: programs sign their own formats through agents (pam_ssh_agent_auth, for
+    /// one), so whether to sign such data is the filter's decision. A filter that allows only the purposes it knows refuses it.
     /// </summary>
-    public SshSignaturePurpose? Purpose { get; internal init; }
+    public SshSignaturePurpose? Purpose { get; init; }
 
     /// <summary>For a <see cref="SshSignaturePurpose.FileSignature"/>, its namespace (for example <c>git</c> or <c>file</c>); otherwise null.</summary>
-    public string? Namespace { get; internal init; }
+    public string? Namespace { get; init; }
 
     /// <summary>For an <see cref="SshSignaturePurpose.Authentication"/> signature, the user name the program on the server logs in as; otherwise null.</summary>
-    public string? UserName { get; internal init; }
+    public string? UserName { get; init; }
 
     /// <summary>
     /// The host key of the server the program on the server is logging in to, when the agent connection was bound to that session

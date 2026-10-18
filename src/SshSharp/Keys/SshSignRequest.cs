@@ -14,6 +14,13 @@ public enum SshSignaturePurpose
     /// the data is the certificate without its signature. A signer that holds a CA key can allow this purpose alone.
     /// </summary>
     Certificate,
+
+    /// <summary>
+    /// Data of a form SshSharp does not recognise, which a program on a server asked an in-process agent (<see cref="SshAgent.FromKeys"/>)
+    /// to sign through agent forwarding: a challenge of its own, such as pam_ssh_agent_auth's. A signer whose policy allows only the
+    /// purposes above refuses it by throwing.
+    /// </summary>
+    Other,
 }
 
 /// <summary>

@@ -100,3 +100,8 @@ SshSharp.SshClientOptions.ForwardAgentFilter.get -> System.Func<SshSharp.SshAgen
 SshSharp.SshClientOptions.ForwardAgentFilter.init -> void
 SshSharp.SshConfigConnectOptions.ForwardAgentFilter.get -> System.Func<SshSharp.SshAgentRequest!, System.Threading.CancellationToken, System.Threading.Tasks.ValueTask<bool>>?
 SshSharp.SshConfigConnectOptions.ForwardAgentFilter.init -> void
+SshSharp.SshAgentRequest.SshAgentRequest(SshSharp.SshAgentOperation operation, SshSharp.SshPublicKey! key, SshSharp.SshCertificate? certificate = null, System.Collections.Generic.IReadOnlyList<SshSharp.SshPublicKey!>? forwardingHostKeys = null, SshSharp.SshPublicKey? destinationHostKey = null) -> void
+SshSharp.SshAgentRequest.Namespace.init -> void
+SshSharp.SshAgentRequest.Purpose.init -> void
+SshSharp.SshAgentRequest.UserName.init -> void
+SshSharp.SshSignaturePurpose.Other = 3 -> SshSharp.SshSignaturePurpose

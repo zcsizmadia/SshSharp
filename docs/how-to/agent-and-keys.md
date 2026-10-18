@@ -64,8 +64,10 @@ It answers as `ssh-agent` does, read-only:
 
 - It lists its keys (a key paired with a certificate twice, as `ssh-add` adds it: the key, then the certificate) and signs with them.
 - RSA keys sign with `rsa-sha2-256` or `rsa-sha2-512`, as the request asks; a request for SHA-1 `ssh-rsa` is refused.
-- It signs only what SSH signs: login requests, SSH signatures (`ssh-keygen -Y sign`, `git` commit signing) and certificates
-  (`ssh-keygen -s` with `-U`). A program on the server cannot use it to sign arbitrary data.
+- Like `ssh-agent`, it signs whatever data it is asked to: login requests, SSH signatures (`ssh-keygen -Y sign`, `git` commit
+  signing), certificates (`ssh-keygen -s` with `-U`), and other programs' own formats, such as pam_ssh_agent_auth's challenge for
+  `sudo`. A key behind an `SshKeySigner` sees data of another form as `SshSignaturePurpose.Other`, and a
+  [filter](#decide-what-a-forwarded-agent-may-do) can limit a forwarded agent to the purposes you know.
 - It binds connections to sessions (`session-bind@openssh.com`) and answers RFC 9987's `query`. On a connection bound for a login,
   it signs only that session's login request, as `ssh-agent` does for destination-constrained keys.
 - Adding, removing and locking keys are refused (`AddKeyAsync` and the others throw `SshException` with `AgentFailed`).
@@ -81,11 +83,17 @@ decides it. It gets an `SshAgentRequest`:
 |---|---|
 | `Operation` | `ListKeys` (asked once for each key in a listing) or `Sign` |
 | `Key`, `Certificate` | The key (with its comment, when known), and the certificate when the agent's identity is one |
-| `Purpose`, `Namespace`, `UserName` | For a signature: a login (with the user name it logs in as), an SSH signature (with its namespace), or a certificate |
+| `Purpose`, `Namespace`, `UserName` | For a signature: a login (with the user name it logs in as), an SSH signature (with its namespace), a certificate, or null for data of any other form |
 | `DestinationHostKey` | The host key of the server being logged in to, when the program bound its agent connection to that session (OpenSSH 8.9 and later do), verified |
 | `ForwardingHostKeys` | The servers the agent was forwarded through, starting with the one this client connected to |
 
 [!code-csharp[](../snippets/Keys.cs#agent-filter)]
+
+Data that is not a login request, an SSH signature or a certificate reaches the filter with a null `Purpose`. Programs sign their own
+formats through agents (pam_ssh_agent_auth, for `sudo` through the forwarded agent), so the filter decides. To restrict a forwarded
+agent to known purposes, allow only those; this policy allows logins and SSH signatures and refuses certificates and unknown data:
+
+[!code-csharp[](../snippets/Keys.cs#agent-known-purposes)]
 
 The filter can be asynchronous, to ask the user before each signature, as `ssh-add -c` does:
 
@@ -122,13 +130,14 @@ every listing and decide at sign time; to hide a key from the server altogether,
 With a filter, the forwarded agent is read-only and narrowed, whichever agent it is:
 
 - Requests to add, remove or lock keys are refused; they never reach a real agent.
-- RSA keys never sign with SHA-1, and data that is not a login request, an SSH signature or a certificate is not signed.
+- RSA keys never sign with SHA-1: a request without a SHA-2 flag is refused and never reaches a real agent.
 - A login request on a connection bound to a session must be for that session, and a host-bound one must name its host key.
 - Keys whose type `SshPublicKey` does not read (DSA in a real agent, security-key certificates) are hidden and cannot sign.
 - Anything the filter throws refuses the request (logged at Warning); refused requests are logged at Information with the key's
   fingerprint.
 
-Without a filter, a real agent's connection is relayed byte for byte, as `ssh -A` relays it.
+Without a filter, a real agent's connection is relayed byte for byte, as `ssh -A` relays it. The filter applies only to requests
+that come through agent forwarding; this client's own authentication through an agent is not filtered.
 
 ## Add a key to the agent
 

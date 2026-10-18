@@ -12,7 +12,7 @@ proxies, remote dynamic and Unix-socket forwarding, destination-constrained agen
 - **The application** that uses the library, its options and callbacks (host key verifier, loggers, `Match exec` runner).
 - **Signers** (`SshKeySigner`, `SshPrivateKey.FromSigner`, `FromRsa`, `FromECDsa`): application code, or a key service it trusts,
   that signs for a key SshSharp never sees. Each request says what it is for (`SshSignRequest.Purpose`: logging in, an SSH
-  signature with its namespace, or a certificate the key issues as a CA), so a signer can refuse by policy. What it signs includes the session identifier and the user name,
+  signature with its namespace, a certificate the key issues as a CA, or `Other`: data of another form that a program on a server asked a forwarded in-process agent to sign), so a signer can refuse by policy. What it signs includes the session identifier and the user name,
   which matters to a signer that logs its requests. Every signature it returns is verified against the public key before use.
 - **The local machine**: the process, its memory, and files the application chooses to load (private keys, `ssh_config`,
   `known_hosts`). Their *contents* are still parsed defensively; see below.
@@ -96,7 +96,10 @@ A man in the middle can read, change, drop and inject bytes. The server itself m
   can then get only what the filter allows: each listed key and each signature is the filter's decision, and requests to add, remove
   or lock keys are refused, so they never reach a real agent. What it judges by:
   - The key, the purpose and the user name come from the request: the server's side chooses them. The purpose is what the data's form
-    shows (a login request, an SSH signature, a certificate); data of any other form is not signed at all.
+    shows (a login request, an SSH signature, a certificate); data of any other form has no purpose (null). Such data is signed when
+    the filter allows it, so other programs that sign through agents keep working (pam_ssh_agent_auth). An agent signs whatever data
+    it is given, so a forwarded agent is a signing service for any protocol that uses the same key; a filter that allows only the
+    purposes the application knows (logins and SSH signatures, say) turns that off.
   - `DestinationHostKey` is set only from a session binding (`session-bind@openssh.com`) whose host key signature over the session
     identifier verified, and a login request must then be for that session (and, host-bound, name that host key) or it is refused.
     It proves which server's key exchange the program on the server took part in, not that the server is honest; an older `ssh` that
@@ -107,8 +110,10 @@ A man in the middle can read, change, drop and inject bytes. The server itself m
 - **The in-process agent** (`SshAgent.FromKeys`) answers forwarded agent channels in this process. A program on the server reaches
   only its protocol server, which parses every request in full before acting, bounds each message at 256 KiB (OpenSSH's limit; a
   larger or empty one closes the channel, not the connection), answers malformed requests with `SSH_AGENT_FAILURE`, and serves each
-  channel on its own. It is read-only, never signs RSA with SHA-1, and signs only login requests, SSH signatures and certificates, so
-  it cannot be used as a signing oracle for other protocols. Its keys are the application's: a key loaded from a file is held in
+  channel on its own. It is read-only and never signs RSA with SHA-1. Like `ssh-agent`, it signs data of any form it is asked to (other
+  programs sign their own challenges through agents), so without a filter a program on the server can use it to sign for other
+  protocols that use the same key; `ForwardAgentFilter` limits it to known purposes, and a key behind an `SshKeySigner` sees such data
+  as `SshSignaturePurpose.Other`, which its policy can refuse. Its keys are the application's: a key loaded from a file is held in
   this process's memory for as long as the agent is used, where a crash dump or a debugger can reach it, as with any key passed in
   `PrivateKeys`, whereas `ssh-agent` keeps keys in another process. For sensitive keys, serve a key behind an `SshKeySigner` (a KMS,
   an HSM, a smart card): its private half never enters the process, and the signer's own policy (`SshSignRequest.Purpose`) is a

@@ -106,8 +106,9 @@ When connecting by alias, encrypted `IdentityFile`s need `SshConfigConnectOption
   throws at `Warning`.
 - A filter that relies on `DestinationHostKey` refuses everything when `ssh` on the server is older than OpenSSH 8.9: it does not
   bind its sessions, so the destination is not known.
-- An RSA signature requested as SHA-1 `ssh-rsa`, or data that is not a login request, an SSH signature or a certificate, is refused
-  by an in-process agent and by any agent behind a filter.
+- An RSA signature requested as SHA-1 `ssh-rsa` is refused by an in-process agent and by any agent behind a filter.
+- A program that signs its own format (pam_ssh_agent_auth, for `sudo`) is refused by a filter that allows only known purposes: such
+  requests reach the filter with a null `Purpose`. Allow them explicitly if the program needs them.
 - `ssh-add` on the server cannot add, remove or lock keys of an in-process agent, or of any agent behind a filter: the forwarded
   agent is read-only then.
 - Keys whose type `SshPublicKey` does not read (DSA, security-key certificates) are hidden behind a filter.

@@ -25,15 +25,18 @@ internal abstract class AgentBackend
     public abstract ValueTask<byte[]> BindAsync(ReadOnlyMemory<byte> message, CancellationToken cancellationToken);
 }
 
-/// <summary>What data to be signed is, as its form shows: a login request, an SSH signature over a file, or a certificate.</summary>
-internal sealed record SignedData(SshSignaturePurpose Purpose, string? Namespace = null, string? UserName = null, byte[]? SessionId = null,
+/// <summary>
+/// What data to be signed is, as its form shows: a login request, an SSH signature over a file, a certificate, or (a null purpose) none of
+/// these, such as pam_ssh_agent_auth's challenge.
+/// </summary>
+internal sealed record SignedData(SshSignaturePurpose? Purpose, string? Namespace = null, string? UserName = null, byte[]? SessionId = null,
     byte[]? HostKey = null);
 
 /// <summary>
 /// The agent protocol (RFC 9987, OpenSSH's PROTOCOL.agent) served for one agent connection: a forwarded agent channel, or one request
 /// to an in-process agent. It is read-only: it lists keys, signs, binds the connection to sessions (<c>session-bind@openssh.com</c>) and
-/// answers <c>query</c>; adding, removing and locking are refused. With a filter, every listed key and every signature is the filter's
-/// to allow.
+/// answers <c>query</c>; adding, removing and locking are refused, and RSA never signs with SHA-1. With a filter, every listed key and
+/// every signature is the filter's to allow, including signatures over data of a form it does not recognise.
 /// </summary>
 /// <remarks>
 /// Every request is parsed in full before anything is done with it, and a malformed one is answered with <c>SSH_AGENT_FAILURE</c>: a
@@ -165,10 +168,7 @@ internal sealed class AgentServer
             return FailureReply;
         }
 
-        if (Classify(data) is not { } signed)
-        {
-            return FailureReply; // not a login request, an SSH signature or a certificate: the agent is not a signing oracle
-        }
+        var signed = Classify(data);
 
         SshPublicKey? destination = null;
         if (signed.Purpose == SshSignaturePurpose.Authentication && AuthenticationBinding() is { } bound)
@@ -387,11 +387,16 @@ internal sealed class AgentServer
     }
 
     /// <summary>
-    /// What the data to sign is, or null when it is none of the forms SSH signs: an SSH signature (<c>SSHSIG</c>, PROTOCOL.sshsig), a
-    /// public key login request (RFC 4252 section 7, or OpenSSH's host-bound form, which ends with the server's host key), or an OpenSSH
-    /// certificate without its signature (PROTOCOL.certkeys).
+    /// What the data to sign is: an SSH signature (<c>SSHSIG</c>, PROTOCOL.sshsig), a public key login request (RFC 4252 section 7, or
+    /// OpenSSH's host-bound form, which ends with the server's host key), an OpenSSH certificate without its signature
+    /// (PROTOCOL.certkeys), or, with a null purpose, something else: other programs sign their own formats through agents
+    /// (pam_ssh_agent_auth, for one), and whether to sign those is the filter's decision.
     /// </summary>
-    internal static SignedData? Classify(ReadOnlySpan<byte> data)
+    internal static SignedData Classify(ReadOnlySpan<byte> data) => Recognize(data) ?? Unrecognized;
+
+    private static readonly SignedData Unrecognized = new(Purpose: null);
+
+    private static SignedData? Recognize(ReadOnlySpan<byte> data)
     {
         if (data.StartsWith("SSHSIG"u8))
         {
@@ -507,7 +512,9 @@ internal sealed class AgentKeyring : AgentBackend
         byte[] signature;
         try
         {
-            signature = await key.SignAsync(new SshSignRequest(algorithm, data, signed.Purpose) { Namespace = signed.Namespace }, binding: null, cancellationToken)
+            // Data of a form not recognised reaches a signer as Other, so a signer whose policy allows logins only still refuses it.
+            var request = new SshSignRequest(algorithm, data, signed.Purpose ?? SshSignaturePurpose.Other) { Namespace = signed.Namespace };
+            signature = await key.SignAsync(request, binding: null, cancellationToken)
                 .ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)

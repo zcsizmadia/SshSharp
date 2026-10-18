@@ -406,6 +406,34 @@ public sealed class InProcessAgentTests : IDisposable
     }
 
     [Test]
+    public async Task DataOfAnotherForm_IsSignedByAForwardedInProcessAgent_AndByAFilteredRealAgentWhenAllowed()
+    {
+        // pam_ssh_agent_auth (sudo through the forwarded agent) signs its own challenge.
+        var challenge = "a challenge of pam_ssh_agent_auth's own"u8.ToArray();
+        using var key = SshPrivateKey.Generate(SshKeyType.Ed25519);
+        await using (var server = NewServer())
+        await using (var client = await ConnectAsync(server, SshAgent.FromKeys(key)))
+        await using (var channel = (await server.OpenAgentChannelAsync())!)
+        {
+            await Assert.That((await RequestAsync(channel, SignRequest(key, challenge)))[0]).IsEqualTo((byte)14);
+        }
+
+        await using var agent = new FakeAgent();
+        agent.Keys.Add((key, "laptop"));
+        var purposes = new List<SshSignaturePurpose?>();
+        await using var filtered = NewServer();
+        await using var filteredClient = await ConnectAsync(filtered, new SshAgent(agent.Path), (request, _) =>
+        {
+            purposes.Add(request.Purpose);
+            return ValueTask.FromResult(true);
+        });
+        await using var filteredChannel = (await filtered.OpenAgentChannelAsync())!;
+        await Assert.That((await RequestAsync(filteredChannel, SignRequest(key, challenge)))[0]).IsEqualTo((byte)14);
+        await Assert.That(agent.LastSignedData).IsEquivalentTo(challenge);
+        await Assert.That(purposes).IsEquivalentTo(new SshSignaturePurpose?[] { null });
+    }
+
+    [Test]
     public async Task WithAFilter_ARealAgentsRefusal_IsPassedOn()
     {
         await using var agent = new FakeAgent();

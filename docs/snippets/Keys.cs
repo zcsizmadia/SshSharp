@@ -112,6 +112,26 @@ internal static class Keys
         // </agent-filter>
     }
 
+    public static SshClientOptions AgentKnownPurposes(SshAgent agent, IReadOnlyList<SshPrivateKey> keys, SshHostKeyVerifier verifier)
+    {
+        // <agent-known-purposes>
+        var options = new SshClientOptions
+        {
+            UserName = "deploy",
+            PrivateKeys = keys,
+            HostKeyVerifier = verifier,
+            ForwardAgent = agent,
+
+            // Logins and SSH signatures (git, ssh-keygen -Y) only. Purpose is null for data of a form SshSharp does not recognise
+            // (pam_ssh_agent_auth's challenge, for one): refused here, as is issuing certificates.
+            ForwardAgentFilter = (request, _) => ValueTask.FromResult(
+                request.Operation == SshAgentOperation.ListKeys
+                || request.Purpose is SshSignaturePurpose.Authentication or SshSignaturePurpose.FileSignature),
+        };
+        // </agent-known-purposes>
+        return options;
+    }
+
     public static async Task AgentConfirmAsync(SshAgent agent, SshHostKeyVerifier verifier, Func<string, CancellationToken, Task<bool>> askUser,
         CancellationToken cancellationToken)
     {
@@ -126,7 +146,7 @@ internal static class Keys
             ForwardAgentFilter = async (request, ct) =>
                 request.Operation == SshAgentOperation.ListKeys
                 || await askUser(
-                    $"Allow a {request.Purpose} signature with {request.Key.Fingerprint} ({request.Key.Comment})" +
+                    $"Allow a {request.Purpose?.ToString() ?? "unrecognised"} signature with {request.Key.Fingerprint} ({request.Key.Comment})" +
                     (request.DestinationHostKey is { } destination ? $" for the server with host key {destination.Fingerprint}?" : "?"),
                     ct),
         };

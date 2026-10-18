@@ -173,12 +173,18 @@ public sealed class SshClientOptions
     /// </para>
     /// <para>
     /// With a filter, the forwarded agent is read-only and narrowed: requests to add, remove or lock keys are refused, RSA keys never
-    /// sign with SHA-1, data that is not a login request, an SSH signature or a certificate is not signed, and keys whose type
-    /// <see cref="SshPublicKey"/> does not read are hidden. Without one, a real agent's connection is relayed byte for byte, as before.
+    /// sign with SHA-1, and keys whose type <see cref="SshPublicKey"/> does not read are hidden. Without one, a real agent's connection
+    /// is relayed byte for byte, as before.
+    /// </para>
+    /// <para>
+    /// Data to sign that is not a login request, an SSH signature or a certificate reaches the filter with a null
+    /// <see cref="SshAgentRequest.Purpose"/>: programs sign their own formats through agents (pam_ssh_agent_auth, for one), so it is the
+    /// filter's to allow. Allowing only the purposes the application knows keeps a forwarded agent from signing anything else.
     /// </para>
     /// <para>
     /// It runs on the connection's background work, possibly for several agent channels at once; it gets a token that is cancelled when
-    /// the connection closes. Anything it throws refuses the request (and is logged).
+    /// the connection closes. Anything it throws refuses the request (and is logged). It is not asked for this client's own
+    /// authentication through the agent, only for requests that come through agent forwarding.
     /// </para>
     /// </remarks>
     public Func<SshAgentRequest, CancellationToken, ValueTask<bool>>? ForwardAgentFilter { get; init; }

@@ -260,11 +260,77 @@ public class AgentServerTests
 
     [Test]
     [MethodDataSource(nameof(UnsignableData))]
-    public async Task DataThatIsNotALoginRequestAnSshSignatureOrACertificate_IsNotSigned(byte[] data)
+    public async Task DataOfAnotherForm_IsSignedWithoutAFilter_AsSshAgentWould(byte[] data)
     {
-        // The agent signs what SSH signs, not whatever a program on the server hands it.
+        // pam_ssh_agent_auth and other programs sign their own formats through agents.
         using var key = SshPrivateKey.Generate(SshKeyType.Ed25519);
-        await Assert.That(await HandleAsync(Server(key), Sign(key.PublicKey.Span, data))).IsEquivalentTo(new byte[] { 5 });
+        var (algorithm, blob) = Signature(await HandleAsync(Server(key), Sign(key.PublicKey.Span, data)));
+        await Assert.That(algorithm).IsEqualTo("ssh-ed25519");
+        await Assert.That(key.GetPublicKey().VerifySignature(data, blob)).IsTrue();
+    }
+
+    [Test]
+    [MethodDataSource(nameof(UnsignableData))]
+    public async Task DataOfAnotherForm_ReachesTheFilterWithoutAPurpose_WhichDecides(byte[] data)
+    {
+        using var key = SshPrivateKey.Generate(SshKeyType.Ed25519);
+        var seen = new List<SshAgentRequest>();
+        var allow = false;
+        var server = Server((request, _) =>
+        {
+            seen.Add(request);
+            return ValueTask.FromResult(allow);
+        }, key);
+
+        await Assert.That(await HandleAsync(server, Sign(key.PublicKey.Span, data))).IsEquivalentTo(new byte[] { 5 });
+        allow = true;
+        await Assert.That(Signature(await HandleAsync(server, Sign(key.PublicKey.Span, data))).Algorithm).IsEqualTo("ssh-ed25519");
+
+        await Assert.That(seen.Count).IsEqualTo(2);
+        await Assert.That(seen[0].Operation).IsEqualTo(SshAgentOperation.Sign);
+        await Assert.That(seen[0].Purpose).IsNull();
+        await Assert.That(seen[0].Namespace).IsNull();
+        await Assert.That(seen[0].UserName).IsNull();
+        await Assert.That(seen[0].DestinationHostKey).IsNull();
+    }
+
+    [Test]
+    public async Task AFilterAllowingOnlyKnownPurposes_RefusesDataOfAnotherForm()
+    {
+        // The example policy in the docs: logins and SSH signatures, nothing else.
+        using var key = SshPrivateKey.Generate(SshKeyType.Ed25519);
+        var server = Server((request, _) => ValueTask.FromResult(
+            request.Operation == SshAgentOperation.ListKeys
+            || request.Purpose is SshSignaturePurpose.Authentication or SshSignaturePurpose.FileSignature), key);
+
+        await Assert.That((await HandleAsync(server, Sign(key.PublicKey.Span, Login(key, "ssh-ed25519"))))[0]).IsEqualTo((byte)14);
+        await Assert.That((await HandleAsync(server, Sign(key.PublicKey.Span, SshSig("file"))))[0]).IsEqualTo((byte)14);
+        await Assert.That(await HandleAsync(server, Sign(key.PublicKey.Span, RandomNumberGenerator.GetBytes(48)))).IsEquivalentTo(new byte[] { 5 });
+    }
+
+    [Test]
+    public async Task ASigner_SeesDataOfAnotherFormAsOther_AndCanRefuseIt()
+    {
+        using var inner = SshPrivateKey.Generate(SshKeyType.Ed25519);
+        var signer = new KeySigner(inner);
+        using var key = SshPrivateKey.FromSigner(signer);
+        await Assert.That((await HandleAsync(Server(key), Sign(key.PublicKey.Span, "pam challenge"u8)))[0]).IsEqualTo((byte)14);
+        await Assert.That(signer.Requests.Single().Purpose).IsEqualTo(SshSignaturePurpose.Other);
+
+        using var refusing = SshPrivateKey.FromSigner(new KeySigner(inner) { Refuse = true });
+        await Assert.That(await HandleAsync(Server(refusing), Sign(refusing.PublicKey.Span, "pam challenge"u8))).IsEquivalentTo(new byte[] { 5 });
+    }
+
+    [Test]
+    public async Task AnSshAgentRequest_CanBeMadeToTestAFilter()
+    {
+        using var key = SshPrivateKey.Generate(SshKeyType.Ed25519);
+        var request = new SshAgentRequest(SshAgentOperation.Sign, key.GetPublicKey()) { Purpose = SshSignaturePurpose.FileSignature, Namespace = "git" };
+        await Assert.That(request.ForwardingHostKeys).IsEmpty();
+        await Assert.That(request.Certificate).IsNull();
+        await Assert.That(request.DestinationHostKey).IsNull();
+        await Assert.That(request.Namespace).IsEqualTo("git");
+        await Assert.That(() => new SshAgentRequest(SshAgentOperation.ListKeys, null!)).Throws<ArgumentNullException>();
     }
 
     [Test]
@@ -695,9 +761,10 @@ public class AgentServerTests
         var throwing = new AgentServer(new AgentKeyring([key]), (_, _) => throw new InvalidOperationException("no prompt"), logger);
         await HandleAsync(throwing, [11]);
 
-        await Assert.That(logger.Entries.Select(e => e.EventId)).IsEquivalentTo(new[] { 42, 43 });
+        await Assert.That(logger.Entries.Select(e => e.EventId)).IsEquivalentTo(new[] { 45, 46 });
         await Assert.That(logger.Entries[0].Message).Contains(key.Fingerprint);
-        await Assert.That(logger.Entries[1].Exception).IsTypeOf<InvalidOperationException>();
+                await Assert.That(logger.Entries[1].Message).Contains(nameof(InvalidOperationException));
+        await Assert.That(logger.Entries[1].Message).DoesNotContain("no prompt"); // the application's message stays out of the log
     }
 
     private sealed class ListLogger : Microsoft.Extensions.Logging.ILogger

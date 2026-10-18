@@ -106,8 +106,10 @@ public sealed class SshAgent
     /// It speaks the agent protocol as <c>ssh-agent</c> does, read-only: it lists its keys and signs with them, binds connections to
     /// sessions (<c>session-bind@openssh.com</c>) and answers <c>query</c>. Adding, removing and locking keys are refused
     /// (<see cref="AddKeyAsync"/> and the others throw <see cref="SshException"/> with <see cref="SshFailureReason.AgentFailed"/>). RSA keys
-    /// sign with <c>rsa-sha2-256</c> or <c>rsa-sha2-512</c> as asked, never SHA-1. It signs only what SSH signs (login requests, SSH
-    /// signatures and certificates), so a program on the server cannot use it to sign arbitrary data.
+    /// sign with <c>rsa-sha2-256</c> or <c>rsa-sha2-512</c> as asked, never SHA-1. Like <c>ssh-agent</c>, it signs whatever data it is
+    /// asked to (other programs sign their own formats through agents, pam_ssh_agent_auth for one); a key behind an
+    /// <see cref="SshKeySigner"/> sees such data as <see cref="SshSignaturePurpose.Other"/>, and
+    /// <see cref="SshClientOptions.ForwardAgentFilter"/> can restrict what a forwarded agent signs to the purposes it knows.
     /// </para>
     /// <para>
     /// The agent does not dispose the keys, and uses them until it is no longer used: keep them alive as long as the clients that
