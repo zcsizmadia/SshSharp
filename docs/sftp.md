@@ -133,9 +133,36 @@ await using var log = await sftp.OpenAsync("app.log", FileMode.Append, FileAcces
 await log.WriteAsync(Encoding.UTF8.GetBytes("deployed\n"));
 ```
 
-The stream is asynchronous only. `SetLength` truncates or extends the remote file. Each `ReadAsync` is one request; for whole
-files, `DownloadAsync` is much faster. `Length` is the size when the stream opened plus this stream's own writes and
-`SetLength`, so it needs no round trip; to see another writer's changes, ask the server (`GetAttributesAsync`).
+The stream is asynchronous only. `SetLength` truncates or extends the remote file. A stream opened only for reading reads ahead
+(up to 16 reads in flight) while it is read in order; one that also writes reads one request at a time. For whole files,
+`DownloadAsync` is still faster. `Length` is the size when the stream opened plus this stream's own writes (including those still
+in flight) and `SetLength`, so it needs no round trip; to see another writer's changes, ask the server (`GetAttributesAsync`).
+
+### Writes in flight
+
+`WriteAsync` does not wait for the server's reply. It splits the data into requests of the server's write size, sends them and
+returns, keeping up to 16 writes in flight per stream; when 16 are outstanding it waits for the oldest. So `CopyToAsync` into
+`OpenWriteAsync` keeps the link busy, as `UploadAsync` does, and memory stays bounded: at most 16 requests (16 × 32 KiB = 512 KiB
+by default, about 4 MiB with OpenSSH's 255 KiB writes). The data is copied into the requests before `WriteAsync` returns, so
+the caller's buffer can be reused at once. Nothing is held back to be combined: each `WriteAsync` sends its data, so many tiny
+writes are many requests (put a `BufferedStream` in front, as the `IFileSystem` adapter does). Writes go out in offset order.
+
+A write the server refuses is never lost. Which call reports it depends on when its reply comes:
+
+| Call | Waits for the writes in flight? | Reports a failed write |
+|---|---|---|
+| `WriteAsync` | Only the oldest, when 16 are outstanding, and all of them after a seek. | Any that has failed by then. |
+| `FlushAsync` | All of them, then asks the server to write the file to disk (`fsync@openssh.com`) when it can. | Any. |
+| `ReadAsync` (read-write stream), `GetLengthAsync`, `SetLength` | All of them, so they see (or change) what was written. | Any. |
+| `Seek`, `Position` set, `Flush` | No. | Any that has failed by then. |
+| `DisposeAsync`, `Dispose` | All of them, then close the handle (also after a failure). | Any not reported yet. |
+
+After a failure the stream is faulted: every later call throws the same exception, and disposing closes the handle without
+throwing it again. Writes sent after the failed one may or may not have landed, so treat the file as incomplete. Cancelling a `WriteAsync` while it waits also faults the stream, since part of its data may have been sent.
+Cancelling `FlushAsync` or a read only stops that wait: the writes stay in flight and the stream stays usable.
+
+To get the errors where you handle them, end with `await stream.FlushAsync()` (or `await using`, whose `DisposeAsync` waits too).
+A synchronous `Dispose` also waits for the writes in flight, blocking the thread, so dispose asynchronously when you can.
 
 ## Files, directories and links
 
@@ -156,8 +183,8 @@ files, `DownloadAsync` is much faster. `Length` is the size when the stream open
 | `CopyFileAsync(source, destination, overwrite)` | Copy on the server, without the data passing through this machine (`copy-data`). Copying a file onto itself is refused. |
 | `GetFileSystemInfoAsync(path)` | Size and free space of the file system, as `df` shows them (`statvfs@openssh.com`). |
 
-On a writable stream, `FlushAsync` asks the server to write the file to disk (`fsync@openssh.com`) when it can; every write is
-acknowledged anyway.
+On a writable stream, `FlushAsync` waits for the writes in flight, then asks the server to write the file to disk
+(`fsync@openssh.com`) when it can (see [Writes in flight](#writes-in-flight)).
 
 Remote paths are passed to the server as they are: relative paths are relative to the login directory, and `/` is the
 separator whatever this machine uses. `Extensions` lists what the server supports, and `Limits` the sizes it accepts.
@@ -212,7 +239,7 @@ var reports = fs.Directory.GetFiles("reports", "*.txt", SearchOption.AllDirector
 | `File` | Reads and writes of bytes, text and lines (sync and async; UTF-8 without BOM by default, BOMs honoured when reading), streams, `Copy` (on the server with `copy-data`), `Move`, `Delete`, times, attributes, Unix modes, symbolic links. |
 | `Directory` | `CreateDirectory` with parents, `Delete` (recursive removes links, never follows them), enumeration with `*` and `?` patterns, `SearchOption` and `EnumerationOptions` (recursion, case, hidden entries, special directories), `Move`, times. |
 | `FileInfo`, `DirectoryInfo` | Attributes are read on first use and kept until `Refresh()`, as in `System.IO`; enumerations carry each entry's attributes, so no request per entry. |
-| Streams | Buffered (64 KiB), sync and async, seekable; read-only streams read ahead. |
+| Streams | Buffered (64 KiB), sync and async, seekable; read-only streams read ahead, and writes are written behind, so a failed write is thrown (as an `IOException`) by a later call, at the latest by `Flush` or `Dispose`. |
 | Errors | The `System.IO` exceptions, from sync and async methods alike: `FileNotFoundException`, `DirectoryNotFoundException`, `UnauthorizedAccessException`, `IOException` (also a failed session or a timeout). `Exists` never throws: it is false when the answer cannot be had. `Copy` onto the same file is an `IOException`. |
 | Timeouts | `SftpFileSystemOptions.OperationTimeout` (60 s; `Timeout.InfiniteTimeSpan` for none) bounds each request, and for whole-file reads, writes and copies the time without progress, so large files are not cut off. |
 | Not supported | `FileSystemWatcher`, `DriveInfo`, `FileVersionInfo`, `RandomAccess`, `SafeFileHandle` overloads, encryption, `Replace`: they throw `NotSupportedException`. SFTP has no creation times: they read as the last write time, and setting one does nothing. |

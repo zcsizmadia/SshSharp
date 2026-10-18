@@ -135,6 +135,47 @@ meaning what they do for `FileStream`:
 
 [!code-csharp[](../snippets/FileTransfer.cs#sftp-stream)]
 
+### Copy a stream into a remote file
+
+When the data comes from a stream (a response body, a compressor, a database export), copy it into `OpenWriteAsync`. The stream
+writes behind: `WriteAsync` sends its requests and returns without waiting for the replies, keeping up to 16 in flight, so the copy
+runs close to the speed of `UploadAsync`:
+
+[!code-csharp[](../snippets/FileTransfer.cs#sftp-stream-copy)]
+
+```mermaid
+sequenceDiagram
+    participant A as Your code
+    participant F as SFTP file stream
+    participant S as SFTP server
+    A->>F: WriteAsync (returns once sent)
+    F->>S: WRITE offset 0
+    A->>F: WriteAsync
+    F->>S: WRITE offset 32768 ... up to 16 in flight
+    S-->>F: STATUS ok
+    S-->>F: STATUS failure (disk full)
+    A->>F: FlushAsync
+    Note over F: waits for every write in flight
+    F-->>A: throws SftpException (disk full)
+    A->>F: DisposeAsync
+    F->>S: CLOSE handle
+```
+
+Over 25 ms of latency (the fake server in the tests, 4 MiB in 32 KiB requests), the copy took 0.40 s with write-behind, against
+4.27 s when each write waited for its reply, and `UploadAsync` 0.17 s (it keeps 64 requests in flight). Against OpenSSH on the same
+machine, copying 64 MiB took 9.7 s, against 17.0 s before, the same as `UploadAsync`.
+
+- **Where errors appear.** A write the server refuses is thrown by a later call: the next `WriteAsync` that finds it, `FlushAsync`,
+  a read, `SetLength`, or at the latest `DisposeAsync`. It is never lost. After that, the stream is faulted: every call throws the
+  same exception, and disposing still closes the remote file. The [SFTP guide](../sftp.md#writes-in-flight) lists what each call
+  waits for.
+- **End with `FlushAsync`** (or rely on `await using`) to see a failure where you handle it, and to have the server write the file
+  to disk where it can (`fsync@openssh.com`).
+- **Cancelling a write** leaves the stream faulted, since part of the data may already be on the server: open the file again.
+- **Many tiny writes** are many requests; nothing is combined. Put a `BufferedStream` in front when writing a few bytes at a time.
+- **Whole files** are still simplest with `UploadFileAsync` or `UploadAsync`, which keep a wider window (64 by default) and report
+  progress.
+
 ## Handle errors
 
 A request the server refuses throws `SftpException`, with the SFTP `Status` and the `Path`:
@@ -146,7 +187,8 @@ A request the server refuses throws `SftpException`, with the SFTP `Status` and 
 - **Paths.** Remote paths go to the server as they are: relative paths start at the login directory, and `/` is the separator
   whatever this machine uses. `GetFullPathAsync` and `ExpandPathAsync` resolve them.
 - **Asynchronous streams.** SFTP file streams support only the asynchronous `Read`/`Write` methods; the synchronous ones throw
-  `NotSupportedException`. For whole files, `DownloadAsync` is much faster than reading a stream.
+  `NotSupportedException`. For whole files, `DownloadAsync` is faster than reading a stream. Writes are written behind, so a failed
+  write is thrown by a later call (at the latest by `FlushAsync` or `DisposeAsync`), usually not by the `WriteAsync` that sent it.
 - **Times.** SFTP version 3 carries modification times in whole seconds.
 - **Extensions.** An operation that needs an extension the server lacks (an overwriting rename, a hard link, a server-side copy)
   throws `NotSupportedException`; `sftp.Extensions` lists what the server has.

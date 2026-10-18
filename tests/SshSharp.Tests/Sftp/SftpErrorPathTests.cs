@@ -464,7 +464,7 @@ public sealed class SftpErrorPathTests : IDisposable
         stream.Seek(1, SeekOrigin.Begin);
 #pragma warning disable CA1835 // the array overloads are what is tested
         await stream.WriteAsync(new byte[] { 0, 7, 8, 0 }, 1, 2, Timeout());
-        stream.Flush(); // every write is acknowledged already
+        stream.Flush(); // does not wait for the write in flight; the read below does
         stream.Position = 0;
         var buffer = new byte[8];
         var read = await stream.ReadAsync(buffer, 2, 6, Timeout());

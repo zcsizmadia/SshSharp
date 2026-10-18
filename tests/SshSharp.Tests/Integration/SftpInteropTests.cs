@@ -197,6 +197,107 @@ public class SftpInteropTests
         }
     }
 
+    [Test]
+    public async Task AStream_WritesBehind_AndReadsBackWhatItWrote()
+    {
+        if (RealServer.Endpoint is not var (host, port) || await RealServer.OptionsAsync() is not { } options || !RealServer.HasSftp)
+        {
+            Skip.Test("SSHSHARP_TEST_SSHD and SSHSHARP_TEST_USER with a password or key, and a server with SFTP, are needed.");
+            return;
+        }
+
+        await using var client = await SshClient.ConnectAsync(host, port, options, Timeout());
+        await using var sftp = await client.OpenSftpAsync(Timeout());
+        var root = RealServer.SftpPath(".sshsharp-writebehind-" + Guid.NewGuid().ToString("N")[..12]);
+        await sftp.CreateDirectoryAsync(root, cancellationToken: Timeout());
+        try
+        {
+            // Copied in, with many writes in flight; then flushed, which waits for them all.
+            var data = RandomNumberGenerator.GetBytes(3 * 1024 * 1024 + 17);
+            await using (var stream = await sftp.OpenWriteAsync(root + "/copied", Timeout()))
+            {
+                await new PlainStream(data).CopyToAsync(stream, Timeout());
+                await stream.FlushAsync(Timeout());
+            }
+
+            var back = new MemoryStream();
+            await sftp.DownloadAsync(root + "/copied", back, cancellationToken: Timeout());
+            await Assert.That(back.ToArray().AsSpan().SequenceEqual(data)).IsTrue();
+
+            // Back over bytes that may still be in flight, then read: the read sees the later write. Disposing waits for the rest.
+            var expected = data[..(1024 * 1024)];
+            await using (var stream = await sftp.OpenAsync(root + "/patched", FileMode.CreateNew, FileAccess.ReadWrite, Timeout()))
+            {
+                await stream.WriteAsync(expected, Timeout());
+                var patch = RandomNumberGenerator.GetBytes(100_000);
+                stream.Position = 5000;
+                await stream.WriteAsync(patch, Timeout());
+                patch.CopyTo(expected, 5000);
+                stream.Position = 0;
+                var read = new byte[expected.Length];
+                await stream.ReadExactlyAsync(read, Timeout());
+                await Assert.That(read.AsSpan().SequenceEqual(expected)).IsTrue();
+                stream.Position = expected.Length;
+                await stream.WriteAsync(data.AsMemory(0, 300_000), Timeout());
+            }
+
+            await Assert.That((await sftp.GetAttributesAsync(root + "/patched", cancellationToken: Timeout())).Size).IsEqualTo(expected.Length + 300_000L);
+        }
+        finally
+        {
+            await DeleteTreeAsync(sftp, root);
+        }
+    }
+
+    [Test]
+    public async Task AStreamCopy_Measure()
+    {
+        // A measurement, not a check: with SSHSHARP_MEASURE=1, prints how long 64 MiB takes copied into OpenWriteAsync and with
+        // UploadAsync, the best of three each. Nothing here asserts a time. (FaultyProxy delays each chunk in turn, which caps the
+        // throughput of anything pipelined, so this runs directly; SftpWriteBehindTests has the same measurement over latency.)
+        if (Environment.GetEnvironmentVariable("SSHSHARP_MEASURE") != "1")
+        {
+            Skip.Test("Set SSHSHARP_MEASURE=1 to measure.");
+            return;
+        }
+
+        if (RealServer.Endpoint is not var (host, port) || await RealServer.OptionsAsync() is not { } options || !RealServer.HasSftp)
+        {
+            Skip.Test("SSHSHARP_TEST_SSHD and SSHSHARP_TEST_USER with a password or key, and a server with SFTP, are needed.");
+            return;
+        }
+
+        await using var client = await SshClient.ConnectAsync(host, port, options, Timeout());
+        await using var sftp = await client.OpenSftpAsync(Timeout());
+        var root = RealServer.SftpPath(".sshsharp-streammeasure-" + Guid.NewGuid().ToString("N")[..12]);
+        await sftp.CreateDirectoryAsync(root, cancellationToken: Timeout());
+        try
+        {
+            var data = RandomNumberGenerator.GetBytes(64 * 1024 * 1024);
+            TimeSpan upload = TimeSpan.MaxValue, copy = TimeSpan.MaxValue;
+            for (var run = 0; run < 3; run++)
+            {
+                var clock = System.Diagnostics.Stopwatch.StartNew();
+                await sftp.UploadAsync(new MemoryStream(data), root + "/uploaded", cancellationToken: Timeout());
+                upload = TimeSpan.FromTicks(Math.Min(upload.Ticks, clock.Elapsed.Ticks));
+
+                clock.Restart();
+                await using (var stream = await sftp.OpenWriteAsync(root + "/copied", Timeout()))
+                {
+                    await new PlainStream(data).CopyToAsync(stream, Timeout());
+                }
+
+                copy = TimeSpan.FromTicks(Math.Min(copy.Ticks, clock.Elapsed.Ticks));
+            }
+
+            Console.WriteLine($"64 MiB: UploadAsync {upload.TotalSeconds:F2} s, CopyToAsync into OpenWriteAsync {copy.TotalSeconds:F2} s");
+        }
+        finally
+        {
+            await DeleteTreeAsync(sftp, root);
+        }
+    }
+
     /// <summary>A tree of 60 small files and one larger one, six directories deep and wide; the relative paths and contents.</summary>
     private static Dictionary<string, byte[]> WriteTree(string root)
     {
@@ -531,4 +632,7 @@ public class SftpInteropTests
     {
         public void Report(SftpTransferProgress value) => report(value.BytesTransferred);
     }
+
+    /// <summary>A memory stream copied the way any stream is, in many writes (<see cref="MemoryStream"/> writes itself in one call).</summary>
+    private sealed class PlainStream(byte[] data) : MemoryStream(data);
 }
