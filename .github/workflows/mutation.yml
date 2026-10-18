@@ -49,8 +49,8 @@ jobs:
             mutate: -m "**/Crypto/BcryptPbkdf.cs"
             tests: Crypto/BcryptPbkdfTests.cs;Keys/*Tests.cs
           - scope: ecdh-dh
-            mutate: -m "**/Crypto/NistCurve.cs" -m "**/Crypto/ModpGroup.cs"
-            tests: Crypto/NistCurveTests.cs;Crypto/ModpGroupTests.cs;Crypto/WycheproofTests.cs;Protocol/ClientKeyExchangeTests.cs;Keys/ExternalKeyTests.cs;Agent/AgentTests.cs
+            mutate: -m "**/Crypto/NistCurve.cs" -m "**/Crypto/ModpGroup.cs" -m "**/Crypto/DhGroupValidator.cs" -m "**/Protocol/ClientKeyExchange.cs" -m "**/Protocol/DhGroupExchangeKeyExchange.cs"
+            tests: Crypto/NistCurveTests.cs;Crypto/ModpGroupTests.cs;Crypto/DhGroupValidatorTests.cs;Crypto/WycheproofTests.cs;Protocol/ClientKeyExchangeTests.cs;Protocol/DhGroupExchangeTests.cs;Protocol/MlKemKexTests.cs;Protocol/SntrupKexTests.cs;Keys/ExternalKeyTests.cs;Agent/AgentTests.cs
           - scope: sntrup761
             mutate: -m "**/Crypto/Sntrup761.cs"
             tests: Crypto/Sntrup761Tests.cs;Protocol/SntrupKexTests.cs

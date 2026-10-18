@@ -121,7 +121,7 @@ jobs:
           AllowStreamLocalForwarding yes
           Subsystem sftp internal-sftp
           RekeyLimit 32K
-          KexAlgorithms +diffie-hellman-group14-sha256,diffie-hellman-group16-sha512
+          KexAlgorithms +diffie-hellman-group-exchange-sha256,diffie-hellman-group14-sha256,diffie-hellman-group16-sha512,diffie-hellman-group18-sha512
           LogLevel DEBUG1
           EOF
           # OpenSSH 9.8+ shuts out an address after failed or unauthenticated connections, which the tests make on purpose.
@@ -475,7 +475,7 @@ jobs:
             'AllowTcpForwarding yes'
             'SyslogFacility LOCAL0' # log to a file (logs\sshd.log), not the event log
             'LogLevel DEBUG2' # channel EOF and shutdown events (rcvd eof, chan_shutdown_write), for the intermittent stdin hang (#86)
-            'KexAlgorithms +diffie-hellman-group14-sha256,diffie-hellman-group16-sha512'
+            'KexAlgorithms +diffie-hellman-group-exchange-sha256,diffie-hellman-group14-sha256,diffie-hellman-group16-sha512,diffie-hellman-group18-sha512'
           ) + (Get-Content $config | Where-Object { $_ -notmatch '^\s*(Port|ListenAddress|PasswordAuthentication|Match|AuthorizedKeysFile|AllowGroups|AllowUsers|DenyGroups|DenyUsers)\b' -and $_ -notmatch '^\s+' }) |
             Set-Content $config -Encoding ascii
           & "$env:WINDIR\System32\OpenSSH\sshd.exe" -t

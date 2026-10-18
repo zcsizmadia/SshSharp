@@ -39,7 +39,9 @@ internal static class SshAlgorithms
     public const string EcdhNistp384 = "ecdh-sha2-nistp384";
     public const string EcdhNistp521 = "ecdh-sha2-nistp521";
     public const string DhGroup14Sha256 = "diffie-hellman-group14-sha256";
+    public const string DhGroupExchangeSha256 = "diffie-hellman-group-exchange-sha256";
     public const string DhGroup16Sha512 = "diffie-hellman-group16-sha512";
+    public const string DhGroup18Sha512 = "diffie-hellman-group18-sha512";
 
     /// <summary>Whether a key exchange method resists a future quantum computer (a hybrid with a post-quantum KEM), as OpenSSH's WarnWeakCrypto judges it.</summary>
     public static bool IsPostQuantum(string kex) =>
@@ -62,10 +64,11 @@ internal static class SshAlgorithms
     // Compression
     public const string CompressionNone = "none";
 
-    // Declared before DefaultKex, which reads it during static initialization.
+    // OpenSSH's client order. Declared before DefaultKex, which reads it during static initialization.
     private static readonly string[] ClassicKex =
     [
-        Curve25519Sha256, Curve25519Sha256Libssh, EcdhNistp256, EcdhNistp384, EcdhNistp521, DhGroup16Sha512, DhGroup14Sha256,
+        Curve25519Sha256, Curve25519Sha256Libssh, EcdhNistp256, EcdhNistp384, EcdhNistp521, DhGroupExchangeSha256, DhGroup16Sha512, DhGroup18Sha512,
+        DhGroup14Sha256,
     ];
 
     /// <summary>
@@ -137,7 +140,8 @@ internal static class SshAlgorithms
     private static readonly HashSet<string> FipsKex = new(StringComparer.Ordinal)
     {
         // ML-KEM (FIPS 203) with a NIST curve and SHA-2: both halves are FIPS-approved, unlike the X25519 hybrid.
-        MlKem768Nistp256Sha256, MlKem1024Nistp384Sha384, EcdhNistp256, EcdhNistp384, EcdhNistp521, DhGroup16Sha512, DhGroup14Sha256,
+        MlKem768Nistp256Sha256, MlKem1024Nistp384Sha384, EcdhNistp256, EcdhNistp384, EcdhNistp521, DhGroupExchangeSha256, DhGroup16Sha512,
+        DhGroup18Sha512, DhGroup14Sha256,
     };
 
     private static readonly HashSet<string> FipsHostKeys = new(StringComparer.Ordinal)

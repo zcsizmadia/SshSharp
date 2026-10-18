@@ -207,6 +207,12 @@ internal sealed class FakeServerOptions
     /// <summary>Do not send the server identification at all.</summary>
     public bool SilentOnConnect { get; init; }
 
+    /// <summary>The group sent for <c>diffie-hellman-group-exchange-sha256</c>: RFC 3526 group 14 when null.</summary>
+    public (BigInteger P, BigInteger G)? GexGroup { get; init; }
+
+    /// <summary>Send this as the server's group exchange value f instead of a real one.</summary>
+    public BigInteger? GexServerValue { get; init; }
+
     // ---- behaviour of key re-exchanges ----
 
     /// <summary>Use this host key (instead of <see cref="HostKey"/>) when re-exchanging keys.</summary>
@@ -268,6 +274,9 @@ internal sealed class FakeSshServer : IAsyncDisposable
     public KexInitMessage? ClientKexInit { get; private set; }
 
     public NegotiatedAlgorithms? Negotiated { get; private set; }
+
+    /// <summary>The client's last group exchange request (min, n, max).</summary>
+    public (uint Min, uint Preferred, uint Max)? GexRequest { get; private set; }
 
     public byte[]? SessionId { get; private set; }
 
@@ -556,6 +565,28 @@ internal sealed class FakeSshServer : IAsyncDisposable
             Stage = $"reading the client's key exchange init ({negotiated.Kex}, {negotiated.HostKey})";
         }
 
+        GexState? gex = null;
+        if (negotiated.Kex == SshAlgorithms.DhGroupExchangeSha256)
+        {
+            // RFC 4419: the client's request (min, n, max), then the server's group.
+            using var requestPacket = await ReceiveRawAsync(cancellationToken);
+            var request = new SshReader(requestPacket.Payload.Span);
+            if (request.ReadByte() != SshMessage.KexDhGexRequest)
+            {
+                throw new InvalidOperationException("Expected SSH_MSG_KEX_DH_GEX_REQUEST.");
+            }
+
+            GexRequest = (request.ReadUInt32(), request.ReadUInt32(), request.ReadUInt32());
+            var (p, g) = Options.GexGroup ?? (ModpGroup.Group14.Prime, ModpGroup.Generator);
+            gex = new GexState(GexRequest.Value, p.ToByteArray(isUnsigned: true, isBigEndian: true), g.ToByteArray(isUnsigned: true, isBigEndian: true));
+            var group = new ArrayBufferWriter<byte>();
+            var groupWriter = new SshWriter(group);
+            groupWriter.WriteByte(SshMessage.KexDhGexGroup);
+            groupWriter.WriteMpint(gex.P);
+            groupWriter.WriteMpint(gex.G);
+            await SendKexAsync(group.WrittenMemory, cancellationToken);
+        }
+
         using var kexInitPacket = await ReceiveRawAsync(cancellationToken);
         var init = kexInitPacket.Payload.ToArray();
 
@@ -584,7 +615,7 @@ internal sealed class FakeSshServer : IAsyncDisposable
             Stage = "computing and sending the key exchange reply";
         }
 
-        var (reply, secret, hash, kexHash) = RunKex(negotiated.Kex, negotiated.HostKey, hostKey, init, clientInitPayload, serverInitPayload);
+        var (reply, secret, hash, kexHash) = RunKex(negotiated.Kex, negotiated.HostKey, hostKey, init, clientInitPayload, serverInitPayload, gex);
         await SendKexAsync(reply, cancellationToken);
         if (initial)
         {
@@ -746,7 +777,8 @@ internal sealed class FakeSshServer : IAsyncDisposable
         };
     }
 
-    private (byte[] Reply, byte[] Secret, byte[] Hash, HashAlgorithmName HashAlgorithm) RunKex(string method, string hostKeyAlgorithm, FakeHostKey hostKey, byte[] init, byte[] clientInit, byte[] serverInit)
+    private (byte[] Reply, byte[] Secret, byte[] Hash, HashAlgorithmName HashAlgorithm) RunKex(string method, string hostKeyAlgorithm, FakeHostKey hostKey, byte[] init, byte[] clientInit, byte[] serverInit,
+        GexState? gex)
     {
         var clientVersion = ClientIdentification!.Line;
         var serverVersion = Options.Identification;
@@ -761,7 +793,7 @@ internal sealed class FakeSshServer : IAsyncDisposable
 
             var buffer = new ArrayBufferWriter<byte>();
             var w = new SshWriter(buffer);
-            w.WriteByte(SshMessage.KexEcdhReply);
+            w.WriteByte(gex is null ? SshMessage.KexEcdhReply : SshMessage.KexDhGexReply);
             w.WriteString(hostKey.Blob);
             body(w);
             w.WriteString(signature);
@@ -875,10 +907,38 @@ internal sealed class FakeSshServer : IAsyncDisposable
                 return (Reply(w => w.WriteString(qs), h), k, h, curve.Hash);
             }
 
+            case SshAlgorithms.DhGroupExchangeSha256:
+            {
+                // RFC 4419 section 3: the exchange in the group sent, H over min, n, max, p, g, e, f.
+                var p = new BigInteger(gex!.P, isUnsigned: true, isBigEndian: true);
+                var g = new BigInteger(gex.G, isUnsigned: true, isBigEndian: true);
+                var eBytes = reader.ReadMpint().ToArray();
+                var e = new BigInteger(eBytes, isUnsigned: true, isBigEndian: true);
+                var y = new BigInteger(RandomNumberGenerator.GetBytes(64), isUnsigned: true, isBigEndian: true) + 2;
+                var fBytes = Options.GexServerValue?.ToByteArray(isUnsigned: true, isBigEndian: true)
+                    ?? BigInteger.ModPow(g, y, p).ToByteArray(isUnsigned: true, isBigEndian: true);
+                var k = BigInteger.ModPow(e, y, p).ToByteArray(isUnsigned: true, isBigEndian: true);
+                var h = ExchangeHash.Compute(HashAlgorithmName.SHA256, clientVersion, serverVersion, clientInit, serverInit, hostKey.Blob, w =>
+                {
+                    w.WriteUInt32(gex.Request.Min);
+                    w.WriteUInt32(gex.Request.Preferred);
+                    w.WriteUInt32(gex.Request.Max);
+                    w.WriteMpint(gex.P);
+                    w.WriteMpint(gex.G);
+                    w.WriteMpint(eBytes);
+                    w.WriteMpint(fBytes);
+                }, k);
+                return (Reply(w => w.WriteMpint(fBytes), h), k, h, HashAlgorithmName.SHA256);
+            }
+
             default:
             {
-                var group = method == SshAlgorithms.DhGroup14Sha256 ? ModpGroup.Group14 : ModpGroup.Group16;
-                var hash = method == SshAlgorithms.DhGroup14Sha256 ? HashAlgorithmName.SHA256 : HashAlgorithmName.SHA512;
+                var (group, hash) = method switch
+                {
+                    SshAlgorithms.DhGroup14Sha256 => (ModpGroup.Group14, HashAlgorithmName.SHA256),
+                    SshAlgorithms.DhGroup18Sha512 => (ModpGroup.Group18, HashAlgorithmName.SHA512),
+                    _ => (ModpGroup.Group16, HashAlgorithmName.SHA512),
+                };
                 var eBytes = reader.ReadMpint().ToArray();
                 var e = new BigInteger(eBytes, isUnsigned: true, isBigEndian: true);
                 var y = new BigInteger(RandomNumberGenerator.GetBytes(64), isUnsigned: true, isBigEndian: true) + 2;
@@ -890,3 +950,6 @@ internal sealed class FakeSshServer : IAsyncDisposable
         }
     }
 }
+
+/// <summary>A group exchange in progress on the fake server: the client's request and the group sent (p and g as unsigned magnitudes).</summary>
+internal sealed record GexState((uint Min, uint Preferred, uint Max) Request, byte[] P, byte[] G);

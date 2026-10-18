@@ -363,11 +363,24 @@ internal sealed class SshTransport : IAsyncDisposable
             using var discarded = await ReadPacketAsync(cancellationToken).ConfigureAwait(false);
         }
 
-        using var kex = ClientKeyExchange.Create(negotiated.Kex);
-        await SendPacketAsync(kex.CreateInit(), kexMessage: true, null, null, cancellationToken).ConfigureAwait(false);
-        var reply = await ReceiveKexMessageAsync(SshMessage.KexEcdhReply, strictMessages, cancellationToken).ConfigureAwait(false);
+        SshAlgorithms.TryGetCipher(negotiated.CipherClientToServer, out var cipherC2S);
+        SshAlgorithms.TryGetCipher(negotiated.CipherServerToClient, out var cipherS2C);
+        SshAlgorithms.TryGetMac(negotiated.MacClientToServer, out var macC2S);
+        SshAlgorithms.TryGetMac(negotiated.MacServerToClient, out var macS2C);
 
-        var context = new KexContext(_options.ClientIdentification.Line, ServerIdentification!.Line, clientInitPayload, serverInitPayload);
+        using var kex = ClientKeyExchange.Create(negotiated.Kex,
+            DhGroupExchangeKeyExchange.PreferredBits(ServerIdentification!.SoftwareVersion, cipherC2S, cipherS2C, macC2S, macS2C));
+        if (kex.CreateGroupRequest() is { } groupRequest)
+        {
+            // Group exchange: the server picks the group first (RFC 4419).
+            await SendPacketAsync(groupRequest, kexMessage: true, null, null, cancellationToken).ConfigureAwait(false);
+            kex.ProcessGroup(await ReceiveKexMessageAsync(SshMessage.KexDhGexGroup, strictMessages, cancellationToken).ConfigureAwait(false));
+        }
+
+        await SendPacketAsync(kex.CreateInit(), kexMessage: true, null, null, cancellationToken).ConfigureAwait(false);
+        var reply = await ReceiveKexMessageAsync(kex.ReplyMessage, strictMessages, cancellationToken).ConfigureAwait(false);
+
+        var context = new KexContext(_options.ClientIdentification.Line, ServerIdentification.Line, clientInitPayload, serverInitPayload);
         using var result = kex.ProcessReply(reply, context);
         await VerifyHostKeyAsync(negotiated, result, initial, cancellationToken).ConfigureAwait(false);
 
@@ -376,10 +389,6 @@ internal sealed class SshTransport : IAsyncDisposable
             SessionId = (byte[])result.ExchangeHash.Clone();
         }
 
-        SshAlgorithms.TryGetCipher(negotiated.CipherClientToServer, out var cipherC2S);
-        SshAlgorithms.TryGetCipher(negotiated.CipherServerToClient, out var cipherS2C);
-        SshAlgorithms.TryGetMac(negotiated.MacClientToServer, out var macC2S);
-        SshAlgorithms.TryGetMac(negotiated.MacServerToClient, out var macS2C);
         using var keys = KeyDerivation.DeriveAll(kex.Hash, result.SharedSecret, result.ExchangeHash, SessionId!, cipherC2S, cipherS2C, macC2S, macS2C, result.SharedSecretIsString);
         var newSend = PacketProtectorFactory.Create(cipherC2S, macC2S, keys.EncryptionKeyClientToServer, keys.IvClientToServer, keys.IntegrityKeyClientToServer);
         PacketProtector newReceive;

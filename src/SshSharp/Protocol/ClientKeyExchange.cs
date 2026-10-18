@@ -35,6 +35,20 @@ internal abstract class ClientKeyExchange : IDisposable
     /// <summary>The hash used for the exchange hash and key derivation.</summary>
     public abstract HashAlgorithmName Hash { get; }
 
+    /// <summary>The message number of the server's reply that <see cref="ProcessReply"/> takes.</summary>
+    public virtual byte ReplyMessage => SshMessage.KexEcdhReply;
+
+    /// <summary>
+    /// A round trip before <see cref="CreateInit"/>, or null for none: group exchange (RFC 4419) asks the server for a group first. The
+    /// server's answer goes to <see cref="ProcessGroup"/>.
+    /// </summary>
+    public virtual byte[]? CreateGroupRequest() => null;
+
+    /// <summary>Processes the server's answer to <see cref="CreateGroupRequest"/> (including its message number).</summary>
+    /// <exception cref="SshProtocolException">The message is malformed.</exception>
+    /// <exception cref="SshException">The group is unacceptable.</exception>
+    public virtual void ProcessGroup(ReadOnlySpan<byte> message) => throw new InvalidOperationException("This key exchange has no group request.");
+
     /// <summary>The first key exchange message (including its message number): <c>SSH_MSG_KEX*_INIT</c>.</summary>
     public abstract byte[] CreateInit();
 
@@ -46,7 +60,9 @@ internal abstract class ClientKeyExchange : IDisposable
     public abstract void Dispose();
 
     /// <summary>Creates the client side of the named method.</summary>
-    public static ClientKeyExchange Create(string name) => name switch
+    /// <param name="name">The negotiated method.</param>
+    /// <param name="groupExchangeBits">The group size group exchange asks for (see <see cref="DhGroupExchangeKeyExchange.PreferredBits"/>).</param>
+    public static ClientKeyExchange Create(string name, int groupExchangeBits = DhGroupExchangeKeyExchange.MaxBits) => name switch
     {
 #if NET10_0_OR_GREATER
         SshAlgorithms.MlKem768X25519Sha256 when MLKem.IsSupported => new MlKem768X25519KeyExchange(),
@@ -60,6 +76,8 @@ internal abstract class ClientKeyExchange : IDisposable
         SshAlgorithms.EcdhNistp521 => new EcdhKeyExchange(NistCurve.P521),
         SshAlgorithms.DhGroup14Sha256 => new DhKeyExchange(ModpGroup.Group14, HashAlgorithmName.SHA256),
         SshAlgorithms.DhGroup16Sha512 => new DhKeyExchange(ModpGroup.Group16, HashAlgorithmName.SHA512),
+        SshAlgorithms.DhGroup18Sha512 => new DhKeyExchange(ModpGroup.Group18, HashAlgorithmName.SHA512),
+        SshAlgorithms.DhGroupExchangeSha256 => new DhGroupExchangeKeyExchange(groupExchangeBits),
         _ => throw new ArgumentException($"Unsupported key exchange method '{name}'.", nameof(name)),
     };
 
@@ -72,12 +90,12 @@ internal abstract class ClientKeyExchange : IDisposable
         return buffer.WrittenSpan.ToArray();
     }
 
-    protected static byte[] ExpectReply(ref SshReader reader)
+    protected static byte[] ExpectReply(ref SshReader reader, byte expected = SshMessage.KexEcdhReply)
     {
         var type = reader.ReadByte();
-        if (type != SshMessage.KexEcdhReply)
+        if (type != expected)
         {
-            throw new SshProtocolException($"Expected the key exchange reply (31), got message {type}.");
+            throw new SshProtocolException($"Expected the key exchange reply ({expected}), got message {type}.");
         }
 
         return reader.ReadString().ToArray(); // K_S
@@ -222,7 +240,10 @@ internal sealed class EcdhKeyExchange : ClientKeyExchange
     public override void Dispose() => _key.Dispose();
 }
 
-/// <summary><c>diffie-hellman-group14-sha256</c> and <c>diffie-hellman-group16-sha512</c> (RFC 4253 section 8, RFC 8268).</summary>
+/// <summary>
+/// <c>diffie-hellman-group14-sha256</c>, <c>diffie-hellman-group16-sha512</c> and <c>diffie-hellman-group18-sha512</c> (RFC 4253
+/// section 8, RFC 8268).
+/// </summary>
 internal sealed class DhKeyExchange : ClientKeyExchange
 {
     private readonly ModpGroup _group;
@@ -234,15 +255,7 @@ internal sealed class DhKeyExchange : ClientKeyExchange
     {
         _group = group;
         _hash = hash;
-
-        // A random exponent of ExponentBits bits with the top bit set, so it is never tiny.
-        var bytes = RandomNumberGenerator.GetBytes(group.ExponentBits / 8);
-        bytes[0] |= 0x80;
-        _x = new BigInteger(bytes, isUnsigned: true, isBigEndian: true);
-        CryptographicOperations.ZeroMemory(bytes);
-
-        // BigInteger.ModPow is not constant-time and its internals cannot be wiped. The exponent is ephemeral and used for one
-        // exchange, so remote timing attacks are impractical; curve25519 and ECDH are preferred over DH by default anyway.
+        _x = NewExponent(group.ExponentBits);
         _e = BigInteger.ModPow(ModpGroup.Generator, _x, group.Prime);
     }
 
@@ -261,15 +274,7 @@ internal sealed class DhKeyExchange : ClientKeyExchange
             throw new SshProtocolException("Trailing data in the key exchange reply.");
         }
 
-        var f = new BigInteger(fMagnitude, isUnsigned: true, isBigEndian: true);
-        var p = _group.Prime;
-        if (f <= BigInteger.One || f >= p - BigInteger.One)
-        {
-            throw new SshException(SshFailureReason.KeyExchangeFailed, "The server's Diffie-Hellman value is out of range.");
-        }
-
-        var k = BigInteger.ModPow(f, _x, p);
-        var kBytes = Magnitude(k);
+        var kBytes = Agree(fMagnitude, _x, _group.Prime);
         try
         {
             return Finish(_hash, context, hostKey, signature, w =>
@@ -289,7 +294,33 @@ internal sealed class DhKeyExchange : ClientKeyExchange
         // BigInteger values cannot be wiped; they are ephemeral and only live as long as this exchange.
     }
 
-    private static byte[] Magnitude(BigInteger value) => value.ToByteArray(isUnsigned: true, isBigEndian: true);
+    /// <summary>A random exponent of <paramref name="bits"/> bits (a multiple of 8) with the top bit set, so it is never tiny.</summary>
+    internal static BigInteger NewExponent(int bits)
+    {
+        var bytes = RandomNumberGenerator.GetBytes(bits / 8);
+        bytes[0] |= 0x80;
+        var x = new BigInteger(bytes, isUnsigned: true, isBigEndian: true);
+        CryptographicOperations.ZeroMemory(bytes);
+        return x;
+    }
+
+    /// <summary>Checks the server's f (1 &lt; f &lt; p-1, RFC 4253 section 8) and returns K = f^x mod p as an unsigned magnitude.</summary>
+    /// <remarks>
+    /// <see cref="BigInteger.ModPow"/> is not constant-time and its internals cannot be wiped. The exponent is ephemeral and used for one
+    /// exchange, so remote timing attacks are impractical; the post-quantum hybrids, curve25519 and ECDH are preferred over DH by default.
+    /// </remarks>
+    internal static byte[] Agree(byte[] fMagnitude, BigInteger x, BigInteger p)
+    {
+        var f = new BigInteger(fMagnitude, isUnsigned: true, isBigEndian: true);
+        if (f <= BigInteger.One || f >= p - BigInteger.One)
+        {
+            throw new SshException(SshFailureReason.KeyExchangeFailed, "The server's Diffie-Hellman value is out of range.");
+        }
+
+        return Magnitude(BigInteger.ModPow(f, x, p));
+    }
+
+    internal static byte[] Magnitude(BigInteger value) => value.ToByteArray(isUnsigned: true, isBigEndian: true);
 }
 
 /// <summary>

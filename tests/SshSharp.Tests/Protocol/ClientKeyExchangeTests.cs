@@ -12,7 +12,7 @@ public class ClientKeyExchangeTests
     public static IEnumerable<string> Methods() =>
     [
         SshAlgorithms.Curve25519Sha256, SshAlgorithms.Curve25519Sha256Libssh, SshAlgorithms.EcdhNistp256, SshAlgorithms.EcdhNistp384,
-        SshAlgorithms.EcdhNistp521, SshAlgorithms.DhGroup14Sha256, SshAlgorithms.DhGroup16Sha512,
+        SshAlgorithms.EcdhNistp521, SshAlgorithms.DhGroup14Sha256, SshAlgorithms.DhGroup16Sha512, SshAlgorithms.DhGroup18Sha512,
     ];
 
     private static readonly KexContext Context = new("SSH-2.0-SshSharp_test", "SSH-2.0-FakeServer", [20, 1, 2, 3], [20, 4, 5, 6]);
@@ -102,8 +102,12 @@ public class ClientKeyExchangeTests
 
             default:
             {
-                var group = method == SshAlgorithms.DhGroup14Sha256 ? ModpGroup.Group14 : ModpGroup.Group16;
-                var hash = method == SshAlgorithms.DhGroup14Sha256 ? HashAlgorithmName.SHA256 : HashAlgorithmName.SHA512;
+                var (group, hash) = method switch
+                {
+                    SshAlgorithms.DhGroup14Sha256 => (ModpGroup.Group14, HashAlgorithmName.SHA256),
+                    SshAlgorithms.DhGroup18Sha512 => (ModpGroup.Group18, HashAlgorithmName.SHA512),
+                    _ => (ModpGroup.Group16, HashAlgorithmName.SHA512),
+                };
                 var eBytes = ClientValue(init, mpint: true);
                 var e = new BigInteger(eBytes, isUnsigned: true, isBigEndian: true);
                 var y = new BigInteger(RandomNumberGenerator.GetBytes(64), isUnsigned: true, isBigEndian: true) + 2;

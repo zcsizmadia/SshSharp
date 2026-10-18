@@ -107,8 +107,14 @@ are cleared after writing; the string `ToOpenSshPrivateKey` returns cannot be.
 
 ## Accepted risks
 
-- **DH group 14/16** uses `BigInteger.ModPow` on its ephemeral exponent, which is not constant-time. The exponent is used once and the
-  timing is not observable remotely in a useful way; curve25519 and ECDH are preferred by default.
+- **DH group 14/16/18 and group exchange** use `BigInteger.ModPow` on the ephemeral exponent, which is not constant-time. The
+  exponent is used once and the timing is not observable remotely in a useful way; curve25519 and ECDH are preferred by default.
+- **Group exchange primality** is one Miller-Rabin round with a random base on the server's prime (`DhGroupValidator`), after trial
+  division of p and (p-1)/2 by the odd numbers below 4096. For a random-looking composite of 2048 bits or more, one round errs
+  with probability below 2^-64 (Damgard, Landrock and Pomerance); it is not a bound against a prime crafted by the server, which
+  needs no weak group to read its own session. More rounds, or proving (p-1)/2 prime, cost a full-size `BigInteger.ModPow` each:
+  measured on Windows 11, .NET 10, x64, a connection to OpenSSH 9.6 on localhost takes 0.87 s with an 8192-bit group (0.22 s for
+  `diffie-hellman-group18-sha512`), of which about 0.65 s is the one round.
 - **bcrypt_pbkdf and Argon2** index tables with data derived from the passphrase. They run once, locally, when a key file is loaded.
 - **Managed strings** (the password option) cannot be wiped.
 

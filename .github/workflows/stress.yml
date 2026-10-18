@@ -181,7 +181,7 @@ jobs:
             'AllowTcpForwarding yes'
             'SyslogFacility LOCAL0'
             'LogLevel DEBUG2'
-            'KexAlgorithms +diffie-hellman-group14-sha256,diffie-hellman-group16-sha512'
+            'KexAlgorithms +diffie-hellman-group-exchange-sha256,diffie-hellman-group14-sha256,diffie-hellman-group16-sha512,diffie-hellman-group18-sha512'
           ) + (Get-Content $config | Where-Object { $_ -notmatch '^\s*(Port|ListenAddress|PasswordAuthentication|Match|AuthorizedKeysFile|AllowGroups|AllowUsers|DenyGroups|DenyUsers)\b' -and $_ -notmatch '^\s+' }) |
             Set-Content $config -Encoding ascii
           & "$env:WINDIR\System32\OpenSSH\sshd.exe" -t
