@@ -192,8 +192,9 @@ public sealed partial class SshClient : IAsyncDisposable
     private readonly record struct SessionSetup(SshTerminalOptions? Terminal, IReadOnlyDictionary<string, string> Environment);
 
     /// <summary>
-    /// Runs a command and collects its output. Without <paramref name="session"/>, as 1.0 does: a bare <c>exec</c>, with standard input left
-    /// open. With it, the session requests of <see cref="StartCommandAsync"/>, then the input and end-of-file.
+    /// Runs a command and collects its output. Without <paramref name="session"/>, as 1.0 does: agent forwarding if configured, then
+    /// <c>exec</c>, with standard input left open. With it, the session requests of <see cref="StartCommandAsync"/>, then the input and
+    /// end-of-file.
     /// </summary>
     private async Task<SshCommandResult> RunCommandCoreAsync(string command, SessionSetup? session, SshCommandInput? standardInput, CancellationToken cancellationToken)
     {
@@ -213,9 +214,14 @@ public sealed partial class SshClient : IAsyncDisposable
                 await RequestSessionAsync(channel, "exec", command, setup, cancellationToken).ConfigureAwait(false);
                 writing = WriteInputAsync(channel, standardInput, stop);
             }
-            else if (!await channel.RequestAsync("exec", true, w => w.WriteString(command), cancellationToken).ConfigureAwait(false))
+            else
             {
-                throw new SshException(SshFailureReason.ChannelClosed, "The server refused to execute the command.");
+                // As every session does (ForwardAgent's contract); before 1.1 this one did not ask (#287).
+                await RequestAgentForwardingAsync(channel, cancellationToken).ConfigureAwait(false);
+                if (!await channel.RequestAsync("exec", true, w => w.WriteString(command), cancellationToken).ConfigureAwait(false))
+                {
+                    throw new SshException(SshFailureReason.ChannelClosed, "The server refused to execute the command.");
+                }
             }
 
             var stdout = new ArrayBufferWriter<byte>();
@@ -388,6 +394,19 @@ public sealed partial class SshClient : IAsyncDisposable
         }
     }
 
+    /// <summary>With <see cref="SshClientOptions.ForwardAgent"/>, asks the server to forward the agent on this session.</summary>
+    private async Task RequestAgentForwardingAsync(SshChannel channel, CancellationToken cancellationToken)
+    {
+        if (_options.ForwardAgent is not null)
+        {
+            // No reply, as ssh sends it: a server that does not forward agents just ignores it. RFC 9987 names the request "agent-req",
+            // to be used only when the server announces "agent-forward"; otherwise OpenSSH's name, which servers have long understood.
+            EnsureChannelDispatch();
+            var request = _connection.ServerExtensions.ContainsKey("agent-forward") ? "agent-req" : "auth-agent-req@openssh.com";
+            await channel.RequestAsync(request, false, null, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
     /// <summary>Sends a session's requests, in ssh's order: the terminal, agent forwarding, the environment, then the program.</summary>
     private async Task RequestSessionAsync(SshChannel channel, string kind, string? command, SessionSetup setup, CancellationToken cancellationToken)
     {
@@ -405,15 +424,7 @@ public sealed partial class SshClient : IAsyncDisposable
             throw new SshException(SshFailureReason.ChannelClosed, "The server refused to allocate a terminal.");
         }
 
-        if (_options.ForwardAgent is not null)
-        {
-            // No reply, as ssh sends it: a server that does not forward agents just ignores it. RFC 9987 names the request "agent-req",
-            // to be used only when the server announces "agent-forward"; otherwise OpenSSH's name, which servers have long understood.
-            EnsureChannelDispatch();
-            var request = _connection.ServerExtensions.ContainsKey("agent-forward") ? "agent-req" : "auth-agent-req@openssh.com";
-            await channel.RequestAsync(request, false, null, cancellationToken).ConfigureAwait(false);
-        }
-
+        await RequestAgentForwardingAsync(channel, cancellationToken).ConfigureAwait(false);
         foreach (var (name, value) in environment)
         {
             // No reply: servers drop names they do not accept (sshd's AcceptEnv), as ssh expects.

@@ -145,10 +145,10 @@ a `cd` in one does not affect the next. Chain dependent steps in one command lin
   Beyond that, `RunCommandAsync` throws `InvalidOperationException`: stream such output with `StartCommandAsync`.
 - **No terminal.** Unless you ask for one, commands run without a pseudo-terminal, so they do not prompt, colorize or page. A
   program that asks questions (`sudo` without `NOPASSWD`) needs [an interactive session](interactive-shell.md), where you can answer.
-- **The two overloads.** `RunCommandAsync(command, cancellationToken)` sends a bare `exec`, as 1.0 did. It does not ask for agent
-  forwarding, and it leaves the command's input open and empty: a command that reads its input waits until it is cancelled. The
-  overload with options and input closes the input (pass `null` for empty input) and sets up the session as `StartCommandAsync`
-  does.
+- **The two overloads.** `RunCommandAsync(command, cancellationToken)` leaves the command's input open and empty, as 1.0 did: a
+  command that reads its input waits until it is cancelled. The overload with options and input closes the input (pass `null` for
+  empty input) and sets up the session as `StartCommandAsync` does. Both ask for agent forwarding when
+  `SshClientOptions.ForwardAgent` is set (in 1.0, `RunCommandAsync(command, cancellationToken)` did not).
 - **Environment.** The server runs the command through the user's shell non-interactively (as `shell -c command`), so startup
   files that only interactive shells read do not run, and `PATH` may differ from what you see in a terminal. Use full paths in
   scripts.

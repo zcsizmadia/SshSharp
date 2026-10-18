@@ -125,7 +125,7 @@ public class RunCommandOptionsTests
     [Test]
     public async Task TheOriginalOverload_StillLeavesTheInputOpen()
     {
-        // 1.0 behaviour, kept: a bare exec, and no EOF.
+        // 1.0 behaviour, kept: exec, and no EOF. (Without ForwardAgent, as here, nothing else is asked; see AgentForwardingTests.)
         await using var server = Server(script => script.FinishAsync(0));
         await using var client = await ConnectAsync(server);
 
