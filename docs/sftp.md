@@ -43,6 +43,23 @@ A failed download leaves no partial local file behind, unless `Resume` is set, i
 next attempt. A resume trusts that the destination's bytes are the start of the same file (nothing compares them), and a
 destination larger than the source is an error.
 
+### Memory
+
+Transfers reuse their buffers instead of allocating new ones for each request, so moving a large file costs the garbage collector
+little:
+
+- **Uploads** read the source straight into the request that carries the data. The buffer comes from the shared pool
+  (`ArrayPool<byte>.Shared`) and goes back as soon as the request is sent, before the server acknowledges it.
+- **Downloads** receive each reply's data into a pooled buffer. It goes back once the data is written to the destination.
+- **Other requests** (opening, listing, attributes) are built in pooled buffers too.
+
+With OpenSSH's 255 KiB reads and writes, each buffer is a 256 KiB array. The pool keeps buffers for the next transfer, and the
+runtime trims it when memory is short.
+
+Both streams must follow the `Stream` contract. `UploadAsync` reads into a buffer that is sent and then reused, and `DownloadAsync`
+writes from a buffer that is reused once `WriteAsync` completes. A stream that keeps the buffer it was given after the call returns
+would see other data later. `MemoryStream`, `FileStream` and the BCL's other streams copy what they keep.
+
 ### Segmented downloads
 
 One SFTP session is one SSH channel, and the data in flight on a channel is bounded by its flow-control window (2 MiB here), so
@@ -134,7 +151,9 @@ await log.WriteAsync(Encoding.UTF8.GetBytes("deployed\n"));
 ```
 
 The stream is asynchronous only. `SetLength` truncates or extends the remote file. A stream opened only for reading reads ahead
-(up to 16 reads in flight) while it is read in order; one that also writes reads one request at a time. For whole files,
+(up to 16 reads in flight) while it is read in order; one that also writes reads one request at a time. Read-ahead replies are held in
+pooled buffers (see [Memory](#memory)) until their data is read, so a read-only stream allows one `ReadAsync` at a time: a second
+one while the first is still running throws `InvalidOperationException`. Disposing the stream during a read is safe. For whole files,
 `DownloadAsync` is still faster. `Length` is the size when the stream opened plus this stream's own writes (including those still
 in flight) and `SetLength`, so it needs no round trip; to see another writer's changes, ask the server (`GetAttributesAsync`).
 

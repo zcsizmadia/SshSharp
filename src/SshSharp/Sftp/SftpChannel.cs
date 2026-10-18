@@ -6,21 +6,73 @@ using SshSharp.Protocol;
 namespace SshSharp.Sftp;
 
 /// <summary>A reply from the SFTP server: its type and whole packet (type, then the request id, then the body).</summary>
-internal sealed class SftpResponse
+/// <remarks>
+/// <para>
+/// A DATA reply (the answer to a READ, up to 255 KiB with OpenSSH) is read into a buffer rented from the shared pool rather than a new
+/// array each time; other replies are small and get a plain array.
+/// </para>
+/// <para>
+/// Ownership: the code a reply is handed to (the caller of <see cref="SftpChannel.RequestAsync(byte, Action{SshWriter}, CancellationToken, Action{SftpResponse}?)"/>)
+/// owns it and disposes it once it is done with <see cref="Packet"/> and with every slice of it, such as the data
+/// <see cref="SftpClient.ExpectData"/> returns. Disposing returns a pooled buffer, after which no slice of it may be used: the next renter
+/// owns those bytes. Disposing a reply with a plain array does nothing, and a pooled reply that is never disposed only costs the pool an
+/// array, so a reply is disposed when it may be DATA and need not be otherwise.
+/// </para>
+/// </remarks>
+internal sealed class SftpResponse : IDisposable
 {
+    private readonly int _length;
+    private readonly bool _pooled;
+    private byte[]? _buffer;
+#if SSHSHARP_INSTRUMENT
+    private readonly ulong _checksum;
+#endif
+
+    /// <summary>A reply in a plain array: <paramref name="packet"/> is the whole packet.</summary>
     public SftpResponse(byte type, byte[] packet)
+        : this(type, packet, packet.Length, pooled: false)
+    {
+    }
+
+    private SftpResponse(byte type, byte[] buffer, int length, bool pooled)
     {
         Type = type;
-        Packet = packet;
+        _buffer = buffer;
+        _length = length;
+        _pooled = pooled;
+#if SSHSHARP_INSTRUMENT
+        _checksum = pooled ? Instrumentation.Checksum(buffer.AsSpan(0, length)) : 0;
+#endif
     }
+
+    /// <summary>A reply in <paramref name="rented"/>, rented from the shared pool: its first <paramref name="length"/> bytes are the packet. The reply now owns it.</summary>
+    public static SftpResponse Pooled(byte[] rented, int length) => new(rented[0], rented, length, pooled: true);
 
     public byte Type { get; }
 
     /// <summary>A reader positioned after the type and request id.</summary>
-    public SshReader Body => new(Packet.AsSpan(5));
+    public SshReader Body => new(Packet.Span[5..]);
 
-    /// <summary>The packet, for slicing data out of it without a copy.</summary>
-    public byte[] Packet { get; }
+    /// <summary>The packet, for slicing data out of it without a copy; a slice is valid until the reply is disposed.</summary>
+    /// <exception cref="ObjectDisposedException">The reply's pooled buffer was returned.</exception>
+    public ReadOnlyMemory<byte> Packet =>
+        (_pooled ? Volatile.Read(ref _buffer) : _buffer) is { } buffer ? buffer.AsMemory(0, _length) : throw new ObjectDisposedException(nameof(SftpResponse));
+
+    /// <summary>Returns a pooled buffer (once; later calls, and calls on a reply in a plain array, do nothing).</summary>
+    public void Dispose()
+    {
+        if (!_pooled || Interlocked.Exchange(ref _buffer, null) is not { } buffer)
+        {
+            return;
+        }
+
+#if SSHSHARP_INSTRUMENT
+        Instrumentation.CheckUnchanged(buffer.AsSpan(0, _length), _checksum, nameof(SftpResponse));
+        buffer.AsSpan(0, _length).Fill(0xDD); // whatever still reads a slice of it now reads this pattern, which content checks catch
+#endif
+        Instrumentation.Returning(buffer, nameof(SftpResponse));
+        ArrayPool<byte>.Shared.Return(buffer);
+    }
 }
 
 /// <summary>
@@ -34,6 +86,9 @@ internal sealed class SftpChannel : IAsyncDisposable
     private readonly SemaphoreSlim _sendLock = new(1, 1);
     private readonly ConcurrentDictionary<uint, TaskCompletionSource<SftpResponse>> _pending = new();
     private readonly CancellationTokenSource _stop = new();
+
+    // A packet's length and type. Only one read of a packet is ever in progress (OpenAsync's, then the read loop's), so it is reused.
+    private readonly byte[] _header = new byte[5];
     private readonly Task _errorDrain;
     private Task _readLoop = Task.CompletedTask;
     private Exception? _failure;
@@ -61,15 +116,16 @@ internal sealed class SftpChannel : IAsyncDisposable
         var channel = new SftpChannel(session);
         try
         {
-            await channel.SendAsync(SshPrivateKey.Encode(w =>
-            {
-                w.WriteByte(SftpProtocol.Init);
-                w.WriteUInt32(SftpProtocol.Version);
-            }), cancellationToken).ConfigureAwait(false);
+            // SSH_FXP_INIT has no request id: uint32 length (5), byte type, uint32 version.
+            var init = new byte[9];
+            BinaryPrimitives.WriteUInt32BigEndian(init, 5);
+            init[4] = SftpProtocol.Init;
+            BinaryPrimitives.WriteUInt32BigEndian(init.AsSpan(5), SftpProtocol.Version);
+            await channel.SendAsync(init, cancellationToken).ConfigureAwait(false);
 
-            var version = await channel.ReadPacketAsync(cancellationToken).ConfigureAwait(false)
+            using var version = await channel.ReadPacketAsync(cancellationToken).ConfigureAwait(false)
                 ?? throw new SshException(SshFailureReason.ProtocolError, "The SFTP server closed the session before saying its version.");
-            (channel.Version, channel.Extensions) = ParseVersion(version);
+            (channel.Version, channel.Extensions) = ParseVersion(version.Packet.Span);
             channel._readLoop = Task.Run(channel.ReadLoopAsync, CancellationToken.None);
             return channel;
         }
@@ -81,7 +137,7 @@ internal sealed class SftpChannel : IAsyncDisposable
     }
 
     /// <summary>SSH_FXP_VERSION: the server's version and its extensions.</summary>
-    internal static (uint Version, IReadOnlyDictionary<string, string> Extensions) ParseVersion(byte[] packet)
+    internal static (uint Version, IReadOnlyDictionary<string, string> Extensions) ParseVersion(ReadOnlySpan<byte> packet)
     {
         try
         {
@@ -135,30 +191,53 @@ internal sealed class SftpChannel : IAsyncDisposable
 
     /// <summary>Sends a request and waits for its reply. <paramref name="body"/> writes what follows the request id.</summary>
     /// <remarks>
-    /// When the caller gives up after the request was sent, the reply is normally dropped. <paramref name="orphaned"/> gets it instead,
-    /// when it comes: a request that opens something (OPEN, OPENDIR) passes a callback that closes the handle, which would otherwise stay
-    /// open on the server until the session ends.
+    /// The request is built (and <paramref name="body"/> run) before this returns, so data it copies from the caller's buffers may change
+    /// as soon as it does. When the caller gives up after the request was sent, the reply is normally dropped. <paramref name="orphaned"/>
+    /// gets it instead, when it comes: a request that opens something (OPEN, OPENDIR) passes a callback that closes the handle, which would
+    /// otherwise stay open on the server until the session ends. The reply is the caller's to dispose (see <see cref="SftpResponse"/>).
     /// </remarks>
-    public async Task<SftpResponse> RequestAsync(byte type, Action<SshWriter> body, CancellationToken cancellationToken, Action<SftpResponse>? orphaned = null)
+    public Task<SftpResponse> RequestAsync(byte type, Action<SshWriter> body, CancellationToken cancellationToken, Action<SftpResponse>? orphaned = null)
+    {
+        var frame = SftpRequestFrame.Start(type);
+        try
+        {
+            body(frame.Writer);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            // Reported through the task, as a failed send would be; the frame is not handed over, so it is returned here.
+            frame.Dispose();
+            return Task.FromException<SftpResponse>(ex);
+        }
+
+        return RequestAsync(frame, cancellationToken, orphaned);
+    }
+
+    /// <summary>
+    /// Sends <paramref name="frame"/> as a request and waits for its reply. The frame is taken over whatever happens (see
+    /// <see cref="SftpRequestFrame"/>): it is disposed once its send has completed or failed, before the reply arrives.
+    /// </summary>
+    public async Task<SftpResponse> RequestAsync(SftpRequestFrame frame, CancellationToken cancellationToken, Action<SftpResponse>? orphaned = null)
     {
         var id = (uint)Interlocked.Increment(ref _nextId);
         var reply = new TaskCompletionSource<SftpResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
-        _pending[id] = reply;
-        if (Volatile.Read(ref _failure) is { } failed)
-        {
-            _pending.TryRemove(id, out _);
-            throw Ended(failed);
-        }
-
         var sent = false;
         try
         {
-            await SendAsync(SshPrivateKey.Encode(w =>
+            _pending[id] = reply;
+
+            // Sent or not, the frame is no longer needed afterwards: the channel copied the bytes into packets of its own before the send
+            // completed.
+            using (frame)
             {
-                w.WriteByte(type);
-                w.WriteUInt32(id);
-                body(w);
-            }), cancellationToken).ConfigureAwait(false);
+                if (Volatile.Read(ref _failure) is { } failed)
+                {
+                    throw Ended(failed);
+                }
+
+                await SendAsync(frame.Complete(id), cancellationToken).ConfigureAwait(false);
+            }
+
             sent = true;
             return await reply.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
         }
@@ -166,23 +245,29 @@ internal sealed class SftpChannel : IAsyncDisposable
         {
             // The server will still answer: hand the reply over when it does (the session failing completes it with an exception).
             _ = reply.Task.ContinueWith(
-                done => orphaned(done.Result),
+                done =>
+                {
+                    using var orphan = done.Result;
+                    orphaned(orphan);
+                },
                 CancellationToken.None, TaskContinuationOptions.OnlyOnRanToCompletion | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
             throw;
         }
         catch
         {
-            // Cancelled or failed: the reply, if it still comes, is dropped (an unknown id is ignored).
+            // Cancelled or failed: the reply, if it still comes, is dropped (an unknown id is ignored). One that came already, or comes
+            // while the request is being forgotten, has nobody to read it: its buffer goes back to the pool.
             _pending.TryRemove(id, out _);
+            _ = reply.Task.ContinueWith(
+                static done => done.Result.Dispose(),
+                CancellationToken.None, TaskContinuationOptions.OnlyOnRanToCompletion | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
             throw;
         }
     }
 
-    private async Task SendAsync(byte[] payload, CancellationToken cancellationToken)
+    /// <summary>Writes one whole frame (length included) to the session.</summary>
+    private async Task SendAsync(ReadOnlyMemory<byte> frame, CancellationToken cancellationToken)
     {
-        var frame = new byte[4 + payload.Length];
-        BinaryPrimitives.WriteUInt32BigEndian(frame, (uint)payload.Length);
-        payload.CopyTo(frame, 4);
         await _sendLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -200,14 +285,14 @@ internal sealed class SftpChannel : IAsyncDisposable
         }
     }
 
-    /// <summary>One packet (without its length), or null at the end of the session.</summary>
-    private async Task<byte[]?> ReadPacketAsync(CancellationToken cancellationToken)
+    /// <summary>One packet (without its length), or null at the end of the session. A DATA reply is in a pooled buffer.</summary>
+    private async Task<SftpResponse?> ReadPacketAsync(CancellationToken cancellationToken)
     {
-        var header = new byte[4];
+        var stream = _session.StandardOutput;
         var read = 0;
         while (read < 4)
         {
-            var n = await _session.StandardOutput.ReadAsync(header.AsMemory(read), cancellationToken).ConfigureAwait(false);
+            var n = await stream.ReadAsync(_header.AsMemory(read, 4 - read), cancellationToken).ConfigureAwait(false);
             if (n == 0)
             {
                 return read == 0 ? null : throw new SshException(SshFailureReason.ProtocolError, "The SFTP session ended inside a packet.");
@@ -216,23 +301,49 @@ internal sealed class SftpChannel : IAsyncDisposable
             read += n;
         }
 
-        var length = BinaryPrimitives.ReadUInt32BigEndian(header);
+        var length = BinaryPrimitives.ReadUInt32BigEndian(_header);
         if (length is < 5 or > SftpProtocol.MaxPacket)
         {
             throw new SshException(SshFailureReason.ProtocolError, $"The SFTP server sent a packet of {length} bytes.");
         }
 
-        var packet = new byte[length];
+        byte[]? packet = null;
+        var pooled = false;
         try
         {
-            await _session.StandardOutput.ReadExactlyAsync(packet, cancellationToken).ConfigureAwait(false);
+            // The type decides where the rest goes: data is rented (and returned by whoever reads it), the small replies are not.
+            await stream.ReadExactlyAsync(_header.AsMemory(4, 1), cancellationToken).ConfigureAwait(false);
+            pooled = _header[4] == SftpProtocol.Data;
+            if (pooled)
+            {
+                packet = ArrayPool<byte>.Shared.Rent((int)length);
+                Instrumentation.Rented(packet, nameof(SftpResponse));
+            }
+            else
+            {
+                packet = new byte[length];
+            }
+
+            packet[0] = _header[4];
+            await stream.ReadExactlyAsync(packet.AsMemory(1, (int)length - 1), cancellationToken).ConfigureAwait(false);
         }
-        catch (EndOfStreamException ex)
+        catch (Exception ex)
         {
-            throw new SshException(SshFailureReason.ProtocolError, "The SFTP session ended inside a packet.", ex);
+            if (pooled)
+            {
+                Instrumentation.Returning(packet!, nameof(SftpResponse));
+                ArrayPool<byte>.Shared.Return(packet!);
+            }
+
+            if (ex is EndOfStreamException)
+            {
+                throw new SshException(SshFailureReason.ProtocolError, "The SFTP session ended inside a packet.", ex);
+            }
+
+            throw;
         }
 
-        return packet;
+        return pooled ? SftpResponse.Pooled(packet, (int)length) : new SftpResponse(packet[0], packet);
     }
 
     private async Task ReadLoopAsync()
@@ -242,13 +353,14 @@ internal sealed class SftpChannel : IAsyncDisposable
         {
             while (await ReadPacketAsync(_stop.Token).ConfigureAwait(false) is { } packet)
             {
-                var id = BinaryPrimitives.ReadUInt32BigEndian(packet.AsSpan(1));
-                if (_pending.TryRemove(id, out var reply))
-                {
-                    reply.TrySetResult(new SftpResponse(packet[0], packet));
-                }
+                var id = BinaryPrimitives.ReadUInt32BigEndian(packet.Packet.Span[1..]);
 
-                // An unknown id belongs to a request that was cancelled: its reply is dropped.
+                // The request takes the reply over. An unknown id belongs to a request that was cancelled, and a request that failed
+                // already (the session ending) does not take it: either way it is dropped here.
+                if (!_pending.TryRemove(id, out var reply) || !reply.TrySetResult(packet))
+                {
+                    packet.Dispose();
+                }
             }
         }
         catch (Exception ex)

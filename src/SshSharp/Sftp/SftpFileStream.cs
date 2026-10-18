@@ -33,7 +33,10 @@ internal sealed class SftpFileStream(SftpClient client, byte[] handle, string pa
     private long _aheadNext;
     private int _depth = 2;
     private ReadOnlyMemory<byte> _leftover;
+    private SftpResponse? _leftoverReply;
     private long _leftoverOffset;
+    private int _reading;
+    private int _readsReleased;
     private long _behindEnd;
     private ExceptionDispatchInfo? _fault;
     private bool _faultReported;
@@ -106,14 +109,42 @@ internal sealed class SftpFileStream(SftpClient client, byte[] handle, string pa
         // What is read includes this stream's own writes: they are acknowledged first.
         await WaitForWritesAsync(cancellationToken).ConfigureAwait(false);
         var length = Math.Min(buffer.Length, client.Limits.MaxReadLength);
-        var reply = await client.SendReadAsync(handle, _position, length, cancellationToken).ConfigureAwait(false);
-        var data = SftpClient.ExpectData(reply, length, path);
+        using var reply = await client.SendReadAsync(handle, _position, length, cancellationToken).ConfigureAwait(false);
+        var data = SftpClient.ExpectData(reply, length, path); // copied out before the reply (its pooled buffer) is disposed
         data.CopyTo(buffer);
         _position += data.Length;
         return data.Length;
     }
 
+    // Ownership of the read-ahead's pooled buffers (see SftpResponse): the replies of the reads in flight belong to _ahead until a read
+    // dequeues one; the reply being read from is _leftoverReply, and _leftover is a slice of it, valid only until it is released. A read
+    // releases it once the last byte is taken or when it moves elsewhere; DropAhead gives the replies still due to a continuation that
+    // disposes them when they arrive. Disposing the stream releases all of it, unless a read is in progress: that read owns them until
+    // it ends, and releases them then (the same handshake as SshChannelReadStream's).
     private async ValueTask<int> ReadAheadAsync(Memory<byte> buffer, CancellationToken cancellationToken)
+    {
+        if (Interlocked.Exchange(ref _reading, 1) != 0)
+        {
+            throw new InvalidOperationException("Another read is already in progress on this stream.");
+        }
+
+        try
+        {
+            // Checked again now that the read is marked: a disposal from here on sees it and leaves the buffers to this read.
+            ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
+            return await ReadAheadCoreAsync(buffer, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _reading, 0);
+            if (Volatile.Read(ref _disposed) != 0)
+            {
+                ReleaseReads(); // disposed during this read, which owned the buffers until now
+            }
+        }
+    }
+
+    private async ValueTask<int> ReadAheadCoreAsync(Memory<byte> buffer, CancellationToken cancellationToken)
     {
         // What is left of the last reply comes first, if the caller is still where it ended.
         if (!_leftover.IsEmpty && _leftoverOffset == _position)
@@ -121,7 +152,7 @@ internal sealed class SftpFileStream(SftpClient client, byte[] handle, string pa
             return TakeLeftover(buffer);
         }
 
-        _leftover = default;
+        ReleaseLeftover();
         if (_ahead.Count == 0 || _ahead.Peek().Offset != _position)
         {
             // Not where the reads in flight are (the first read, or after a seek or a short read): start over from here.
@@ -141,10 +172,21 @@ internal sealed class SftpFileStream(SftpClient client, byte[] handle, string pa
         _depth = Math.Min(_depth * 2, MaxReadAhead);
         var (offset, length, pending) = _ahead.Peek();
         var reply = await pending.WaitAsync(cancellationToken).ConfigureAwait(false);
-        _ahead.Dequeue();
-        var data = SftpClient.ExpectData(reply, length, path);
+        _ahead.Dequeue(); // the reply is this read's now
+        ReadOnlyMemory<byte> data;
+        try
+        {
+            data = SftpClient.ExpectData(reply, length, path);
+        }
+        catch
+        {
+            reply.Dispose();
+            throw;
+        }
+
         if (data.IsEmpty)
         {
+            reply.Dispose();
             DropAhead(); // the end of the file; the reads past it answer the same
             return 0;
         }
@@ -154,6 +196,7 @@ internal sealed class SftpFileStream(SftpClient client, byte[] handle, string pa
             DropAhead(); // a short read leaves a gap before the next read in flight: the next call starts over after this data
         }
 
+        _leftoverReply = reply;
         _leftover = data;
         _leftoverOffset = offset;
         return TakeLeftover(buffer);
@@ -166,15 +209,64 @@ internal sealed class SftpFileStream(SftpClient client, byte[] handle, string pa
         _leftover = _leftover[count..];
         _leftoverOffset += count;
         _position += count;
+        if (_leftover.IsEmpty)
+        {
+            ReleaseLeftover(); // all of it taken: the buffer goes back now rather than at the next read
+        }
+
         return count;
     }
 
-    /// <summary>Forgets the reads in flight; their replies are dropped, and a failure (the session ended) is observed, not raised.</summary>
+    /// <summary>Forgets what is left of the last reply and returns its buffer; the slice must not be used after this.</summary>
+    private void ReleaseLeftover()
+    {
+        _leftover = default;
+        _leftoverReply?.Dispose();
+        _leftoverReply = null;
+    }
+
+    /// <summary>
+    /// Forgets the reads in flight; their replies are disposed when they arrive (they are nobody's now), and a failure (the session ended)
+    /// is observed, not raised.
+    /// </summary>
     private void DropAhead()
     {
         while (_ahead.TryDequeue(out var dropped))
         {
-            _ = dropped.Reply.ContinueWith(static t => _ = t.Exception, CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
+            _ = dropped.Reply.ContinueWith(static t =>
+            {
+                if (t.IsCompletedSuccessfully)
+                {
+                    t.Result.Dispose();
+                }
+                else
+                {
+                    _ = t.Exception;
+                }
+            }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+        }
+    }
+
+    /// <summary>
+    /// On disposing, after <c>_disposed</c> is set: releases the read-ahead's buffers, or leaves them to a read in progress. Both sides
+    /// write their flag before reading the other's (interlocked, so in that order): the read is seen here, or it sees the disposal when it
+    /// ends and releases them itself.
+    /// </summary>
+    private void ReleaseReadsUnlessReading()
+    {
+        if (Volatile.Read(ref _reading) == 0)
+        {
+            ReleaseReads();
+        }
+    }
+
+    /// <summary>On disposing: everything the read-ahead holds (once, by the disposal or by the read in progress that outlives it).</summary>
+    private void ReleaseReads()
+    {
+        if (Interlocked.Exchange(ref _readsReleased, 1) == 0)
+        {
+            DropAhead();
+            ReleaseLeftover();
         }
     }
 
@@ -210,8 +302,8 @@ internal sealed class SftpFileStream(SftpClient client, byte[] handle, string pa
                     await AcknowledgeOldestAsync(cancellationToken).ConfigureAwait(false);
                 }
 
-                // The request is built (the data copied) before SendWriteAsync returns. Like the read-ahead, it outlives this call, so it
-                // is not tied to its token; the wait for room is.
+                // The request is built (the data copied into a pooled buffer of its own, returned once the request is sent) before
+                // SendWriteAsync returns. Like the read-ahead, it outlives this call, so it is not tied to its token; the wait for room is.
                 var part = buffer[..Math.Min(buffer.Length, client.Limits.MaxWriteLength)];
                 _behind.Enqueue(client.SendWriteAsync(handle, _position, part, CancellationToken.None));
                 _position += part.Length;
@@ -391,7 +483,7 @@ internal sealed class SftpFileStream(SftpClient client, byte[] handle, string pa
         var closing = Interlocked.Exchange(ref _disposed, 1) == 0;
         if (closing)
         {
-            DropAhead();
+            ReleaseReadsUnlessReading();
             await SettleWritesAsync().ConfigureAwait(false);
             await client.CloseHandleAsync(handle).ConfigureAwait(false); // closed even after a failed write
         }
@@ -408,7 +500,7 @@ internal sealed class SftpFileStream(SftpClient client, byte[] handle, string pa
         var closing = disposing && Interlocked.Exchange(ref _disposed, 1) == 0;
         if (closing)
         {
-            DropAhead();
+            ReleaseReadsUnlessReading();
             if (_behind.Count > 0)
             {
                 // Stream gives synchronous disposal no other way to report a write that fails: the writes in flight are waited for, as
