@@ -163,6 +163,22 @@ both libraries, and setting `DOTNET_ThreadPool_UnfairSemaphoreSpinLimit=0` remov
 CPU per GiB is lower than SSH.NET's once spinning is excluded. On one core, SshSharp keeps the full rate and SSH.NET slows to
 265 MiB/s.
 
+### Measuring a connect fairly
+
+A connect is short and runs mostly code that runs once per connect, so how it is measured decides much of the result:
+
+* **Only the connect is timed.** `Connect_SshSharp` connects through the `ssh_config` route (to force the algorithms through public
+  API), and builds and parses that configuration once, outside the timed connects, as an application holds its configuration.
+  Each connect still resolves the host's settings from it and reads the key file, as SSH.NET's `Connect` reads its `PrivateKeyFile`.
+  Until this change the configuration text was built and parsed inside every timed connect.
+* **The same authentication on both sides.** With `SSHSHARP_BENCH_KEY` (an OpenSSH key file) both libraries log in with that key;
+  otherwise both use the password, the only method each is given. `SSHSHARP_BENCH_CIPHER` picks the cipher forced on both.
+* **Cold and warm are reported apart.** The connect profiler (`-- --connect-profile`) first times the first connect in the process
+  (cold: everything is compiled on the way, as for a command-line tool that connects once), then warms up with 100 connects of each
+  route (`SSHSHARP_BENCH_WARMUP` changes it) and a pause, so that the measured rounds run optimized code, as in a long-running
+  service. With one warm-up connect, methods that run once per connect stayed in the unoptimized tier for all the measured rounds.
+  BenchmarkDotNet measures the `Connect` benchmarks after its own warm-up iterations, so they report the warm figure.
+
 ### What the comparison found
 
 * **Connect** first measured 2.2x SSH.NET's time. Profiling each phase showed the key exchange took 12 ms, mostly in the

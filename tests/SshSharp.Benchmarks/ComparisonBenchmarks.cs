@@ -52,8 +52,21 @@ public class ComparisonBenchmarks
         }
     }
 
-    /// <summary>SshSharp, through its public ssh_config route to force the algorithms.</summary>
-    internal static Task<SshClient> ConnectSshSharpAsync(Microsoft.Extensions.Logging.ILogger? logger = null)
+    /// <summary>
+    /// SshSharp, through its public ssh_config route to force the algorithms. The config is built and parsed once, outside the timed
+    /// connects, as an application would hold it; SSH.NET's ConnectionInfo is likewise plain objects. Each connect still resolves the
+    /// host's settings from it and reads the key file, as SSH.NET reads its PrivateKeyFile.
+    /// </summary>
+    internal static Task<SshClient> ConnectSshSharpAsync(Microsoft.Extensions.Logging.ILogger? logger = null) =>
+        SshClient.ConnectAsync("bench", new SshConfigConnectOptions
+        {
+            Config = BenchConfig.Value.Config,
+            Password = BenchConfig.Value.Password,
+            UseAgent = false,
+            Logger = logger,
+        });
+
+    private static readonly Lazy<(SshConfig Config, string? Password)> BenchConfig = new(() =>
     {
         var (host, port, user, password) = Server;
         var config = $"Host bench\n HostName {host}\n Port {port}\n User {user}\n KexAlgorithms curve25519-sha256\n"
@@ -66,8 +79,8 @@ public class ComparisonBenchmarks
             config += $" IdentityFile \"{KeyFile}\"\n IdentitiesOnly yes\n";
         }
 
-        return SshClient.ConnectAsync("bench", new SshConfigConnectOptions { Config = SshConfig.Parse(config), Password = password.Length > 0 ? password : null, UseAgent = false, Logger = logger });
-    }
+        return (SshConfig.Parse(config), password.Length > 0 ? password : null);
+    });
 
     /// <summary>SSH.NET with the same algorithms: everything else removed from its tables.</summary>
     internal static SshNet.ConnectionInfo SshNetConnection()
