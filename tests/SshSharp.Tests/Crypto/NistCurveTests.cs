@@ -30,6 +30,51 @@ public class NistCurveTests
         }
     }
 
+    private static byte[] FieldBytes(System.Numerics.BigInteger value, int size)
+    {
+        var bytes = value.ToByteArray(isUnsigned: true, isBigEndian: true);
+        var padded = new byte[size];
+        bytes.CopyTo(padded, size - bytes.Length);
+        return padded;
+    }
+
+    /// <summary>The point on the curve with the smallest x, found with the square root a^((p+1)/4) (each of the three primes is 3 mod 4).</summary>
+    private static (System.Numerics.BigInteger X, System.Numerics.BigInteger Y) SmallestPoint(NistCurve curve)
+    {
+        var p = curve.Prime;
+        for (System.Numerics.BigInteger x = 0; ; x++)
+        {
+            var rhs = ((((x * x % p) * x) - (3 * x) + curve.B) % p + p) % p;
+            var y = System.Numerics.BigInteger.ModPow(rhs, (p + 1) / 4, p);
+            if (y * y % p == rhs)
+            {
+                return (x, y);
+            }
+        }
+    }
+
+    [Test]
+    [MethodDataSource(nameof(Curves))]
+    public async Task CoordinatesOfPOrMore_AreRejected_EvenWhenTheyAreOnTheCurveModP(string name)
+    {
+        // A peer could send x + p for x: the same point mod p, and so it passes the curve equation; only the range check refuses it.
+        var curve = NistCurve.FromSshName(name);
+        var p = curve.Prime;
+        var (x, y) = SmallestPoint(curve);
+        await Assert.That(curve.IsOnCurve(FieldBytes(x, curve.FieldSize), FieldBytes(y, curve.FieldSize))).IsTrue();
+        await Assert.That(curve.IsOnCurve(FieldBytes(x + p, curve.FieldSize), FieldBytes(y, curve.FieldSize))).IsFalse();
+
+        // y + p only fits in the field's bytes when the prime leaves room above it (P-521); the other y, p - y, then may.
+        var fieldMax = System.Numerics.BigInteger.One << (8 * curve.FieldSize);
+        foreach (var candidate in new[] { y, p - y })
+        {
+            if (candidate + p < fieldMax)
+            {
+                await Assert.That(curve.IsOnCurve(FieldBytes(x, curve.FieldSize), FieldBytes(candidate + p, curve.FieldSize))).IsFalse();
+            }
+        }
+    }
+
     [Test]
     [MethodDataSource(nameof(Curves))]
     public async Task ModifiedOrMalformedPointsAreRejected(string name)
