@@ -67,6 +67,36 @@ internal static class Forwarding
         // </remote>
     }
 
+    public static async Task RemoteHandlerAsync(SshClient client, CancellationToken cancellationToken)
+    {
+        // <remote-handler>
+        // ssh -R 8080, served by this process: each connection to the server's localhost:8080 arrives here as a Stream.
+        // Nothing listens on this machine.
+        await using var remote = await client.ForwardRemotePortAsync("localhost", 8080, async (connection, ct) =>
+        {
+            // The handler owns the stream; it is disposed (closing the connection) when the handler returns.
+            using var reader = new StreamReader(connection.Stream, leaveOpen: true);
+            var line = await reader.ReadLineAsync(ct);
+            await connection.Stream.WriteAsync(System.Text.Encoding.UTF8.GetBytes($"you said: {line}\n"), ct);
+        }, maxConnections: 20, cancellationToken);
+        Console.WriteLine($"Serving the server's port {remote.RemotePort}");
+
+        await Task.Delay(Timeout.Infinite, cancellationToken);  // disposing the forwarder cancels and closes the handlers' connections
+        // </remote-handler>
+    }
+
+    public static async Task RemoteHandlerSocketAsync(SshClient client, CancellationToken cancellationToken)
+    {
+        // <remote-handler-socket>
+        // The same for a Unix socket on the server: programs there open /run/user/1000/app.sock and reach the handler here.
+        await using var socket = await client.ForwardRemoteUnixSocketAsync("/run/user/1000/app.sock", async (connection, ct) =>
+        {
+            await connection.Stream.WriteAsync("ready\n"u8.ToArray(), ct);
+            await connection.Stream.CopyToAsync(Stream.Null, ct);  // read until the program closes its side
+        }, cancellationToken: cancellationToken);
+        // </remote-handler-socket>
+    }
+
     public static async Task DynamicAsync(SshClient client, CancellationToken cancellationToken)
     {
         // <dynamic>

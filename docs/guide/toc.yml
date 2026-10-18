@@ -101,6 +101,8 @@
       href: ../scenarios/file-sync.md
     - name: A database through a jump host
       href: ../scenarios/database-tunnel.md
+    - name: A webhook receiver behind NAT
+      href: ../scenarios/webhook-receiver.md
     - name: A background worker
       href: ../scenarios/background-worker.md
     - name: Short-lived certificates for CI jobs

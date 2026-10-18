@@ -124,6 +124,100 @@ public class ForwardingInteropTests
         }, () => $"The local service {(accepted ? "accepted a forwarded connection" : "saw no forwarded connection")}; connected {client.IsConnected}.");
     }
 
+    /// <summary>An in-process handler: reads one line and answers it in upper case.</summary>
+    private static async Task UpperCaseLineAsync(SshForwardedConnection connection, CancellationToken cancellationToken)
+    {
+        var line = await ReadLineAsync(buffer => connection.Stream.ReadAsync(buffer, cancellationToken));
+        await connection.Stream.WriteAsync(Encoding.ASCII.GetBytes(line.ToUpperInvariant() + "\n"), cancellationToken);
+    }
+
+    [Test]
+    public async Task RemoteForwardingToAHandler_ServesTheServersConnectionsInProcess()
+    {
+        await using var client = await ConnectAsync();
+        if (client is null)
+        {
+            Skip.Test("SSHSHARP_TEST_SSHD and SSHSHARP_TEST_USER with a password or key are needed.");
+            return;
+        }
+
+        var connections = new List<SshForwardedConnection>();
+        await Stages.RunAsync(async stages =>
+        {
+            await using var forwarder = await OnSomeHighPortAsync(45000, stages.Step, " (handler)",
+                port => client.ForwardRemotePortAsync("localhost", port, async (connection, ct) =>
+                {
+                    lock (connections)
+                    {
+                        connections.Add(connection);
+                    }
+
+                    await UpperCaseLineAsync(connection, ct);
+                }, cancellationToken: Timeout()));
+
+            // Play two programs on the server through tunnels: here -> server -> its forwarded port -> back to the handler here.
+            // "localhost", not 127.0.0.1: when another process holds that port on 127.0.0.1, sshd may have bound only ::1 for "localhost".
+            stages.Step($"opening two tunnels to the server's localhost:{forwarder.RemotePort}");
+            await using var first = await client.OpenTcpTunnelAsync("localhost", forwarder.RemotePort, Timeout());
+            await using var second = await client.OpenTcpTunnelAsync("localhost", forwarder.RemotePort, Timeout());
+            stages.Step("exchanging a line with the handler on each");
+            await first.WriteAsync("hello handler\n"u8.ToArray(), Timeout());
+            await second.WriteAsync("second one\n"u8.ToArray(), Timeout());
+            await Assert.That(await ReadLineAsync(buffer => first.ReadAsync(buffer, Timeout()))).IsEqualTo("HELLO HANDLER");
+            await Assert.That(await ReadLineAsync(buffer => second.ReadAsync(buffer, Timeout()))).IsEqualTo("SECOND ONE");
+
+            // The handler returned, so its stream was disposed: the connection ends on the server's side too.
+            stages.Step("waiting for the end of the connection");
+            await Assert.That(await first.ReadAsync(new byte[16], Timeout())).IsEqualTo(0);
+            SshForwardedConnection[] seen;
+            lock (connections)
+            {
+                seen = [.. connections];
+            }
+
+            await Assert.That(seen.Length).IsEqualTo(2);
+            foreach (var connection in seen)
+            {
+                // The port that was connected, and an originator (the server's own loopback, as it reports it).
+                await Assert.That(connection.BoundPort).IsEqualTo(forwarder.RemotePort);
+                await Assert.That(connection.OriginatorAddress).IsNotNull();
+            }
+        }, () => $"{connections.Count} connection(s) reached the handler; connected {client.IsConnected}.");
+    }
+
+    [Test]
+    public async Task RemoteSocketForwardingToAHandler_ServesTheServersConnectionsInProcess()
+    {
+        await using var client = await ConnectAsync();
+        if (client is null || !(RealServer.IsOpenSsh || RealServer.IsAsyncSsh) || RealServer.IsWindows)
+        {
+            Skip.Test("SSHSHARP_TEST_SSHD and SSHSHARP_TEST_USER with a password or key are needed, on an OpenSSH or AsyncSSH server with Unix sockets.");
+            return;
+        }
+
+        // A fresh name: sshd does not replace an existing socket file (StreamLocalBindUnlink no).
+        var socketPath = $"/tmp/sshsharp-{Guid.NewGuid():N}.sock";
+        try
+        {
+            string? seenPath = null;
+            await using var forwarder = await client.ForwardRemoteUnixSocketAsync(socketPath, async (connection, ct) =>
+            {
+                seenPath = connection.RemoteSocketPath;
+                await UpperCaseLineAsync(connection, ct);
+            }, cancellationToken: Timeout());
+
+            // Play the server-side application: here -> server -> its socket -> back to the handler here.
+            await using var tunnel = await client.OpenUnixSocketTunnelAsync(socketPath, Timeout());
+            await tunnel.WriteAsync("through a socket\n"u8.ToArray(), Timeout());
+            await Assert.That(await ReadLineAsync(buffer => tunnel.ReadAsync(buffer, Timeout()))).IsEqualTo("THROUGH A SOCKET");
+            await Assert.That(seenPath).IsEqualTo(socketPath);
+        }
+        finally
+        {
+            await client.RunCommandAsync($"rm -f {socketPath}", Timeout());
+        }
+    }
+
     [Test]
     public async Task RemoteDynamicForwarding_ConnectsWhereTheServersSideAsks()
     {

@@ -6,18 +6,24 @@ using SshSharp.Protocol;
 namespace SshSharp;
 
 /// <summary>
-/// A remote port forwarding (<c>ssh -R</c>) started by <see cref="SshClient.ForwardRemotePortAsync"/>: the server listens on
+/// A remote port forwarding (<c>ssh -R</c>) started by <see cref="SshClient.ForwardRemotePortAsync(string, int, string, int, CancellationToken)"/>: the server listens on
 /// <see cref="BindAddress"/>:<see cref="RemotePort"/>, and each connection made to it is relayed to <see cref="LocalHost"/>:<see cref="LocalPort"/>
 /// as reached from this machine. A remote dynamic forwarding (<see cref="SshClient.ForwardRemoteDynamicPortAsync"/>,
-/// <see cref="IsDynamic"/>) instead answers each connection as a SOCKS proxy and connects where it asks. Dispose it to cancel the
-/// forwarding on the server and close the forwarded connections.
+/// <see cref="IsDynamic"/>) instead answers each connection as a SOCKS proxy and connects where it asks, and a forwarding to a handler
+/// (<see cref="SshClient.ForwardRemotePortAsync(string, int, Func{SshForwardedConnection, CancellationToken, Task}, int, CancellationToken)"/>)
+/// passes each connection to the application's code. Dispose it to cancel the forwarding on the server and close the forwarded
+/// connections.
 /// </summary>
 public sealed class SshRemotePortForwarder : IAsyncDisposable
 {
     private readonly ILogger _logger;
     private readonly Func<SshRemotePortForwarder, CancellationToken, Task> _cancel;
     private readonly Func<string, int, bool>? _allowDestination;
+    private readonly ForwardedHandlerSet? _handlers;
     private readonly CancellationTokenSource _stop;
+
+    // Kept apart from _stop: a connection the server forwarded just before disposal may start after _stop is disposed.
+    private readonly CancellationToken _stopToken;
     private readonly HashSet<Task> _connections = [];
     private int _disposed;
     private int _active;
@@ -32,7 +38,19 @@ public sealed class SshRemotePortForwarder : IAsyncDisposable
         _logger = logger;
         _cancel = cancel;
         _stop = CancellationTokenSource.CreateLinkedTokenSource(connectionClosed);
+        _stopToken = _stop.Token;
     }
+
+    /// <summary>A forwarding to a handler in this process: each connection is passed to <paramref name="handler"/>.</summary>
+    internal SshRemotePortForwarder(string bindAddress, int port, Func<SshForwardedConnection, CancellationToken, Task> handler, int maxConnections,
+        ILogger logger, Func<SshRemotePortForwarder, CancellationToken, Task> cancel, CancellationToken connectionClosed)
+        : this(bindAddress, port, string.Empty, 0, logger, cancel, connectionClosed)
+    {
+        _handlers = new ForwardedHandlerSet(handler, maxConnections, logger);
+    }
+
+    /// <summary>Whether connections go to a handler in this process rather than to a host and port.</summary>
+    internal bool IsHandler => _handlers is not null;
 
     /// <summary>A remote dynamic forwarding: no fixed destination; each connection names its own through SOCKS.</summary>
     internal SshRemotePortForwarder(string bindAddress, int port, Func<string, int, bool>? allowDestination, ILogger logger,
@@ -55,10 +73,10 @@ public sealed class SshRemotePortForwarder : IAsyncDisposable
     /// <summary>The port the server listens on (the one it picked when 0 was asked for).</summary>
     public int RemotePort { get; }
 
-    /// <summary>Where each forwarded connection goes, as reached from this machine.</summary>
+    /// <summary>Where each forwarded connection goes, as reached from this machine; empty for a dynamic forwarding or one to a handler.</summary>
     public string LocalHost { get; }
 
-    /// <summary>The port on <see cref="LocalHost"/>.</summary>
+    /// <summary>The port on <see cref="LocalHost"/>; 0 for a dynamic forwarding or one to a handler.</summary>
     public int LocalPort { get; }
 
     /// <summary>How many forwarded connections are open now.</summary>
@@ -70,14 +88,42 @@ public sealed class SshRemotePortForwarder : IAsyncDisposable
         }
     }
 
-    /// <summary>Takes a <c>forwarded-tcpip</c> channel the server opened for a connection to the forwarded port; the task ends with it.</summary>
-    internal Task Accept(SshChannel channel)
+    /// <summary>
+    /// Counts a connection the server is opening, before its channel is confirmed, unless this forwarding already serves its most
+    /// (a handler's <c>maxConnections</c>): then the server's channel is refused. Undone by <see cref="Release"/>, or when the
+    /// connection <see cref="Accept"/> serves ends.
+    /// </summary>
+    internal bool TryReserve()
+    {
+        var limit = _handlers?.MaxConnections ?? int.MaxValue;
+        while (true)
+        {
+            var active = Volatile.Read(ref _active);
+            if (active >= limit)
+            {
+                return false;
+            }
+
+            if (Interlocked.CompareExchange(ref _active, active + 1, active) == active)
+            {
+                return true;
+            }
+        }
+    }
+
+    /// <summary>Gives back a reservation for a channel that was refused after all.</summary>
+    internal void Release() => Interlocked.Decrement(ref _active);
+
+    /// <summary>
+    /// Takes a <c>forwarded-tcpip</c> channel the server opened for a connection to the forwarded port, reserved with
+    /// <see cref="TryReserve"/>; <paramref name="data"/> is the channel's type-specific data. The task ends with the connection.
+    /// </summary>
+    internal Task Accept(SshChannel channel, byte[] data)
     {
         Task connection;
         lock (_connections)
         {
-            Interlocked.Increment(ref _active);
-            connection = ServeAsync(channel);
+            connection = ServeAsync(channel, data);
             _connections.Add(connection);
         }
 
@@ -97,11 +143,11 @@ public sealed class SshRemotePortForwarder : IAsyncDisposable
     /// Counts the connection until it has finished, so <see cref="ActiveConnections"/> is exact once it is awaited. It never faults: a
     /// connection that fails unexpectedly is closed, so neither the remote application nor <see cref="DisposeAsync"/> is left hanging.
     /// </summary>
-    private async Task ServeAsync(SshChannel channel)
+    private async Task ServeAsync(SshChannel channel, byte[] data)
     {
         try
         {
-            await ServeCoreAsync(channel).ConfigureAwait(false);
+            await ServeCoreAsync(channel, data).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -127,9 +173,17 @@ public sealed class SshRemotePortForwarder : IAsyncDisposable
         }
     }
 
-    private async Task ServeCoreAsync(SshChannel channel)
+    private async Task ServeCoreAsync(SshChannel channel, byte[] data)
     {
         await Task.Yield();
+        if (_handlers is { } handlers)
+        {
+            // The handler owns the stream; RunAsync disposes it (closing the channel) when the handler returns.
+            var stream = new SshChannelStream(channel);
+            await handlers.RunAsync(SshForwardedConnection.ForTcp(stream, data), stream, RemotePort, _stopToken).ConfigureAwait(false);
+            return;
+        }
+
         if (IsDynamic)
         {
             await ServeDynamicAsync(channel).ConfigureAwait(false);
@@ -314,7 +368,11 @@ public sealed class SshRemotePortForwarder : IAsyncDisposable
         await stream.DisposeAsync().ConfigureAwait(false);
     }
 
-    /// <summary>Cancels the forwarding on the server (<c>cancel-tcpip-forward</c>) and closes every forwarded connection.</summary>
+    /// <summary>
+    /// Cancels the forwarding on the server (<c>cancel-tcpip-forward</c>) and closes every forwarded connection. For a forwarding to a
+    /// handler, the token each handler was given is cancelled, and this waits up to 5 seconds for the handlers to return; the
+    /// connections of any still running then are closed under them, and this returns without waiting for them further.
+    /// </summary>
     public async ValueTask DisposeAsync()
     {
         if (Interlocked.Exchange(ref _disposed, 1) != 0)
@@ -340,8 +398,14 @@ public sealed class SshRemotePortForwarder : IAsyncDisposable
         }
 
         // The connections never fault (see ServeAsync); this only waits for them.
-        await Task.WhenAll(open.Select(t => t.ContinueWith(_ => { }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default)))
-            .ConfigureAwait(false);
+        var all = Task.WhenAll(open.Select(t => t.ContinueWith(_ => { }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default)));
+        // A handler is the application's code: it may ignore its token, so the wait is bounded.
+        if (_handlers is { } handlers && !await handlers.StopAsync(all).ConfigureAwait(false))
+        {
+            return; // handlers still running hold the token: _stop stays undisposed
+        }
+
+        await all.ConfigureAwait(false);
         _stop.Dispose();
     }
 }

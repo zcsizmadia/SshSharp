@@ -9,6 +9,7 @@ library in CI), and lists what to change for production. Copy them as a starting
 | [A fleet health check](fleet-health-check.md) | Check many hosts in parallel, each with its own connection and time limit, and report every host. |
 | [A file sync job](file-sync.md) | Mirror a local directory to a server: only changed files, atomic replacement, safe to rerun after a failure. |
 | [A database through a jump host](database-tunnel.md) | Reach a database inside a private network through a bastion, from any ADO.NET provider. |
+| [A webhook receiver behind NAT](webhook-receiver.md) | Serve webhooks that reach a public server's port from your own code, over an outbound SSH connection, with no local port. |
 | [A background worker](background-worker.md) | A hosted service that fetches files on a schedule over a shared, reconnecting connection. |
 | [Short-lived certificates for CI jobs](ci-certificates.md) | Be the SSH certificate authority: issue each CI job a certificate for one user, for twenty minutes, from a CA key in a KMS or agent. |
 

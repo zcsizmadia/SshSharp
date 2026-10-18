@@ -112,4 +112,14 @@ internal static partial class SshLog
 
     [LoggerMessage(EventId = 32, Level = LogLevel.Warning, Message = "A connection through remote dynamic forwarding on port {RemotePort} was not made: {Reason}")]
     public static partial void RemoteDynamicConnectFailed(ILogger logger, int remotePort, string reason);
+
+    [LoggerMessage(EventId = 42, Level = LogLevel.Information, Message = "The server forwards its port {RemotePort} to a handler in this process")]
+    public static partial void RemoteHandlerForwardingStarted(ILogger logger, int remotePort);
+
+    [LoggerMessage(EventId = 43, Level = LogLevel.Information, Message = "The server forwards a Unix socket to a handler in this process (streamlocal-forward)")]
+    public static partial void RemoteSocketHandlerForwardingStarted(ILogger logger);
+
+    // The exception's type only: its message is the application's, and can name hosts or carry the data it was handling.
+    [LoggerMessage(EventId = 44, Level = LogLevel.Warning, Message = "The handler for a connection forwarded from remote port {RemotePort} (0 for a Unix socket) failed with {ExceptionType}; that connection was closed")]
+    public static partial void RemoteForwardingHandlerFailed(ILogger logger, int remotePort, string exceptionType);
 }

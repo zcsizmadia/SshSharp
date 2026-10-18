@@ -246,6 +246,18 @@ internal sealed class FakeSessionServer : IAsyncDisposable
     /// </summary>
     public Task<Stream?> OpenAgentChannelAsync(string type = "auth-agent@openssh.com") => OpenChannelToClientAsync(type, null);
 
+    /// <summary>The channel the server most recently opened to the client (a forwarded connection), to inspect its window.</summary>
+    public ServerChannel? LastChannelToClient { get; private set; }
+
+    /// <summary>How much more the client lets the server send on <paramref name="channel"/> now (its receive window, as the server sees it).</summary>
+    public static long ClientWindowOf(ServerChannel channel)
+    {
+        lock (channel)
+        {
+            return channel.ClientWindow;
+        }
+    }
+
     /// <summary>Opens a channel to the client and returns its far end as a stream, or null when the client refuses it.</summary>
     private async Task<Stream?> OpenChannelToClientAsync(string type, Action<SshWriter>? data)
     {
@@ -257,6 +269,8 @@ internal sealed class FakeSessionServer : IAsyncDisposable
         {
             _channels[channel.Id] = channel;
         }
+
+        LastChannelToClient = channel;
 
         await _server.SendAsync(Build(w =>
         {
