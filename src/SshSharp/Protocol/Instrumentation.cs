@@ -12,6 +12,8 @@ namespace SshSharp.Protocol;
 /// returning one that is not out (a double return, which would hand one array to two renters) is reported with both stacks.</item>
 /// <item>Received data: a checksum of each chunk is taken when it arrives and checked when it is read and when it is released, so a
 /// buffer overwritten while queued is reported where it happens, not as wrong bytes somewhere later.</item>
+/// <item>SFTP data replies (pooled): checked the same way before their buffer is returned, and then overwritten with a fill pattern, so
+/// a slice still used after the return reads that pattern and a test that compares the content fails.</item>
 /// </list>
 /// Reports go to the file named by SSHSHARP_INSTRUMENT_LOG (appended), or to standard error.
 /// </summary>
@@ -101,6 +103,20 @@ internal static class Instrumentation
         if (Checksum(data) != expected)
         {
             Report($"RECEIVED DATA CHANGED on channel {channel} ({data.Length} bytes) {when}: the buffer was overwritten while queued\n{Environment.StackTrace}");
+        }
+    }
+
+    /// <summary>
+    /// Checks that a pooled buffer still holds what was received into it (<paramref name="expected"/> is its <see cref="Checksum"/> then),
+    /// just before its owner returns it: a change means something else wrote into it while it was out, for example a renter it was handed to
+    /// after a double return.
+    /// </summary>
+    [Conditional("SSHSHARP_INSTRUMENT")]
+    public static void CheckUnchanged(ReadOnlySpan<byte> data, ulong expected, string owner)
+    {
+        if (Checksum(data) != expected)
+        {
+            Report($"POOLED BUFFER CHANGED while {owner} owned it ({data.Length} bytes)\n{Environment.StackTrace}");
         }
     }
 

@@ -179,6 +179,26 @@ A connect is short and runs mostly code that runs once per connect, so how it is
   service. With one warm-up connect, methods that run once per connect stayed in the unoptimized tier for all the measured rounds.
   BenchmarkDotNet measures the `Connect` benchmarks after its own warm-up iterations, so they report the warm figure.
 
+### SFTP
+
+`SftpBenchmarks` compares the SFTP clients: SshSharp's `SftpClient` against SSH.NET's `Renci.SshNet.SftpClient`. It uses the same
+server, algorithms and environment variables as `ComparisonBenchmarks`. Run it on its own with:
+
+```
+dotnet run -c Release --project tests/SshSharp.Benchmarks -f net10.0 -- --filter "*SftpBenchmarks*"
+```
+
+| Category | SSH.NET (baseline) | SshSharp |
+|---|---|---|
+| `SftpUpload32MiB` | `UploadFileAsync` from a `MemoryStream` | `UploadAsync` from a `MemoryStream` |
+| `SftpDownload32MiB` | `DownloadFileAsync` into `Stream.Null` | `DownloadAsync` into `Stream.Null` |
+| `SftpOpenWrite32MiB` | `CopyToAsync` into `OpenAsync(..., FileMode.Create, FileAccess.Write)` | `CopyToAsync` into `OpenWriteAsync` |
+
+Each library works in a new directory under `/tmp` on the server (`sshsharp-sftp-bench-` and a random suffix). The setup uploads
+the 32 MiB file that both libraries download, and the cleanup removes the directory. The memory diagnoser reports allocated bytes
+and Gen0, Gen1 and Gen2 collections per operation. With OpenSSH's 255 KiB requests, an array allocated for each request lands on
+the large object heap, so Gen2 collections show it.
+
 ### What the comparison found
 
 * **Connect** first measured 2.2x SSH.NET's time. Profiling each phase showed the key exchange took 12 ms, mostly in the

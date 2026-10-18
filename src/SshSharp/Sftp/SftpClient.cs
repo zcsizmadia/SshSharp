@@ -398,7 +398,8 @@ public sealed partial class SftpClient : IAsyncDisposable
     /// file exists, <see cref="FileMode.Append"/> starts at the end. Disposing the stream closes the remote file.
     /// </summary>
     /// <remarks>
-    /// A stream opened only for reading reads ahead (up to 16 reads in flight) while it is read in order. Writes are written behind:
+    /// A stream opened only for reading reads ahead (up to 16 reads in flight) while it is read in order, one read at a time: a read while
+    /// another is in progress throws <see cref="InvalidOperationException"/>. Writes are written behind:
     /// <see cref="Stream.WriteAsync(ReadOnlyMemory{byte}, CancellationToken)"/> returns once its requests are sent, keeping up to 16 in
     /// flight, so a write the server refuses is thrown by a later call: the next write that finds it, or at the latest
     /// <see cref="Stream.FlushAsync(CancellationToken)"/> or <see cref="Stream.DisposeAsync"/>, which wait for every write in flight (as
@@ -826,15 +827,44 @@ public sealed partial class SftpClient : IAsyncDisposable
             w.WriteUInt32((uint)length);
         }, cancellationToken);
 
-    internal Task<SftpResponse> SendWriteAsync(byte[] handle, long offset, ReadOnlyMemory<byte> data, CancellationToken cancellationToken) =>
-        _channel.RequestAsync(SftpProtocol.Write, w =>
-        {
-            w.WriteString(handle);
-            w.WriteUInt64((ulong)offset);
-            w.WriteString(data.Span);
-        }, cancellationToken);
+    /// <summary>Sends one write; <paramref name="data"/> is copied into the request before this returns, so the caller may reuse it at once.</summary>
+    internal Task<SftpResponse> SendWriteAsync(byte[] handle, long offset, ReadOnlyMemory<byte> data, CancellationToken cancellationToken)
+    {
+        var frame = StartWrite(handle, offset, data.Length);
+        data.Span.CopyTo(frame.GetSpan(data.Length));
+        EndWrite(frame, handle, data.Length);
+        return _channel.RequestAsync(frame, cancellationToken);
+    }
 
-    /// <summary>The data in a READ reply, or empty at the end of the file.</summary>
+    /// <summary>
+    /// Starts a WRITE request with room for <paramref name="capacity"/> bytes of data, in one buffer of the size the whole request needs:
+    /// the data goes straight into it (<see cref="SftpRequestFrame.GetMemory"/>), and <see cref="EndWrite"/> fills in its length. The
+    /// caller owns the frame until it hands it to the channel.
+    /// </summary>
+    private static SftpRequestFrame StartWrite(byte[] handle, long offset, int capacity)
+    {
+        var frame = SftpRequestFrame.Start(SftpProtocol.Write, WriteHeaderLength(handle) + capacity);
+        var writer = frame.Writer;
+        writer.WriteString(handle);
+        writer.WriteUInt64((ulong)offset);
+        writer.WriteUInt32(0); // the data's length, filled in by EndWrite
+        return frame;
+    }
+
+    /// <summary>Takes the <paramref name="count"/> bytes put after a <see cref="StartWrite"/> as the request's data.</summary>
+    private static void EndWrite(SftpRequestFrame frame, byte[] handle, int count)
+    {
+        frame.Advance(count);
+        frame.PatchUInt32(WriteHeaderLength(handle) - 4, (uint)count);
+    }
+
+    /// <summary>A WRITE request up to its data: length, type, id, handle, offset and data length.</summary>
+    private static int WriteHeaderLength(byte[] handle) => SftpRequestFrame.HeaderLength + 4 + handle.Length + 8 + 4;
+
+    /// <summary>
+    /// The data in a READ reply, or empty at the end of the file. The data is a slice of <paramref name="reply"/>'s pooled buffer: it is
+    /// valid until the reply is disposed, which the caller does once it has copied or written it out.
+    /// </summary>
     internal static ReadOnlyMemory<byte> ExpectData(SftpResponse reply, int requested, string path)
     {
         if (IsEndOfFile(reply))
@@ -848,18 +878,19 @@ public sealed partial class SftpClient : IAsyncDisposable
         }
 
         // DATA: type, id, then string data; sliced out of the packet without a copy.
-        if (reply.Packet.Length < 9)
+        var packet = reply.Packet;
+        if (packet.Length < 9)
         {
             throw new SshException(SshFailureReason.ProtocolError, "The SFTP server sent a truncated data reply.");
         }
 
-        var length = BinaryPrimitives.ReadUInt32BigEndian(reply.Packet.AsSpan(5));
-        if (length > reply.Packet.Length - 9 || length > (uint)requested || length == 0)
+        var length = BinaryPrimitives.ReadUInt32BigEndian(packet.Span[5..]);
+        if (length > packet.Length - 9 || length > (uint)requested || length == 0)
         {
             throw new SshException(SshFailureReason.ProtocolError, $"The SFTP server sent {length} bytes for a read of {requested}.");
         }
 
-        return reply.Packet.AsMemory(9, (int)length);
+        return packet.Slice(9, (int)length);
     }
 
     internal static void ExpectWritten(SftpResponse reply, string path) => ExpectOk(reply, "Writing", path);
@@ -943,8 +974,9 @@ public sealed partial class SftpClient : IAsyncDisposable
                 var slotPassedOn = false;
                 try
                 {
-                    var data = ExpectData(await pending.ConfigureAwait(false), length, path);
-                    if (data.IsEmpty)
+                    // The data is a slice of the reply's pooled buffer: it is written out before the reply is disposed, and not used after.
+                    using var reply = await pending.ConfigureAwait(false);
+                    var data = ExpectData(reply, length, path);                    if (data.IsEmpty)
                     {
                         end = true; // the later reads are past the end too; their replies are awaited (and dropped) below
                         continue;
@@ -979,12 +1011,12 @@ public sealed partial class SftpClient : IAsyncDisposable
         }
         finally
         {
-            // Replies still due are awaited, so none arrives after the handle is closed and the caller moves on.
+            // Replies still due are awaited, so none arrives after the handle is closed and the caller moves on; their buffers go back.
             foreach (var (_, _, pending) in inFlight)
             {
                 try
                 {
-                    await pending.ConfigureAwait(false);
+                    (await pending.ConfigureAwait(false)).Dispose();
                 }
                 catch (Exception ex) when (ex is SshException or OperationCanceledException or ObjectDisposedException)
                 {
@@ -1050,25 +1082,30 @@ public sealed partial class SftpClient : IAsyncDisposable
                     await TakeSlotAsync(budget).ConfigureAwait(false);
                 }
 
-                var buffer = new byte[chunk];
+                // The request is built in one pooled buffer, and the source is read straight into its data: no buffer of its own, no copy.
+                // This method owns the frame until RequestAsync takes it over, which returns it once it is sent.
+                var frame = StartWrite(handle, offset, chunk);
                 int read;
                 try
                 {
-                    read = await source.ReadAtLeastAsync(buffer, chunk, throwOnEndOfStream: false, cancellationToken).ConfigureAwait(false);
+                    read = await source.ReadAtLeastAsync(frame.GetMemory(chunk)[..chunk], chunk, throwOnEndOfStream: false, cancellationToken).ConfigureAwait(false);
                 }
                 catch
                 {
+                    frame.Dispose();
                     budget?.Release();
                     throw;
                 }
 
                 if (read == 0)
                 {
+                    frame.Dispose();
                     budget?.Release();
                     break;
                 }
 
-                inFlight.Enqueue((SendWriteAsync(handle, offset, buffer.AsMemory(0, read), cancellationToken), read));
+                EndWrite(frame, handle, read);
+                inFlight.Enqueue((_channel.RequestAsync(frame, cancellationToken), read));
                 offset += read;
                 if (inFlight.Count >= options.MaxRequestsInFlight)
                 {
