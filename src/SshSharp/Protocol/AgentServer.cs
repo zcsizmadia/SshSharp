@@ -135,13 +135,23 @@ internal sealed class AgentServer
         }
 
         _listed = identities;
+        // Without a filter every key is listed; with one, each is asked about (asynchronously, so not a LINQ Where).
         var allowed = new List<AgentIdentity>(identities.Count);
-        foreach (var identity in identities)
+        if (_filter is null)
         {
-            if (_filter is null || await AllowAsync(SshAgentOperation.ListKeys, identity.Blob, identity.Comment, signed: null, destination: AuthenticationBinding()?.HostKey,
-                cancellationToken).ConfigureAwait(false))
+            allowed.AddRange(identities);
+        }
+        else
+        {
+            var destination = AuthenticationBinding()?.HostKey;
+            foreach (var identity in identities)
             {
-                allowed.Add(identity);
+                var allow = await AllowAsync(SshAgentOperation.ListKeys, identity.Blob, identity.Comment, signed: null, destination, cancellationToken)
+                    .ConfigureAwait(false);
+                if (allow)
+                {
+                    allowed.Add(identity);
+                }
             }
         }
 
