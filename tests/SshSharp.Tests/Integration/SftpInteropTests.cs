@@ -107,6 +107,122 @@ public class SftpInteropTests
     }
 
     [Test]
+    public async Task ATreeOfManyFiles_RoundTrips_WithSeveralFilesAtOnce()
+    {
+        if (RealServer.Endpoint is not var (host, port) || await RealServer.OptionsAsync() is not { } options)
+        {
+            Skip.Test("SSHSHARP_TEST_SSHD and SSHSHARP_TEST_USER with a password or key are needed.");
+            return;
+        }
+
+        if (!RealServer.HasSftp)
+        {
+            Skip.Test("The Dropbear test image has no sftp-server.");
+            return;
+        }
+
+        var local = Directory.CreateTempSubdirectory("sshsharp-sftpmany-");
+        await using var client = await SshClient.ConnectAsync(host, port, options, Timeout());
+        await using var sftp = await client.OpenSftpAsync(Timeout());
+        var remote = RealServer.SftpPath(".sshsharp-sftpmany-" + Guid.NewGuid().ToString("N")[..12]);
+        try
+        {
+            var tree = WriteTree(Path.Combine(local.FullName, "source"));
+            var transfer = new SftpTransferOptions { MaxConcurrentFiles = 4 };
+
+            var up = await sftp.UploadDirectoryAsync(Path.Combine(local.FullName, "source"), remote, transfer, Timeout());
+            await Assert.That(up.Files).IsEqualTo(tree.Count);
+            await Assert.That(up.Directories).IsEqualTo(6);
+
+            var copy = Path.Combine(local.FullName, "copy");
+            var down = await sftp.DownloadDirectoryAsync(remote, copy, transfer, Timeout());
+            await Assert.That(down).IsEqualTo(up);
+            foreach (var (path, data) in tree)
+            {
+                await Assert.That((await File.ReadAllBytesAsync(Path.Combine(copy, path))).AsSpan().SequenceEqual(data)).IsTrue();
+            }
+        }
+        finally
+        {
+            local.Delete(recursive: true);
+            await DeleteTreeAsync(sftp, remote);
+        }
+    }
+
+    [Test]
+    public async Task ATreeOfManyFiles_OverLatency_Measure()
+    {
+        // A measurement, not a check: with SSHSHARP_MEASURE=1, prints how long a tree of small files takes through a proxy that adds
+        // 25 ms each way, one file at a time and several. Nothing here asserts a time.
+        if (Environment.GetEnvironmentVariable("SSHSHARP_MEASURE") != "1")
+        {
+            Skip.Test("Set SSHSHARP_MEASURE=1 to measure.");
+            return;
+        }
+
+        if (RealServer.Endpoint is not { } endpoint || await RealServer.OptionsAsync() is not { } options || !RealServer.HasSftp)
+        {
+            Skip.Test("SSHSHARP_TEST_SSHD and SSHSHARP_TEST_USER with a password or key, and a server with SFTP, are needed.");
+            return;
+        }
+
+        var local = Directory.CreateTempSubdirectory("sshsharp-sftpmeasure-");
+        await using var proxy = new FaultyProxy(endpoint) { Latency = TimeSpan.FromMilliseconds(25) };
+        await using var client = await SshClient.ConnectAsync("127.0.0.1", proxy.Port, options, Timeout());
+        await using var sftp = await client.OpenSftpAsync(Timeout());
+        var remote = RealServer.SftpPath(".sshsharp-sftpmeasure-" + Guid.NewGuid().ToString("N")[..12]);
+        try
+        {
+            var source = Path.Combine(local.FullName, "source");
+            var tree = WriteTree(source);
+            await sftp.CreateDirectoryAsync(remote, cancellationToken: Timeout());
+            foreach (var files in new[] { 1, 4, 8, 16 })
+            {
+                var transfer = new SftpTransferOptions { MaxConcurrentFiles = files };
+                var clock = System.Diagnostics.Stopwatch.StartNew();
+                await sftp.UploadDirectoryAsync(source, $"{remote}/up{files}", transfer, Timeout());
+                var up = clock.Elapsed;
+                clock.Restart();
+                await sftp.DownloadDirectoryAsync($"{remote}/up{files}", Path.Combine(local.FullName, "down" + files), transfer, Timeout());
+                var down = clock.Elapsed;
+                Console.WriteLine($"{tree.Count} files, 25 ms each way, MaxConcurrentFiles={files}: upload {up.TotalSeconds:F2} s, download {down.TotalSeconds:F2} s");
+            }
+        }
+        finally
+        {
+            local.Delete(recursive: true);
+            await using var direct = await SshClient.ConnectAsync(endpoint.Host, endpoint.Port, options, Timeout());
+            await using var cleanup = await direct.OpenSftpAsync(Timeout());
+            await DeleteTreeAsync(cleanup, remote);
+        }
+    }
+
+    /// <summary>A tree of 60 small files and one larger one, six directories deep and wide; the relative paths and contents.</summary>
+    private static Dictionary<string, byte[]> WriteTree(string root)
+    {
+        var tree = new Dictionary<string, byte[]>(StringComparer.Ordinal);
+        string[] directories = ["a", Path.Combine("a", "b"), Path.Combine("a", "b", "c"), "d", Path.Combine("d", "e"), "empty"];
+        foreach (var directory in directories)
+        {
+            Directory.CreateDirectory(Path.Combine(root, directory));
+        }
+
+        for (var i = 0; i < 60; i++)
+        {
+            var path = Path.Combine(directories[i % 5], $"f{i:D2}.txt");
+            tree[path] = RandomNumberGenerator.GetBytes(100 + i * 37);
+        }
+
+        tree["big.bin"] = RandomNumberGenerator.GetBytes(700_000);
+        foreach (var (path, data) in tree)
+        {
+            File.WriteAllBytes(Path.Combine(root, path), data);
+        }
+
+        return tree;
+    }
+
+    [Test]
     public async Task TheFileSystemAbstraction_WorksAgainstARealServer()
     {
         if (RealServer.Endpoint is not var (host, port) || await RealServer.OptionsAsync() is not { } options)

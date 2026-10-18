@@ -10,7 +10,8 @@ public sealed partial class SftpClient
     /// <summary>
     /// Downloads the directory <paramref name="remoteDirectory"/> and everything under it into <paramref name="localDirectory"/> (created
     /// if needed), file by file with <see cref="DownloadFileAsync"/> and the same <paramref name="options"/>. Symbolic links and special
-    /// files are skipped, so a link cannot lead the download outside the tree.
+    /// files are skipped, so a link cannot lead the download outside the tree. With <see cref="SftpTransferOptions.MaxConcurrentFiles"/>
+    /// above 1, several files are downloaded at once.
     /// </summary>
     /// <remarks>
     /// Every name the server lists is checked before it becomes a local path: names that cannot be a file name on this system (a
@@ -28,14 +29,23 @@ public sealed partial class SftpClient
         var root = Path.GetFullPath(localDirectory);
         Directory.CreateDirectory(root);
         var summary = new SummaryCounter();
-        await DownloadTreeAsync(remoteDirectory, root, root, 0, options, summary, cancellationToken).ConfigureAwait(false);
+        if (ConcurrentFiles(options) is var files && files > 1)
+        {
+            await DownloadTreeConcurrentlyAsync(remoteDirectory, root, files, options, summary, cancellationToken).ConfigureAwait(false);
+        }
+        else
+        {
+            await DownloadTreeAsync(remoteDirectory, root, root, 0, options, summary, cancellationToken).ConfigureAwait(false);
+        }
+
         return summary.ToSummary();
     }
 
     /// <summary>
     /// Uploads the local directory <paramref name="localDirectory"/> and everything under it to <paramref name="remoteDirectory"/> (created
     /// if needed), file by file with <see cref="UploadFileAsync"/> and the same <paramref name="options"/>. Symbolic links, junctions and
-    /// other reparse points are skipped, and so are special files on Unix (FIFOs, sockets, devices).
+    /// other reparse points are skipped, and so are special files on Unix (FIFOs, sockets, devices). With
+    /// <see cref="SftpTransferOptions.MaxConcurrentFiles"/> above 1, several files are uploaded at once.
     /// </summary>
     /// <exception cref="DirectoryNotFoundException"><paramref name="localDirectory"/> does not exist.</exception>
     public async Task<SftpTransferSummary> UploadDirectoryAsync(string localDirectory, string remoteDirectory, SftpTransferOptions? options = null, CancellationToken cancellationToken = default)
@@ -50,9 +60,24 @@ public sealed partial class SftpClient
         }
 
         var summary = new SummaryCounter();
-        await UploadTreeAsync(root, remoteDirectory, 0, options, summary, cancellationToken).ConfigureAwait(false);
+        if (ConcurrentFiles(options) is var files && files > 1)
+        {
+            await UploadTreeConcurrentlyAsync(root, remoteDirectory, files, options, summary, cancellationToken).ConfigureAwait(false);
+        }
+        else
+        {
+            await UploadTreeAsync(root, remoteDirectory, 0, options, summary, cancellationToken).ConfigureAwait(false);
+        }
+
         return summary.ToSummary();
     }
+
+    /// <summary>
+    /// How many files a directory transfer moves at once: <see cref="SftpTransferOptions.MaxConcurrentFiles"/>, within the open handles
+    /// the server allows, one kept for a listing.
+    /// </summary>
+    private int ConcurrentFiles(SftpTransferOptions options) =>
+        Limits.MaxOpenHandles is { } handles ? Math.Clamp(handles - 1, 1, options.MaxConcurrentFiles) : options.MaxConcurrentFiles;
 
     private async Task DownloadTreeAsync(string remoteDirectory, string localDirectory, string root, int depth, SftpTransferOptions options,
         SummaryCounter summary, CancellationToken cancellationToken)
@@ -76,13 +101,13 @@ public sealed partial class SftpClient
         {
             if (!seen.Add(entry.Name))
             {
-                summary.Skipped++;
+                summary.Skip();
                 continue;
             }
 
             if (LocalPathFor(localDirectory, entry.Name, root) is not { } local)
             {
-                summary.Skipped++; // a name this system cannot hold, or one that was not valid UTF-8
+                summary.Skip(); // a name this system cannot hold, or one that was not valid UTF-8
                 continue;
             }
 
@@ -90,7 +115,7 @@ public sealed partial class SftpClient
             {
                 Directory.CreateDirectory(local);
                 await DownloadTreeAsync(entry.FullPath, local, root, depth + 1, options, summary, cancellationToken).ConfigureAwait(false);
-                summary.Directories++;
+                summary.AddDirectory();
                 if (options.Preserve)
                 {
                     // After its contents, which would change its time (and which a mode without write permission could refuse).
@@ -104,12 +129,11 @@ public sealed partial class SftpClient
             }
             else if (entry.Attributes.IsRegularFile)
             {
-                summary.Bytes += await DownloadFileAsync(entry.FullPath, local, options, cancellationToken).ConfigureAwait(false);
-                summary.Files++;
+                summary.AddFile(await DownloadFileAsync(entry.FullPath, local, options, cancellationToken).ConfigureAwait(false));
             }
             else
             {
-                summary.Skipped++; // a symbolic link, a device, or a type the server did not say
+                summary.Skip(); // a symbolic link, a device, or a type the server did not say
             }
         }
     }
@@ -128,7 +152,7 @@ public sealed partial class SftpClient
         {
             if ((entry.Attributes & FileAttributes.ReparsePoint) != 0)
             {
-                summary.Skipped++;
+                summary.Skip();
                 continue;
             }
 
@@ -136,14 +160,14 @@ public sealed partial class SftpClient
             var remote = prefix + entry.Name;
             if (entry is FileInfo && !LocalFileType.IsRegularFile(entry.FullName))
             {
-                summary.Skipped++; // a FIFO (opening it would wait for a writer), a socket or a device
+                summary.Skip(); // a FIFO (opening it would wait for a writer), a socket or a device
                 continue;
             }
 
             if (entry is DirectoryInfo directory)
             {
                 await UploadTreeAsync(directory, remote, depth + 1, options, summary, cancellationToken).ConfigureAwait(false);
-                summary.Directories++;
+                summary.AddDirectory();
                 if (options.Preserve)
                 {
                     await SetAttributesAsync(remote, new SftpFileAttributes
@@ -156,8 +180,370 @@ public sealed partial class SftpClient
             }
             else
             {
-                summary.Bytes += await UploadFileAsync(entry.FullName, remote, options, cancellationToken).ConfigureAwait(false);
-                summary.Files++;
+                summary.AddFile(await UploadFileAsync(entry.FullName, remote, options, cancellationToken).ConfigureAwait(false));
+            }
+        }
+    }
+
+    /// <summary>
+    /// <see cref="DownloadDirectoryAsync"/> with <paramref name="concurrency"/> files at once: the tree is listed directory by directory,
+    /// as the sequential walk does, and each file is handed to a download of its own once one of the <paramref name="concurrency"/> slots
+    /// is free, so the walk never runs far ahead of the transfers. A directory is created locally before its listing is read, so before
+    /// any file goes into it; its times and permissions (<see cref="SftpTransferOptions.Preserve"/>) are set once every file is in.
+    /// </summary>
+    private async Task DownloadTreeConcurrentlyAsync(string remoteDirectory, string root, int concurrency, SftpTransferOptions options,
+        SummaryCounter summary, CancellationToken cancellationToken)
+    {
+        using var budget = new SemaphoreSlim(options.MaxRequestsInFlight, options.MaxRequestsInFlight);
+        using var slots = new SemaphoreSlim(concurrency, concurrency);
+        using var group = new TransferGroup(cancellationToken);
+        var fileOptions = options.ForFilesOfDirectory(SerializedProgress.Wrap(options.Progress), budget);
+        var claimed = new LocalPathClaims();
+        var preserved = new List<(string Local, SftpFileAttributes Attributes, int Depth)>();
+
+        _ = group.Run(token => WalkAsync(remoteDirectory, root, 0, token));
+        await group.WhenAllAsync().ConfigureAwait(false);
+
+        if (options.Preserve)
+        {
+            // After every file, the deepest first: a directory's contents would change its time, and a mode without write permission
+            // could refuse them.
+            foreach (var (local, attributes, _) in preserved.OrderByDescending(d => d.Depth))
+            {
+                if (attributes.LastWriteTime is { } modified)
+                {
+                    Directory.SetLastWriteTimeUtc(local, modified.UtcDateTime);
+                }
+
+                SetLocalPermissions(local, attributes.Permissions);
+            }
+        }
+
+        async Task WalkAsync(string remote, string localDirectory, int depth, CancellationToken token)
+        {
+            if (depth > MaxDepth)
+            {
+                throw new SshException(SshFailureReason.TransferFailed, $"The remote tree is deeper than {MaxDepth} levels.");
+            }
+
+            var entries = new List<SftpFileInfo>();
+            await foreach (var entry in ListDirectoryAsync(remote, token).ConfigureAwait(false))
+            {
+                entries.Add(entry);
+            }
+
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var entry in entries)
+            {
+                if (!seen.Add(entry.Name))
+                {
+                    summary.Skip();
+                    continue;
+                }
+
+                if (LocalPathFor(localDirectory, entry.Name, root) is not { } local)
+                {
+                    summary.Skip(); // a name this system cannot hold, or one that was not valid UTF-8
+                    continue;
+                }
+
+                if (entry.Attributes.IsDirectory)
+                {
+                    Directory.CreateDirectory(local);
+                    await WalkAsync(entry.FullPath, local, depth + 1, token).ConfigureAwait(false);
+                    summary.AddDirectory();
+                    preserved.Add((local, entry.Attributes, depth));
+                }
+                else if (entry.Attributes.IsRegularFile)
+                {
+                    await slots.WaitAsync(token).ConfigureAwait(false);
+                    var earlier = claimed.Claim(local, out var done);
+                    _ = group.Run(async fileToken =>
+                    {
+                        try
+                        {
+                            // Two names this system takes for one file (they differ only in case): one after the other, the last
+                            // listed winning, as one at a time.
+                            await earlier.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+                            summary.AddFile(await DownloadFileAsync(entry.FullPath, local, fileOptions, fileToken).ConfigureAwait(false));
+                        }
+                        finally
+                        {
+                            done.TrySetResult();
+                            slots.Release();
+                        }
+                    });
+                }
+                else
+                {
+                    summary.Skip(); // a symbolic link, a device, or a type the server did not say
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// <see cref="UploadDirectoryAsync"/> with <paramref name="concurrency"/> files at once. The local tree is walked first; then every
+    /// directory is created as soon as its parent exists, several at a time, and the files follow in the walk's order, each started once
+    /// its directory exists and one of the <paramref name="concurrency"/> slots is free. With <see cref="SftpTransferOptions.Preserve"/>,
+    /// the directories get their attributes at the end, the deepest first, a level at a time.
+    /// </summary>
+    private async Task UploadTreeConcurrentlyAsync(DirectoryInfo root, string remoteRoot, int concurrency, SftpTransferOptions options,
+        SummaryCounter summary, CancellationToken cancellationToken)
+    {
+        var directories = new List<(DirectoryInfo Local, string Remote, int Parent, int Depth)> { (root, remoteRoot, -1, 0) };
+        var files = new List<(string Local, string Remote, int Directory)>();
+        Walk(0);
+
+        using var budget = new SemaphoreSlim(options.MaxRequestsInFlight, options.MaxRequestsInFlight);
+        using var slots = new SemaphoreSlim(concurrency, concurrency);
+        var fileOptions = options.ForFilesOfDirectory(SerializedProgress.Wrap(options.Progress), budget);
+        using (var group = new TransferGroup(cancellationToken))
+        {
+            var made = new Task[directories.Count];
+            made[0] = group.Run(token => EnsureRemoteDirectoryAsync(remoteRoot, token));
+            for (var i = 1; i < directories.Count; i++)
+            {
+                var (_, remote, parent, _) = directories[i];
+                var parentMade = made[parent];
+                made[i] = group.Run(async token =>
+                {
+                    await parentMade.ConfigureAwait(false);
+                    await HoldingSlotAsync(slots, () => EnsureRemoteDirectoryAsync(remote, token), token).ConfigureAwait(false);
+                });
+            }
+
+            _ = group.Run(async token =>
+            {
+                var claimed = new LocalPathClaims();
+                foreach (var (local, remote, directory) in files)
+                {
+                    await made[directory].ConfigureAwait(false);
+                    await slots.WaitAsync(token).ConfigureAwait(false);
+                    var earlier = claimed.Claim(remote, out var done);
+                    _ = group.Run(async fileToken =>
+                    {
+                        try
+                        {
+                            // Names a server may take for one file (they differ only in case): one after the other, as one at a time.
+                            await earlier.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+                            summary.AddFile(await UploadFileAsync(local, remote, fileOptions, fileToken).ConfigureAwait(false));
+                        }
+                        finally
+                        {
+                            done.TrySetResult();
+                            slots.Release();
+                        }
+                    });
+                }
+            });
+
+            await group.WhenAllAsync().ConfigureAwait(false);
+        }
+
+        if (!options.Preserve)
+        {
+            return;
+        }
+
+        // A level at a time, the deepest first: a directory made read-only (or unsearchable) before its subdirectories got theirs would
+        // refuse them.
+        foreach (var level in directories.Skip(1).GroupBy(d => d.Depth).OrderByDescending(level => level.Key))
+        {
+            using var group = new TransferGroup(cancellationToken);
+            _ = group.Run(async token =>
+            {
+                foreach (var (local, remote, _, _) in level)
+                {
+                    await slots.WaitAsync(token).ConfigureAwait(false);
+                    _ = group.Run(async setToken =>
+                    {
+                        try
+                        {
+                            await SetAttributesAsync(remote, new SftpFileAttributes
+                            {
+                                LastWriteTime = local.LastWriteTimeUtc,
+                                LastAccessTime = local.LastAccessTimeUtc,
+                                Permissions = LocalPermissions(local.FullName),
+                            }, setToken).ConfigureAwait(false);
+                        }
+                        finally
+                        {
+                            slots.Release();
+                        }
+                    });
+                }
+            });
+
+            await group.WhenAllAsync().ConfigureAwait(false);
+        }
+
+        void Walk(int index)
+        {
+            var (local, remoteDirectory, _, depth) = directories[index];
+            if (depth > MaxDepth)
+            {
+                throw new IOException($"The local tree is deeper than {MaxDepth} levels.");
+            }
+
+            var prefix = remoteDirectory.EndsWith('/') ? remoteDirectory : remoteDirectory + "/";
+            foreach (var entry in local.EnumerateFileSystemInfos())
+            {
+                if ((entry.Attributes & FileAttributes.ReparsePoint) != 0)
+                {
+                    summary.Skip();
+                    continue;
+                }
+
+                cancellationToken.ThrowIfCancellationRequested();
+                var remote = prefix + entry.Name;
+                if (entry is FileInfo && !LocalFileType.IsRegularFile(entry.FullName))
+                {
+                    summary.Skip(); // a FIFO (opening it would wait for a writer), a socket or a device
+                    continue;
+                }
+
+                if (entry is DirectoryInfo directory)
+                {
+                    directories.Add((directory, remote, index, depth + 1));
+                    Walk(directories.Count - 1);
+                    summary.AddDirectory();
+                }
+                else
+                {
+                    files.Add((entry.FullName, remote, index));
+                }
+            }
+        }
+    }
+
+    /// <summary>Runs <paramref name="action"/> holding one of <paramref name="slots"/>.</summary>
+    private static async Task HoldingSlotAsync(SemaphoreSlim slots, Func<Task> action, CancellationToken cancellationToken)
+    {
+        await slots.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await action().ConfigureAwait(false);
+        }
+        finally
+        {
+            slots.Release();
+        }
+    }
+
+    /// <summary>
+    /// The transfers of a directory transfer with several files at once, which fail together: the first failure cancels the others
+    /// and is the exception <see cref="WhenAllAsync"/> throws, not the cancellations or closed sessions it caused in them.
+    /// </summary>
+    private sealed class TransferGroup : IDisposable
+    {
+        private readonly CancellationTokenSource _failed;
+        private readonly List<Task> _tasks = [];
+        private Exception? _firstFailure;
+
+        public TransferGroup(CancellationToken cancellationToken) => _failed = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+
+        /// <summary>Cancelled by the caller, or once one of the transfers has failed.</summary>
+        public CancellationToken Token => _failed.Token;
+
+        /// <summary>Starts <paramref name="work"/> in the group.</summary>
+        public Task Run(Func<CancellationToken, Task> work)
+        {
+            var task = RunAsync(work);
+            lock (_tasks)
+            {
+                _tasks.Add(task);
+            }
+
+            return task;
+        }
+
+        private async Task RunAsync(Func<CancellationToken, Task> work)
+        {
+            try
+            {
+                await work(_failed.Token).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                if (!_failed.IsCancellationRequested)
+                {
+                    Interlocked.CompareExchange(ref _firstFailure, ex, null);
+                }
+
+                await _failed.CancelAsync().ConfigureAwait(false);
+                throw;
+            }
+        }
+
+        /// <summary>Waits for every transfer, including those started meanwhile, then throws the first failure, or the caller's cancellation.</summary>
+        public async Task WhenAllAsync()
+        {
+            Task[] all;
+            while (true)
+            {
+                lock (_tasks)
+                {
+                    all = [.. _tasks];
+                }
+
+                // As a plain Task: Task<T>'s own ConfigureAwait does not take SuppressThrowing.
+                await Task.WhenAll(all).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+                lock (_tasks)
+                {
+                    if (_tasks.Count == all.Length)
+                    {
+                        break; // nothing started while waiting: none can start now, as only running ones start others
+                    }
+                }
+            }
+
+            if (Volatile.Read(ref _firstFailure) is { } first)
+            {
+                System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(first);
+            }
+
+            await Task.WhenAll(all).ConfigureAwait(false); // any other outcome (the caller's cancellation) as it is
+        }
+
+        public void Dispose() => _failed.Dispose();
+    }
+
+    /// <summary>
+    /// The destination paths a concurrent directory transfer has handed out, compared without case: two names that differ only in case
+    /// may be one file on the receiving side (Windows, macOS), and two transfers into one file at once would collide, where one after the
+    /// other the later one simply replaces it.
+    /// </summary>
+    private sealed class LocalPathClaims
+    {
+        private readonly Dictionary<string, Task> _claims = new(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>Claims <paramref name="path"/>: returns what to wait for first (a transfer to the same path), and <paramref name="done"/> to complete when finished.</summary>
+        public Task Claim(string path, out TaskCompletionSource done)
+        {
+            done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var earlier = _claims.GetValueOrDefault(path, Task.CompletedTask);
+            _claims[path] = done.Task;
+            return earlier;
+        }
+    }
+
+    /// <summary>
+    /// Reports progress one report at a time: the files of a concurrent directory transfer report from several threads, and a callback
+    /// written for one transfer at a time need not be thread-safe.
+    /// </summary>
+    private sealed class SerializedProgress(IProgress<SftpTransferProgress> progress) : IProgress<SftpTransferProgress>
+    {
+        private readonly object _lock = new();
+
+        public static SerializedProgress? Wrap(IProgress<SftpTransferProgress>? progress) =>
+            progress is null ? null : new SerializedProgress(progress);
+
+        public void Report(SftpTransferProgress value)
+        {
+            lock (_lock)
+            {
+                progress.Report(value);
             }
         }
     }
@@ -252,17 +638,26 @@ public sealed partial class SftpClient
         }
     }
 
+    /// <summary>What a directory transfer did so far; safe to update from the files of a concurrent transfer.</summary>
     private sealed class SummaryCounter
     {
-        public int Files { get; set; }
+        private int _files;
+        private int _directories;
+        private long _bytes;
+        private int _skipped;
 
-        public int Directories { get; set; }
+        public void AddFile(long bytes)
+        {
+            Interlocked.Increment(ref _files);
+            Interlocked.Add(ref _bytes, bytes);
+        }
 
-        public long Bytes { get; set; }
+        public void AddDirectory() => Interlocked.Increment(ref _directories);
 
-        public int Skipped { get; set; }
+        public void Skip() => Interlocked.Increment(ref _skipped);
 
-        public SftpTransferSummary ToSummary() => new(Files, Directories, Bytes, Skipped);
+        public SftpTransferSummary ToSummary() =>
+            new(Volatile.Read(ref _files), Volatile.Read(ref _directories), Interlocked.Read(ref _bytes), Volatile.Read(ref _skipped));
     }
 }
 

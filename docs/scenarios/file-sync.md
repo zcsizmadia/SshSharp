@@ -27,6 +27,10 @@ failure: files already in place are skipped.
 - **Deletion** is off by default in the example's `MainAsync`. Turn it on only when the remote directory belongs to this job.
 - **Downloads.** The mirror image (server to local) is the same with `DownloadFileAsync`; for a plain copy of a tree, use
   `DownloadDirectoryAsync`, which already skips symbolic links and unsafe names.
+- **Many small files over latency.** The loop uploads one file at a time, and each costs a few round trips. For the first copy of
+  a large tree, `UploadDirectoryAsync` with `MaxConcurrentFiles` (say 8) moves several files at once. For the changed files, run a
+  few uploads at once on the same `SftpClient` (it may be used by several tasks), bounded with a `SemaphoreSlim` or
+  `Parallel.ForEachAsync`; each upload has its own `MaxRequestsInFlight` window, so lower it to keep memory in check.
 
 ## See also
 
