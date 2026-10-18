@@ -85,6 +85,38 @@ server may allow fewer sessions than asked (sshd's `MaxSessions`). Segments appl
 Symbolic links and special files are skipped in both directions. A download treats the server as untrusted: a name that cannot be
 a safe file name here is skipped and counted in `Skipped`, and a path that would land outside the target stops the download.
 
+## Copy many small files faster
+
+A directory transfer moves one file after another by default, and each file costs a few round trips (open, size, close) however
+small it is. Over a link with latency, a tree of many small files spends most of its time waiting. `MaxConcurrentFiles` transfers
+several files at once over the same session:
+
+[!code-csharp[](../snippets/FileTransfer.cs#sftp-concurrent-files)]
+
+### When to use
+
+- Many small or medium files (source trees, web sites, logs) over 20 ms or more of latency: start with 8. Over 25 ms of added
+  latency, uploading 61 files to OpenSSH took 14.1 s one at a time and 3.3 s with 16 at once.
+- Not for a few large files: one file already keeps `MaxRequestsInFlight` requests in flight. For those, use `Segments`.
+
+### How it interacts with the other options
+
+- **`MaxRequestsInFlight`** is the window of the whole transfer: the files share it. Memory stays at most `MaxRequestsInFlight`
+  requests (2 MiB by default, about 16 MiB with OpenSSH's larger requests) plus 64 KiB per file in flight, whatever
+  `MaxConcurrentFiles` is. Raise `MaxRequestsInFlight` if larger files in the tree should keep a full window while others run.
+- **`Segments`** still splits each large file of a download over sessions of its own, so the sessions add up across files. The
+  server's `MaxSessions` (10 by default) caps them; a file that gets no extra session downloads over the main one.
+- **`Preserve`** sets directory times and permissions after every file is in, the deepest first.
+- **`Progress`** reports each file by its path, interleaved, but never from two threads at once.
+
+### Notes and pitfalls
+
+- The first failure stops the other files and is the exception thrown; stopped downloads are deleted, stopped uploads keep what was
+  written, as for a single file. Cancelling stops every file.
+- A server that limits open files (`limits@openssh.com`) gets fewer files at once.
+- The single-file methods ignore `MaxConcurrentFiles`. To transfer your own list of files at once, call `UploadFileAsync` or
+  `DownloadFileAsync` from several tasks on one `SftpClient`, which is safe.
+
 ## Browse and change the remote file system
 
 [!code-csharp[](../snippets/FileTransfer.cs#sftp-browse)]

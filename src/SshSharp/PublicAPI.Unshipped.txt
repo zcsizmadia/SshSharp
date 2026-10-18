@@ -17,3 +17,5 @@ SshSharp.SshFailureReason.CommandFailed = 12 -> SshSharp.SshFailureReason
 static SshSharp.SshCommandInput.FromBytes(System.ReadOnlyMemory<byte> data) -> SshSharp.SshCommandInput!
 static SshSharp.SshCommandInput.FromStream(System.IO.Stream! stream) -> SshSharp.SshCommandInput!
 static SshSharp.SshCommandInput.FromText(string! text, System.Text.Encoding? encoding = null) -> SshSharp.SshCommandInput!
+SshSharp.Sftp.SftpTransferOptions.MaxConcurrentFiles.get -> int
+SshSharp.Sftp.SftpTransferOptions.MaxConcurrentFiles.init -> void

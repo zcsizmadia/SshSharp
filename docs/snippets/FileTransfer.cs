@@ -84,6 +84,17 @@ internal static class FileTransfer
         // </sftp-directories>
     }
 
+    public static async Task ConcurrentFilesAsync(SftpClient sftp, CancellationToken cancellationToken)
+    {
+        // <sftp-concurrent-files>
+        // A tree of many small files over a link with latency: eight files at a time over the same session. The eight share the
+        // 64 requests in flight (and their memory) rather than take 64 each.
+        var options = new SftpTransferOptions { MaxConcurrentFiles = 8, Preserve = true };
+        var summary = await sftp.UploadDirectoryAsync("site", "/srv/www/site", options, cancellationToken);
+        Console.WriteLine($"{summary.Files} files, {summary.Directories} directories, {summary.Bytes:N0} bytes");
+        // </sftp-concurrent-files>
+    }
+
     public static async Task BrowseAsync(SftpClient sftp, CancellationToken cancellationToken)
     {
         // <sftp-browse>

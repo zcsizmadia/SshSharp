@@ -190,6 +190,53 @@ internal sealed class FakeSftpServer
     /// <summary>Every READ's offset, in arrival order across sessions.</summary>
     public List<long> ReadOffsets { get; } = [];
 
+    /// <summary>
+    /// How long every reply takes to reach the client, as on a link with this round-trip time: replies are delayed without holding up
+    /// the requests behind them, so a client that pipelines pays the latency once per batch, not once per request. None by default.
+    /// </summary>
+    public TimeSpan Latency { get; set; }
+
+    /// <summary>Answers OPEN of the paths this matches with Failure (a disk error on the server, say).</summary>
+    public Func<string, bool>? FailOpen { get; set; }
+
+    /// <summary>The most file handles (not directory handles) open at once, across sessions.</summary>
+    public int MaxOpenFileHandles { get; private set; }
+
+    /// <summary>The open handles announced with limits@openssh.com (0: no limit).</summary>
+    public ulong MaxHandles { get; set; } = 1024;
+
+    /// <summary>The most READ and WRITE requests in flight at once, across sessions: from their arrival until their reply goes out.</summary>
+    public int MaxDataRequestsInFlight => Volatile.Read(ref _maxDataInFlight);
+
+    private int _dataInFlight;
+    private int _maxDataInFlight;
+
+    private void DataRequestArrived()
+    {
+        var now = Interlocked.Increment(ref _dataInFlight);
+        int seen;
+        while (now > (seen = Volatile.Read(ref _maxDataInFlight)) && Interlocked.CompareExchange(ref _maxDataInFlight, now, seen) != seen)
+        {
+        }
+    }
+
+    /// <summary>How many OPEN or MKDIR requests named a path whose parent directory did not exist (yet).</summary>
+    public int MissingParents { get; private set; }
+
+    /// <summary>The paths of the regular files that exist, below <paramref name="directory"/>.</summary>
+    public List<string> FilesUnder(string directory)
+    {
+        lock (_nodes)
+        {
+            return [.. _nodes.Where(n => n.Key.StartsWith(directory + "/", StringComparison.Ordinal) && !n.Value.IsDirectory && n.Value.LinkTarget is null)
+                .Select(n => n.Key).Order(StringComparer.Ordinal)];
+        }
+    }
+
+    /// <summary>Whether the parent directory of the absolute <paramref name="path"/> exists.</summary>
+    private bool ParentExists(string path) =>
+        _nodes.TryGetValue(path[..Math.Max(1, path.LastIndexOf('/'))], out var parent) && parent.IsDirectory;
+
     /// <summary>Sessions share the file system, so requests are handled one at a time, whichever session they come from.</summary>
     private byte[]? HandleLocked(byte[] packet)
     {
@@ -265,6 +312,11 @@ internal sealed class FakeSftpServer
 
                     var packet = buffer.GetRange(4, length).ToArray();
                     buffer.RemoveRange(0, 4 + length);
+                    if (packet[0] is 5 or 6)
+                    {
+                        DataRequestArrived();
+                    }
+
                     var now = Interlocked.Increment(ref unanswered);
                     lock (_requests)
                     {
@@ -277,6 +329,46 @@ internal sealed class FakeSftpServer
 
             queue.Writer.Complete();
         });
+
+        // With Latency, replies go out through a sender that holds each one until it is due, while the responder goes on to the next
+        // request: a round trip costs the latency, and requests sent together share it.
+        var delayed = System.Threading.Channels.Channel.CreateUnbounded<(long Due, byte Type, byte[] Frame)>();
+        var latency = Latency;
+        var sender = latency <= TimeSpan.Zero ? Task.CompletedTask : Task.Run(async () =>
+        {
+            await foreach (var (due, type, frame) in delayed.Reader.ReadAllAsync())
+            {
+                var wait = System.Diagnostics.Stopwatch.GetElapsedTime(System.Diagnostics.Stopwatch.GetTimestamp(), due);
+                if (wait > TimeSpan.Zero)
+                {
+                    await Task.Delay(wait);
+                }
+
+                Answered(type);
+                await script.StdoutAsync(frame);
+            }
+        });
+
+        async Task ReplyAsync(byte type, byte[] frame)
+        {
+            if (latency > TimeSpan.Zero)
+            {
+                delayed.Writer.TryWrite((System.Diagnostics.Stopwatch.GetTimestamp() + (long)(latency.TotalSeconds * System.Diagnostics.Stopwatch.Frequency), type, frame));
+            }
+            else
+            {
+                Answered(type);
+                await script.StdoutAsync(frame);
+            }
+        }
+
+        void Answered(byte type)
+        {
+            if (type is 5 or 6)
+            {
+                Interlocked.Decrement(ref _dataInFlight);
+            }
+        }
 
         await foreach (var packet in queue.Reader.ReadAllAsync())
         {
@@ -306,6 +398,7 @@ internal sealed class FakeSftpServer
             {
                 // A hostile or broken server: these bytes instead of the framed reply, and optionally the end of the session after them.
                 Interlocked.Decrement(ref unanswered);
+                Answered(packet[0]);
                 await script.StdoutAsync(raw);
                 if (EndSessionAfterRawFrame)
                 {
@@ -320,6 +413,8 @@ internal sealed class FakeSftpServer
             {
                 var nextReply = HandleLocked(next, opened);
                 Interlocked.Add(ref unanswered, -2);
+                Answered(next[0]);
+                Answered(packet[0]);
                 await script.StdoutAsync(Frame(nextReply!));
                 await script.StdoutAsync(Frame(reply!));
                 ReorderedPairs++;
@@ -329,9 +424,11 @@ internal sealed class FakeSftpServer
             // Answered once its reply starts out, not once the send returns: the client can read the reply and send its next request
             // before then, and counting that one first made a single request in flight look like two (the stress run on arm64 saw it).
             Interlocked.Decrement(ref unanswered);
-            await script.StdoutAsync(Frame(reply!));
+            await ReplyAsync(packet[0], Frame(reply!));
         }
 
+        delayed.Writer.Complete();
+        await sender;
         if (!endedEarly)
         {
             await reader; // otherwise the client still has the session open: end it from this side
@@ -533,6 +630,16 @@ internal sealed class FakeSftpServer
                 var path = Resolve(r.ReadUtf8String());
                 var flags = r.ReadUInt32();
                 r.ReadUInt32(); // attrs (flags 0 from the client)
+                if (!ParentExists(path))
+                {
+                    MissingParents++;
+                }
+
+                if (FailOpen?.Invoke(path) == true)
+                {
+                    return Status(id, 4, "Input/output error");
+                }
+
                 var exists = _nodes.TryGetValue(path, out var node);
                 if (exists && (flags & 0x20) != 0 && (flags & 0x08) != 0)
                 {
@@ -575,6 +682,7 @@ internal sealed class FakeSftpServer
 
                 var handle = "h" + _nextHandle++;
                 _handles[handle] = (path, 0);
+                MaxOpenFileHandles = Math.Max(MaxOpenFileHandles, _handles.Keys.Count(h => h.StartsWith('h')));
                 return Build(w => { w.WriteByte(102); w.WriteUInt32(id); w.WriteString(handle); });
             }
 
@@ -761,6 +869,12 @@ internal sealed class FakeSftpServer
                     return Status(id, 4, "File exists");
                 }
 
+                if (!ParentExists(path))
+                {
+                    MissingParents++;
+                    return Status(id, 2, "No such file"); // as mkdir(2): the parent must exist
+                }
+
                 var directory = new Node { IsDirectory = true, Mode = 0x1ED };
                 ApplyAttributes(ref r, directory);
                 _nodes[path] = directory;
@@ -822,7 +936,7 @@ internal sealed class FakeSftpServer
                             w.WriteUInt64(256 * 1024);
                             w.WriteUInt64(Limits.Read);
                             w.WriteUInt64(Limits.Write);
-                            w.WriteUInt64(1024);
+                            w.WriteUInt64(MaxHandles);
                         });
                     case "posix-rename@openssh.com":
                         return Rename(id, Resolve(r.ReadUtf8String()), Resolve(r.ReadUtf8String()), overwrite: true);

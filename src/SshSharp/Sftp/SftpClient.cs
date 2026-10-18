@@ -888,7 +888,13 @@ public sealed partial class SftpClient : IAsyncDisposable
         // A window of reads in flight; replies are written in offset order. The window starts at 2 and doubles with each reply, up to
         // MaxRequestsInFlight, so a small file costs a few requests rather than a full window past its end. A short read (allowed by the
         // draft, but not at the end of the file) gets a follow-up read for the rest, at the front of the queue, so the output stays in order.
+        //
+        // In a directory transfer with several files at once, each read also takes a slot of the transfer's shared budget
+        // (SftpTransferOptions.RequestBudget), held until its data is written out: the files together keep at most MaxRequestsInFlight
+        // reads, and their data, in memory. A file that has reads in flight never waits for a slot; it takes the next one only as it
+        // frees its own, so files waiting on each other cannot hold every slot.
         var chunk = Limits.MaxReadLength;
+        var budget = options.RequestBudget;
         var window = Math.Min(2, options.MaxRequestsInFlight);
         var inFlight = new LinkedList<(long Offset, int Length, Task<SftpResponse> Reply)>();
         var next = start;
@@ -900,6 +906,16 @@ public sealed partial class SftpClient : IAsyncDisposable
             {
                 while (!end && inFlight.Count < window && (stop is not { } limit || next < limit))
                 {
+                    if (budget is not null && !budget.Wait(0, cancellationToken))
+                    {
+                        if (inFlight.Count > 0)
+                        {
+                            break; // the replies due free slots of this file's own
+                        }
+
+                        await budget.WaitAsync(cancellationToken).ConfigureAwait(false);
+                    }
+
                     var requested = stop is { } last ? (int)Math.Min(chunk, last - next) : chunk;
                     inFlight.AddLast((next, requested, SendReadAsync(handle, next, requested, cancellationToken)));
                     next += requested;
@@ -912,26 +928,39 @@ public sealed partial class SftpClient : IAsyncDisposable
 
                 var (offset, length, pending) = inFlight.First!.Value;
                 inFlight.RemoveFirst();
-                var data = ExpectData(await pending.ConfigureAwait(false), length, path);
-                if (data.IsEmpty)
+                var slotPassedOn = false;
+                try
                 {
-                    end = true; // the later reads are past the end too; their replies are awaited (and dropped) below
-                    continue;
-                }
-
-                if (!end)
-                {
-                    if (data.Length == length)
+                    var data = ExpectData(await pending.ConfigureAwait(false), length, path);
+                    if (data.IsEmpty)
                     {
-                        window = Math.Min(window * 2, options.MaxRequestsInFlight); // a full reply: more is likely to follow
+                        end = true; // the later reads are past the end too; their replies are awaited (and dropped) below
+                        continue;
                     }
 
-                    await write(offset, data, cancellationToken).ConfigureAwait(false);
-                    total += data.Length;
-                    if (data.Length < length)
+                    if (!end)
                     {
-                        var rest = offset + data.Length;
-                        inFlight.AddFirst((rest, length - data.Length, SendReadAsync(handle, rest, length - data.Length, cancellationToken)));
+                        if (data.Length == length)
+                        {
+                            window = Math.Min(window * 2, options.MaxRequestsInFlight); // a full reply: more is likely to follow
+                        }
+
+                        await write(offset, data, cancellationToken).ConfigureAwait(false);
+                        total += data.Length;
+                        if (data.Length < length)
+                        {
+                            // The follow-up read takes over this read's slot: it must go out, and before anything else of this file.
+                            var rest = offset + data.Length;
+                            inFlight.AddFirst((rest, length - data.Length, SendReadAsync(handle, rest, length - data.Length, cancellationToken)));
+                            slotPassedOn = true;
+                        }
+                    }
+                }
+                finally
+                {
+                    if (!slotPassedOn)
+                    {
+                        budget?.Release();
                     }
                 }
             }
@@ -948,6 +977,10 @@ public sealed partial class SftpClient : IAsyncDisposable
                 catch (Exception ex) when (ex is SshException or OperationCanceledException or ObjectDisposedException)
                 {
                     // Already failing.
+                }
+                finally
+                {
+                    budget?.Release();
                 }
             }
         }
@@ -988,8 +1021,11 @@ public sealed partial class SftpClient : IAsyncDisposable
     /// <summary>Writes <paramref name="source"/> from its position to the remote file from <paramref name="start"/>; returns the bytes written.</summary>
     private async Task<long> UploadHandleAsync(byte[] handle, string path, Stream source, long start, SftpTransferOptions options, CancellationToken cancellationToken)
     {
-        // A window of writes in flight; progress counts what the server has acknowledged.
+        // A window of writes in flight; progress counts what the server has acknowledged. In a directory transfer with several files at
+        // once, each write (and its buffer) also holds a slot of the transfer's shared budget until it is acknowledged, taken as in
+        // DownloadRangeAsync: a file with writes in flight frees its own rather than wait.
         var chunk = Limits.MaxWriteLength;
+        var budget = options.RequestBudget;
         var inFlight = new Queue<(Task<SftpResponse> Reply, int Length)>();
         long offset = start, acknowledged = 0;
         long? size = options.Progress is not null && source.CanSeek ? source.Length : null;
@@ -997,10 +1033,26 @@ public sealed partial class SftpClient : IAsyncDisposable
         {
             while (true)
             {
+                if (budget is not null)
+                {
+                    await TakeSlotAsync(budget).ConfigureAwait(false);
+                }
+
                 var buffer = new byte[chunk];
-                var read = await source.ReadAtLeastAsync(buffer, chunk, throwOnEndOfStream: false, cancellationToken).ConfigureAwait(false);
+                int read;
+                try
+                {
+                    read = await source.ReadAtLeastAsync(buffer, chunk, throwOnEndOfStream: false, cancellationToken).ConfigureAwait(false);
+                }
+                catch
+                {
+                    budget?.Release();
+                    throw;
+                }
+
                 if (read == 0)
                 {
+                    budget?.Release();
                     break;
                 }
 
@@ -1036,15 +1088,41 @@ public sealed partial class SftpClient : IAsyncDisposable
                 {
                     // Already failing.
                 }
+                finally
+                {
+                    budget?.Release();
+                }
             }
         }
 
         async Task AcknowledgeAsync()
         {
             var (reply, length) = inFlight.Dequeue();
-            ExpectWritten(await reply.ConfigureAwait(false), path);
+            try
+            {
+                ExpectWritten(await reply.ConfigureAwait(false), path);
+            }
+            finally
+            {
+                budget?.Release();
+            }
+
             acknowledged += length;
             options.Progress?.Report(new SftpTransferProgress(path, start + acknowledged, size));
+        }
+
+        async Task TakeSlotAsync(SemaphoreSlim slots)
+        {
+            while (!slots.Wait(0, cancellationToken))
+            {
+                if (inFlight.Count == 0)
+                {
+                    await slots.WaitAsync(cancellationToken).ConfigureAwait(false);
+                    return;
+                }
+
+                await AcknowledgeAsync().ConfigureAwait(false); // frees a slot of this file's own
+            }
         }
     }
 
@@ -1237,7 +1315,12 @@ public sealed class SftpTransferOptions
     /// <summary>Reports each file's progress: its path, the bytes transferred so far and its size, when known.</summary>
     public IProgress<SftpTransferProgress>? Progress { get; init; }
 
-    /// <summary>How many reads or writes may be in flight at once (default 64, as OpenSSH's sftp). More helps on links with latency.</summary>
+    /// <summary>
+    /// How many reads or writes may be in flight at once (default 64, as OpenSSH's sftp). More helps on links with latency. It bounds the
+    /// whole transfer: one file's reads or writes, or in a directory transfer with <see cref="MaxConcurrentFiles"/> above 1 those of all
+    /// its files together, so at most this many, each of up to <see cref="SftpLimits.MaxReadLength"/> or
+    /// <see cref="SftpLimits.MaxWriteLength"/> bytes, are held in memory at once.
+    /// </summary>
     public int MaxRequestsInFlight
     {
         get;
@@ -1269,4 +1352,59 @@ public sealed class SftpTransferOptions
             field = value;
         }
     } = 1;
+
+    /// <summary>
+    /// How many files <see cref="SftpClient.UploadDirectoryAsync"/> and <see cref="SftpClient.DownloadDirectoryAsync"/> transfer at once
+    /// over the same SFTP session (default 1: one after another; at most 64). Each file costs round trips of its own (open, attributes,
+    /// close), so on a link with latency a tree of many small files moves several times faster with 4 to 16. It does not speed up a few
+    /// large files, which already keep <see cref="MaxRequestsInFlight"/> requests in flight (<see cref="Segments"/> is for those). The
+    /// single-file methods ignore it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The files share the transfer's <see cref="MaxRequestsInFlight"/> reads or writes rather than take that many each, so the memory the
+    /// transfer holds does not grow with this setting: at most <see cref="MaxRequestsInFlight"/> times the read or write length (64 ×
+    /// 32 KiB by default, or 64 × 255 KiB with OpenSSH's limits, about 16 MiB), plus a 64 KiB local file buffer for each file in flight.
+    /// Opening, closing and setting attributes add about one small request for each file in flight.
+    /// </para>
+    /// <para>
+    /// A directory is created before any file goes into it, and directories are created several at a time. With <see cref="Preserve"/>,
+    /// directories get their times and permissions once every file is in, the deepest first. When the server announces
+    /// <see cref="SftpLimits.MaxOpenHandles"/>, fewer files are transferred at once if needed, keeping a handle free for listings.
+    /// </para>
+    /// <para>
+    /// The first failure cancels the files still in flight and is the exception the transfer throws. A cancelled file is left as a failed
+    /// single-file transfer leaves it: a download is deleted (unless <see cref="Resume"/> is set), an upload keeps what was written.
+    /// <see cref="Progress"/> reports each file's progress as before, the files' reports interleaved but never made at the same time.
+    /// </para>
+    /// </remarks>
+    public int MaxConcurrentFiles
+    {
+        get;
+        init
+        {
+            ArgumentOutOfRangeException.ThrowIfLessThan(value, 1);
+            ArgumentOutOfRangeException.ThrowIfGreaterThan(value, 64);
+            field = value;
+        }
+    } = 1;
+
+    /// <summary>
+    /// The slots a directory transfer's files share for their reads and writes (<see cref="MaxRequestsInFlight"/> in all), or null in a
+    /// transfer of one file: a read or write holds one until its data is written out or acknowledged.
+    /// </summary>
+    internal SemaphoreSlim? RequestBudget { get; init; }
+
+    /// <summary>These options for the files of a directory transfer: reporting through <paramref name="progress"/>, sharing <paramref name="budget"/>.</summary>
+    internal SftpTransferOptions ForFilesOfDirectory(IProgress<SftpTransferProgress>? progress, SemaphoreSlim budget) => new()
+    {
+        Overwrite = Overwrite,
+        Preserve = Preserve,
+        Resume = Resume,
+        Progress = progress,
+        MaxRequestsInFlight = MaxRequestsInFlight,
+        Segments = Segments,
+        MaxConcurrentFiles = MaxConcurrentFiles,
+        RequestBudget = budget,
+    };
 }

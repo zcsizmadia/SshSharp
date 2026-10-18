@@ -34,9 +34,10 @@ latency. Each request is as large as the server allows (`limits@openssh.com`; 32
 | `Overwrite` (default true) | Replace an existing destination file; otherwise it is an error. |
 | `Preserve` | Copy the modification and access times, and the permission bits (`rwx` for owner, group and others), as `sftp -p` does. Permissions travel only where the receiving side has Unix modes, and setuid, setgid and the sticky bit are never copied. |
 | `Progress` | An `IProgress<SftpTransferProgress>`: for each file, its remote `Path`, `BytesTransferred` so far (including what a resumed transfer found there) and `TotalBytes`, when known. |
-| `MaxRequestsInFlight` | The window of outstanding requests (1 to 1024). |
+| `MaxRequestsInFlight` | The window of outstanding requests (1 to 1024), for the whole transfer: a directory transfer's files share it. |
 | `Resume` | Continue an interrupted transfer, as `reget` and `reput` do: only the part the destination lacks is sent. |
 | `Segments` (default 1) | Download one file in up to 16 parallel ranges, each over its own SFTP session (see below). |
+| `MaxConcurrentFiles` (default 1) | Transfer up to 64 files of a directory at once over the same session (see [Several files at once](#several-files-at-once)). |
 
 A failed download leaves no partial local file behind, unless `Resume` is set, in which case what arrived is kept for the
 next attempt. A resume trusts that the destination's bytes are the start of the same file (nothing compares them), and a
@@ -80,6 +81,47 @@ outside the tree and an upload never waits on a FIFO. A download treats the serv
 name here (a separator, `.` or `..`, control characters, a name that was not valid UTF-8; on Windows also `\`, `:`, device names
 such as `CON` or `NUL`, and a trailing dot or space) is skipped and counted in `summary.Skipped`. A path that would still end up
 outside the target directory, or a tree deeper than 64 levels, stops the download with an `SshException` (`TransferFailed`).
+
+### Several files at once
+
+By default a directory transfer moves one file after another. Each file costs round trips of its own however small it is
+(opening it, closing it, and reading or setting its attributes), so over 50 to 100 ms of latency a tree of many
+small files spends most of its time waiting. `MaxConcurrentFiles` (1 to 64) transfers that many files at once over the same
+session:
+
+```csharp
+var options = new SftpTransferOptions { MaxConcurrentFiles = 8 };
+var summary = await sftp.UploadDirectoryAsync("site", "/srv/www/site", options);
+```
+
+Use it for trees of many small or medium files on links with latency; 4 to 16 is a good range. Over 25 ms of added latency, a
+tree of 60 small files and one of 700 KB uploaded about 4 times faster to OpenSSH with 16 than with 1, and downloaded about 3 times
+faster. It does not speed up a few large files, which already keep the request window full; `Segments` is for those.
+
+- **Requests in flight and memory.** `MaxRequestsInFlight` bounds the whole transfer, not each file: the files share its slots,
+  each read or write holding one until its data is written out or acknowledged. So the memory a directory transfer holds does not
+  grow with `MaxConcurrentFiles`: at most `MaxRequestsInFlight` times the request size (64 × 32 KiB = 2 MiB by default, 64 × 255 KiB
+  ≈ 16 MiB with OpenSSH's `limits@openssh.com`), plus a 64 KiB local file buffer for each file in flight. Opening, closing and
+  setting attributes add about one small request for each file in flight. A file that has requests in flight never waits for a
+  slot (it reuses its own as replies come), so files cannot block each other.
+- **Order.** A directory is created before any file goes into it. An upload walks the local tree first, then creates the remote
+  directories several at a time (each as soon as its parent exists) while the files follow in the walk's order. A download lists
+  the remote tree directory by directory, as before, and hands each file to a free slot. With `Preserve`, directories get their
+  times and permissions once every file is in, the deepest first. Two names that differ only in case go one after the other, as
+  they may be the same file on the receiving side.
+- **Open handles.** When the server announces a limit on open files (`limits@openssh.com`), fewer files go at once if needed, one
+  handle kept for listings.
+- **Segments.** With `Segments` as well, each large file may open sessions of its own, so a download can ask for up to
+  `MaxConcurrentFiles × (Segments − 1)` extra sessions; the server's `MaxSessions` (10 by default) caps them, and a file that gets
+  none downloads over the main session. All their reads still share `MaxRequestsInFlight`.
+- **Errors and cancellation.** The first failure cancels the files still in flight and is the exception the transfer throws (not an
+  `AggregateException`). Each stopped file is left as a failed single-file transfer leaves it: a download is deleted (unless `Resume`
+  is set), an upload keeps what was written. Cancelling the token stops every file.
+- **Progress.** `Progress` still reports each file by its path; reports from different files interleave, but the callback is never
+  called from two threads at once, so it needs no locking of its own. Sum the last report of each path for a total.
+
+`MaxConcurrentFiles` applies to `UploadDirectoryAsync` and `DownloadDirectoryAsync` only. To transfer a list of files of your own
+at once, call `UploadFileAsync` or `DownloadFileAsync` from several tasks on one `SftpClient`; each then has its own window.
 
 ## Files as streams
 
