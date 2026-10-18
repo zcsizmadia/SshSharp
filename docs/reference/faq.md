@@ -70,6 +70,17 @@ Yes: FIDO keys through the agent; Windows key stores and the TPM through `SshPri
 `KnownHostsEntry`, `SshCertificate` and `SshSignature` all have `GetPublicKey()`. See
 [Read a public key and its fingerprint](../how-to/agent-and-keys.md#read-a-public-key-and-its-fingerprint).
 
+**Can my application issue SSH certificates, as `ssh-keygen -s` does?**
+Yes: `SshCertificateBuilder` issues user and host certificates, signed with any `SshPrivateKey`, including one in an SSH agent or a
+KMS (`SshKeySigner`, which sees `SshSignaturePurpose.Certificate`). There is no default end of validity: set `ValidBefore`. To check
+a certificate someone presents, use `SshCertificate.IsValidFor` with the CA you trust; `VerifySignature` alone does not say the CA
+is one you trust. See [Certificates](../how-to/certificates.md#act-as-a-certificate-authority).
+
+**Why does `IsValidFor` refuse a certificate that sshd accepts?**
+It refuses any critical option (`force-command`, `source-address`, `verify-required`), because it cannot enforce them; sshd can.
+If your application enforces them, check the parts (`GetAuthorityKey`, `Type`, `VerifySignature`, `IsValidAt`, `Principals`,
+`CriticalOptions`) yourself. It also refuses a certificate without principals, as sshd does for `TrustedUserCAKeys`.
+
 **Does it support `ssh-rsa` (SHA-1) or DSA keys?**
 No. RSA keys sign with `rsa-sha2-256` or `rsa-sha2-512`, which every OpenSSH since 7.2 accepts. DSA is not supported.
 

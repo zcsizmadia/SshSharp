@@ -36,6 +36,7 @@ Features that SSH.NET users have asked for in its issue tracker, and that SshSha
 | Fetch host keys without logging in (`ssh-keyscan`) | `SshClient.ScanHostKeysAsync(host, port)` |
 | Generate keys (`ssh-keygen -t`) | `SshPrivateKey.Generate(type)` and `SaveAsync(path, passphrase)` |
 | Sign and verify files or git commits (`ssh-keygen -Y`) | `SshSignature` and `SshAllowedSigners` (see [Signing](signing.md)) |
+| Issue and check OpenSSH certificates (`ssh-keygen -s`, `-L`) | `SshCertificateBuilder` signs user and host certificates with any key, an agent's or a KMS's too; `SshCertificate.IsValidFor` checks one (see [Certificates](how-to/certificates.md#act-as-a-certificate-authority)) |
 | Connect from a chosen local address or interface | `SshClientOptions.LocalEndPoint`, `BindAddress` and `BindInterface` in `ssh_config` |
 | Agent keys limited to some hosts (`ssh-add -h`) | adding them: `SshAgentKeyConstraints.Destinations` (`restrict-destination-v00@openssh.com`); using them: session binding and `publickey-hostbound`, automatically |
 | Send a BREAK to a serial console | `session.SendBreakAsync()` (RFC 4335, as OpenSSH's `~B`) |

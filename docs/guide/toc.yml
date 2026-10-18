@@ -103,6 +103,8 @@
       href: ../scenarios/database-tunnel.md
     - name: A background worker
       href: ../scenarios/background-worker.md
+    - name: Short-lived certificates for CI jobs
+      href: ../scenarios/ci-certificates.md
 - name: Concepts
   items:
     - name: Architecture and connection lifecycle

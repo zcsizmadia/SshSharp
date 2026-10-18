@@ -1276,7 +1276,7 @@ internal sealed class FakeSessionServer : IAsyncDisposable
             var now = (ulong)DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             return certificate.Type == SshCertificateType.User
                 && certificate.AuthorityKey.Span.SequenceEqual(authority)
-                && certificate.HasValidAuthoritySignature()
+                && certificate.VerifySignature()
                 && now >= certificate.ValidAfterSeconds && now < certificate.ValidBeforeSeconds
                 && certificate.Principals.Contains(user);
         }

@@ -11,8 +11,8 @@ proxies, remote dynamic and Unix-socket forwarding, destination-constrained agen
 
 - **The application** that uses the library, its options and callbacks (host key verifier, loggers, `Match exec` runner).
 - **Signers** (`SshKeySigner`, `SshPrivateKey.FromSigner`, `FromRsa`, `FromECDsa`): application code, or a key service it trusts,
-  that signs for a key SshSharp never sees. Each request says what it is for (`SshSignRequest.Purpose`: logging in, or an SSH
-  signature with its namespace), so a signer can refuse by policy. What it signs includes the session identifier and the user name,
+  that signs for a key SshSharp never sees. Each request says what it is for (`SshSignRequest.Purpose`: logging in, an SSH
+  signature with its namespace, or a certificate the key issues as a CA), so a signer can refuse by policy. What it signs includes the session identifier and the user name,
   which matters to a signer that logs its requests. Every signature it returns is verified against the public key before use.
 - **The local machine**: the process, its memory, and files the application chooses to load (private keys, `ssh_config`,
   `known_hosts`). Their *contents* are still parsed defensively; see below.
@@ -134,6 +134,26 @@ A man in the middle can read, change, drop and inject bytes. The server itself m
 - An allowed-signers file is parsed strictly, as `ssh-keygen` does: an unknown or repeated option rejects the whole file
   rather than silently dropping a restriction. A `cert-authority` line accepts only user certificates it issued, within their
   validity, for a principal the certificate names and the line allows.
+
+### Certificates the application checks or issues
+
+- **Checking** (`SshCertificate`): a certificate is parsed as hostile input (and fuzzed). `VerifySignature` proves only that the
+  key in the certificate's `AuthorityKey` signed it; anyone can make a CA, so trusting a certificate means comparing its authority
+  with one you trust. `IsValidFor` does both, then the type, the validity window (`valid_after <= now < valid_before`), the principal
+  (exact for users, a pattern for hosts; a certificate without principals is no one's) and refuses any critical option, since only
+  the application can enforce `force-command` or `source-address`. The CA's signature must be SHA-2 or Ed25519 (never SHA-1
+  `ssh-rsa`), from an RSA key of 2048 bits or more; the same rules apply to host certificates in `known_hosts` and to certificates
+  in allowed-signers files. Revocation is not part of these checks.
+- **Issuing** (`SshCertificateBuilder`): the application is then the certificate authority, and **whoever can sign with the CA key
+  can log in as any principal on every server that trusts it**. Keep the key out of the process: in an SSH agent, or in a key vault,
+  KMS or HSM through an `SshKeySigner` that allows `SshSignaturePurpose.Certificate` and nothing else (and, the other way round,
+  have login keys refuse that purpose). Issue for the shortest time that works (there is no default end, so nothing is valid
+  forever by accident), name principals exactly (at least one is required, so no certificate is valid for any user), drop the
+  extensions a use does not need, give each certificate its own serial for revocation, and log what is issued. The builder checks
+  option names and values before anything is signed, writes options sorted and once each, uses a fresh 32-byte random nonce, signs
+  RSA with `rsa-sha2-512` (never `ssh-rsa`), and verifies the signature before returning the certificate, so a signer or agent that
+  answers with the wrong key or algorithm fails instead of producing a certificate servers would refuse.
+- **What it decides:** who gets a certificate is the application's decision. The library does not authenticate the requester.
 
 ### SCP downloads
 

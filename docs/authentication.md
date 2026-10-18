@@ -84,8 +84,9 @@ for each signature.
   or a non-exportable one, for example a Windows CNG key in the TPM (Microsoft Platform Crypto Provider). The `RSA` or `ECDsa` stays
   yours; disposing the SSH key does not dispose it.
 - **Any other signer:** derive from `SshKeySigner` and pass it to `SshPrivateKey.FromSigner`. Each `SshSignRequest` it gets carries
-  the SSH algorithm (which fixes the hash), the data, and what the signature is for: `Purpose` is `Authentication` (logging in) or
-  `FileSignature` (an SSH signature, with its `Namespace`), so a signer can apply a policy or ask its user. It returns the signature as
+  the SSH algorithm (which fixes the hash), the data, and what the signature is for: `Purpose` is `Authentication` (logging in),
+  `FileSignature` (an SSH signature, with its `Namespace`) or `Certificate` (issuing a certificate as its authority, see
+  [Certificates](how-to/certificates.md#act-as-a-certificate-authority)), so a signer can apply a policy or ask its user. It returns the signature as
   .NET produces it: PKCS#1 v1.5 for RSA, r‖s for ECDSA (or DER, by overriding `EcdsaSignatureFormat`), 64 bytes for Ed25519.
 
 ```csharp
@@ -126,6 +127,10 @@ var options = new SshClientOptions
 ```
 
 Connecting by `ssh_config` alias finds certificates as `ssh` does: `CertificateFile` entries and `<identity>-cert.pub`.
+
+An application can also be the certificate authority: `SshCertificateBuilder` issues user and host certificates, signed with any
+`SshPrivateKey` (one in an agent or a key service too), and `SshCertificate.IsValidFor` checks one as sshd would. See
+[Certificates](how-to/certificates.md#act-as-a-certificate-authority).
 
 ## SSH agent
 

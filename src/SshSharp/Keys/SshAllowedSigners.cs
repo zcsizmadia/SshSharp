@@ -152,7 +152,7 @@ public sealed class SshAllowedSigners
         signature.Certificate is { Type: SshCertificateType.User } certificate
             && certificate.AuthorityKey.Span.SequenceEqual(entry.Key)
             && at >= certificate.ValidAfter && at < certificate.ValidBefore
-            && certificate.HasValidAuthoritySignature()
+            && certificate.VerifySignature()
             ? certificate
             : null;
 
