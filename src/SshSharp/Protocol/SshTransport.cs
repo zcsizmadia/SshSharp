@@ -21,6 +21,10 @@ internal sealed class SshTransport : IAsyncDisposable
     private readonly SshTransportOptions _options;
     private readonly SemaphoreSlim _sendLock = new(1, 1);
 
+    // Padding randomness, drawn a block at a time. Every encode runs under _sendLock (application packets, KEXINIT, NEWKEYS, EXT_INFO),
+    // so it needs no lock of its own.
+    private readonly PaddingRandom _padding = new();
+
     // Flushes run under this token, never the caller's: once a packet is encoded it has its sequence number and must reach the wire whole,
     // so a cancelled caller stops waiting but the flush continues. Only aborting the transport cancels it.
     private readonly CancellationTokenSource _lifetime = new();
@@ -114,7 +118,7 @@ internal sealed class SshTransport : IAsyncDisposable
 
         var clientInit = KexInitMessage.ForClient(_options.Preferences);
         var clientInitPayload = Serialize(clientInit.Write);
-        await SendPacketAsync(clientInitPayload, kexMessage: true, null, null, cancellationToken).ConfigureAwait(false);
+        await SendPacketAsync(null, clientInitPayload, kexMessage: true, null, null, cancellationToken).ConfigureAwait(false);
 
         var serverInitPayload = await ReceiveKexMessageAsync(SshMessage.KexInit, strict: false, cancellationToken).ConfigureAwait(false);
 
@@ -137,7 +141,7 @@ internal sealed class SshTransport : IAsyncDisposable
     public async ValueTask SendAsync(ReadOnlyMemory<byte> payload, Action? onCommitted, CancellationToken cancellationToken)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        await SendPacketAsync(payload, kexMessage: false, onCommitted, null, cancellationToken).ConfigureAwait(false);
+        await SendPacketAsync(null, payload, kexMessage: false, onCommitted, null, cancellationToken).ConfigureAwait(false);
         if (_connected && !_rekeying && RekeyDue())
         {
             await StartRekeyAsync(cancellationToken).ConfigureAwait(false);
@@ -149,10 +153,24 @@ internal sealed class SshTransport : IAsyncDisposable
     /// the send lock, so nothing can be sent in between. Returns whether the message was sent. A channel uses this so that its EOF or data
     /// never follows its CLOSE, which the receive loop may send at any moment.
     /// </summary>
-    public async ValueTask<bool> SendIfAsync(ReadOnlyMemory<byte> payload, Func<bool> condition, CancellationToken cancellationToken)
+    public ValueTask<bool> SendIfAsync(ReadOnlyMemory<byte> payload, Func<bool> condition, CancellationToken cancellationToken) =>
+        SendIfCoreAsync(null, payload, condition, cancellationToken);
+
+    /// <summary>
+    /// Sends <c>SSH_MSG_CHANNEL_DATA</c> carrying <paramref name="data"/> to <paramref name="recipientChannel"/>, under the same condition as
+    /// <see cref="SendIfAsync"/>. The header and the data are written straight into the packet, so the data is copied once; it is read
+    /// only until the packet is encoded, before the returned task completes.
+    /// </summary>
+    public ValueTask<bool> SendDataIfAsync(uint recipientChannel, ReadOnlyMemory<byte> data, Func<bool> condition, CancellationToken cancellationToken) =>
+        SendIfCoreAsync(new ChannelDataHeader(recipientChannel, (uint)data.Length), data, condition, cancellationToken);
+
+    // Pooled: every data packet comes this way, and it completes asynchronously whenever the socket pushes back or a sender waits for
+    // the lock, which would otherwise allocate a state machine box each time.
+    [System.Runtime.CompilerServices.AsyncMethodBuilder(typeof(System.Runtime.CompilerServices.PoolingAsyncValueTaskMethodBuilder<>))]
+    private async ValueTask<bool> SendIfCoreAsync(ChannelDataHeader? header, ReadOnlyMemory<byte> payload, Func<bool> condition, CancellationToken cancellationToken)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        if (!await SendPacketAsync(payload, kexMessage: false, null, condition, cancellationToken).ConfigureAwait(false))
+        if (!await SendPacketAsync(header, payload, kexMessage: false, null, condition, cancellationToken).ConfigureAwait(false))
         {
             return false;
         }
@@ -252,7 +270,7 @@ internal sealed class SshTransport : IAsyncDisposable
             writer.WriteString(description);
             writer.WriteString(string.Empty);
         });
-        await SendPacketAsync(payload, kexMessage: true, null, null, cancellationToken).ConfigureAwait(false);
+        await SendPacketAsync(null, payload, kexMessage: true, null, null, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Cancels every pending read and flush: the connection is being torn down and nothing more will be sent.</summary>
@@ -304,6 +322,7 @@ internal sealed class SshTransport : IAsyncDisposable
             // disposing the stream ends that write.
             if (locked)
             {
+                _padding.Clear(); // nothing is encoded any more: _failed is set, and this holds the lock
                 await _writer.CompleteAsync(closed).ConfigureAwait(false);
             }
         }
@@ -381,11 +400,11 @@ internal sealed class SshTransport : IAsyncDisposable
         if (kex.CreateGroupRequest() is { } groupRequest)
         {
             // Group exchange: the server picks the group first (RFC 4419).
-            await SendPacketAsync(groupRequest, kexMessage: true, null, null, cancellationToken).ConfigureAwait(false);
+            await SendPacketAsync(null, groupRequest, kexMessage: true, null, null, cancellationToken).ConfigureAwait(false);
             kex.ProcessGroup(await ReceiveKexMessageAsync(SshMessage.KexDhGexGroup, strictMessages, cancellationToken).ConfigureAwait(false));
         }
 
-        await SendPacketAsync(kex.CreateInit(), kexMessage: true, null, null, cancellationToken).ConfigureAwait(false);
+        await SendPacketAsync(null, kex.CreateInit(), kexMessage: true, null, null, cancellationToken).ConfigureAwait(false);
         var reply = await ReceiveKexMessageAsync(kex.ReplyMessage, strictMessages, cancellationToken).ConfigureAwait(false);
 
         var context = new KexContext(_options.ClientIdentification.Line, ServerIdentification.Line, clientInitPayload, serverInitPayload);
@@ -453,7 +472,7 @@ internal sealed class SshTransport : IAsyncDisposable
         await _sendLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            PacketCodec.Encode(_writer, new[] { SshMessage.NewKeys }, _sendProtector, _sendSequence++);
+            PacketCodec.Encode(_writer, [], [SshMessage.NewKeys], _sendProtector, _sendSequence++, _padding);
             TraceKexMessage("sent", SshMessage.NewKeys, _sendSequence - 1);
             await _writer.FlushAsync(_lifetime.Token).ConfigureAwait(false);
             _sendProtector.Dispose();
@@ -469,7 +488,7 @@ internal sealed class SshTransport : IAsyncDisposable
                 // The first packet under the new keys (RFC 8308 section 2.4). ext-info-in-auth@openssh.com (PROTOCOL 1.10) lets the server
                 // send server-sig-algs again during authentication, for example when a Match block changes them for this user; the
                 // authentication reads the current list before each key.
-                PacketCodec.Encode(_writer, ClientExtInfo, _sendProtector, _sendSequence++);
+                PacketCodec.Encode(_writer, [], ClientExtInfo, _sendProtector, _sendSequence++, _padding);
                 await _writer.FlushAsync(_lifetime.Token).ConfigureAwait(false);
             }
 
@@ -583,7 +602,7 @@ internal sealed class SshTransport : IAsyncDisposable
         _rekeying = true;
         _pendingClientInit = clientInit;
         _pendingClientInitPayload = payload;
-        PacketCodec.Encode(_writer, payload, _sendProtector, _sendSequence++);
+        PacketCodec.Encode(_writer, [], payload, _sendProtector, _sendSequence++, _padding);
         TraceKexMessage("sent", payload[0], _sendSequence - 1);
         await _writer.FlushAsync(_lifetime.Token).ConfigureAwait(false);
     }
@@ -606,7 +625,11 @@ internal sealed class SshTransport : IAsyncDisposable
     /// is cancelled during the flush, it gets <see cref="OperationCanceledException"/> right away, the flush finishes in the background,
     /// and the lock is released when it does.
     /// </remarks>
-    private async ValueTask<bool> SendPacketAsync(ReadOnlyMemory<byte> payload, bool kexMessage, Action? onCommitted, Func<bool>? condition, CancellationToken cancellationToken)
+    // Pooled: every packet comes this way, and it completes asynchronously whenever the socket pushes back or a sender waits for the
+    // lock or a re-exchange, which would otherwise allocate a state machine box each time.
+    [System.Runtime.CompilerServices.AsyncMethodBuilder(typeof(System.Runtime.CompilerServices.PoolingAsyncValueTaskMethodBuilder<>))]
+    private async ValueTask<bool> SendPacketAsync(ChannelDataHeader? header, ReadOnlyMemory<byte> payload, bool kexMessage, Action? onCommitted, Func<bool>? condition,
+        CancellationToken cancellationToken)
     {
         while (true)
         {
@@ -617,7 +640,7 @@ internal sealed class SshTransport : IAsyncDisposable
             {
                 if (!kexMessage && _rekeying)
                 {
-                    Instrumentation.Trace($"kex: message {payload.Span[0]} waits for the re-exchange");
+                    Instrumentation.Trace($"kex: message {MessageType(header, payload)} waits for the re-exchange");
                     wait = _rekeyDone.Task;
                 }
                 else
@@ -632,16 +655,23 @@ internal sealed class SshTransport : IAsyncDisposable
                         return false;
                     }
 
-                    PacketCodec.Encode(_writer, payload.Span, _sendProtector, _sendSequence++);
-                    TraceKexMessage("sent", payload.Span[0], _sendSequence - 1);
+                    var length = EncodeLocked(header, payload);
+                    TraceKexMessage("sent", MessageType(header, payload), _sendSequence - 1);
                     onCommitted?.Invoke();
-                    Interlocked.Add(ref _bytesSinceKex, payload.Length);
+                    Interlocked.Add(ref _bytesSinceKex, length);
                     Interlocked.Increment(ref _packetsSentSinceKex);
-                    SshTelemetry.BytesSent.Add(payload.Length);
+                    SshTelemetry.BytesSent.Add(length);
                     var flush = _writer.FlushAsync(_lifetime.Token);
                     if (flush.IsCompleted)
                     {
                         flush.GetAwaiter().GetResult();
+                        return true;
+                    }
+
+                    if (!cancellationToken.CanBeCanceled)
+                    {
+                        // Nothing can cancel the wait, so the flush is awaited as it is: no task for it, and no WaitAsync task around that.
+                        await flush.ConfigureAwait(false);
                         return true;
                     }
 
@@ -679,6 +709,27 @@ internal sealed class SshTransport : IAsyncDisposable
             await wait.WaitAsync(cancellationToken).ConfigureAwait(false);
         }
     }
+
+    /// <summary>
+    /// Encodes one packet into the writer, with the next sequence number, and returns its payload's length. The caller holds
+    /// <see cref="_sendLock"/>, which also guards the padding randomness. With <paramref name="header"/>, the payload is that header and
+    /// then <paramref name="payload"/>, both written straight into the packet.
+    /// </summary>
+    private int EncodeLocked(ChannelDataHeader? header, ReadOnlyMemory<byte> payload)
+    {
+        if (header is { } value)
+        {
+            Span<byte> prefix = stackalloc byte[ChannelDataHeader.Size];
+            value.Write(prefix);
+            PacketCodec.Encode(_writer, prefix, payload.Span, _sendProtector, _sendSequence++, _padding);
+            return ChannelDataHeader.Size + payload.Length;
+        }
+
+        PacketCodec.Encode(_writer, [], payload.Span, _sendProtector, _sendSequence++, _padding);
+        return payload.Length;
+    }
+
+    private static byte MessageType(ChannelDataHeader? header, ReadOnlyMemory<byte> payload) => header is null ? payload.Span[0] : SshMessage.ChannelData;
 
     /// <summary>Releases the send lock once a flush abandoned by a cancelled caller has finished.</summary>
     private async Task ReleaseAfterAsync(Task flush)

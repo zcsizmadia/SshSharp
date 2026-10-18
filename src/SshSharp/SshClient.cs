@@ -225,7 +225,7 @@ public sealed partial class SshClient : IAsyncDisposable
             }
 
             var stdout = new ArrayBufferWriter<byte>();
-            var stderr = new ArrayBufferWriter<byte>();
+            ArrayBufferWriter<byte>? stderr = null; // most commands write nothing there
             long total = 0;
             while (await channel.ReadAsync(stop.Token).ConfigureAwait(false) is { } chunk)
             {
@@ -237,7 +237,7 @@ public sealed partial class SshClient : IAsyncDisposable
                         throw new InvalidOperationException($"The command produced more than {_options.MaxCommandOutputBytes} bytes of output.");
                     }
 
-                    (chunk.IsExtended ? stderr : stdout).Write(chunk.Data.Span);
+                    (chunk.IsExtended ? stderr ??= new ArrayBufferWriter<byte>() : stdout).Write(chunk.Data.Span);
                 }
             }
 
@@ -251,7 +251,7 @@ public sealed partial class SshClient : IAsyncDisposable
             outcome = exitStatus == 0 ? "success" : "failure";
             activity?.SetTag("ssh.command.exit_status", exitStatus);
             SshLog.CommandFinished(_logger, channel.LocalId, exitStatus, channel.ExitSignal?.Name);
-            return new SshCommandResult(exitStatus, channel.ExitSignal, stdout.WrittenMemory, stderr.WrittenMemory);
+            return new SshCommandResult(exitStatus, channel.ExitSignal, stdout.WrittenMemory, stderr?.WrittenMemory ?? ReadOnlyMemory<byte>.Empty);
         }
         catch (OperationCanceledException) when (writing.IsFaulted && !cancellationToken.IsCancellationRequested)
         {

@@ -370,6 +370,226 @@ public sealed class ScpTests : IDisposable
         await Assert.That(() => ScpChannel.QuoteForShell("")).Throws<ArgumentException>();
     }
 
+    // ---- pooled buffers ----
+
+    /// <summary>
+    /// A pool that hands out fresh arrays and checks how they come back: each once, and none touched after its return (returned arrays
+    /// are filled with a marker, and a later read would see the marker as data, a later write would change it).
+    /// </summary>
+    private sealed class CheckingPool : System.Buffers.ArrayPool<byte>
+    {
+        private const byte Returned = 0xCD;
+        private readonly object _lock = new();
+        private readonly HashSet<byte[]> _out = new(ReferenceEqualityComparer.Instance);
+        private readonly List<byte[]> _returned = [];
+        private int _rented;
+        private int _doubleReturns;
+
+        public int Rented { get { lock (_lock) { return _rented; } } }
+
+        public int Outstanding { get { lock (_lock) { return _out.Count; } } }
+
+        public int DoubleReturns { get { lock (_lock) { return _doubleReturns; } } }
+
+        public bool ReturnedUntouched
+        {
+            get
+            {
+                lock (_lock)
+                {
+                    return _returned.All(a => a.All(b => b == Returned));
+                }
+            }
+        }
+
+        public override byte[] Rent(int minimumLength)
+        {
+            var array = new byte[minimumLength];
+            lock (_lock)
+            {
+                _out.Add(array);
+                _rented++;
+            }
+
+            return array;
+        }
+
+        public override void Return(byte[] array, bool clearArray = false)
+        {
+            lock (_lock)
+            {
+                if (!_out.Remove(array))
+                {
+                    _doubleReturns++;
+                    return;
+                }
+
+                array.AsSpan().Fill(Returned);
+                _returned.Add(array);
+            }
+        }
+
+        /// <summary>Waits for every buffer to come back: the stderr reader returns its own when the session's end reaches it.</summary>
+        public async Task<int> OutstandingAfterAsync(TimeSpan limit)
+        {
+            var deadline = DateTime.UtcNow + limit;
+            while (Outstanding > 0 && DateTime.UtcNow < deadline)
+            {
+                await Task.Delay(20);
+            }
+
+            return Outstanding;
+        }
+    }
+
+    private static async Task AssertAllReturnedAsync(CheckingPool pool, int atLeast)
+    {
+        await Assert.That(await pool.OutstandingAfterAsync(TimeSpan.FromSeconds(30))).IsEqualTo(0);
+        await Assert.That(pool.Rented).IsGreaterThanOrEqualTo(atLeast);
+        await Assert.That(pool.DoubleReturns).IsEqualTo(0);
+        await Assert.That(pool.ReturnedUntouched).IsTrue();
+    }
+
+    [Test]
+    public async Task PooledBuffers_AreReturnedOnce_AndNotUsedAfterwards_AfterAnUploadAndADownload()
+    {
+        var files = new Dictionary<string, byte[]>();
+        var content = new byte[300_000];
+        new Random(3).NextBytes(content);
+        content[0] = 0x42; // not 1 or 2, which the scripted source would take for an error message
+        await using var server = new FakeSessionServer
+        {
+            OnExec = script => script.Command.Contains(" -t ", StringComparison.Ordinal)
+                ? Sink([], files)(script)
+                : Source(Text($"C0644 {content.Length} big.bin\n"), [.. content, 0])(script),
+        };
+        await using var client = await ConnectAsync(server);
+        var pool = new CheckingPool();
+
+        // Upload: the read buffer, the stderr reader's and the file's data buffer.
+        await using (var scp = await ScpChannel.StartAsync(client, new SshScpOptions(), "-t", "/tmp/big.bin", Timeout(), pool))
+        {
+            await scp.ReadAckAsync(Timeout());
+            await scp.SendLineAsync($"C0644 {content.Length} big.bin", Timeout());
+            await scp.ReadAckAsync(Timeout());
+            await scp.SendDataAsync(new MemoryStream(content), content.Length, _ => { }, Timeout());
+            await scp.ReadAckAsync(Timeout());
+            await scp.FinishAsync(Timeout());
+        }
+
+        await Assert.That(Convert.ToHexString(files["big.bin"])).IsEqualTo(Convert.ToHexString(content));
+        await AssertAllReturnedAsync(pool, atLeast: 3);
+
+        // Download: what was read into the pooled buffer arrives intact.
+        using var sink = new MemoryStream();
+        await using (var scp = await ScpChannel.StartAsync(client, new SshScpOptions(), "-f", "/tmp/big.bin", Timeout(), pool))
+        {
+            await scp.SendAckAsync(Timeout());
+            await Assert.That(await scp.ReadLineAsync(Timeout())).IsEqualTo($"C0644 {content.Length} big.bin");
+            await scp.SendAckAsync(Timeout());
+            await scp.ReadDataAsync(sink, content.Length, _ => { }, Timeout());
+            await scp.ReadAckAsync(Timeout());
+            await scp.SendAckAsync(Timeout());
+            await scp.FinishAsync(Timeout());
+        }
+
+        await Assert.That(Convert.ToHexString(sink.ToArray())).IsEqualTo(Convert.ToHexString(content));
+        await AssertAllReturnedAsync(pool, atLeast: 5);
+    }
+
+    [Test]
+    public async Task PooledBuffers_AreReturned_WhenTheTransferFails_OrIsCancelled()
+    {
+        // The remote scp refuses the file; the local source is shorter than it claimed; the source stalls and the caller gives up; the
+        // caller gives up waiting for an answer that never comes. Each time, every buffer goes back once, and none is used after that.
+        await using var server = new FakeSessionServer
+        {
+            OnExec = async script =>
+            {
+                if (script.Command.Contains("refused", StringComparison.Ordinal))
+                {
+                    await Sink([], [], refuseWith: "scp: refused: Permission denied")(script);
+                    return;
+                }
+
+                if (script.Command.Contains("silent", StringComparison.Ordinal))
+                {
+                    while (await script.ReadInputAsync() is not null)
+                    {
+                        // Never answers; ends when the client closes the channel.
+                    }
+
+                    await script.FinishAsync(1);
+                    return;
+                }
+
+                await Sink([], [])(script);
+            },
+        };
+        await using var client = await ConnectAsync(server);
+        var pool = new CheckingPool();
+
+        await using (var scp = await ScpChannel.StartAsync(client, new SshScpOptions(), "-t", "/refused", Timeout(), pool))
+        {
+            await scp.ReadAckAsync(Timeout());
+            await scp.SendLineAsync("C0644 5 x", Timeout());
+            await Assert.That(async () => await scp.ReadAckAsync(Timeout())).Throws<SshException>();
+        }
+
+        await AssertAllReturnedAsync(pool, atLeast: 2);
+
+        await using (var scp = await ScpChannel.StartAsync(client, new SshScpOptions(), "-t", "/short", Timeout(), pool))
+        {
+            await scp.ReadAckAsync(Timeout());
+            await scp.SendLineAsync("C0644 10 x", Timeout());
+            await scp.ReadAckAsync(Timeout());
+            await Assert.That(async () => await scp.SendDataAsync(new MemoryStream(Text("ab")), 10, _ => { }, Timeout())).Throws<IOException>();
+        }
+
+        await AssertAllReturnedAsync(pool, atLeast: 5);
+
+        await using (var scp = await ScpChannel.StartAsync(client, new SshScpOptions(), "-t", "/stalled", Timeout(), pool))
+        {
+            await scp.ReadAckAsync(Timeout());
+            await scp.SendLineAsync("C0644 10 x", Timeout());
+            await scp.ReadAckAsync(Timeout());
+            using var giveUp = new CancellationTokenSource(TimeSpan.FromMilliseconds(200));
+            await Assert.That(async () => await scp.SendDataAsync(new StallingStream(), 10, _ => { }, giveUp.Token)).Throws<OperationCanceledException>();
+        }
+
+        await AssertAllReturnedAsync(pool, atLeast: 8);
+
+        await using (var scp = await ScpChannel.StartAsync(client, new SshScpOptions(), "-f", "/silent", Timeout(), pool))
+        {
+            using var giveUp = new CancellationTokenSource(TimeSpan.FromMilliseconds(200));
+            await Assert.That(async () => await scp.ReadAckAsync(giveUp.Token)).Throws<OperationCanceledException>();
+        }
+
+        await AssertAllReturnedAsync(pool, atLeast: 10);
+    }
+
+    [Test]
+    public async Task AChannelUsedAfterDisposal_ThrowsRatherThanReadingAReturnedBuffer()
+    {
+        await using var server = new FakeSessionServer { OnExec = Sink([], []) };
+        await using var client = await ConnectAsync(server);
+        var pool = new CheckingPool();
+        var scp = await ScpChannel.StartAsync(client, new SshScpOptions(), "-t", "/tmp/x", Timeout(), pool);
+        await scp.DisposeAsync();
+        await scp.DisposeAsync(); // once is enough; twice returns nothing twice
+        await Assert.That(async () => await scp.ReadByteAsync(Timeout())).Throws<ObjectDisposedException>();
+        await AssertAllReturnedAsync(pool, atLeast: 2);
+    }
+
+    /// <summary>A source whose reads never complete until cancelled.</summary>
+    private sealed class StallingStream : MemoryStream
+    {
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            await Task.Delay(System.Threading.Timeout.Infinite, cancellationToken);
+            return 0;
+        }
+    }
     private sealed class SynchronousProgress(List<SshScpProgress> sink) : IProgress<SshScpProgress>
     {
         public void Report(SshScpProgress value) => sink.Add(value);

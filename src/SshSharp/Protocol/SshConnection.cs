@@ -230,22 +230,25 @@ internal sealed class SshConnection : IAsyncDisposable
             return false;
         }
 
-        Post(Build(w =>
-        {
-            w.WriteByte(SshMessage.Ping);
-            w.WriteString("PING!"u8);
-        }));
+        // Fixed size: byte, then the string "PING!" (length and bytes), written directly.
+        var chaff = new byte[1 + 4 + 5];
+        chaff[0] = SshMessage.Ping;
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt32BigEndian(chaff.AsSpan(1), 5);
+        "PING!"u8.CopyTo(chaff.AsSpan(5));
+        Post(chaff);
         return true;
     }
 
     /// <summary>SSH2_MSG_PING with an 8-byte number as its data (0 for keep-alive probes, which nobody waits for).</summary>
-    private static byte[] PingMessage(ulong id) => Build(w =>
+    private static byte[] PingMessage(ulong id)
     {
-        w.WriteByte(SshMessage.Ping);
-        Span<byte> data = stackalloc byte[8];
-        System.Buffers.Binary.BinaryPrimitives.WriteUInt64BigEndian(data, id);
-        w.WriteString(data);
-    });
+        // Fixed size: byte, then a string of 8 bytes (length and bytes), written directly.
+        var message = new byte[1 + 4 + 8];
+        message[0] = SshMessage.Ping;
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt32BigEndian(message.AsSpan(1), 8);
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt64BigEndian(message.AsSpan(5), id);
+        return message;
+    }
 
     private void EnqueueGlobalReply(TaskCompletionSource<GlobalReply> reply)
     {
@@ -355,7 +358,19 @@ internal sealed class SshConnection : IAsyncDisposable
     }
 
     /// <summary>Sends a message only if <paramref name="condition"/> holds when it takes its place on the wire (see <see cref="SshTransport.SendIfAsync"/>).</summary>
-    public async ValueTask<bool> SendIfAsync(ReadOnlyMemory<byte> payload, Func<bool> condition, CancellationToken cancellationToken)
+    public ValueTask<bool> SendIfAsync(ReadOnlyMemory<byte> payload, Func<bool> condition, CancellationToken cancellationToken) =>
+        SendIfCoreAsync(null, payload, condition, cancellationToken);
+
+    /// <summary>
+    /// Sends <c>SSH_MSG_CHANNEL_DATA</c> carrying <paramref name="data"/> to <paramref name="recipientChannel"/>, only if
+    /// <paramref name="condition"/> holds when it takes its place on the wire (see <see cref="SshTransport.SendDataIfAsync"/>).
+    /// </summary>
+    public ValueTask<bool> SendDataIfAsync(uint recipientChannel, ReadOnlyMemory<byte> data, Func<bool> condition, CancellationToken cancellationToken) =>
+        SendIfCoreAsync(recipientChannel, data, condition, cancellationToken);
+
+    // Pooled: every data packet comes this way, and it completes asynchronously whenever the transport does.
+    [System.Runtime.CompilerServices.AsyncMethodBuilder(typeof(System.Runtime.CompilerServices.PoolingAsyncValueTaskMethodBuilder<>))]
+    private async ValueTask<bool> SendIfCoreAsync(uint? dataRecipient, ReadOnlyMemory<byte> payload, Func<bool> condition, CancellationToken cancellationToken)
     {
         if (_failure is { } failure)
         {
@@ -364,7 +379,9 @@ internal sealed class SshConnection : IAsyncDisposable
 
         try
         {
-            return await _transport.SendIfAsync(payload, condition, cancellationToken).ConfigureAwait(false);
+            return dataRecipient is { } recipient
+                ? await _transport.SendDataIfAsync(recipient, payload, condition, cancellationToken).ConfigureAwait(false)
+                : await _transport.SendIfAsync(payload, condition, cancellationToken).ConfigureAwait(false);
         }
         catch (IOException ex)
         {
@@ -900,14 +917,8 @@ internal sealed class SshConnection : IAsyncDisposable
         }
 
         // The confirmation must be on the wire before anything the handler sends on the channel, so it is sent first, not posted.
-        var confirmation = Build(w =>
-        {
-            w.WriteByte(SshMessage.ChannelOpenConfirmation);
-            w.WriteUInt32(senderChannel);
-            w.WriteUInt32(accepted.LocalId);
-            w.WriteUInt32(SshChannel.LocalWindowSize);
-            w.WriteUInt32(SshChannel.LocalMaxPacketSize);
-        });
+        var confirmation = SshChannel.FixedMessage(SshMessage.ChannelOpenConfirmation, senderChannel, accepted.LocalId, SshChannel.LocalWindowSize,
+            SshChannel.LocalMaxPacketSize);
         _ = Task.Run(async () =>
         {
             try
