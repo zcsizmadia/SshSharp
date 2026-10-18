@@ -86,6 +86,40 @@ public sealed class AgentForwardingTests : IDisposable
     }
 
     [Test]
+    public async Task RunCommandAsync_AsksForForwarding_BeforeTheCommand_WithEitherOverload()
+    {
+        // ForwardAgent applies to every session; the 1.0 overload did not ask for it until #287.
+        await using var agent = new FakeAgent();
+        await using var server = new FakeSessionServer();
+        await using var client = await ConnectAsync(server, new SshAgent(agent.Path));
+
+        await client.RunCommandAsync("true", Timeout());
+        await client.RunCommandAsync("true", options: null, standardInput: null, Timeout());
+
+        var sessions = server.Channels.Where(c => c.Requests.Count > 0).ToArray();
+        await Assert.That(sessions.Length).IsEqualTo(2);
+        foreach (var session in sessions)
+        {
+            string[] types;
+            lock (session.Requests)
+            {
+                types = [.. session.Requests.Select(r => r.Type)];
+            }
+
+            await Assert.That(types).IsEquivalentTo(new[] { "auth-agent-req@openssh.com", "exec" });
+        }
+    }
+
+    [Test]
+    public async Task RunCommandAsync_WithoutForwarding_AsksForNothing()
+    {
+        await using var server = new FakeSessionServer();
+        await using var client = await ConnectAsync(server, forward: null);
+        await client.RunCommandAsync("true", Timeout());
+        await Assert.That(Requests(server).Select(r => r.Type)).IsEquivalentTo(new[] { "exec" });
+    }
+
+    [Test]
     public async Task AServerAnnouncingAgentForward_GetsTheRfc9987Names()
     {
         // RFC 9987 section 7: "agent-req" and "agent-connect" are used only when the server announces "agent-forward" in EXT_INFO.
