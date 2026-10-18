@@ -36,10 +36,11 @@ jobs:
           - scope: ed25519
             mutate: -m "**/Crypto/Ed25519.cs"
             tests: Crypto/Ed25519Tests.cs;Crypto/WycheproofTests.cs;Keys/*Tests.cs
-          # ChaCha20*.cs: the scalar ChaCha20.cs, the vectorized ChaCha20.Vector.cs and ChaCha20Poly1305OpenSsh.cs.
+          # ChaCha20*.cs: the scalar ChaCha20.cs, the vectorized ChaCha20.Vector.cs and ChaCha20Poly1305OpenSsh.cs. Poly1305*.cs: the
+          # 64-bit Poly1305.cs and the 26-bit Poly1305.Limbs26.cs.
           - scope: chacha20-poly1305
-            mutate: -m "**/Crypto/ChaCha20*.cs" -m "**/Crypto/Poly1305.cs"
-            tests: Crypto/ChaChaPolyTests.cs;Crypto/ChaCha20VectorTests.cs;Crypto/WycheproofTests.cs;Protocol/PacketCodecTests.cs
+            mutate: -m "**/Crypto/ChaCha20*.cs" -m "**/Crypto/Poly1305*.cs"
+            tests: Crypto/ChaChaPolyTests.cs;Crypto/ChaCha20VectorTests.cs;Crypto/Poly1305Tests.cs;Crypto/WycheproofTests.cs;Protocol/PacketCodecTests.cs
           - scope: aes-ctr
             mutate: -m "**/Crypto/AesCtr.cs" -m "**/Crypto/XorHelper.cs"
             tests: Crypto/AesCtrTests.cs;Crypto/ChaChaPolyTests.cs;Protocol/PacketCodecTests.cs

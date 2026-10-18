@@ -52,7 +52,10 @@ ChaCha20, Poly1305, AES-CTR and sntrup761 itself. Those implementations are chec
   [fixtures' README](https://github.com/zcsizmadia/SshSharp/blob/main/tests/SshSharp.Tests/Fixtures/wycheproof/README.md) says how.
 - **Differential tests:** the vectorized ChaCha20 (8 and 4 blocks at once) against the scalar code, for every length up to 2,000
   bytes, long buffers, and counters that cross the 2^32 and 2^64 boundaries in every lane. The tests choose the path explicitly, so
-  every path runs on every CI platform, whatever vector width its CPU has.
+  every path runs on every CI platform, whatever vector width its CPU has. Poly1305 with 64-bit limbs against the 26-bit code (which
+  32-bit processes use) and against the definition computed with `BigInteger`: random keys and messages of every length up to 1,100
+  bytes and long ones, the largest clamped r, accumulators just below and above p and 2^130, an s that carries out of 2^128, and
+  every RFC 8439 Poly1305 vector. Both limb sizes run on every machine.
 - **Constant-time review and a timing test:** see the [cryptography review](crypto-review.md).
 
 ## Real servers

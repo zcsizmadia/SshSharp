@@ -23,7 +23,7 @@ Machine: Intel Core i7-12800H, Windows 11, .NET 10.0.12, `--job short` (3 iterat
 | aes256-gcm | 64 B | 201 ns | 481 ns | 0 B / 32 B |
 | aes256-gcm | 1 KiB | 318 ns | 751 ns | 0 B / 32 B |
 | aes256-gcm | 16 KiB | 1.96 µs | 4.57 µs | 0 B / 32 B |
-| chacha20-poly1305 (managed) | 16 KiB | 17.9 µs | 36.5 µs | 0 B / 32 B |
+| chacha20-poly1305 (managed) | 16 KiB | 14.6 µs | 29.1 µs | 0 B / 32 B |
 | aes256-ctr + hmac-sha2-256-etm | 16 KiB | 13.7 µs | 27.6 µs | 0 B / 32 B |
 
 The 32 B is the `DecodedPacket` wrapper; it does not grow with the payload. AES-GCM runs on the CPU's AES instructions, which is why it is
@@ -68,11 +68,43 @@ with 4 blocks at once and 50.1 µs scalar.
   temporaries on the stack. That is why 8 blocks at once is 1.3x, not 2x, faster than 4.
 * **Tiering:** the vector kernels are compiled fully optimized up front (`AggressiveOptimization`). With tiered compilation, which tier
   a benchmark ended in made the ChaCha20 timing vary by a factor of two between runs.
-* **Poly1305 now costs more than ChaCha20:** 20.0 µs for 32 KiB (about 1,640 MB/s), so roughly 10 µs of the 17.9 µs packet. It is
-  left as it is. Vectorizing it needs a 32×32→64-bit lane multiply, which the cross-platform `Vector128`/`Vector256` API does not
-  have (64-bit lane multiplication is emulated on x64 without AVX-512), so it would need x64- and Arm64-specific intrinsics with the
-  scalar code as the fallback. A scalar version with 64-bit limbs (`Math.BigMul`, as the X25519 field already uses) is the other
-  candidate. Either would at most make the 16 KiB packet about 1.4x faster again.
+* **Poly1305 then cost more than ChaCha20:** 20.0 µs for 32 KiB (about 1,640 MB/s), so roughly 10 µs of the 17.9 µs packet.
+  Vectorizing it needs a 32×32→64-bit lane multiply, which the cross-platform `Vector128`/`Vector256` API does not have (64-bit lane
+  multiplication is emulated on x64 without AVX-512), so it would need x64- and Arm64-specific intrinsics with the scalar code as the
+  fallback. It now uses 64-bit limbs instead (below).
+
+## Poly1305 (64-bit limbs)
+
+In a 64-bit process Poly1305 holds its numbers in three limbs of 44, 44 and 42 bits and multiplies them with `Math.BigMul`
+(64×64→128-bit): 9 products per 16-byte block instead of 25 with the five 26-bit limbs. Its constant-time review is in the
+[cryptography review](crypto-review.md#constant-time-review-of-poly1305-with-64-bit-limbs).
+
+Machine: Intel Core i7-12800H, Windows 11, .NET 10.0.12 and 8.0.31, `--job medium`. Before is the 26-bit code (main before the
+change); MB/s is bytes of payload per second.
+
+| Benchmark | Runtime | Before | After | Speed-up |
+|---|---|---:|---:|---:|
+| Poly1305, 32 KiB | .NET 10 | 19.8 µs (1,655 MB/s) | 13.0 µs (2,524 MB/s) | 1.5x |
+| Poly1305, 32 KiB | .NET 8 | 20.5 µs (1,598 MB/s) | 12.7 µs (2,576 MB/s) | 1.6x |
+| Packet encode (seal), 16 KiB | .NET 10 | 17.9 µs (915 MB/s) | 14.6 µs (1,124 MB/s) | 1.23x |
+| Packet encode (seal), 16 KiB | .NET 8 | 21.4 µs (767 MB/s) | 18.5 µs (886 MB/s) | 1.15x |
+| Packet encode + decode (seal and open), 16 KiB | .NET 10 | 36.1 µs | 29.1 µs | 1.24x |
+| Packet encode + decode (seal and open), 16 KiB | .NET 8 | 44.4 µs | 37.2 µs | 1.19x |
+
+`CryptoBenchmarks` also runs the 26-bit code on its own (`Poly1305 32 KiB, 26-bit limbs`): 19.3 µs on .NET 10 and 19.6 µs on
+.NET 8, the same as before the change. Before and after ran back to back on an otherwise idle machine; the .NET 8 "before" Poly1305
+measurement is bimodal in every run (20.4 to 20.5 µs on average), the others are not.
+
+* **Why not 2x:** the multiplications are a third of what they were, but each 128-bit product is still split, summed and carried, and
+  .NET's `Math.BigMul` hands the low half of `mulx` back through a stack slot. Storing the multipliers shifted left by 20 bits, so
+  that the high word of a product is already the part above bit 44, saved about a tenth of the time against splitting each
+  product afterwards (12.7 against 14.1 µs for 32 KiB in a simple timing loop on .NET 10).
+* **32-bit processes keep the 26-bit code.** Without a 64×64-bit multiply instruction, the runtime computes each `Math.BigMul` from
+  four 32-bit multiplies. Measured on the same machine with the 32-bit (x86) runtime, 32 KiB took 72 to 73 µs with the 64-bit limbs
+  against 36 to 38 µs with the 26-bit limbs on .NET 10, and 84 to 85 µs against 36 to 37 µs on .NET 8 (a simple timing loop). Which code runs is decided by
+  `Environment.Is64BitProcess`, a constant for the JIT.
+* **With ChaCha20 vectorized and Poly1305 on 64-bit limbs**, a 16 KiB chacha20-poly1305 packet now takes about 15 µs to seal on
+  .NET 10, against 2 µs with AES-GCM on AES instructions.
 
 ## Public key operations (one operation)
 
