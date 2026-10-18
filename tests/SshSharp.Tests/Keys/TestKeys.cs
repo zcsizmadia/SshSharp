@@ -29,6 +29,21 @@ internal static class TestKeys
         }, comment, checkOverride, padding, passphrase, cipher);
     }
 
+    /// <summary>
+    /// An OpenSSH Ed25519 key file for <paramref name="seed"/> that names <paramref name="publicKey"/> as its public key, consistently in
+    /// the public section, the private section and after the seed: a file whose only flaw is that the public key is not the seed's.
+    /// </summary>
+    public static string OpenSshEd25519(byte[] seed, byte[] publicKey)
+    {
+        var publicBlob = Blob(w => { w.WriteString("ssh-ed25519"); w.WriteString(publicKey); });
+        return OpenSsh(publicBlob, w =>
+        {
+            w.WriteString("ssh-ed25519");
+            w.WriteString(publicKey);
+            w.WriteString([.. seed, .. publicKey]);
+        }, "mismatched@example");
+    }
+
     public static string OpenSshEcdsa(ECCurve curve, string curveName, out byte[] publicBlob, string comment = "")
     {
         using var ecdsa = ECDsa.Create(curve);

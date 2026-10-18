@@ -190,6 +190,71 @@ public class Ed25519Tests
         }
     }
 
+    private static byte[] SignWithPublicKey(byte[] seed, byte[] publicKey, byte[] message)
+    {
+        var sig = new byte[64];
+        Ed25519.Sign(seed, publicKey, message, sig);
+        return sig;
+    }
+
+    [Test]
+    public async Task SigningWithTheKnownPublicKey_MatchesTheRfc8032AndOpenSslVectors()
+    {
+        // RFC 8032 section 7.1, tests 1 to 3.
+        (string Seed, string Message, string Signature)[] rfc =
+        [
+            ("9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60", "",
+                "e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e065224901555fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b"),
+            ("4ccd089b28ff96da9db6c346ec114e0f5b8a319f35aba624da8cf6ed4fb8a6fb", "72",
+                "92a009a9f0d4cab8720e820b5f642540a2b27b5416503f8fb3762223ebdb69da085ac1e43e15996e458f3613d0f11d8c387b2eaeb4302aeeb00d291612bb0c00"),
+            ("c5aa8df43f9f837bedb7442f31dcb7b166d38535076f094b85ce3a2e0b4458f7", "af82",
+                "6291d657deec24024827e69c3abe01a30ce548a284743a445e3680d7db5ac3ac18ff9b538d16f290ae67f760984dc6594a7c15e9716ed28dc027beceea1ec40a"),
+        ];
+        foreach (var (seed, message, signature) in rfc)
+        {
+            await Assert.That(Hex(SignWithPublicKey(H(seed), PublicKey(H(seed)), H(message)))).IsEqualTo(signature);
+        }
+
+        var count = 0;
+        foreach (var line in File.ReadLines(Path.Combine(AppContext.BaseDirectory, "Fixtures", "curve25519_openssl_vectors.txt")))
+        {
+            var f = line.Split(' ');
+            if (f[0] == "ed25519")
+            {
+                await Assert.That(Hex(SignWithPublicKey(H(f[1]), H(f[2]), H(f[3])))).IsEqualTo(f[4]);
+                count++;
+            }
+        }
+
+        await Assert.That(count).IsEqualTo(9);
+    }
+
+    [Test]
+    public async Task SigningWithTheKnownPublicKey_ChecksItsSize()
+    {
+        var seed = H("9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60");
+        var pub = PublicKey(seed);
+        await Assert.That(() => Ed25519.Sign(seed, pub.AsSpan(1), [], new byte[64])).Throws<ArgumentException>();
+        await Assert.That(() => Ed25519.Sign(seed, [.. pub, 0], [], new byte[64])).Throws<ArgumentException>();
+        await Assert.That(() => Ed25519.Sign(seed.AsSpan(1), pub, [], new byte[64])).Throws<ArgumentException>();
+        await Assert.That(() => Ed25519.Sign(seed, pub, [], new byte[63])).Throws<ArgumentException>();
+    }
+
+    [Test]
+    public async Task AMismatchedPublicKey_WouldGiveTheSecretScalarAway()
+    {
+        // Why only a key's own derived public key may be passed: the nonce depends on the seed and the message, not on the public key,
+        // so two signatures of one message under two public keys share R, and S - S' = (h - h') * a gives away the scalar a. This
+        // records the hazard that SshPrivateKey.Ed25519Key's derive-only public key (see SshPrivateKeyTests) guards against.
+        var seed = H("9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60");
+        var message = "same message"u8.ToArray();
+        var genuine = SignWithPublicKey(seed, PublicKey(seed), message);
+        var mismatched = SignWithPublicKey(seed, PublicKey(H("4ccd089b28ff96da9db6c346ec114e0f5b8a319f35aba624da8cf6ed4fb8a6fb")), message);
+        await Assert.That(Hex(mismatched[..32])).IsEqualTo(Hex(genuine[..32]));
+        await Assert.That(Hex(mismatched[32..])).IsNotEqualTo(Hex(genuine[32..]));
+        await Assert.That(Hex(genuine)).IsEqualTo(Hex(Sign(seed, message)));
+    }
+
     [Test]
     public async Task Signing_IsDeterministic()
     {
