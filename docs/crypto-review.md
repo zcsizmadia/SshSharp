@@ -12,7 +12,7 @@ outside review is planned (1.0 shipped with this internal review as its basis).
 | Field arithmetic (GF(2^255 - 19)) | `BigInteger` on random and edge values (non-canonical encodings, limb boundaries), long operation chains with limb bounds checked |
 | X25519 | RFC 7748 vectors including the 1,000-iteration one, OpenSSL-generated vectors, all-zero shared secret rejected |
 | Ed25519 | RFC 8032 vectors, OpenSSL and ssh-keygen signatures; non-canonical S, small-order and non-canonical public keys rejected |
-| ChaCha20, Poly1305, chacha20-poly1305@openssh.com | RFC 8439 vectors, the framework's RFC 8439 AEAD, OpenSSH's construction, interop with OpenSSH; the vectorized ChaCha20 against the scalar code (below) |
+| ChaCha20, Poly1305, chacha20-poly1305@openssh.com | RFC 8439 vectors, the framework's RFC 8439 AEAD, OpenSSH's construction, interop with OpenSSH; the vectorized ChaCha20 against the scalar code, and Poly1305's 64-bit limbs against its 26-bit code and a `BigInteger` computation of the definition (below) |
 | bcrypt_pbkdf | pyca/bcrypt known answer; keys encrypted by ssh-keygen with every supported cipher |
 | BLAKE2b | RFC 7693 |
 | Argon2d/i/id | RFC 9106 section 5 vectors; .ppk files written by PuTTY's puttygen (CI) |
@@ -134,6 +134,82 @@ test against the scalar code, and the timing test below.
 Measured on an Intel Core i7-12800H, Windows 11, x64 (on .NET 8 the first row also runs 4 blocks at once). The first run of the
 data check gave t = -16.9: the harness reused one array for the fixed class, which stayed in the cache while each random input was a
 fresh array. The fixed class now gets a fresh copy per sample, like the random class, and the other checks' results did not change.
+
+## Constant-time review of Poly1305 with 64-bit limbs
+
+In a 64-bit process, Poly1305 (`Crypto/Poly1305.cs`) holds r and the accumulator h in three limbs of 44, 44 and 42 bits (the
+poly1305-donna-64 representation) and multiplies them with 64×64→128-bit products from `Math.BigMul`: 9 products per 16-byte block,
+against 25 with the five 26-bit limbs it replaced. A 32-bit process keeps the 26-bit code (`Crypto/Poly1305.Limbs26.cs`, unchanged),
+because there a 64×64-bit product takes four 32-bit multiplies and the 64-bit limbs measured about twice as slow
+([benchmarks](benchmarks.md#poly1305-64-bit-limbs)). Which one runs depends only on the process (`Environment.Is64BitProcess`, a
+constant for the JIT). The one-time key (r and s) and the accumulator are secret. In `chacha20-poly1305@openssh.com` the message is the
+ciphertext, but the code treats it as secret too; only its length is public.
+
+**Method.** Line-by-line reading against poly1305-donna-64, a bound for every limb and column sum (in the code's comments), inspection
+of the x64 JIT output on .NET 10 and .NET 8 (`DOTNET_JitDisasm`), a differential test, and the timing test below.
+
+**Findings.**
+
+- **Clamping and limbs:** r is clamped and split into limbs with constant masks and shifts; the message limbs and the 2^128 bit of a
+  whole block are added the same way.
+- **Products:** `Math.BigMul` compiles to `mulx` on x64 with BMI2 and to `mul` and `umulh` on Arm64, whose time does not depend on
+  their operands; without BMI2 the runtime's fallback is straight-line code of four multiplies of 32-bit halves. The multipliers
+  (r0, r1, r2 and 20·r2) are stored shifted left by 20 bits, which still fits in 64, so each 128-bit product splits at bit 44 with
+  one shift of its low word, and 20·h2 is multiplied by r1 instead of h2 by 20·r1, which would not fit shifted. As in the X25519 field, column sums are kept as two 64-bit halves, so no
+  128-bit addition and no carry flag is involved: every product is below 2^92 and every column below 2^93, so neither half can
+  overflow.
+- **Carries:** one fixed pass per block, with shifts and masks: d0 into d1, d1 into d2, and the carry above 2^130 back into h0 times 5,
+  then h0 into h1. Every block leaves h0 below 2^44, h1 below 2^44 + 2^8 and h2 below 2^42, the bounds the next block's products need.
+- **Final reduction** (`Finish44`, inlined): the steps of poly1305-donna-64, line for line and in its order. Two full carry passes
+  (h1 into h2, h2's overflow into h0 times 5, h0 into h1) leave every limb within its width. Then g = h + 5 - 2^130 (h - p) is
+  computed limb by limb, and the sign bit of its top limb becomes a mask (`(g2 >> 63) - 1`) that selects g or h with AND and OR.
+  Adding s is limb by limb with shift carries, and the carry out of 2^128 is dropped by the top limb's mask. Within the limb bounds
+  the block loop guarantees (h0 < 2^44, h1 < 2^44 + 2^8, h2 < 2^42), the second pass never carries: the first pass carries h0 into
+  h1 only after h2 overflowed, which needs a carry out of h1, which leaves h1 below 2^8 before the +1. It is kept so that the code
+  matches the reference. A test runs this step on its own against `BigInteger` for every combination of edge limb values at those
+  bounds (including the rare state where the first pass carries all the way round) and for 4,000 random states.
+- **Control flow:** the loop runs once per 16-byte block, and its one branch, between a whole block read in place and the last
+  partial block staged with its 0x01 terminator, depends only on the length. In the JIT output of `ComputeTag44` on .NET 10 and
+  .NET 8, with `Finish44` inlined into it, every conditional jump is a span length or bounds check (the key, the tag, the remaining
+  message), the loop's own length tests or the stack-guard check; there is no `cmov` or `setcc`, and the 9 `mulx` of a block and the
+  final reduction and select are straight-line code. The method is compiled fully optimized at once (it uses `stackalloc`, so it
+  does not go through tier 0), so this is the code that runs.
+- **Secrets in memory:** the limbs live in registers and stack slots, and the last partial block in a 16-byte stack buffer; none is
+  cleared, as before.
+- **32-bit processes:** the 26-bit code multiplies 32-bit values into 64-bit products, as before this change. In the x86 JIT output
+  (.NET 10 and .NET 8) each of its 25 products per block is one `mulx` instruction, with no call to the 64-bit multiplication helper
+  of the platform caveat above.
+
+| Check (15,000 samples per class) | t (.NET 10) | t (.NET 8) | Verdict |
+|---|---|---|---|
+| Poly1305 over 16,383 bytes (1,023 blocks and a partial one): all-zero key vs random keys | 0.49 | -0.93 | no evidence of a leak |
+| The same with the 26-bit limbs | 0.93 | -0.61 | no evidence of a leak |
+| Poly1305 over 4,095 bytes: all-zero data vs random data | 0.89 | 0.09 | no evidence of a leak |
+| The same with the 26-bit limbs | -0.89 | 0.64 | no evidence of a leak |
+
+Measured on an Intel Core i7-12800H, Windows 11, x64, on an otherwise idle machine. Poly1305 runs over more data than ChaCha20 in
+this test because it is fast: over 1,000 bytes it took 4 to 5 timer ticks (100 ns each on Windows), too few to show a small
+difference; over 16,383 bytes it takes about 64 ticks with the 64-bit limbs and 97 with the 26-bit ones.
+
+A differential test runs both limb sizes on every machine against each other and against the definition computed with `BigInteger`:
+random keys and messages of every length up to 1,100 bytes and longer ones, the largest clamped r with all-ones messages, accumulators
+that end just below, at and above p and 2^130 (where the final subtraction and the carry above 2^130 decide the result), an s that
+carries out of 2^128, and the RFC 8439 vectors (section 2.5.2 and appendix A.3).
+
+Mutation testing (the `chacha20-poly1305` scope, Stryker.NET 5) kills 126 mutants of the 64-bit code and 174 of the 26-bit code.
+What survives:
+
+- `>>` turned into `>>>`: on an unsigned value both are the same shift, so these mutants are equivalent. Where the shift is the only
+  bitwise operator of its statement, the statement carries a `// Stryker disable once Bitwise` comment. Where the statement also
+  has `&`, `|` or `<<` (6 statements in the 64-bit code, 11 in the 26-bit code), it does not, because the comment would also hide
+  those operators' mutants, which the tests kill.
+- The call of the 26-bit code from `ComputeTag` runs only in a 32-bit process, so a 64-bit test run cannot cover it; the tests call
+  `ComputeTag26` directly instead. Negating `Environment.Is64BitProcess` is equivalent (both branches give the same tag), and so is
+  removing the clearing of the last block's stack buffer (it starts zeroed and only the last block uses it); both are annotated.
+- The additions of the second carry pass of the final reduction (`h2 += cc`, `h0 += cc * 5`, `h1 += cc`) add a carry that is
+  always 0 within the block loop's limb bounds (above), so changing them is equivalent; they are annotated with that bound.
+- In the 26-bit code, the last carry of its final reduction (`h1 += cc`) survives, as it did before this change; that code is
+  unchanged.
 
 ## Private keys written to files
 

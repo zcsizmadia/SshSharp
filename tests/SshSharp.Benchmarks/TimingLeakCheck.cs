@@ -39,6 +39,20 @@ internal static class TimingLeakCheck
         Check("ChaCha20 data", samples, new byte[1000], plain => ChaCha20.Xor(chachaKey, nonce, 1, plain, stream),
             () => RandomNumberGenerator.GetBytes(1000));
 
+        // Poly1305 is fast, so it runs over more data than ChaCha20, to span many timer ticks (100 ns on Windows): an all-zero key
+        // (r = 0, s = 0) against random keys over 16,383 bytes (1,023 whole blocks and a partial one, about a packet), then one key with
+        // all-zero data against random data over 4,095 bytes (the inputs are prepared up front, one per sample). The 26-bit limbs,
+        // which a 32-bit process uses, are checked on their own too.
+        var polyData = RandomNumberGenerator.GetBytes(16383);
+        var polyTag = new byte[Poly1305.TagSize];
+        Check("Poly1305 key", samples, new byte[32], secret => Poly1305.ComputeTag(secret, polyData, polyTag));
+        Check("Poly1305 key/26", samples, new byte[32], secret => Poly1305.ComputeTag26(secret, polyData, polyTag));
+        var polyKey = RandomNumberGenerator.GetBytes(32);
+        Check("Poly1305 data", samples, new byte[4095], data => Poly1305.ComputeTag(polyKey, data, polyTag),
+            () => RandomNumberGenerator.GetBytes(4095));
+        Check("Poly1305 data/26", samples, new byte[4095], data => Poly1305.ComputeTag26(polyKey, data, polyTag),
+            () => RandomNumberGenerator.GetBytes(4095));
+
         // sntrup761 decapsulation is about a millisecond, so it gets a tenth of the samples. First a fixed secret key against fresh ones
         // (each with a valid ciphertext of its own), then the implicit-rejection path: one key, a valid ciphertext against random bytes.
         var kemSamples = Math.Max(1000, samples / 10);
@@ -96,7 +110,7 @@ internal static class TimingLeakCheck
         var b = randomTimes.Where(t => t <= cutoff).ToArray();
         var t = WelchT(a, b);
         var verdict = Math.Abs(t) < 4.5 ? "no evidence of a leak" : Math.Abs(t) < 10 ? "SUSPICIOUS" : "LEAK LIKELY";
-        Console.WriteLine($"{name,-14} t = {t,8:F2}   fixed mean {a.Average(),9:F1}   random mean {b.Average(),9:F1} ticks   {verdict}");
+        Console.WriteLine($"{name,-16} t = {t,8:F2}   fixed mean {a.Average(),9:F1}   random mean {b.Average(),9:F1} ticks   {verdict}");
     }
 
     private static double Percentile(double[] values, double p)

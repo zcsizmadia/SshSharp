@@ -54,4 +54,8 @@ public class CryptoBenchmarks
 
     [Benchmark(Description = "Poly1305 32 KiB")]
     public void Poly1305Tag() => SshSharp.Crypto.Poly1305.ComputeTag(_polyKey, _bulk, _tag);
+
+    // The 26-bit limbs, which a 32-bit process uses (and which were the only code before the 64-bit limbs).
+    [Benchmark(Description = "Poly1305 32 KiB, 26-bit limbs")]
+    public void Poly1305Tag26() => SshSharp.Crypto.Poly1305.ComputeTag26(_polyKey, _bulk, _tag);
 }

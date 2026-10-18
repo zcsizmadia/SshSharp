@@ -142,8 +142,12 @@ public class ChaChaPolyTests
         }
 
         await Assert.That(Hex(Tag(key, []))).IsEqualTo("0102030405060708090a0b0c0d0e0f10");
-        await Assert.That(() => Poly1305.ComputeTag(new byte[31], [], new byte[16])).Throws<ArgumentException>();
-        await Assert.That(() => Poly1305.ComputeTag(new byte[32], [], new byte[15])).Throws<ArgumentException>();
+        // Exactly ArgumentException, with its message: a check that let a bad size through would fail later with
+        // ArgumentOutOfRangeException instead.
+        await Assert.That(() => Poly1305.ComputeTag(new byte[31], [], new byte[16])).ThrowsExactly<ArgumentException>()
+            .WithMessageContaining("32-byte key");
+        await Assert.That(() => Poly1305.ComputeTag(new byte[32], [], new byte[15])).ThrowsExactly<ArgumentException>()
+            .WithMessageContaining("16-byte tag");
     }
 
     private static ChaCha20Poly1305OpenSsh NewCipher(out byte[] key)
