@@ -179,6 +179,53 @@ public class Poly1305Tests
     }
 
     [Test]
+    public async Task TheFinalReduction_AtTheBlockLoopsLimbBounds_MatchesBigInteger()
+    {
+        // The 64-bit code's last step on its own, for accumulators the block loop can leave (h0 < 2^44, h1 < 2^44 + 2^8, h2 < 2^42):
+        // every combination of edge values, which include the rare state where both carry passes carry (h1 >= 2^44 with h2 and h0
+        // at their tops), then random states. The tag must be (h mod p) + s mod 2^128.
+        const ulong Top44 = (1UL << 44) - 1;
+        const ulong Top42 = (1UL << 42) - 1;
+        ulong[] h0Edges = [0, 1, 4, 5, 6, Top44 - 5, Top44 - 4, Top44 - 1, Top44];
+        ulong[] h1Edges = [0, 1, (1UL << 8) - 1, Top44 - 1, Top44, Top44 + 1, Top44 + 2, Top44 + (1UL << 8) - 1];
+        ulong[] h2Edges = [0, 1, Top42 - 1, Top42];
+        var rng = new Random(306);
+        byte[][] sValues = [new byte[16], Enumerable.Repeat((byte)0xff, 16).ToArray(), RandomBytes(rng, 16)];
+
+        var states = new List<(ulong H0, ulong H1, ulong H2, byte[] S)>();
+        foreach (var h0 in h0Edges)
+        {
+            foreach (var h1 in h1Edges)
+            {
+                foreach (var h2 in h2Edges)
+                {
+                    states.AddRange(sValues.Select(s => (h0, h1, h2, s)));
+                }
+            }
+        }
+
+        for (var i = 0; i < 4000; i++)
+        {
+            states.Add(((ulong)rng.NextInt64(1L << 44), (ulong)rng.NextInt64((1L << 44) + 256), (ulong)rng.NextInt64(1L << 42), RandomBytes(rng, 16)));
+        }
+
+        var tag = new byte[16];
+        var failures = new List<string>();
+        foreach (var (h0, h1, h2, s) in states)
+        {
+            Poly1305.Finish44(h0, h1, h2, s, tag);
+            var h = new BigInteger(h0) + (new BigInteger(h1) << 44) + (new BigInteger(h2) << 88);
+            var expected = Hex(ToBytes(((h % P) + new BigInteger(s, isUnsigned: true)) % TwoTo128));
+            if (Hex(tag) != expected)
+            {
+                failures.Add($"h0 {h0:x}, h1 {h1:x}, h2 {h2:x}, s {Hex(s)}");
+            }
+        }
+
+        await Assert.That(failures).IsEmpty();
+    }
+
+    [Test]
     public async Task SCarriesOutOf2To128()
     {
         // h + s above 2^128 must wrap: s = 2^128 - 1 with h = 1, 2 and p - 1 (whose low 128 bits are all ones but the last two).

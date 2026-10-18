@@ -160,18 +160,20 @@ of the x64 JIT output on .NET 10 and .NET 8 (`DOTNET_JitDisasm`), a differential
   overflow.
 - **Carries:** one fixed pass per block, with shifts and masks: d0 into d1, d1 into d2, and the carry above 2^130 back into h0 times 5,
   then h0 into h1. Every block leaves h0 below 2^44, h1 below 2^44 + 2^8 and h2 below 2^42, the bounds the next block's products need.
-- **Final reduction:** h1 is carried into h2 and h2's overflow back into h0 (times 5), which leaves h below 2^130 + 2^45, less than
-  2p. Then g = h + 5 - 2^130 (h - p) is computed limb by limb, and the sign bit of its top limb becomes a mask (`(g2 >> 63) - 1`)
-  that selects g or h with AND and OR. Adding s is limb by limb with shift carries, and the carry out of 2^128 is dropped by the top
-  limb's mask. poly1305-donna-64 also carries h0 into h1 and repeats the whole pass. The repeated pass can never carry, and the
-  extra carry out of h0 (h0 can reach 2^44 + 4) is unnecessary because the subtraction and the addition of s carry every limb
-  exactly; it was also left out because no test could reach it on purpose, so its mutants survived. The shortened reduction was
-  checked against `BigInteger` over two million limb states at the loop's bounds, the edge values included.
+- **Final reduction** (`Finish44`, inlined): the steps of poly1305-donna-64, line for line and in its order. Two full carry passes
+  (h1 into h2, h2's overflow into h0 times 5, h0 into h1) leave every limb within its width. Then g = h + 5 - 2^130 (h - p) is
+  computed limb by limb, and the sign bit of its top limb becomes a mask (`(g2 >> 63) - 1`) that selects g or h with AND and OR.
+  Adding s is limb by limb with shift carries, and the carry out of 2^128 is dropped by the top limb's mask. Within the limb bounds
+  the block loop guarantees (h0 < 2^44, h1 < 2^44 + 2^8, h2 < 2^42), the second pass never carries: the first pass carries h0 into
+  h1 only after h2 overflowed, which needs a carry out of h1, which leaves h1 below 2^8 before the +1. It is kept so that the code
+  matches the reference. A test runs this step on its own against `BigInteger` for every combination of edge limb values at those
+  bounds (including the rare state where the first pass carries all the way round) and for 4,000 random states.
 - **Control flow:** the loop runs once per 16-byte block, and its one branch, between a whole block read in place and the last
-  partial block staged with its 0x01 terminator, depends only on the length. In the JIT output of `ComputeTag44` on .NET 10 and .NET
-  8, every conditional jump is a span length or bounds check (the key, the tag, the remaining message), the loop's own length tests or
-  the stack-guard check; there is no `cmov` or `setcc`, and the 9 `mulx` of a block and the final select are straight-line code. The
-  method is compiled fully optimized at once (it uses `stackalloc`, so it does not go through tier 0), so this is the code that runs.
+  partial block staged with its 0x01 terminator, depends only on the length. In the JIT output of `ComputeTag44` on .NET 10 and
+  .NET 8, with `Finish44` inlined into it, every conditional jump is a span length or bounds check (the key, the tag, the remaining
+  message), the loop's own length tests or the stack-guard check; there is no `cmov` or `setcc`, and the 9 `mulx` of a block and the
+  final reduction and select are straight-line code. The method is compiled fully optimized at once (it uses `stackalloc`, so it
+  does not go through tier 0), so this is the code that runs.
 - **Secrets in memory:** the limbs live in registers and stack slots, and the last partial block in a 16-byte stack buffer; none is
   cleared, as before.
 - **32-bit processes:** the 26-bit code multiplies 32-bit values into 64-bit products, as before this change. In the x86 JIT output
@@ -194,7 +196,7 @@ random keys and messages of every length up to 1,100 bytes and longer ones, the 
 that end just below, at and above p and 2^130 (where the final subtraction and the carry above 2^130 decide the result), an s that
 carries out of 2^128, and the RFC 8439 vectors (section 2.5.2 and appendix A.3).
 
-Mutation testing (the `chacha20-poly1305` scope, Stryker.NET 5) kills 116 mutants of the 64-bit code and 174 of the 26-bit code.
+Mutation testing (the `chacha20-poly1305` scope, Stryker.NET 5) kills 126 mutants of the 64-bit code and 174 of the 26-bit code.
 What survives:
 
 - `>>` turned into `>>>`: on an unsigned value both are the same shift, so these mutants are equivalent. Where the shift is the only
@@ -204,6 +206,8 @@ What survives:
 - The call of the 26-bit code from `ComputeTag` runs only in a 32-bit process, so a 64-bit test run cannot cover it; the tests call
   `ComputeTag26` directly instead. Negating `Environment.Is64BitProcess` is equivalent (both branches give the same tag), and so is
   removing the clearing of the last block's stack buffer (it starts zeroed and only the last block uses it); both are annotated.
+- The additions of the second carry pass of the final reduction (`h2 += cc`, `h0 += cc * 5`, `h1 += cc`) add a carry that is
+  always 0 within the block loop's limb bounds (above), so changing them is equivalent; they are annotated with that bound.
 - In the 26-bit code, the last carry of its final reduction (`h1 += cc`) survives, as it did before this change; that code is
   unchanged.
 

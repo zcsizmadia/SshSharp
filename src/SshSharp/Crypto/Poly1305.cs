@@ -113,10 +113,19 @@ internal static partial class Poly1305
             h1 += c;
         }
 
-        // Carry h1 into h2 and h2's overflow back into h0. Each carry is 0 or 1 (h1 < 2^44 + 2^8, h2 < 2^42), so afterwards h1 < 2^44,
-        // h2 < 2^42 and h0 < 2^44 + 5, and h < 2^130 + 2^45 < 2p. poly1305-donna-64 also carries h0 into h1 and then repeats the pass;
-        // here h0 is left as it is, because the steps below carry every limb exactly and so take h0 up to 2^44 + 4. (The carry out of
-        // h0 needs a state no test can reach on purpose, which left that line's mutants alive, and the repeated pass never carries.)
+        Finish44(h0, h1, h2, key[16..], tag);
+    }
+
+    /// <summary>
+    /// The end of <see cref="ComputeTag44"/>: reduces h (limbs as the block loop leaves them: h0 &lt; 2^44, h1 &lt; 2^44 + 2^8,
+    /// h2 &lt; 2^42) modulo p, adds s and writes the tag. The steps and their order are poly1305-donna-64's.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static void Finish44(ulong h0, ulong h1, ulong h2, ReadOnlySpan<byte> s, Span<byte> tag)
+    {
+        // Fully carry h, as poly1305-donna-64 does: two passes. Within the bounds above the second pass never carries: the first
+        // carries h0 into h1 only if h2 overflowed, which needs a carry out of h1, which leaves h1 below 2^8 before that +1; so after
+        // the first pass h0, h1 < 2^44 and h2 < 2^42, every carry of the second is 0, and its additions are equivalent mutants.
         // Stryker disable once Bitwise : on an unsigned value, >>> is the same shift as >>
         var cc = h1 >> 44;
         h1 &= Mask44;
@@ -125,6 +134,25 @@ internal static partial class Poly1305
         cc = h2 >> 42;
         h2 &= Mask42;
         h0 += cc * 5;
+        // Stryker disable once Bitwise : on an unsigned value, >>> is the same shift as >>
+        cc = h0 >> 44;
+        h0 &= Mask44;
+        h1 += cc;
+        // Stryker disable once Bitwise : on an unsigned value, >>> is the same shift as >>
+        cc = h1 >> 44;
+        h1 &= Mask44;
+        // Stryker disable once Assignment : cc is 0 here (h1 < 2^44 after the first pass)
+        h2 += cc;
+        // Stryker disable once Bitwise : on an unsigned value, >>> is the same shift as >>
+        cc = h2 >> 42;
+        h2 &= Mask42;
+        // Stryker disable once Assignment,Arithmetic : cc is 0 here (h2 < 2^42 after the first pass)
+        h0 += cc * 5;
+        // Stryker disable once Bitwise : on an unsigned value, >>> is the same shift as >>
+        cc = h0 >> 44;
+        h0 &= Mask44;
+        // Stryker disable once Assignment : cc is 0 here (h0 < 2^44 after the first pass)
+        h1 += cc;
 
         // Compute g = h + 5 - 2^130 = h - p, and select g if it did not go negative (h >= p), else h: a mask, not a branch.
         var g0 = h0 + 5;
@@ -148,8 +176,8 @@ internal static partial class Poly1305
         h2 = (h2 & mask) | g2;
 
         // h + s mod 2^128: s is added limb by limb, and the carry out of bit 128 is dropped with the top limb's mask.
-        var t0 = BinaryPrimitives.ReadUInt64LittleEndian(key[16..]);
-        var t1 = BinaryPrimitives.ReadUInt64LittleEndian(key[24..]);
+        var t0 = BinaryPrimitives.ReadUInt64LittleEndian(s);
+        var t1 = BinaryPrimitives.ReadUInt64LittleEndian(s[8..]);
         h0 += t0 & Mask44;
         // Stryker disable once Bitwise : on an unsigned value, >>> is the same shift as >>
         cc = h0 >> 44;
