@@ -130,7 +130,11 @@ public class TransportInteropTests
         }
 
         var seen = new List<HostKeyInfo>();
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+
+        // Finite-field DH up to 8192 bits is CPU-bound BigInteger work (the group exchange's primality round alone is about 0.65 s on a
+        // fast machine). Under the parallel test load of a 4-core CI runner it took over 20 s once, so these get more time; a hang still
+        // fails.
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(kex.StartsWith("diffie-hellman", StringComparison.Ordinal) ? 90 : 20));
         var (stream, transport) = await ConnectOrSkipAsync(() =>
         {
             seen.Clear();
