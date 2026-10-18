@@ -16,12 +16,16 @@ internal static class ConnectProfile
     public static async Task RunAsync()
     {
         var (host, port, user, password) = ComparisonBenchmarks.Server;
+
+        // With SSHSHARP_BENCH_KEY the direct route logs in with that key (loaded once), as the ssh_config route does.
+        IReadOnlyList<SshPrivateKey> keys = ComparisonBenchmarks.KeyFile is { } keyFile ? [await SshPrivateKey.LoadAsync(keyFile)] : [];
         var direct = new SshClientOptions
         {
             UserName = user,
-            Password = password,
+            Password = password.Length > 0 ? password : null,
+            PrivateKeys = keys,
             HostKeyVerifier = SshHostKeyVerifier.FromDelegate((_, _) => ValueTask.FromResult(true)),
-            AlgorithmPreferences = new AlgorithmPreferences { Kex = [SshAlgorithms.Curve25519Sha256], Ciphers = ["aes256-gcm@openssh.com"], HostKeys = [SshAlgorithms.SshEd25519] },
+            AlgorithmPreferences = new AlgorithmPreferences { Kex = [SshAlgorithms.Curve25519Sha256], Ciphers = [ComparisonBenchmarks.Cipher], HostKeys = [SshAlgorithms.SshEd25519] },
         };
 
         // Warm up both paths (JIT, first DNS and socket setup).
@@ -65,7 +69,8 @@ internal static class ConnectProfile
         var logged = new SshClientOptions
         {
             UserName = user,
-            Password = password,
+            Password = direct.Password,
+            PrivateKeys = keys,
             HostKeyVerifier = direct.HostKeyVerifier,
             AlgorithmPreferences = direct.AlgorithmPreferences,
             Logger = factory.CreateLogger("profile"),
