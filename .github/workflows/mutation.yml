@@ -54,6 +54,9 @@ jobs:
           - scope: public-key
             mutate: -m "**/Keys/SshPublicKey.cs" -m "**/Keys/VerifyingKey.cs"
             tests: Keys/*Tests.cs;Crypto/WycheproofTests.cs;Fuzz/ParserRobustnessTests.cs
+          - scope: certificates
+            mutate: -m "**/SshCertificate.cs" -m "**/SshCertificateBuilder.cs"
+            tests: CertificateTests.cs;Keys/SshCertificate*Tests.cs;Keys/ExternalKeyTests.cs;Keys/SshSignatureTests.cs;KnownHostsVerifierTests.cs;Fuzz/ParserRobustnessTests.cs
           - scope: sntrup761
             mutate: -m "**/Crypto/Sntrup761.cs"
             tests: Crypto/Sntrup761Tests.cs;Protocol/SntrupKexTests.cs

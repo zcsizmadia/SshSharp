@@ -50,7 +50,7 @@ public sealed class CertificateTests : IDisposable
         await Assert.That(certificate.ValidBefore.ToUnixTimeSeconds()).IsEqualTo(before.ToUnixTimeSeconds());
         await Assert.That(certificate.Extensions).IsEquivalentTo(new[] { "permit-pty" });
         await Assert.That(certificate.AuthorityFingerprint).IsEqualTo(_authority.Fingerprint);
-        await Assert.That(certificate.HasValidAuthoritySignature()).IsTrue();
+        await Assert.That(certificate.VerifySignature()).IsTrue();
 
         // "Forever" maps to MaxValue rather than overflowing.
         var forever = SshCertificate.FromBlob(TestKeys.Certificate(_authority, key.Blob, SshCertificateType.Host));
@@ -67,7 +67,7 @@ public sealed class CertificateTests : IDisposable
         var tampered = (byte[])blob.Clone();
         var index = Array.IndexOf(tampered, (byte)'t', 120);
         tampered[index] ^= 1;
-        await Assert.That(SshCertificate.FromBlob(tampered).HasValidAuthoritySignature()).IsFalse();
+        await Assert.That(SshCertificate.FromBlob(tampered).VerifySignature()).IsFalse();
 
         // An authority whose key is itself a certificate is refused.
         var authorityCertificate = SshCertificate.FromBlob(TestKeys.Certificate(_authority, _authority.PublicKey.ToArray(), SshCertificateType.User));

@@ -48,3 +48,28 @@ SshSharp.Config.KnownHostsFile.Add(string! host, int port, SshSharp.SshPublicKey
 SshSharp.Config.KnownHostsFile.Check(string! host, SshSharp.SshPublicKey! key) -> SshSharp.Config.KnownHostsCheckResult
 SshSharp.Config.KnownHostsFile.Check(string! host, int port, SshSharp.SshPublicKey! key) -> SshSharp.Config.KnownHostsCheckResult
 static SshSharp.SshHostKeyVerifier.Pinned(params SshSharp.SshPublicKey![]! keys) -> SshSharp.SshHostKeyVerifier!
+SshSharp.SshCertificate.Comment.get -> string?
+SshSharp.SshCertificate.IsValidAt(System.DateTimeOffset time) -> bool
+SshSharp.SshCertificate.IsValidFor(SshSharp.SshPublicKey! authority, SshSharp.SshCertificateType type, string! principal, System.DateTimeOffset time, out string? reason) -> bool
+SshSharp.SshCertificate.ToAuthorizedKeysLine() -> string!
+SshSharp.SshCertificate.VerifySignature() -> bool
+override SshSharp.SshCertificate.ToString() -> string!
+SshSharp.SshCertificateBuilder
+SshSharp.SshCertificateBuilder.CriticalOptions.get -> System.Collections.Generic.IDictionary<string!, string!>!
+SshSharp.SshCertificateBuilder.Extensions.get -> System.Collections.Generic.IDictionary<string!, string!>!
+SshSharp.SshCertificateBuilder.KeyId.get -> string!
+SshSharp.SshCertificateBuilder.Principals.get -> System.Collections.Generic.IList<string!>!
+SshSharp.SshCertificateBuilder.PublicKey.get -> SshSharp.SshPublicKey!
+SshSharp.SshCertificateBuilder.Serial.get -> ulong
+SshSharp.SshCertificateBuilder.Serial.set -> void
+SshSharp.SshCertificateBuilder.SignAsync(SshSharp.SshPrivateKey! authority, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SshSharp.SshCertificate!>!
+SshSharp.SshCertificateBuilder.SshCertificateBuilder(SshSharp.SshPublicKey! publicKey, SshSharp.SshCertificateType type, string! keyId) -> void
+SshSharp.SshCertificateBuilder.Type.get -> SshSharp.SshCertificateType
+SshSharp.SshCertificateBuilder.ValidAfter.get -> System.DateTimeOffset?
+SshSharp.SshCertificateBuilder.ValidAfter.set -> void
+SshSharp.SshCertificateBuilder.ValidBefore.get -> System.DateTimeOffset?
+SshSharp.SshCertificateBuilder.ValidBefore.set -> void
+const SshSharp.SshCertificateBuilder.ForceCommand = "force-command" -> string!
+const SshSharp.SshCertificateBuilder.SourceAddress = "source-address" -> string!
+const SshSharp.SshCertificateBuilder.VerifyRequired = "verify-required" -> string!
+SshSharp.SshSignaturePurpose.Certificate = 2 -> SshSharp.SshSignaturePurpose

@@ -235,4 +235,107 @@ internal static class Keys
         }, cancellationToken);
         // </kerberos-address>
     }
+
+    public static async Task CheckCertificateAsync(CancellationToken cancellationToken)
+    {
+        // <certificate-check>
+        // The authority you trust, and a certificate someone presents (a user's -cert.pub, say, uploaded to your bastion's portal).
+        var trustedCa = SshPublicKey.Parse(await File.ReadAllTextAsync("user_ca.pub", cancellationToken));
+        var certificate = SshCertificate.Parse(await File.ReadAllTextAsync("id_ed25519-cert.pub", cancellationToken));
+
+        if (!certificate.IsValidFor(trustedCa, SshCertificateType.User, "deploy", DateTimeOffset.UtcNow, out var reason))
+        {
+            throw new InvalidOperationException($"Certificate {certificate.KeyId} is not acceptable: {reason}.");
+        }
+        // </certificate-check>
+    }
+
+    public static async Task CheckCertificatePartsAsync(SshPublicKey trustedCa, SshCertificate certificate)
+    {
+        // <certificate-check-parts>
+        // Only the signature: proves the holder of AuthorityKey issued it, not that you trust that authority.
+        var signed = certificate.VerifySignature();
+
+        // Your own rules, for an application that enforces the critical options itself.
+        var acceptable = signed
+            && certificate.GetAuthorityKey() == trustedCa
+            && certificate.Type == SshCertificateType.User
+            && certificate.IsValidAt(DateTimeOffset.UtcNow)
+            && certificate.Principals.Contains("deploy")
+            && certificate.CriticalOptions.Keys.All(option => option == SshCertificateBuilder.ForceCommand);
+        // </certificate-check-parts>
+        await Task.CompletedTask;
+        _ = acceptable;
+    }
+
+    public static async Task IssueUserCertificateAsync(SshHostKeyVerifier verifier, string buildId, ulong buildNumber, CancellationToken cancellationToken)
+    {
+        // <certificate-issue-user>
+        // The CA key, read from a secret store (see below for one that stays in an agent or a KMS).
+        using var ca = SshPrivateKey.Parse(Environment.GetEnvironmentVariable("SSH_USER_CA_KEY") ?? throw new InvalidOperationException("SSH_USER_CA_KEY is not set."));
+
+        // A key for this build only, and a certificate for it that expires with the build.
+        using var key = SshPrivateKey.Generate(SshKeyType.Ed25519, $"ci-build-{buildId}");
+        var builder = new SshCertificateBuilder(key.GetPublicKey(), SshCertificateType.User, keyId: $"ci-build-{buildId}")
+        {
+            Serial = buildNumber,                              // unique, so a revocation list can name it
+            Principals = { "deploy" },                         // the user it may log in as
+            ValidBefore = DateTimeOffset.UtcNow.AddMinutes(30),
+        };
+        builder.Extensions.Clear();                            // commands only: no terminal, no forwarding
+        var certificate = await builder.SignAsync(ca, cancellationToken);
+
+        await using var client = await SshClient.ConnectAsync("build.example.com", 22, new SshClientOptions
+        {
+            UserName = "deploy",
+            PrivateKeys = [key.WithCertificate(certificate)],
+            HostKeyVerifier = verifier,
+        }, cancellationToken);
+        // </certificate-issue-user>
+    }
+
+    public static async Task IssueHostCertificateAsync(SshPrivateKey ca, CancellationToken cancellationToken)
+    {
+        // <certificate-issue-host>
+        var hostKey = SshPublicKey.Parse(await File.ReadAllTextAsync("ssh_host_ed25519_key.pub", cancellationToken));
+        var builder = new SshCertificateBuilder(hostKey, SshCertificateType.Host, keyId: "web1")
+        {
+            Principals = { "web1.example.com", "web1" },
+            ValidBefore = DateTimeOffset.UtcNow.AddDays(90),
+        };
+        var certificate = await builder.SignAsync(ca, cancellationToken);
+
+        // sshd_config: HostCertificate /etc/ssh/ssh_host_ed25519_key-cert.pub
+        await File.WriteAllTextAsync("ssh_host_ed25519_key-cert.pub", certificate.ToAuthorizedKeysLine() + "\n", cancellationToken);
+        // </certificate-issue-host>
+    }
+
+    public static async Task CertificateAuthorityInAgentAsync(CancellationToken cancellationToken)
+    {
+        // <certificate-ca-agent>
+        // The CA key stays in the agent (ssh-add on the signing host); only its fingerprint is configuration.
+        var caFingerprint = Environment.GetEnvironmentVariable("SSH_USER_CA_FINGERPRINT") ?? throw new InvalidOperationException("Set SSH_USER_CA_FINGERPRINT.");
+        var agent = SshAgent.FromEnvironment() ?? throw new InvalidOperationException("No SSH agent is running.");
+        var ca = (await agent.GetKeysAsync(cancellationToken)).Single(k => k.Fingerprint == caFingerprint);
+        // </certificate-ca-agent>
+        _ = ca;
+    }
+
+    // <certificate-ca-signer>
+    /// <summary>
+    /// A certificate authority whose key is in a key service: it signs certificates only, so a stolen API credential cannot use the CA
+    /// key to log in anywhere. <c>signDigest</c> stands for your KMS client (an Ed25519 key signs the data itself; see SshKeySigner).
+    /// </summary>
+    internal sealed class CertificateAuthoritySigner(byte[] publicKey, Func<byte[], CancellationToken, Task<byte[]>> signDigest)
+        : SshKeySigner(publicKey)
+    {
+        // An ECDSA P-256 key in the service: it signs a SHA-256 digest and answers DER.
+        public override DSASignatureFormat EcdsaSignatureFormat => DSASignatureFormat.Rfc3279DerSequence;
+
+        public override async ValueTask<byte[]> SignAsync(SshSignRequest request, CancellationToken cancellationToken) =>
+            request.Purpose == SshSignaturePurpose.Certificate
+                ? await signDigest(SHA256.HashData(request.Data.Span), cancellationToken)
+                : throw new UnauthorizedAccessException("The CA key issues certificates only.");
+    }
+    // </certificate-ca-signer>
 }

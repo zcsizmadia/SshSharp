@@ -8,6 +8,12 @@ public enum SshSignaturePurpose
 
     /// <summary>An SSH signature over a file or other data (SSHSIG, <c>ssh-keygen -Y sign</c>), with its <see cref="SshSignRequest.Namespace"/>.</summary>
     FileSignature,
+
+    /// <summary>
+    /// Issuing an OpenSSH certificate as its certificate authority (<see cref="SshCertificateBuilder.SignAsync"/>, <c>ssh-keygen -s</c>):
+    /// the data is the certificate without its signature. A signer that holds a CA key can allow this purpose alone.
+    /// </summary>
+    Certificate,
 }
 
 /// <summary>
@@ -36,7 +42,7 @@ public sealed class SshSignRequest
 
     /// <summary>
     /// The data to sign: for authentication, the session identifier and the login request; for a file signature, the SSHSIG structure
-    /// holding the namespace and the file's hash. It is valid only until the signing task completes; copy it to keep it.
+    /// holding the namespace and the file's hash; for a certificate, the certificate up to its signature. It is valid only until the signing task completes; copy it to keep it.
     /// </summary>
     public ReadOnlyMemory<byte> Data { get; }
 

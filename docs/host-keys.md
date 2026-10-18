@@ -136,7 +136,10 @@ the key's type (`ssh-rsa`).
 `client.HostKey.GetPublicKey()` gives the key as an `SshPublicKey`: equal to another `SshPublicKey` when the key bytes are, with
 `ToAuthorizedKeysLine()` for the `<type> <base64>` text and `GetFingerprint(HashAlgorithmName.MD5)` for the legacy `MD5:aa:bb:...`
 form. `KnownHostsEntry.GetPublicKey()`, `KnownHostsFile.Add(host, port, key)` and `KnownHostsFile.Check(host, port, key)` work with
-the same type, and `SshCertificate.GetPublicKey()` and `GetAuthorityKey()` give a certificate's two keys.
+the same type, and `SshCertificate.GetPublicKey()` and `GetAuthorityKey()` give a certificate's two keys. To check a host
+certificate outside a connection, as `KnownHostsVerifier` does, use
+`certificate.IsValidFor(ca, SshCertificateType.Host, hostName, now, out var reason)`; to issue one, see
+[Certificates](how-to/certificates.md#act-as-a-certificate-authority).
 
 [!code-csharp[](snippets/HostKeys.cs#compare-key)]
 
