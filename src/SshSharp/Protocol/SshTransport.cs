@@ -54,12 +54,12 @@ internal sealed class SshTransport : IAsyncDisposable
 
         // Large socket reads. The defaults (4 KiB segments, 1 KiB minimum read) took nine or more reads for one 32 KiB data packet, each
         // an asynchronous completion through the thread pool; streaming from a Windows client then cost about five times the CPU per GiB.
-        // A read now has room for a whole packet and usually returns several. The cost: a 128 KiB array from the shared pool, rented
-        // when a read is issued (the reader needs somewhere to read into) and returned once everything in it has been consumed. The
-        // receive loop always has a read outstanding, so in practice each open connection holds one, idle or not, and gives it back when
-        // it closes. The writer keeps its defaults: a packet is encoded into a span of its full size (a segment of its own when it is
-        // larger than 4 KiB), so a large packet still goes out in one write.
-        _reader = PipeReader.Create(stream, new StreamPipeReaderOptions(bufferSize: 128 * 1024, minimumReadSize: 32 * 1024, leaveOpen: true));
+        // A read now has room for a whole packet and usually returns several. Zero-byte reads first wait for data with no buffer, then
+        // rent the 128 KiB array from the shared pool for the read that follows; it goes back once everything in it has been consumed. So
+        // an idle connection holds no buffer (without them, the receive loop's outstanding read held one per connection). Measured: no
+        // CPU cost, slightly less on Linux. The writer keeps its defaults: a packet is encoded into a span of its full size (a segment of
+        // its own when it is larger than 4 KiB), so a large packet still goes out in one write.
+        _reader = PipeReader.Create(stream, new StreamPipeReaderOptions(bufferSize: 128 * 1024, minimumReadSize: 32 * 1024, leaveOpen: true, useZeroByteReads: true));
         _writer = PipeWriter.Create(stream, new StreamPipeWriterOptions(leaveOpen: true));
     }
 

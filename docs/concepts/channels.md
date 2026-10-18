@@ -56,8 +56,8 @@ Received data is copied as little as possible on its way to your code:
 
 - **Socket reads are large.** The connection reads from the network into a 128 KiB buffer, with room for at least 32 KiB in each
   read, so one read usually brings in several packets. Smaller reads cost far more CPU per GiB, as each one is a separate
-  asynchronous completion. The buffer comes from the shared array pool. Each open connection holds one while it waits for data,
-  idle or not, and returns it when it closes.
+  asynchronous completion. The buffer comes from the shared array pool, and only while data is being read: the connection waits for
+  data with no buffer (a zero-byte read), so an idle connection holds none.
 - **Each packet is decrypted into a pooled buffer** that holds its data until your code has read it. The bytes the packet used are
   then zeroed and the buffer is returned to the pool, and the data counts as consumed for the window.
 - **Stream reads return what has arrived.** `ReadAsync` on `StandardOutput`, `StandardError` or a tunnel waits only until some data

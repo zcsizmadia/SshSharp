@@ -14,6 +14,7 @@ internal sealed class DecodedPacket : IDisposable
     private readonly int _length;
     private readonly int _used;
 
+    /// <summary>A decoded packet whose payload lies in a pooled buffer.</summary>
     /// <param name="buffer">The pooled buffer, returned to <see cref="ArrayPool{T}.Shared"/> on disposal.</param>
     /// <param name="offset">Where the payload starts.</param>
     /// <param name="length">The payload's length.</param>
