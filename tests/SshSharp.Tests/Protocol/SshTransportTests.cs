@@ -66,7 +66,8 @@ public class SshTransportTests
     [
         .. SshAlgorithms.HasMlKem ? [SshAlgorithms.MlKem768X25519Sha256] : Array.Empty<string>(),
         SshAlgorithms.Sntrup761X25519Sha512, SshAlgorithms.Sntrup761X25519Sha512OpenSsh, SshAlgorithms.Curve25519Sha256, SshAlgorithms.Curve25519Sha256Libssh, SshAlgorithms.EcdhNistp256, SshAlgorithms.EcdhNistp384,
-        SshAlgorithms.EcdhNistp521, SshAlgorithms.DhGroup14Sha256, SshAlgorithms.DhGroup16Sha512,
+        SshAlgorithms.EcdhNistp521, SshAlgorithms.DhGroup14Sha256, SshAlgorithms.DhGroup16Sha512, SshAlgorithms.DhGroup18Sha512,
+        SshAlgorithms.DhGroupExchangeSha256,
     ];
 
     public static IEnumerable<string> HostKeyKinds() => ["ed25519", "ecdsa256", "ecdsa384", "ecdsa521", "rsa-sha2-512", "rsa-sha2-256"];

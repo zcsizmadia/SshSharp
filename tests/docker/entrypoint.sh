@@ -35,7 +35,7 @@ AllowTcpForwarding yes
 AllowStreamLocalForwarding yes
 Subsystem sftp internal-sftp
 RekeyLimit ${REKEY_LIMIT:-32K}
-KexAlgorithms +diffie-hellman-group14-sha256,diffie-hellman-group16-sha512
+KexAlgorithms +diffie-hellman-group-exchange-sha256,diffie-hellman-group14-sha256,diffie-hellman-group16-sha512,diffie-hellman-group18-sha512
 LogLevel DEBUG1
 CONFIG
 # OpenSSH 9.8+ shuts out an address after failed or unauthenticated connections, which the tests make on purpose.

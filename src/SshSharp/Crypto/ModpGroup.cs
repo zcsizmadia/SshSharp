@@ -23,6 +23,9 @@ internal sealed class ModpGroup
     /// <summary>RFC 3526 group 16 (4096 bits).</summary>
     public static ModpGroup Group16 { get; } = new("group16", 4096, 240904, 768);
 
+    /// <summary>RFC 3526 group 18 (8192 bits).</summary>
+    public static ModpGroup Group18 { get; } = new("group18", 8192, 4743158, 1024);
+
     public string Name { get; }
 
     public int Bits { get; }

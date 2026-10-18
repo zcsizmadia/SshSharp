@@ -183,6 +183,30 @@ public class KexNegotiationTests
     }
 
     [Test]
+    public async Task FromConfig_AcceptsGroupExchangeAndGroup18_InEveryForm()
+    {
+        const string gex = SshAlgorithms.DhGroupExchangeSha256;
+        const string group18 = SshAlgorithms.DhGroup18Sha512;
+
+        var exact = AlgorithmPreferences.FromConfig(Config($"KexAlgorithms {group18},{gex}\n"));
+        await Assert.That(string.Join(",", exact.Kex)).IsEqualTo($"{group18},{gex}");
+
+        var first = AlgorithmPreferences.FromConfig(Config($"KexAlgorithms ^{gex}\n"));
+        await Assert.That(first.Kex[0]).IsEqualTo(gex);
+        await Assert.That(first.Kex.Count(k => k == gex)).IsEqualTo(1);
+
+        var removed = AlgorithmPreferences.FromConfig(Config($"KexAlgorithms -{gex},{group18}\n"));
+        await Assert.That(removed.Kex.Contains(gex)).IsFalse();
+        await Assert.That(removed.Kex.Contains(group18)).IsFalse();
+        await Assert.That(removed.Kex.Contains(SshAlgorithms.DhGroup16Sha512)).IsTrue();
+
+        var added = AlgorithmPreferences.FromConfig(Config($"KexAlgorithms +{group18}\n"));
+        await Assert.That(added.Kex.Count(k => k == group18)).IsEqualTo(1);
+        await Assert.That(added.Kex[^1]).IsEqualTo(group18);
+        await Assert.That(added.Kex.Count).IsEqualTo(SshAlgorithms.DefaultKex.Count);
+    }
+
+    [Test]
     public async Task FromConfig_DefaultsWhenNothingIsConfigured()
     {
         var prefs = AlgorithmPreferences.FromConfig(Config("User x\n"));

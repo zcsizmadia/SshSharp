@@ -24,10 +24,21 @@ address is tried: set `AddressFamily = SshAddressFamily.Inet` (`AddressFamily in
 
 ### No common algorithms
 
-`KeyExchangeFailed`: the server offers only algorithms SshSharp does not implement (CBC ciphers, SHA-1 MACs, `ssh-rsa`, DH group 1
-or group exchange). Typical for old network equipment and very old servers. The fix is on the server: enable a modern algorithm
-(any OpenSSH since 6.5 has `curve25519-sha256`, `aes*-ctr` and `hmac-sha2-*`). With `FipsMode`, a server that has only an Ed25519
-host key fails the same way. See [Algorithms](algorithms.md).
+`KeyExchangeFailed`: the server offers only algorithms SshSharp does not implement (CBC ciphers, SHA-1 MACs, `ssh-rsa`, DH group 1,
+`diffie-hellman-group14-sha1` or `diffie-hellman-group-exchange-sha1`). Typical for old network equipment and very old servers.
+SshSharp has the SHA-2 finite-field methods such equipment often offers alone: `diffie-hellman-group-exchange-sha256` and
+`diffie-hellman-group14-sha256`, `group16-sha512` and `group18-sha512`. The fix is on the server: enable a modern algorithm (any
+OpenSSH since 6.5 has `curve25519-sha256`, `aes*-ctr` and `hmac-sha2-*`). With `FipsMode`, a server that has only an Ed25519 host
+key fails the same way. See [Algorithms](algorithms.md).
+
+**"No matching key exchange algorithm".** The message lists what each side offered. A `KexAlgorithms` line in `ssh_config` that
+removes the finite-field methods (`-diffie-hellman-*`) leaves nothing in common with a server that offers only those.
+
+**The server's group is refused.** With `diffie-hellman-group-exchange-sha256`, a group outside 2048 to 8192 bits, or one that fails
+the primality and shape checks, fails with `KeyExchangeFailed` and a message naming the check (for example "The server's group
+exchange prime has 1024 bits, outside the 2048 to 8192 requested."). The server's moduli file (`/etc/ssh/moduli` for OpenSSH) holds
+a weak or corrupt group: remove the groups under 2048 bits there (the size column counts one bit less, so lines under 2047), or skip
+the method with `KexAlgorithms -diffie-hellman-group-exchange-sha256`.
 
 **"No matching MAC".** SshSharp has both the encrypt-then-MAC `hmac-sha2-*-etm@openssh.com` and the plain `hmac-sha2-256` and
 `hmac-sha2-512`, which routers, switches and appliances often offer alone with `aes*-ctr`. If the MAC still does not match:

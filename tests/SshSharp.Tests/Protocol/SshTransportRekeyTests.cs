@@ -323,6 +323,7 @@ public class SshTransportRekeyTests
     [Arguments(SshAlgorithms.EcdhNistp521)]
     [Arguments(SshAlgorithms.DhGroup14Sha256)]
     [Arguments(SshAlgorithms.DhGroup16Sha512)]
+    [Arguments(SshAlgorithms.DhGroupExchangeSha256)]
     public async Task TheKeyExchangeMethodMayChangeAcrossARekey(string rekeyKex)
     {
         var (client, server, clientPump, serverPump) = await StartAsync(new FakeServerOptions { RekeyKex = rekeyKex });

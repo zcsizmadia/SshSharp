@@ -9,7 +9,8 @@ public class TransportInteropTests
     // Host key types the test server (ed25519, rsa, ecdsa-p256) offers, and key exchanges / ciphers it supports.
     public static IEnumerable<(string Kex, string Cipher, string HostKey)> Combinations()
     {
-        string[] kex = [SshAlgorithms.Curve25519Sha256, SshAlgorithms.EcdhNistp256, SshAlgorithms.EcdhNistp384, SshAlgorithms.EcdhNistp521, SshAlgorithms.DhGroup14Sha256, SshAlgorithms.DhGroup16Sha512];
+        string[] kex = [SshAlgorithms.Curve25519Sha256, SshAlgorithms.EcdhNistp256, SshAlgorithms.EcdhNistp384, SshAlgorithms.EcdhNistp521, SshAlgorithms.DhGroup14Sha256, SshAlgorithms.DhGroup16Sha512,
+            SshAlgorithms.DhGroupExchangeSha256, SshAlgorithms.DhGroup18Sha512];
         string[] ciphers = ["chacha20-poly1305@openssh.com", "aes256-gcm@openssh.com", "aes128-gcm@openssh.com", "aes256-ctr", "aes192-ctr", "aes128-ctr"];
         string[] hostKeys = [SshAlgorithms.SshEd25519, SshAlgorithms.EcdsaNistp256, SshAlgorithms.RsaSha2_512, SshAlgorithms.RsaSha2_256];
 

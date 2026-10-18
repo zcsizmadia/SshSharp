@@ -6,7 +6,7 @@ namespace SshSharp.Tests.Crypto;
 public class ModpGroupTests
 {
     // Deterministic Miller-Rabin with fixed small bases (plenty to expose a wrongly derived constant).
-    private static bool IsProbablePrime(BigInteger n)
+    private static bool IsProbablePrime(BigInteger n, int[]? bases = null)
     {
         if (n < 2)
         {
@@ -34,7 +34,7 @@ public class ModpGroupTests
             r++;
         }
 
-        foreach (var a in new[] { 2, 3, 5, 7 })
+        foreach (var a in bases ?? [2, 3, 5, 7])
         {
             var x = BigInteger.ModPow(a, d, n);
             if (x == 1 || x == n - 1)
@@ -98,6 +98,25 @@ public class ModpGroupTests
         await Assert.That(IsProbablePrime(p)).IsTrue();
         await Assert.That(IsProbablePrime((p - 1) / 2)).IsTrue();
         await Assert.That(ModpGroup.Group16.ExponentBits).IsEqualTo(768);
+    }
+
+    [Test]
+    public async Task Group18_HasTheRfc3526Shape_AndIsASafePrime()
+    {
+        var p = ModpGroup.Group18.Prime;
+        var hex = Hex(p);
+        await Assert.That(hex.Length).IsEqualTo(2048);
+        await Assert.That(hex).StartsWith("FFFFFFFFFFFFFFFFC90FDAA22168C234C4C6628B80DC1CD1");
+
+        // RFC 3526 section 7 ends the prime with "60C980DD 98EDD3DF FFFFFFFF FFFFFFFF".
+        await Assert.That(hex).EndsWith("60C980DD98EDD3DFFFFFFFFFFFFFFFFF");
+        await Assert.That(ModpGroup.Group18.Bits).IsEqualTo(8192);
+        await Assert.That(ModpGroup.Group18.ExponentBits).IsEqualTo(1024);
+        await Assert.That(ModpGroup.Group18.Name).IsEqualTo("group18");
+
+        // One base each: a full-size exponentiation at 8192 bits takes most of a second.
+        await Assert.That(IsProbablePrime(p, [2])).IsTrue();
+        await Assert.That(IsProbablePrime((p - 1) / 2, [2])).IsTrue();
     }
 
     [Test]

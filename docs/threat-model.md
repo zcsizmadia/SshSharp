@@ -45,6 +45,14 @@ A man in the middle can read, change, drop and inject bytes. The server itself m
   `mlkem1024nistp384-sha384` use the platform's ML-KEM (on .NET 10 where the OS provides it), and
   `sntrup761x25519-sha512` a managed sntrup761 (everywhere; see the [cryptography review](crypto-review.md)). Both check the
   server's reply length exactly and still reject low-order X25519 points, so neither is weaker than curve25519 alone.
+- **Server-chosen Diffie-Hellman groups (`diffie-hellman-group-exchange-sha256`):** the server picks the prime and generator.
+  They are covered by the exchange hash the server signs, so a man in the middle cannot substitute a weak group; only the server
+  can, and a malicious server holds the session keys anyway. The checks guard against a server with a broken or weak group,
+  which would expose the session to an eavesdropper: the prime must have 2048 to 8192 bits (OpenSSH's client checks only this),
+  be 3 mod 4, have no odd factor below 4096 in p or (p-1)/2, and pass one Miller-Rabin round with a random base; the generator
+  must lie in [2, p-2], and the server's public value in (1, p-1). That (p-1)/2 is prime is not proven: it would cost another
+  full-size exponentiation (about 0.65 s at 8192 bits) on every connection. A failed check fails the connection with
+  `KeyExchangeFailed` before the client's public value is sent.
 - **Host key rotation (`UpdateHostKeys`):** off by default. A new key is recorded only after the server proves it holds it
   (`hostkeys-prove-00@openssh.com`), and any invalid proof cancels the whole update. Nothing is updated when the connection's
   own key is not in `known_hosts`: a changed key let through by `StrictHostKeyChecking no` proves nothing, and must not get the
@@ -143,8 +151,9 @@ A man in the middle can read, change, drop and inject bytes. The server itself m
   (the `Password` option) cannot be wiped; this is a known limitation. The same holds for `SshGssapiOptions.Credential`: a
   `NetworkCredential` keeps its password as a managed string, so prefer the platform's ticket (`kinit`, or the Windows logon
   session) to an explicit credential.
-- The managed X25519, Ed25519, sntrup761 and Poly1305 code avoids branches and table lookups on secret data. DH (group14/16) uses
-  `BigInteger.ModPow`, which is not constant-time, on an ephemeral exponent used once; curve25519 and ECDH are preferred.
+- The managed X25519, Ed25519, sntrup761 and Poly1305 code avoids branches and table lookups on secret data. DH (group14/16/18
+  and group exchange) uses `BigInteger.ModPow`, which is not constant-time, on an ephemeral exponent used once; the post-quantum
+  hybrids, curve25519 and ECDH are preferred.
 
 ### Configuration input
 

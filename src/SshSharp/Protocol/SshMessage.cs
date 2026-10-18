@@ -20,6 +20,12 @@ internal static class SshMessage
     public const byte KexDhInit = 30;
     public const byte KexDhReply = 31;
 
+    // diffie-hellman-group-exchange-* (RFC 4419).
+    public const byte KexDhGexGroup = 31;
+    public const byte KexDhGexInit = 32;
+    public const byte KexDhGexReply = 33;
+    public const byte KexDhGexRequest = 34;
+
     public const byte UserAuthRequest = 50;
     public const byte UserAuthFailure = 51;
     public const byte UserAuthSuccess = 52;
