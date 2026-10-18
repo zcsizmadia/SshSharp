@@ -7,14 +7,19 @@ namespace SshSharp;
 /// <summary>
 /// A remote Unix-socket forwarding (<c>ssh -R /remote/socket:target</c>) started by <see cref="SshClient.ForwardRemoteUnixSocketAsync(string, string, int, CancellationToken)"/>:
 /// the server listens on the Unix socket <see cref="RemoteSocketPath"/>, and each connection made to it is relayed to a TCP port
-/// (<see cref="LocalHost"/>:<see cref="LocalPort"/>) or a Unix socket (<see cref="LocalSocketPath"/>) reached from this machine. Dispose it
-/// to cancel the forwarding on the server and close the forwarded connections.
+/// (<see cref="LocalHost"/>:<see cref="LocalPort"/>) or a Unix socket (<see cref="LocalSocketPath"/>) reached from this machine, or passed
+/// to the application's handler (<see cref="SshClient.ForwardRemoteUnixSocketAsync(string, Func{SshForwardedConnection, CancellationToken, Task}, int, CancellationToken)"/>).
+/// Dispose it to cancel the forwarding on the server and close the forwarded connections.
 /// </summary>
 public sealed class SshRemoteSocketForwarder : IAsyncDisposable
 {
     private readonly ILogger _logger;
     private readonly Func<SshRemoteSocketForwarder, CancellationToken, Task> _cancel;
+    private readonly ForwardedHandlerSet? _handlers;
     private readonly CancellationTokenSource _stop;
+
+    // Kept apart from _stop: a connection the server forwarded just before disposal may start after _stop is disposed.
+    private readonly CancellationToken _stopToken;
     private readonly HashSet<Task> _connections = [];
     private int _disposed;
     private int _active;
@@ -29,30 +34,70 @@ public sealed class SshRemoteSocketForwarder : IAsyncDisposable
         _logger = logger;
         _cancel = cancel;
         _stop = CancellationTokenSource.CreateLinkedTokenSource(connectionClosed);
+        _stopToken = _stop.Token;
     }
+
+    /// <summary>A forwarding to a handler in this process: each connection is passed to <paramref name="handler"/>.</summary>
+    internal SshRemoteSocketForwarder(string socketPath, Func<SshForwardedConnection, CancellationToken, Task> handler, int maxConnections, ILogger logger,
+        Func<SshRemoteSocketForwarder, CancellationToken, Task> cancel, CancellationToken connectionClosed)
+        : this(socketPath, null, 0, null, logger, cancel, connectionClosed)
+    {
+        _handlers = new ForwardedHandlerSet(handler, maxConnections, logger);
+    }
+
+    /// <summary>Whether connections go to a handler in this process rather than to a host and port or a socket.</summary>
+    internal bool IsHandler => _handlers is not null;
 
     /// <summary>The Unix socket the server listens on.</summary>
     public string RemoteSocketPath { get; }
 
-    /// <summary>The host connections go to, from this machine; null when they go to <see cref="LocalSocketPath"/>.</summary>
+    /// <summary>The host connections go to, from this machine; null when they go to <see cref="LocalSocketPath"/> or a handler.</summary>
     public string? LocalHost { get; }
 
-    /// <summary>The port on <see cref="LocalHost"/>; 0 when connections go to <see cref="LocalSocketPath"/>.</summary>
+    /// <summary>The port on <see cref="LocalHost"/>; 0 when connections go to <see cref="LocalSocketPath"/> or a handler.</summary>
     public int LocalPort { get; }
 
-    /// <summary>The Unix socket on this machine connections go to; null when they go to <see cref="LocalHost"/>.</summary>
+    /// <summary>The Unix socket on this machine connections go to; null when they go to <see cref="LocalHost"/> or a handler.</summary>
     public string? LocalSocketPath { get; }
 
     /// <summary>How many forwarded connections are open now.</summary>
     public int ActiveConnections => Volatile.Read(ref _active);
 
-    /// <summary>Takes a <c>forwarded-streamlocal@openssh.com</c> channel the server opened for a connection to the socket.</summary>
+    /// <summary>
+    /// Counts a connection the server is opening, before its channel is confirmed, unless this forwarding already serves its most
+    /// (a handler's <c>maxConnections</c>): then the server's channel is refused. Undone by <see cref="Release"/>, or when the
+    /// connection <see cref="Accept"/> serves ends.
+    /// </summary>
+    internal bool TryReserve()
+    {
+        var limit = _handlers?.MaxConnections ?? int.MaxValue;
+        while (true)
+        {
+            var active = Volatile.Read(ref _active);
+            if (active >= limit)
+            {
+                return false;
+            }
+
+            if (Interlocked.CompareExchange(ref _active, active + 1, active) == active)
+            {
+                return true;
+            }
+        }
+    }
+
+    /// <summary>Gives back a reservation for a channel that was refused after all.</summary>
+    internal void Release() => Interlocked.Decrement(ref _active);
+
+    /// <summary>
+    /// Takes a <c>forwarded-streamlocal@openssh.com</c> channel the server opened for a connection to the socket, reserved with
+    /// <see cref="TryReserve"/>.
+    /// </summary>
     internal Task Accept(SshChannel channel)
     {
         Task connection;
         lock (_connections)
         {
-            Interlocked.Increment(ref _active);
             connection = ServeAsync(channel);
             _connections.Add(connection);
         }
@@ -75,6 +120,14 @@ public sealed class SshRemoteSocketForwarder : IAsyncDisposable
         try
         {
             await Task.Yield();
+            if (_handlers is { } handlers)
+            {
+                // The handler owns the stream; RunAsync disposes it (closing the channel) when the handler returns.
+                var stream = new SshChannelStream(channel);
+                await handlers.RunAsync(SshForwardedConnection.ForUnixSocket(stream, RemoteSocketPath), stream, 0, _stopToken).ConfigureAwait(false);
+                return;
+            }
+
             Socket socket;
             try
             {
@@ -135,7 +188,11 @@ public sealed class SshRemoteSocketForwarder : IAsyncDisposable
         }
     }
 
-    /// <summary>Cancels the forwarding on the server (<c>cancel-streamlocal-forward@openssh.com</c>) and closes every forwarded connection.</summary>
+    /// <summary>
+    /// Cancels the forwarding on the server (<c>cancel-streamlocal-forward@openssh.com</c>) and closes every forwarded connection. For a
+    /// forwarding to a handler, the token each handler was given is cancelled, and this waits up to 5 seconds for the handlers to return;
+    /// the connections of any still running then are closed under them, and this returns without waiting for them further.
+    /// </summary>
     public async ValueTask DisposeAsync()
     {
         if (Interlocked.Exchange(ref _disposed, 1) != 0)
@@ -160,8 +217,17 @@ public sealed class SshRemoteSocketForwarder : IAsyncDisposable
             open = [.. _connections];
         }
 
-        await Task.WhenAll(open.Select(t => t.ContinueWith(_ => { }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default)))
-            .ConfigureAwait(false);
+        var all = Task.WhenAll(open.Select(t => t.ContinueWith(_ => { }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default)));
+        if (_handlers is { } handlers)
+        {
+            // A handler is the application's code: it may ignore its token, so the wait is bounded.
+            if (!await handlers.StopAsync(all).ConfigureAwait(false))
+            {
+                return; // handlers still running hold the token: _stop stays undisposed
+            }
+        }
+
+        await all.ConfigureAwait(false);
         _stop.Dispose();
     }
 }

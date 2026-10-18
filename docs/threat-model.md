@@ -82,13 +82,21 @@ A man in the middle can read, change, drop and inject bytes. The server itself m
   given and as each address it resolves to here, and the connection goes only to an address that passed.
 - The client does not check the address a `forwarded-tcpip` channel names, only the port. The server picks which forwarding
   to use anyway.
+- **Remote forwarding to a handler** (`ForwardRemotePortAsync` and `ForwardRemoteUnixSocketAsync` with a handler) runs the
+  application's code for every connection the server forwards, so anyone who can reach the forwarded port or socket on the server
+  (every user there, and other machines with a non-loopback bind address and `GatewayPorts`) can send it data. The handler must
+  treat what it reads as untrusted input: bound sizes and time, validate, and authenticate requests where it matters.
+  `SshForwardedConnection`'s addresses and ports are what the server reported; they describe the connection and do not
+  authenticate the peer. Each forwarding serves at most `maxConnections` (100 by default) at once and refuses the server's channels
+  above it; a handler that throws closes its own connection only, and its exception is logged by type, never with its message.
 - **Agent forwarding** relays the agent protocol unchanged, as `ssh -A` does: while the connection is up, the server can ask the
   agent to sign with any of its keys. Forward the agent only to servers you trust, and use the agent's own confirmation
   (`ssh-add -c`) for sensitive keys.
 - **Transport pings** (`ping@openssh.com`) are answered with a pong, as OpenSSH answers them. Pongs not yet sent are capped
   (256 KiB), so a server that pings but stops reading cannot grow the client's memory; pings past the cap go unanswered.
-- Forwarded connections the server opens are capped (`SshClientOptions.MaxForwardedConnections`, 1,000 by default); above
-  it, new ones are refused. Within that, a server can still send data up to each channel's window (2 MiB).
+- Forwarded connections the server opens are capped (`SshClientOptions.MaxForwardedConnections`, 1,000 by default, and a
+  handler forwarding's `maxConnections`); above it, new ones are refused. Within that, a server can still send data up to each
+  channel's window (2 MiB), and no more until it is read: a handler that stops reading holds the server back.
 
 ### The agent
 
@@ -106,6 +114,8 @@ A man in the middle can read, change, drop and inject bytes. The server itself m
   to loopback unless the configuration names an address or sets `GatewayPorts`, as with `ssh`.
 - The SOCKS proxy has no authentication (like `ssh -D`) and supports only CONNECT (SOCKS 4, 4a and 5). Anyone who can reach
   its address can use the SSH connection, so it should listen on loopback.
+- Remote forwarding to a handler opens no listener on this machine: its connections reach the application's code only through
+  the SSH connection (see [Channels the server opens](#channels-the-server-opens) for what that code must expect).
 
 ### Proxies
 

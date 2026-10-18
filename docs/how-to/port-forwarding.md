@@ -12,6 +12,7 @@ a tunnel as a plain `Stream` or plugs it into `HttpClient`.
 | Reach it from your own code, without opening a port | [A tunnel stream](#tunnels-without-a-local-port) or [`HttpClient`](#httpclient-through-the-server) |
 | Let programs reach many destinations through the server | [Dynamic forwarding](#dynamic-forwarding-a-socks-proxy-ssh--d), `ssh -D` |
 | Let the server reach a service on your side | [Remote forwarding](#remote-forwarding-ssh--r), `ssh -R` |
+| Serve a port (or Unix socket) on the server from your own code, without a local port | [Serving a remote port from your app](#serving-a-remote-port-from-your-app) |
 
 ## How each kind flows
 
@@ -77,6 +78,67 @@ what they may reach:
 
 [!code-csharp[](../snippets/Forwarding.cs#remote-dynamic)]
 
+## Serving a remote port from your app
+
+Remote forwarding can also hand each connection to your code instead of relaying it to a host and port: the server listens, and
+every connection made to it there arrives in a handler as an `SshForwardedConnection` with a duplex `Stream`. Nothing listens on
+this machine. It is what Go's `ssh.Client.Listen` and AsyncSSH's handler form give.
+
+Use it for:
+
+- **a webhook receiver behind NAT:** a public server's reverse proxy passes requests to a port on its loopback, and your
+  application, which has no public address, serves them (see the [webhook receiver scenario](../scenarios/webhook-receiver.md));
+- **an in-process test server:** a program under test on a remote machine connects to `localhost:<port>` there and talks to a fake
+  service in your test;
+- **a protocol of your own,** with no local listener for other processes on this machine to find.
+
+```mermaid
+sequenceDiagram
+    participant P as Program on the server
+    participant S as sshd (listens on localhost:8080)
+    participant C as SshClient (this process)
+    participant H as Your handler
+    P->>S: connect to localhost:8080
+    S->>C: forwarded-tcpip channel (connected address, originator)
+    C->>H: handler(connection, token), concurrently per connection
+    P-->>H: bytes, through connection.Stream
+    H-->>P: bytes, through connection.Stream
+    H->>C: handler returns: the stream is disposed
+    C->>S: EOF and CLOSE: the program sees the connection end
+```
+
+[!code-csharp[](../snippets/Forwarding.cs#remote-handler)]
+
+The same works for a Unix socket on the server:
+
+[!code-csharp[](../snippets/Forwarding.cs#remote-handler-socket)]
+
+How the handler runs:
+
+- **It owns the stream.** Disposing `connection.Stream` closes the connection; when the handler returns, the stream is disposed
+  for it if it has not been already.
+- **Where the connection came from.** For a port, `BoundAddress` and `BoundPort` are the address and port that were connected on
+  the server, and `OriginatorAddress` and `OriginatorPort` the program's, all as the server reports them. For a Unix socket,
+  `RemoteSocketPath` is set and the originator is null (the server does not say who connected).
+- **Errors stay with their connection.** A handler that throws closes its own connection only. The exception is logged by type,
+  never with its message, and other connections and the forwarding go on.
+- **Back-pressure.** A handler that stops reading stops the server from sending more than the channel's window (2 MiB): the window
+  is only opened again as the handler reads.
+- **A cap.** `maxConnections` (100 by default) is the most connections served at once by this forwarding. The server's channels
+  above it are refused (resource shortage) until some end, as are those above `SshClientOptions.MaxForwardedConnections` over all
+  forwardings.
+- **Stopping.** The handler's token is cancelled when the forwarder is disposed or the SSH connection ends. Disposing the forwarder
+  sends the cancel request to the server, so it stops listening; it then cancels the handlers and waits up to 5 seconds for them to
+  return. The connections of any still running then are closed under them, and disposal returns without waiting further.
+
+The forwarder is the usual `SshRemotePortForwarder` (or `SshRemoteSocketForwarder`), with `RemotePort` set when port 0 was
+requested; its `LocalHost` is empty and `LocalPort` 0.
+
+> [!IMPORTANT]
+> Anyone who can reach the forwarded port on the server (every user and process there, or every machine with a bind address other
+> than loopback and `GatewayPorts`) can open connections into your handler. Treat what arrives as untrusted input: bound how much
+> you read and how long you wait, validate before acting, authenticate requests where it matters, and keep `maxConnections` low.
+
 ## Notes and pitfalls
 
 - **Bind to loopback.** A local forwarder or SOCKS proxy has no authentication: anyone who can reach its port can use the server's
@@ -87,7 +149,8 @@ what they may reach:
   `client.ConnectionClosed` if you need to know (see [Keep-alive and reconnecting](keepalive-and-reconnect.md)).
 - **Remote destinations come from the server's side.** With remote dynamic forwarding, every destination is allowed when
   `allowDestination` is null, as with `ssh`. Pass a filter unless you trust everyone on the server.
-- **Limits.** The server can open at most `SshClientOptions.MaxForwardedConnections` (1,000) forwarded connections at a time.
+- **Limits.** The server can open at most `SshClientOptions.MaxForwardedConnections` (1,000) forwarded connections at a time, and a
+  forwarding to a handler at most its `maxConnections`.
 - **From `ssh_config`.** `LocalForward`, `RemoteForward` and `DynamicForward` start with the connection when
   `SshConfigConnectOptions.StartForwardings` is true.
 
@@ -96,4 +159,5 @@ what they may reach:
 - [Connecting: tunnels and port forwarding](../connecting.md#tunnels-and-port-forwarding) (in-depth: Unix sockets, remote Unix-socket
   forwarding, forwardings from `ssh_config`)
 - [A database through a jump host](../scenarios/database-tunnel.md)
+- [A webhook receiver behind NAT](../scenarios/webhook-receiver.md)
 - [Channels and flow control](../concepts/channels.md)

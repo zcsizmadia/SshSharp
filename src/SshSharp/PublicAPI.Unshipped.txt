@@ -73,3 +73,12 @@ const SshSharp.SshCertificateBuilder.ForceCommand = "force-command" -> string!
 const SshSharp.SshCertificateBuilder.SourceAddress = "source-address" -> string!
 const SshSharp.SshCertificateBuilder.VerifyRequired = "verify-required" -> string!
 SshSharp.SshSignaturePurpose.Certificate = 2 -> SshSharp.SshSignaturePurpose
+SshSharp.SshClient.ForwardRemotePortAsync(string! bindAddress, int remotePort, System.Func<SshSharp.SshForwardedConnection!, System.Threading.CancellationToken, System.Threading.Tasks.Task!>! handler, int maxConnections = 100, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SshSharp.SshRemotePortForwarder!>!
+SshSharp.SshClient.ForwardRemoteUnixSocketAsync(string! remoteSocketPath, System.Func<SshSharp.SshForwardedConnection!, System.Threading.CancellationToken, System.Threading.Tasks.Task!>! handler, int maxConnections = 100, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SshSharp.SshRemoteSocketForwarder!>!
+SshSharp.SshForwardedConnection
+SshSharp.SshForwardedConnection.BoundAddress.get -> string?
+SshSharp.SshForwardedConnection.BoundPort.get -> int?
+SshSharp.SshForwardedConnection.OriginatorAddress.get -> string?
+SshSharp.SshForwardedConnection.OriginatorPort.get -> int?
+SshSharp.SshForwardedConnection.RemoteSocketPath.get -> string?
+SshSharp.SshForwardedConnection.Stream.get -> System.IO.Stream!

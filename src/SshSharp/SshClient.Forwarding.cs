@@ -203,6 +203,41 @@ public sealed partial class SshClient
     }
 
     /// <summary>
+    /// Remote port forwarding to a handler in this process (what Go's <c>ssh.Client.Listen</c> gives): asks the server to listen on
+    /// <paramref name="bindAddress"/>:<paramref name="remotePort"/> and passes every connection made to it to <paramref name="handler"/>,
+    /// as a <see cref="SshForwardedConnection"/> with a duplex <see cref="SshForwardedConnection.Stream"/>. Nothing listens on this
+    /// machine: it serves a port on the server from the application, for example a webhook receiver behind NAT, or a test server that
+    /// programs on the server connect to.
+    /// </summary>
+    /// <param name="bindAddress">Where the server listens: <c>localhost</c> for its loopback only (what ssh uses by default), an address, or
+    /// empty for every address (subject to sshd's <c>GatewayPorts</c>).</param>
+    /// <param name="remotePort">The port the server listens on; 0 lets it pick one (see <see cref="SshRemotePortForwarder.RemotePort"/>).</param>
+    /// <param name="handler">
+    /// Serves one connection; it runs concurrently for concurrent connections. It owns the connection's stream: disposing it closes
+    /// the connection, and it is disposed when the handler returns. Its token is cancelled when the forwarder is disposed or the SSH
+    /// connection ends. A handler that throws closes its own connection only; the exception is logged by type, and the forwarding goes
+    /// on. Anyone who can reach the port on the server can connect, so treat what arrives as untrusted input.
+    /// </param>
+    /// <param name="maxConnections">
+    /// The most connections served at once by this forwarding; the server's channels above it are refused (resource shortage) until
+    /// some end. <see cref="SshClientOptions.MaxForwardedConnections"/> still applies across all forwardings. Default 100.
+    /// </param>
+    /// <param name="cancellationToken">Cancels the request to the server.</param>
+    /// <returns>The forwarding; dispose it to stop. <see cref="SshRemotePortForwarder.LocalHost"/> is empty and
+    /// <see cref="SshRemotePortForwarder.LocalPort"/> 0.</returns>
+    /// <exception cref="SshException">The server refused (sshd's <c>AllowTcpForwarding</c>, or the port is in use).</exception>
+    public Task<SshRemotePortForwarder> ForwardRemotePortAsync(string bindAddress, int remotePort, Func<SshForwardedConnection, CancellationToken, Task> handler,
+        int maxConnections = 100, CancellationToken cancellationToken = default)
+    {
+        ValidateRemoteListen(bindAddress, remotePort);
+        ArgumentNullException.ThrowIfNull(handler);
+        ArgumentOutOfRangeException.ThrowIfLessThan(maxConnections, 1);
+        return StartRemoteForwardAsync(bindAddress, remotePort,
+            port => new SshRemotePortForwarder(bindAddress, port, handler, maxConnections, _logger, CancelRemoteForwardAsync, _connection.Closed),
+            cancellationToken);
+    }
+
+    /// <summary>
     /// Remote Unix-socket forwarding (<c>ssh -R /remote/socket:host:port</c>, <c>streamlocal-forward@openssh.com</c>): asks the server
     /// to listen on the Unix socket <paramref name="remoteSocketPath"/> and relays every connection made to it to
     /// <paramref name="localHost"/>:<paramref name="localPort"/>, as reached from this machine. For example, a database here becomes a socket
@@ -228,6 +263,37 @@ public sealed partial class SshClient
         ValidateSocketPath(localSocketPath, nameof(localSocketPath));
         return StartRemoteSocketForwardAsync(remoteSocketPath,
             path => new SshRemoteSocketForwarder(path, null, 0, localSocketPath, _logger, CancelRemoteSocketForwardAsync, _connection.Closed), cancellationToken);
+    }
+
+    /// <summary>
+    /// Remote Unix-socket forwarding to a handler in this process: asks the server to listen on the Unix socket
+    /// <paramref name="remoteSocketPath"/> (<c>streamlocal-forward@openssh.com</c>) and passes every connection made to it to
+    /// <paramref name="handler"/>, as a <see cref="SshForwardedConnection"/> with a duplex <see cref="SshForwardedConnection.Stream"/>.
+    /// sshd's <c>StreamLocalBindUnlink</c> decides whether a stale socket file is replaced.
+    /// </summary>
+    /// <param name="remoteSocketPath">The Unix socket the server listens on.</param>
+    /// <param name="handler">
+    /// Serves one connection; it runs concurrently for concurrent connections. It owns the connection's stream: disposing it closes
+    /// the connection, and it is disposed when the handler returns. Its token is cancelled when the forwarder is disposed or the SSH
+    /// connection ends. A handler that throws closes its own connection only; the exception is logged by type, and the forwarding goes
+    /// on. Anyone who can open the socket on the server can connect, so treat what arrives as untrusted input.
+    /// </param>
+    /// <param name="maxConnections">
+    /// The most connections served at once by this forwarding; the server's channels above it are refused (resource shortage) until
+    /// some end. <see cref="SshClientOptions.MaxForwardedConnections"/> still applies across all forwardings. Default 100.
+    /// </param>
+    /// <param name="cancellationToken">Cancels the request to the server.</param>
+    /// <returns>The forwarding; dispose it to stop. <see cref="SshRemoteSocketForwarder.LocalHost"/> and
+    /// <see cref="SshRemoteSocketForwarder.LocalSocketPath"/> are null.</returns>
+    /// <exception cref="SshException">The server refused (sshd's <c>AllowStreamLocalForwarding</c>, or the socket exists).</exception>
+    public Task<SshRemoteSocketForwarder> ForwardRemoteUnixSocketAsync(string remoteSocketPath, Func<SshForwardedConnection, CancellationToken, Task> handler,
+        int maxConnections = 100, CancellationToken cancellationToken = default)
+    {
+        ValidateSocketPath(remoteSocketPath, nameof(remoteSocketPath));
+        ArgumentNullException.ThrowIfNull(handler);
+        ArgumentOutOfRangeException.ThrowIfLessThan(maxConnections, 1);
+        return StartRemoteSocketForwardAsync(remoteSocketPath,
+            path => new SshRemoteSocketForwarder(path, handler, maxConnections, _logger, CancelRemoteSocketForwardAsync, _connection.Closed), cancellationToken);
     }
 
     private static void ValidateSocketPath(string path, string name)
@@ -269,7 +335,15 @@ public sealed partial class SshClient
             throw new SshException(SshFailureReason.ChannelClosed, "The server refused to listen on the Unix socket (stream-local forwarding not allowed, or the socket exists).");
         }
 
-        SshLog.RemoteSocketForwardingStarted(_logger);
+        if (forwarder.IsHandler)
+        {
+            SshLog.RemoteSocketHandlerForwardingStarted(_logger);
+        }
+        else
+        {
+            SshLog.RemoteSocketForwardingStarted(_logger);
+        }
+
         return forwarder;
     }
 
@@ -360,7 +434,11 @@ public sealed partial class SshClient
             throw new SshException(SshFailureReason.ChannelClosed, $"Port {port} is already forwarded on this connection.");
         }
 
-        if (forwarder.IsDynamic)
+        if (forwarder.IsHandler)
+        {
+            SshLog.RemoteHandlerForwardingStarted(_logger, port);
+        }
+        else if (forwarder.IsDynamic)
         {
             SshLog.RemoteDynamicForwardingStarted(_logger, port);
         }
@@ -397,13 +475,18 @@ public sealed partial class SshClient
         }
 
         Func<SshChannel, Task>? accept = null;
+        Func<bool>? reserve = null;
+        Action? release = null;
         try
         {
             if (type == "forwarded-streamlocal@openssh.com")
             {
                 // The socket path that was connected, then a reserved string; only sockets this client asked for are served.
                 var reader = new SshReader(data);
-                accept = _remoteSocketForwards.TryGetValue(reader.ReadUtf8String(), out var socketForwarder) ? socketForwarder.Accept : null;
+                if (_remoteSocketForwards.TryGetValue(reader.ReadUtf8String(), out var socketForwarder))
+                {
+                    (accept, reserve, release) = (socketForwarder.Accept, socketForwarder.TryReserve, socketForwarder.Release);
+                }
             }
             else if (type == "forwarded-tcpip")
             {
@@ -411,7 +494,10 @@ public sealed partial class SshClient
                 var reader = new SshReader(data);
                 reader.ReadUtf8String();
                 var port = (int)reader.ReadUInt32();
-                accept = _remoteForwards.TryGetValue(port, out var forwarder) ? forwarder.Accept : null;
+                if (_remoteForwards.TryGetValue(port, out var forwarder))
+                {
+                    (accept, reserve, release) = (channel => forwarder.Accept(channel, data), forwarder.TryReserve, forwarder.Release);
+                }
             }
         }
         catch (SshProtocolException)
@@ -419,13 +505,22 @@ public sealed partial class SshClient
             return null;
         }
 
-        if (accept is null)
+        if (accept is null || reserve is null || release is null)
         {
             return null;
         }
 
-        // Each one is a local connection (or a SOCKS exchange) on this machine: a server cannot make this client open without limit.
+        // Each one is a local connection (or a SOCKS exchange, or a handler's work) on this machine: a server cannot make this client
+        // open without limit, over all forwardings, nor beyond a handler forwarding's own limit. Both counts are taken now, before the
+        // channel is confirmed, so concurrent opens cannot overshoot. (Should the confirmation fail to go out, the connection is ending,
+        // and its forwardings with it.)
         if (Interlocked.Increment(ref _forwardedConnections) > _options.MaxForwardedConnections)
+        {
+            Interlocked.Decrement(ref _forwardedConnections);
+            return SshConnection.RefuseResourceShortage;
+        }
+
+        if (!reserve())
         {
             Interlocked.Decrement(ref _forwardedConnections);
             return SshConnection.RefuseResourceShortage;

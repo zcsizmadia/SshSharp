@@ -221,6 +221,25 @@ in canonical form (`127.0.0.1`, `::1`), and a host name is checked as given, the
 resolves to is checked as well; the connection goes only to an address that passed. A filter that throws refuses that
 connection. `IsDynamic` (`socks.IsDynamic` here) tells the two kinds of remote forwarding apart.
 
+Remote forwarding can also serve the server's connections from your own code, with no local port: pass a handler instead of a
+host and port. Each connection made to the forwarded port on the server arrives as an `SshForwardedConnection`, whose `Stream`
+the handler reads and writes, with the address and port that were connected and the originator's, as the server reports them.
+
+```csharp
+await using var remote = await client.ForwardRemotePortAsync("localhost", 8080, async (connection, ct) =>
+{
+    // connection.Stream is this one connection; it is disposed (closed) when the handler returns
+    await connection.Stream.WriteAsync("hello from the client side\n"u8.ToArray(), ct);
+}, maxConnections: 20);
+```
+
+Handlers run concurrently, one per connection. One that throws closes its own connection only (the exception is logged by type).
+A handler that stops reading holds the server back at the channel window. `maxConnections` (100 by default) caps the connections
+served at once by the forwarding, and the server's channels above it are refused. The handler's token is cancelled when the
+forwarder is disposed or the connection ends; disposal cancels the forwarding on the server, cancels the handlers, waits up to 5
+seconds for them, and then closes the connections of any still running. `ForwardRemoteUnixSocketAsync` takes a handler in the same
+way. See [Serving a remote port from your app](how-to/port-forwarding.md#serving-a-remote-port-from-your-app).
+
 The server can open at most `SshClientOptions.MaxForwardedConnections` (1,000) forwarded connections at a time over all remote
 forwardings; more are refused until some close.
 
