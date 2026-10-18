@@ -46,6 +46,62 @@ flowchart TB
 Keep secrets out of `appsettings.json`: bind `Password` or `PrivateKeyPassphrase` from user secrets in development
 (`dotnet user-secrets set "Ssh:Deploy:Password" ...`) and from environment variables or a secret store in production.
 
+## Run it in a container or Kubernetes
+
+A pod gets secrets as values, not as files in `~/.ssh`, and has no `known_hosts` of its own. Give the endpoint the key's text
+(`PrivateKeys`) and pin the server's host key (`HostKeyFingerprints`) instead:
+
+```json
+{
+  "Ssh": {
+    "Deploy": {
+      "Host": "deploy.example.com",
+      "UserName": "deploy",
+      "HostKeyFingerprints": [ "SHA256:47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU" ]
+    }
+  }
+}
+```
+
+The key and its passphrase are not in the file. Set them where the secrets live:
+
+```shell
+# Development: user secrets.
+dotnet user-secrets set "Ssh:Deploy:PrivateKeys:0:Key" "$(cat ~/.ssh/deploy_ed25519)"
+dotnet user-secrets set "Ssh:Deploy:PrivateKeys:0:Passphrase" "$(cat ~/.ssh/deploy_ed25519.passphrase)"
+
+# A container: environment variables (a double underscore is the section separator).
+Ssh__Deploy__PrivateKeys__0__Key=...
+Ssh__Deploy__PrivateKeys__0__Passphrase=...
+Ssh__Deploy__HostKeyFingerprints__0=SHA256:...
+```
+
+In Kubernetes, map a secret's entries to those variables:
+
+```yaml
+env:
+  - name: Ssh__Deploy__PrivateKeys__0__Key
+    valueFrom:
+      secretKeyRef: { name: deploy-ssh, key: key }
+  - name: Ssh__Deploy__PrivateKeys__0__Passphrase
+    valueFrom:
+      secretKeyRef: { name: deploy-ssh, key: passphrase }
+```
+
+The registration does not change. With `ValidateOnStart`, a malformed fingerprint, a key that cannot be read or a wrong passphrase
+stops the start, with an error that names the entry and never shows the key or passphrase:
+
+[!code-csharp[](../snippets/DependencyInjection.cs#containers)]
+
+- **Fingerprints replace known_hosts.** Setting `KnownHostsFiles` or `AcceptNewHostKeys` as well fails validation. List more than one
+  fingerprint to roll a host key over.
+- **Keys from files come first.** `PrivateKeyFiles`, then `PrivateKeys`, then `Password`.
+- **A proxy** is a setting too: `"Proxy": "http://proxy.example.com:3128"` (or `socks5://`). Bind it from a secret store if it
+  carries a password.
+
+The full rules, Key Vault names and the key-per-file provider are in
+[Dependency injection: containers and Kubernetes](../dependency-injection.md#containers-and-kubernetes).
+
 ## Use the shared connection
 
 Most code should use `ISshConnectionProvider`: one connection per endpoint, shared by every caller (SSH runs many channels over one
@@ -64,8 +120,9 @@ for something that holds a session for the application's lifetime.
 
 ## Customize the client options
 
-`ConfigureClientOptions` adjusts the `SshClientOptions` the endpoint builds: a different host key policy, a proxy, keys held
-elsewhere:
+`ConfigureClientOptions` adjusts the `SshClientOptions` the endpoint builds, for what the settings do not cover: a host key policy
+of your own, keys held elsewhere (`SshPrivateKey.FromSigner`), an agent. Pinned fingerprints, keys as values and a proxy need no
+code: they are settings.
 
 [!code-csharp[](../snippets/DependencyInjection.cs#customize)]
 
@@ -77,9 +134,11 @@ elsewhere:
   the delay fails at once with the last error). A command that was running when the connection dropped fails, and your code
   decides whether to run it again.
 - **Host keys.** Without `ConfigAlias`, the endpoint verifies against `KnownHostsFiles` (default `~/.ssh/known_hosts`) with
-  `StrictHostKeyChecking yes`; `AcceptNewHostKeys` switches to `accept-new`. In a container, mount a `known_hosts` file.
+  `StrictHostKeyChecking yes`; `AcceptNewHostKeys` switches to `accept-new`. In a container, pin `HostKeyFingerprints` or mount a
+  `known_hosts` file.
 - **`ConfigAlias`** connects through `ssh_config` instead; then `Host`, `Port`, `UserName`, `PrivateKeyFiles`, `KnownHostsFiles`,
-  `AcceptNewHostKeys`, `KeepAliveInterval` and `ConfigureClientOptions` are not used.
+  `AcceptNewHostKeys`, `KeepAliveInterval` and `ConfigureClientOptions` are not used, and `PrivateKeys`, `HostKeyFingerprints` and
+  `Proxy` fail validation.
 - **Timeouts.** `ConnectTimeout` (30 s) bounds each attempt, authentication included, and fails with `TimeoutException`. It is
   also the `SshClientOptions.ConnectTimeout` that `ConfigureClientOptions` receives; a shorter one set there applies, and still fails
   with `TimeoutException`. With `ConfigAlias`, `ssh_config`'s own `ConnectTimeout` applies too, and fails with `SshException`

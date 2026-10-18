@@ -11,6 +11,7 @@ common policies and how to choose.
 | Hosts are in the user's `known_hosts` (interactive tools, admin scripts) | `KnownHostsVerifier.ForCurrentUser(StrictHostKeyChecking.Yes)` |
 | A service with its own trust store, learning hosts on first contact | `new KnownHostsVerifier([path]) { Policy = AcceptNew }` |
 | A few fixed servers whose fingerprints you know | `SshHostKeyVerifier.Pinned(...)` |
+| An endpoint registered with `AddSshClient` (a container, Kubernetes) | the `HostKeyFingerprints` setting, from configuration |
 | Hosts with OpenSSH host certificates | `@cert-authority` lines in `known_hosts`, or a custom verifier |
 | An inventory, CMDB or vault knows the keys | `SshHostKeyVerifier.FromDelegate(...)` |
 | Connecting by `ssh_config` alias | nothing: the configuration's `known_hosts` and `StrictHostKeyChecking` apply |
@@ -39,6 +40,17 @@ common policies and how to choose.
 [!code-csharp[](../snippets/HostKeys.cs#pinned)]
 
 Fingerprints are written as `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` prints them, with the `SHA256:` prefix.
+
+### With dependency injection
+
+An endpoint registered with `AddSshClient` pins fingerprints through its `HostKeyFingerprints` setting, so they can come from
+configuration (`appsettings.json`, an environment variable such as `Ssh__Deploy__HostKeyFingerprints__0`) with no code:
+
+[!code-csharp[](../snippets/DependencyInjection.cs#pin-in-code)]
+
+They replace known_hosts for that endpoint: `KnownHostsFiles` or `AcceptNewHostKeys` alongside them fails validation, and a
+fingerprint not in OpenSSH's `SHA256:` format fails it at startup (with `ValidateOnStart`). See
+[Dependency injection: containers and Kubernetes](../dependency-injection.md#containers-and-kubernetes).
 
 ## Ask your own source of truth
 

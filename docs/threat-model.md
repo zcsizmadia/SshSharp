@@ -173,10 +173,14 @@ A man in the middle can read, change, drop and inject bytes. The server itself m
 
 ### Dependency injection
 
-- `SshEndpointOptions` can hold a password and a key passphrase bound from configuration: bind them from a secret store, not a
-  checked-in file. They are not logged.
+- `SshEndpointOptions` can hold a password, a key passphrase, private keys as text (`PrivateKeys`) and a proxy URI with a password,
+  bound from configuration: bind them from a secret store, not a checked-in file. They are not logged, validation errors name an
+  entry without its value, and `SshEndpointPrivateKey.ToString()` and the debugger do not show them.
 - Host keys are checked strictly by default: an unknown host fails unless `AcceptNewHostKeys` is set (which trusts the first key it
   sees), and a changed key always fails.
+- `HostKeyFingerprints` replaces known_hosts with pinned fingerprints; whoever can change the configuration decides which servers
+  are trusted, as with a known_hosts file. Combining it with `KnownHostsFiles`, `AcceptNewHostKeys` or `ConfigAlias` fails validation
+  rather than widening trust to either source.
 - With `ConfigAlias`, the connection takes ssh_config's settings and the core defaults (`ProxyCommand` allowed, the agent used,
   `ForwardAgent` and `StrictHostKeyChecking` as the file says); an unknown host is refused, since there is no one to ask.
 - The health check's description names no server software and carries no server text, since health endpoints are often reachable
