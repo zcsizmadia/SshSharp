@@ -190,6 +190,15 @@ internal sealed class FakeSftpServer
     /// <summary>Every READ's offset, in arrival order across sessions.</summary>
     public List<long> ReadOffsets { get; } = [];
 
+    /// <summary>Fails a WRITE at this offset with a Failure status, writing nothing (a full disk on the server, say).</summary>
+    public Func<long, bool>? FailWriteAt { get; set; }
+
+    /// <summary>Every WRITE's offset, in arrival order across sessions.</summary>
+    public List<long> WriteOffsets { get; } = [];
+
+    /// <summary>While set and not completed, the first WRITE (and every request behind it) waits for it before being answered.</summary>
+    public TaskCompletionSource? HoldWrites { get; set; }
+
     /// <summary>
     /// How long every reply takes to reach the client, as on a link with this round-trip time: replies are delayed without holding up
     /// the requests behind them, so a client that pipelines pays the latency once per batch, not once per request. None by default.
@@ -381,6 +390,11 @@ internal sealed class FakeSftpServer
                 }
 
                 await hold.Task;
+            }
+
+            if (packet[0] is 6 && HoldWrites is { } holdWrites)
+            {
+                await holdWrites.Task;
             }
 
             var reply = HandleLocked(packet, opened);
@@ -728,6 +742,12 @@ internal sealed class FakeSftpServer
                 if (!_handles.TryGetValue(handle, out var open) || Follow(open.Path) is not { } node)
                 {
                     return Status(id, 4, "Bad handle");
+                }
+
+                WriteOffsets.Add(offset);
+                if (FailWriteAt?.Invoke(offset) == true)
+                {
+                    return Status(id, 4, "No space left on device");
                 }
 
                 if (node.Data.Count < offset + data.Length)

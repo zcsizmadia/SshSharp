@@ -135,6 +135,17 @@ internal static class FileTransfer
         // </sftp-stream>
     }
 
+    public static async Task StreamCopyAsync(SftpClient sftp, Stream source, CancellationToken cancellationToken)
+    {
+        // <sftp-stream-copy>
+        // Copy any stream into a remote file. Writes are sent without waiting for each reply (up to 16 in flight), so a failure can
+        // surface on a later call: FlushAsync waits for every write and throws it, and so does DisposeAsync.
+        await using var remote = await sftp.OpenWriteAsync("incoming/export.csv", cancellationToken);
+        await source.CopyToAsync(remote, cancellationToken);
+        await remote.FlushAsync(cancellationToken);
+        // </sftp-stream-copy>
+    }
+
     public static async Task AtomicUploadAsync(SftpClient sftp, CancellationToken cancellationToken)
     {
         // <sftp-atomic>

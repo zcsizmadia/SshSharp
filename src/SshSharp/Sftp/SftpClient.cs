@@ -397,6 +397,14 @@ public sealed partial class SftpClient : IAsyncDisposable
     /// for <see cref="FileStream"/>: <see cref="FileMode.Create"/> creates or truncates, <see cref="FileMode.CreateNew"/> fails if the
     /// file exists, <see cref="FileMode.Append"/> starts at the end. Disposing the stream closes the remote file.
     /// </summary>
+    /// <remarks>
+    /// A stream opened only for reading reads ahead (up to 16 reads in flight) while it is read in order. Writes are written behind:
+    /// <see cref="Stream.WriteAsync(ReadOnlyMemory{byte}, CancellationToken)"/> returns once its requests are sent, keeping up to 16 in
+    /// flight, so a write the server refuses is thrown by a later call: the next write that finds it, or at the latest
+    /// <see cref="Stream.FlushAsync(CancellationToken)"/> or <see cref="Stream.DisposeAsync"/>, which wait for every write in flight (as
+    /// do reads and <see cref="Stream.SetLength"/>). The stream is then faulted: every later call throws the same exception, and
+    /// disposing still closes the remote file. Cancelling a write also faults the stream.
+    /// </remarks>
     public async Task<Stream> OpenAsync(string path, FileMode mode, FileAccess access, CancellationToken cancellationToken = default)
     {
         var (handle, flags) = await OpenHandleAsync(path, mode, access, cancellationToken).ConfigureAwait(false);
@@ -421,7 +429,11 @@ public sealed partial class SftpClient : IAsyncDisposable
     public Task<Stream> OpenReadAsync(string path, CancellationToken cancellationToken = default) =>
         OpenAsync(path, FileMode.Open, FileAccess.Read, cancellationToken);
 
-    /// <summary>Creates or truncates a remote file for writing, as <see cref="OpenAsync"/> with <see cref="FileMode.Create"/>.</summary>
+    /// <summary>
+    /// Creates or truncates a remote file for writing, as <see cref="OpenAsync"/> with <see cref="FileMode.Create"/>. Writes are written
+    /// behind (see <see cref="OpenAsync"/>): end with <see cref="Stream.FlushAsync(CancellationToken)"/> or dispose the stream
+    /// asynchronously to see a failed write.
+    /// </summary>
     public Task<Stream> OpenWriteAsync(string path, CancellationToken cancellationToken = default) =>
         OpenAsync(path, FileMode.Create, FileAccess.Write, cancellationToken);
 

@@ -12,6 +12,7 @@ may be used from several tasks at once, and what may not.
 | `SshSession` | One reader per stream, one writer for `StandardInput`. Reading `StandardOutput` and `StandardError` from two tasks at the same time is expected (and needed, see [flow control](channels.md#flow-control)). |
 | `SshExpect` | One caller at a time. It reads `StandardOutput` itself; nothing else may read it. |
 | Tunnel streams | As for any `Stream`: one reader and one writer at a time, which may run concurrently. |
+| SFTP file streams (`OpenAsync`) | One call at a time, as for `FileStream`. Writes in flight are answered in the background, but the stream looks at their replies only during your calls, so nothing races with you. |
 | `SftpFileSystem`, `SftpFileProvider` | Yes, through their shared `SftpClient`. |
 | `SshClientOptions`, `SshConfigConnectOptions`, `SshConfig` | Immutable once built; one instance can serve many connections. |
 | `ISshClientFactory`, `ISshConnectionProvider` | Yes; singletons in the container. |
@@ -40,6 +41,9 @@ is still a bad idea: it holds a thread for a network round trip.
 Two adapters are synchronous by contract: `IFileProvider` and many `IFileSystem` members. Each such call blocks a thread for an SFTP
 round trip, bounded by the adapter's `OperationTimeout`. Under load, prefer `IFileSystem`'s `...Async` methods and keep
 `SftpFileProvider`'s cache on.
+
+An SFTP file stream is asynchronous, but two `Stream` members have no asynchronous form: `SetLength`, and a synchronous `Dispose`
+of a stream with writes in flight, block until the server answers (a failed write must not be lost). Dispose with `await using`.
 
 ## See also
 

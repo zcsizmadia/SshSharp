@@ -128,6 +128,12 @@ The server accepts only the variables its `AcceptEnv` lists. Pass values on the 
 The server lacks an OpenSSH extension the operation needs: an overwriting rename (`posix-rename@openssh.com`), hard links, server-side
 copy. `sftp.Extensions` lists what it has. Or a synchronous `Read`/`Write` on an SFTP stream: use the async methods.
 
+### `SftpException` from `FlushAsync`, `DisposeAsync` or a later `WriteAsync`
+
+SFTP file streams write behind: `WriteAsync` returns before the server answers, so a write it refused (a full disk, a quota) is
+thrown by a later call on the stream. The file is incomplete; the stream is faulted and every later call throws the same exception.
+See [Writes in flight](../sftp.md#writes-in-flight).
+
 ### SCP fails on a Windows server
 
 Remote paths are single-quoted for a POSIX shell. A Windows OpenSSH server whose default shell is `cmd.exe` or PowerShell reads

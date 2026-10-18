@@ -1,3 +1,5 @@
+using System.Runtime.ExceptionServices;
+
 namespace SshSharp.Sftp;
 
 /// <summary>
@@ -8,17 +10,33 @@ namespace SshSharp.Sftp;
 /// when the file was opened, kept up to date with this stream's own writes and <see cref="SetLength"/>; another writer's changes show in
 /// <see cref="GetLengthAsync"/>.
 /// </summary>
+/// <remarks>
+/// Writes are written behind: <see cref="WriteAsync(ReadOnlyMemory{byte}, CancellationToken)"/> sends its requests and returns without
+/// waiting for their replies, keeping up to 16 in flight (it waits for the oldest when the window is full), so writing through the
+/// stream approaches the speed of <see cref="SftpClient.UploadAsync"/>. A write that fails is never lost: the next call that finds it
+/// (any call but the getters) throws its exception, and so does every call after it; <see cref="FlushAsync"/>, a read, a seek followed by
+/// a write, <see cref="SetLength"/> and disposing wait for every write in flight first. Disposing still closes the handle after a failed
+/// write, and throws the failure if no call reported it yet. A cancelled write leaves the stream faulted, since some of its data may have
+/// been written.
+/// </remarks>
 internal sealed class SftpFileStream(SftpClient client, byte[] handle, string path, bool canRead, bool canWrite, long position, long? length) : Stream
 {
     private const int MaxReadAhead = 16;
 
+    /// <summary>The most writes in flight: as deep as the read-ahead, so at most 16 writes of the server's write size are held at once.</summary>
+    internal const int MaxWriteBehind = 16;
+
     private readonly Queue<(long Offset, int Length, Task<SftpResponse> Reply)> _ahead = new();
+    private readonly Queue<Task<SftpResponse>> _behind = new();
     private long? _length = length;
     private long _position = position;
     private long _aheadNext;
     private int _depth = 2;
     private ReadOnlyMemory<byte> _leftover;
     private long _leftoverOffset;
+    private long _behindEnd;
+    private ExceptionDispatchInfo? _fault;
+    private bool _faultReported;
     private int _disposed;
 
     public override bool CanRead => canRead && _disposed == 0;
@@ -31,7 +49,7 @@ internal sealed class SftpFileStream(SftpClient client, byte[] handle, string pa
     /// </summary>
     public override bool CanSeek => _disposed == 0 && _length is not null;
 
-    /// <summary>The file's size as this stream knows it, without a round trip (see the class remarks).</summary>
+    /// <summary>The file's size as this stream knows it, without a round trip (see the class remarks); it counts the writes in flight.</summary>
     /// <exception cref="NotSupportedException">The server did not report the file's size when it was opened.</exception>
     public override long Length
     {
@@ -42,12 +60,17 @@ internal sealed class SftpFileStream(SftpClient client, byte[] handle, string pa
         }
     }
 
+    /// <summary>
+    /// The position. Setting it does not wait for the writes in flight (a write or read that follows does), but throws a write that
+    /// already failed.
+    /// </summary>
     public override long Position
     {
         get => _position;
         set
         {
             ArgumentOutOfRangeException.ThrowIfNegative(value);
+            ThrowIfWriteFailed();
             _position = value;
         }
     }
@@ -55,6 +78,7 @@ internal sealed class SftpFileStream(SftpClient client, byte[] handle, string pa
     public async Task<long> GetLengthAsync(CancellationToken cancellationToken)
     {
         ObjectDisposedException.ThrowIf(_disposed != 0, this);
+        await WaitForWritesAsync(cancellationToken).ConfigureAwait(false);
         var size = (await client.GetHandleAttributesAsync(handle, path, cancellationToken).ConfigureAwait(false)).Size
             ?? throw new NotSupportedException("The SFTP server did not report the file's size.");
         _length = size;
@@ -79,6 +103,8 @@ internal sealed class SftpFileStream(SftpClient client, byte[] handle, string pa
             return await ReadAheadAsync(buffer, cancellationToken).ConfigureAwait(false);
         }
 
+        // What is read includes this stream's own writes: they are acknowledged first.
+        await WaitForWritesAsync(cancellationToken).ConfigureAwait(false);
         var length = Math.Min(buffer.Length, client.Limits.MaxReadLength);
         var reply = await client.SendReadAsync(handle, _position, length, cancellationToken).ConfigureAwait(false);
         var data = SftpClient.ExpectData(reply, length, path);
@@ -155,6 +181,10 @@ internal sealed class SftpFileStream(SftpClient client, byte[] handle, string pa
     public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) =>
         ReadAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
 
+    /// <summary>
+    /// Sends <paramref name="buffer"/> in requests of the server's write size and returns once they are sent, not acknowledged (see the
+    /// class remarks); the data is copied into the requests, so the buffer can be reused at once.
+    /// </summary>
     public override async ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(_disposed != 0, this);
@@ -163,23 +193,50 @@ internal sealed class SftpFileStream(SftpClient client, byte[] handle, string pa
             throw new NotSupportedException("The file was not opened for writing.");
         }
 
-        while (!buffer.IsEmpty)
+        ThrowIfWriteFailed();
+        cancellationToken.ThrowIfCancellationRequested();
+        try
         {
-            var part = buffer[..Math.Min(buffer.Length, client.Limits.MaxWriteLength)];
-            SftpClient.ExpectWritten(await client.SendWriteAsync(handle, _position, part, cancellationToken).ConfigureAwait(false), path);
-            _position += part.Length;
-            if (_length is { } known && _position > known)
+            if (_behind.Count > 0 && _behindEnd != _position)
             {
-                _length = _position;
+                // After a seek, this write may overlap one in flight: those are acknowledged first, so the later bytes win.
+                await WaitForWritesAsync(cancellationToken).ConfigureAwait(false);
             }
 
-            buffer = buffer[part.Length..];
+            while (!buffer.IsEmpty)
+            {
+                if (_behind.Count >= MaxWriteBehind)
+                {
+                    await AcknowledgeOldestAsync(cancellationToken).ConfigureAwait(false);
+                }
+
+                // The request is built (the data copied) before SendWriteAsync returns. Like the read-ahead, it outlives this call, so it
+                // is not tied to its token; the wait for room is.
+                var part = buffer[..Math.Min(buffer.Length, client.Limits.MaxWriteLength)];
+                _behind.Enqueue(client.SendWriteAsync(handle, _position, part, CancellationToken.None));
+                _position += part.Length;
+                _behindEnd = _position;
+                if (_length is { } known && _position > known)
+                {
+                    _length = _position;
+                }
+
+                buffer = buffer[part.Length..];
+            }
+        }
+        catch (OperationCanceledException ex) when (cancellationToken.IsCancellationRequested && _fault is null)
+        {
+            // Part of this write may be in flight and part not: the file's content is unknown, so the stream cannot go on.
+            _fault = ExceptionDispatchInfo.Capture(ex);
+            _faultReported = true;
+            throw;
         }
     }
 
     public override Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) =>
         WriteAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
 
+    /// <summary>Moves the position. It does not wait for the writes in flight (a write or read that follows does), but throws a write that already failed.</summary>
     public override long Seek(long offset, SeekOrigin origin)
     {
         ObjectDisposedException.ThrowIf(_disposed != 0, this);
@@ -191,9 +248,11 @@ internal sealed class SftpFileStream(SftpClient client, byte[] handle, string pa
             _ => throw new ArgumentOutOfRangeException(nameof(origin)),
         };
         ArgumentOutOfRangeException.ThrowIfNegative(target, nameof(offset));
+        ThrowIfWriteFailed();
         return _position = target;
     }
 
+    /// <summary>Waits for the writes in flight, then sets the file's size on the server.</summary>
     public override void SetLength(long value)
     {
         ObjectDisposedException.ThrowIf(_disposed != 0, this);
@@ -203,25 +262,39 @@ internal sealed class SftpFileStream(SftpClient client, byte[] handle, string pa
             throw new NotSupportedException("The file was not opened for writing.");
         }
 
-        client.SetHandleAttributesAsync(handle, path, new SftpFileAttributes { Size = value }, CancellationToken.None).GetAwaiter().GetResult();
+        // Stream has no asynchronous SetLength: the call blocks on the server, as it always has; the writes in flight come first, so a
+        // write past the new end cannot land after it.
+        SetLengthAsync(value).GetAwaiter().GetResult();
         _length = value;
     }
 
+    private async Task SetLengthAsync(long value)
+    {
+        await WaitForWritesAsync(CancellationToken.None).ConfigureAwait(false);
+        await client.SetHandleAttributesAsync(handle, path, new SftpFileAttributes { Size = value }, CancellationToken.None).ConfigureAwait(false);
+    }
+
     /// <summary>
-    /// Every write is acknowledged when it returns; flushing also asks the server to write the file to disk (<c>fsync@openssh.com</c>),
-    /// when it can.
+    /// Waits for every write in flight, throwing the first that failed; then asks the server to write the file to disk
+    /// (<c>fsync@openssh.com</c>), when it can.
     /// </summary>
     public override async Task FlushAsync(CancellationToken cancellationToken)
     {
         ObjectDisposedException.ThrowIf(_disposed != 0, this);
         if (canWrite)
         {
+            await WaitForWritesAsync(cancellationToken).ConfigureAwait(false);
             await client.SyncHandleAsync(handle, path, cancellationToken).ConfigureAwait(false);
         }
     }
 
+    /// <summary>Does not wait for the writes in flight (<see cref="FlushAsync"/> does), but throws a write that already failed.</summary>
     public override void Flush()
     {
+        if (_disposed == 0)
+        {
+            ThrowIfWriteFailed();
+        }
     }
 
     public override int Read(byte[] buffer, int offset, int count) =>
@@ -230,26 +303,128 @@ internal sealed class SftpFileStream(SftpClient client, byte[] handle, string pa
     public override void Write(byte[] buffer, int offset, int count) =>
         throw new NotSupportedException("SFTP file streams are asynchronous; use WriteAsync.");
 
+    /// <summary>Forgets the writes acknowledged already, without waiting; throws if one failed, now or before.</summary>
+    private void ThrowIfWriteFailed()
+    {
+        while (_behind.TryPeek(out var write) && write.IsCompleted)
+        {
+            Acknowledge(_behind.Dequeue());
+        }
+
+        if (_fault is { } fault)
+        {
+            _faultReported = true;
+            fault.Throw();
+        }
+    }
+
+    /// <summary>Waits for every write in flight; throws the first that failed. Cancelling the wait leaves the writes in flight.</summary>
+    private async ValueTask WaitForWritesAsync(CancellationToken cancellationToken)
+    {
+        ThrowIfWriteFailed();
+        while (_behind.Count > 0)
+        {
+            await AcknowledgeOldestAsync(cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private async ValueTask AcknowledgeOldestAsync(CancellationToken cancellationToken)
+    {
+        // As a plain Task: SuppressThrowing is not allowed on a Task<T>; the write's own outcome is read by Acknowledge.
+        Task oldest = _behind.Peek();
+        await oldest.WaitAsync(cancellationToken).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+        cancellationToken.ThrowIfCancellationRequested(); // the write itself, if it is done, is acknowledged by the next call
+        ThrowIfWriteFailed();
+    }
+
+    /// <summary>Records the outcome of a completed write: the first failure faults the stream, the others are observed.</summary>
+    private void Acknowledge(Task<SftpResponse> write)
+    {
+        if (_fault is not null)
+        {
+            _ = write.Exception;
+            return;
+        }
+
+        // Whatever the write failed with is kept and thrown later: a failure is never dropped.
+        if (!write.IsCompletedSuccessfully)
+        {
+            _fault = write.IsCanceled
+                ? ExceptionDispatchInfo.Capture(new TaskCanceledException(write))
+                : ExceptionDispatchInfo.Capture(write.Exception!.InnerException ?? write.Exception);
+            return;
+        }
+
+        try
+        {
+            SftpClient.ExpectWritten(write.Result, path); // completed: this does not block
+        }
+        catch (SshException ex)
+        {
+            _fault = ExceptionDispatchInfo.Capture(ex); // the server refused the write (an SftpException), or sent a malformed reply
+        }
+    }
+
+    /// <summary>Waits for every write in flight without throwing, recording the first failure.</summary>
+    private async Task SettleWritesAsync()
+    {
+        while (_behind.TryDequeue(out var write))
+        {
+            Task settled = write; // as a plain Task, for SuppressThrowing
+            await settled.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+            Acknowledge(write);
+        }
+    }
+
+    /// <summary>On disposing: throws a write failure no call has reported yet.</summary>
+    private void ThrowUnreportedFailure()
+    {
+        if (_fault is { } fault && !_faultReported)
+        {
+            _faultReported = true;
+            fault.Throw();
+        }
+    }
+
     public override async ValueTask DisposeAsync()
     {
-        if (Interlocked.Exchange(ref _disposed, 1) == 0)
+        var closing = Interlocked.Exchange(ref _disposed, 1) == 0;
+        if (closing)
         {
             DropAhead();
-            await client.CloseHandleAsync(handle).ConfigureAwait(false);
+            await SettleWritesAsync().ConfigureAwait(false);
+            await client.CloseHandleAsync(handle).ConfigureAwait(false); // closed even after a failed write
         }
 
         await base.DisposeAsync().ConfigureAwait(false);
+        if (closing)
+        {
+            ThrowUnreportedFailure();
+        }
     }
 
     protected override void Dispose(bool disposing)
     {
-        if (disposing && Interlocked.Exchange(ref _disposed, 1) == 0)
+        var closing = disposing && Interlocked.Exchange(ref _disposed, 1) == 0;
+        if (closing)
         {
-            // Synchronous disposal cannot wait for the network; the close is sent in the background.
             DropAhead();
+            if (_behind.Count > 0)
+            {
+                // Stream gives synchronous disposal no other way to report a write that fails: the writes in flight are waited for, as
+                // SetLength waits for its request, rather than lost. Only a caller that wrote asynchronously and disposes synchronously
+                // gets here.
+                SettleWritesAsync().GetAwaiter().GetResult();
+            }
+
+            // The close is sent in the background, as before.
             _ = client.CloseHandleAsync(handle);
         }
 
         base.Dispose(disposing);
+        if (closing)
+        {
+            ThrowUnreportedFailure();
+        }
     }
 }
