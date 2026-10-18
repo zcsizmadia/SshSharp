@@ -203,8 +203,9 @@ internal sealed class SftpChannel : IAsyncDisposable
         {
             body(frame.Writer);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
+            // Reported through the task, as a failed send would be; the frame is not handed over, so it is returned here.
             frame.Dispose();
             return Task.FromException<SftpResponse>(ex);
         }
@@ -224,7 +225,10 @@ internal sealed class SftpChannel : IAsyncDisposable
         try
         {
             _pending[id] = reply;
-            try
+
+            // Sent or not, the frame is no longer needed afterwards: the channel copied the bytes into packets of its own before the send
+            // completed.
+            using (frame)
             {
                 if (Volatile.Read(ref _failure) is { } failed)
                 {
@@ -232,11 +236,6 @@ internal sealed class SftpChannel : IAsyncDisposable
                 }
 
                 await SendAsync(frame.Complete(id), cancellationToken).ConfigureAwait(false);
-            }
-            finally
-            {
-                // Sent or not, the frame is no longer needed: the channel copied the bytes into packets of its own before the send completed.
-                frame.Dispose();
             }
 
             sent = true;

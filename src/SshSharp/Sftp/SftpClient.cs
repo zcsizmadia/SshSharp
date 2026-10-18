@@ -1085,27 +1085,39 @@ public sealed partial class SftpClient : IAsyncDisposable
                 // The request is built in one pooled buffer, and the source is read straight into its data: no buffer of its own, no copy.
                 // This method owns the frame until RequestAsync takes it over, which returns it once it is sent.
                 var frame = StartWrite(handle, offset, chunk);
+                var handedOver = false;
                 int read;
                 try
                 {
-                    read = await source.ReadAtLeastAsync(frame.GetMemory(chunk)[..chunk], chunk, throwOnEndOfStream: false, cancellationToken).ConfigureAwait(false);
+                    try
+                    {
+                        read = await source.ReadAtLeastAsync(frame.GetMemory(chunk)[..chunk], chunk, throwOnEndOfStream: false, cancellationToken).ConfigureAwait(false);
+                    }
+                    catch
+                    {
+                        budget?.Release();
+                        throw;
+                    }
+
+                    if (read == 0)
+                    {
+                        budget?.Release();
+                        break;
+                    }
+
+                    EndWrite(frame, handle, read);
+                    var request = _channel.RequestAsync(frame, cancellationToken); // takes the frame over, whatever happens
+                    handedOver = true;
+                    inFlight.Enqueue((request, read));
                 }
-                catch
+                finally
                 {
-                    frame.Dispose();
-                    budget?.Release();
-                    throw;
+                    if (!handedOver)
+                    {
+                        frame.Dispose();
+                    }
                 }
 
-                if (read == 0)
-                {
-                    frame.Dispose();
-                    budget?.Release();
-                    break;
-                }
-
-                EndWrite(frame, handle, read);
-                inFlight.Enqueue((_channel.RequestAsync(frame, cancellationToken), read));
                 offset += read;
                 if (inFlight.Count >= options.MaxRequestsInFlight)
                 {
