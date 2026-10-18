@@ -50,6 +50,9 @@ ChaCha20, Poly1305, AES-CTR and sntrup761 itself. Those implementations are chec
   Every vector gives the expected answer. Wycheproof keeps adding vectors as new bugs are found, so the copies in the repository are
   checked for updates from time to time and before each release; the
   [fixtures' README](https://github.com/zcsizmadia/SshSharp/blob/main/tests/SshSharp.Tests/Fixtures/wycheproof/README.md) says how.
+- **Differential tests:** the vectorized ChaCha20 (8 and 4 blocks at once) against the scalar code, for every length up to 2,000
+  bytes, long buffers, and counters that cross the 2^32 and 2^64 boundaries in every lane. The tests choose the path explicitly, so
+  every path runs on every CI platform, whatever vector width its CPU has.
 - **Constant-time review and a timing test:** see the [cryptography review](crypto-review.md).
 
 ## Real servers

@@ -4,8 +4,12 @@ using System.Runtime.CompilerServices;
 
 namespace SshSharp.Crypto;
 
-/// <summary>The ChaCha20 block function and stream cipher (RFC 8439 section 2), with the counter/nonce words exposed so both the RFC and OpenSSH layouts can use it.</summary>
-internal static class ChaCha20
+/// <summary>
+/// The ChaCha20 block function and stream cipher (RFC 8439 section 2), with the counter/nonce words exposed so both the RFC and OpenSSH
+/// layouts can use it. The stream cipher computes 8 or 4 blocks at once with SIMD vectors where the CPU has them (ChaCha20.Vector.cs),
+/// and uses the scalar block function for the rest.
+/// </summary>
+internal static partial class ChaCha20
 {
     public const int KeySize = 32;
     public const int BlockSize = 64;
@@ -68,7 +72,15 @@ internal static class ChaCha20
     /// XORs <paramref name="input"/> with the keystream (OpenSSH layout: 64-bit counter, 8-byte nonce) into <paramref name="output"/>.
     /// The spans may be the same (in-place) but must not partially overlap.
     /// </summary>
-    public static void Xor(ReadOnlySpan<byte> key, ReadOnlySpan<byte> nonce8, ulong counter, ReadOnlySpan<byte> input, Span<byte> output)
+    public static void Xor(ReadOnlySpan<byte> key, ReadOnlySpan<byte> nonce8, ulong counter, ReadOnlySpan<byte> input, Span<byte> output) =>
+        Xor(key, nonce8, counter, input, output, ParallelBlocks);
+
+    /// <summary>
+    /// <see cref="Xor(ReadOnlySpan{byte}, ReadOnlySpan{byte}, ulong, ReadOnlySpan{byte}, Span{byte})"/> with the number of blocks computed
+    /// at once chosen by the caller: 8 (256-bit vectors), 4 (128-bit vectors) or 1 (the scalar block function only). The tests use it to
+    /// run every path on every machine; a vector width the CPU lacks still gives the right output, through the runtime's software fallback.
+    /// </summary>
+    internal static void Xor(ReadOnlySpan<byte> key, ReadOnlySpan<byte> nonce8, ulong counter, ReadOnlySpan<byte> input, Span<byte> output, int parallelBlocks)
     {
         if (key.Length != KeySize || nonce8.Length != 8 || output.Length < input.Length)
         {
@@ -77,8 +89,12 @@ internal static class ChaCha20
 
         var n0 = BinaryPrimitives.ReadUInt32LittleEndian(nonce8);
         var n1 = BinaryPrimitives.ReadUInt32LittleEndian(nonce8[4..]);
+
+        // Whole groups of 8 blocks, then of 4, go through the vector code, and the rest (at most 3 blocks, the last one possibly partial)
+        // through the scalar block function. The split depends only on the length, never on the key or the data.
+        var done = XorParallel(key, n0, n1, ref counter, input, output, parallelBlocks);
         Span<byte> block = stackalloc byte[BlockSize];
-        for (var offset = 0; offset < input.Length; offset += BlockSize)
+        for (var offset = done; offset < input.Length; offset += BlockSize)
         {
             Block(key, (uint)counter, (uint)(counter >> 32), n0, n1, block);
             counter++;

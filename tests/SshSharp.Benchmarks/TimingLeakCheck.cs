@@ -28,6 +28,17 @@ internal static class TimingLeakCheck
         lowScalar[31] = 0x40;
         Check("X25519", samples, lowScalar, secret => X25519.TryAgree(secret, peer, shared));
 
+        // ChaCha20 over 1,000 bytes (groups of 8 and 4 blocks through the vector code, the tail through the scalar code): an all-zero
+        // key against random keys, then one key with all-zero data against random data. The 4-block path is checked on its own too.
+        var nonce = RandomNumberGenerator.GetBytes(8);
+        var data = RandomNumberGenerator.GetBytes(1000);
+        var stream = new byte[1000];
+        Check("ChaCha20 key", samples, new byte[32], secret => ChaCha20.Xor(secret, nonce, 1, data, stream));
+        Check("ChaCha20 key/4", samples, new byte[32], secret => ChaCha20.Xor(secret, nonce, 1, data, stream, 4));
+        var chachaKey = RandomNumberGenerator.GetBytes(32);
+        Check("ChaCha20 data", samples, new byte[1000], plain => ChaCha20.Xor(chachaKey, nonce, 1, plain, stream),
+            () => RandomNumberGenerator.GetBytes(1000));
+
         // sntrup761 decapsulation is about a millisecond, so it gets a tenth of the samples. First a fixed secret key against fresh ones
         // (each with a valid ciphertext of its own), then the implicit-rejection path: one key, a valid ciphertext against random bytes.
         var kemSamples = Math.Max(1000, samples / 10);
@@ -54,11 +65,13 @@ internal static class TimingLeakCheck
 
     private static void Check(string name, int samples, byte[] fixedSecret, Action<byte[]> operation, Func<byte[]>? randomSecret = null)
     {
-        // Inputs and the class order are prepared up front, so nothing but the operation is timed.
+        // Inputs and the class order are prepared up front, so nothing but the operation is timed. The fixed class gets a copy of the
+        // fixed secret per sample, allocated in turn with the random ones, so both classes read memory that is equally warm in the cache:
+        // reusing one array made a 1,000-byte input look faster only because it stayed in the cache.
         randomSecret ??= () => RandomNumberGenerator.GetBytes(32);
         var coin = new Random(1);
         var inputs = Enumerable.Range(0, 2 * samples)
-            .Select(_ => coin.Next(2) == 0 ? (Fixed: true, Secret: fixedSecret) : (Fixed: false, Secret: randomSecret()))
+            .Select(_ => coin.Next(2) == 0 ? (Fixed: true, Secret: (byte[])fixedSecret.Clone()) : (Fixed: false, Secret: randomSecret()))
             .ToArray();
 
         // Warm up so tiering does not land in one class.

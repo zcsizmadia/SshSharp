@@ -45,6 +45,13 @@ public class CryptoBenchmarks
     [Benchmark(Description = "ChaCha20 32 KiB")]
     public void ChaCha20() => SshSharp.Crypto.ChaCha20.Xor(_privateKey, _peer.AsSpan(0, 8), 1, _bulk, _bulkOut);
 
+    // The same with the number of blocks at once forced: 4 (Vector128) and 1 (the scalar block function, the fallback).
+    [Benchmark(Description = "ChaCha20 32 KiB, 4 blocks")]
+    public void ChaCha20Vector128() => SshSharp.Crypto.ChaCha20.Xor(_privateKey, _peer.AsSpan(0, 8), 1, _bulk, _bulkOut, 4);
+
+    [Benchmark(Description = "ChaCha20 32 KiB, scalar")]
+    public void ChaCha20Scalar() => SshSharp.Crypto.ChaCha20.Xor(_privateKey, _peer.AsSpan(0, 8), 1, _bulk, _bulkOut, 1);
+
     [Benchmark(Description = "Poly1305 32 KiB")]
     public void Poly1305Tag() => SshSharp.Crypto.Poly1305.ComputeTag(_polyKey, _bulk, _tag);
 }
