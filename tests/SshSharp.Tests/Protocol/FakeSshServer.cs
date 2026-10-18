@@ -432,8 +432,18 @@ internal sealed class FakeSshServer : IAsyncDisposable
         }
     }
 
-    /// <summary>Closes the server's side of the connection.</summary>
-    public ValueTask CloseAsync() => CompleteWriterAsync();
+    /// <summary>
+    /// Closes the server's side of the connection. If a sender holds the send lock too long (see <see cref="CompleteWriterAsync"/>), the
+    /// connection is cut instead: a test that closes the server relies on the client noticing, and a close that silently did nothing
+    /// made such a test wait out its timeout (stress run 39100315796, windows-latest).
+    /// </summary>
+    public async ValueTask CloseAsync()
+    {
+        if (!await CompleteWriterAsync())
+        {
+            ClientStream.Dispose();
+        }
+    }
 
     public async ValueTask DisposeAsync()
     {
@@ -463,9 +473,9 @@ internal sealed class FakeSshServer : IAsyncDisposable
     /// <summary>
     /// Completes the server-to-client pipe under the send lock, so no packet is being encoded into the pipe's memory meanwhile, as the
     /// client's transport does. A sender stuck holding the lock (writing into a pipe nobody reads) keeps the pipe open instead; the
-    /// unpooled pipe memory makes a late write harmless either way.
+    /// unpooled pipe memory makes a late write harmless either way. Returns whether the pipe is completed.
     /// </summary>
-    private async ValueTask CompleteWriterAsync()
+    private async ValueTask<bool> CompleteWriterAsync()
     {
         var locked = await _sendLock.WaitAsync(TimeSpan.FromSeconds(5));
         try
@@ -475,6 +485,8 @@ internal sealed class FakeSshServer : IAsyncDisposable
                 _writerCompleted = true;
                 await _writer.CompleteAsync();
             }
+
+            return _writerCompleted;
         }
         finally
         {

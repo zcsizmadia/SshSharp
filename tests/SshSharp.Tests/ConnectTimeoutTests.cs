@@ -195,11 +195,15 @@ public sealed class ConnectTimeoutTests
 
         await using (v6)
         {
-            var ex = await Assert.ThrowsAsync<SshException>(async () => await SshClient.ConnectAsync("localhost", v4.Port, Options(Short, family), Timeout()));
-            await Assert.That(ex!.Reason).IsEqualTo(SshFailureReason.Timeout); // connected, then the silent server timed out
+            // No ConnectTimeout: under load, resolving "localhost" alone can outlast a short one, and the attempt then times out before
+            // any address is tried (stress run 39100315796). The connection is watched until it arrives, then cancelled.
+            using var cancel = new CancellationTokenSource();
+            var connecting = SshClient.ConnectAsync("localhost", v4.Port, Options(null, family), cancel.Token);
 
             var (tried, other) = family == SshAddressFamily.Inet ? (v4, v6) : (v6, v4);
             await tried.Accepted.WaitAsync(Timeout());
+            await cancel.CancelAsync();
+            await Assert.ThrowsAsync<OperationCanceledException>(async () => await connecting);
             await Assert.That(other.Accepted.IsCompleted).IsFalse();
         }
     }

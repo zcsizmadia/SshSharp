@@ -41,6 +41,10 @@ internal static class TcpConnector
             try
             {
                 await tcp.ConnectAsync(host, port, cancellationToken).ConfigureAwait(false);
+
+                // A cancellation racing the connect's completion can close the socket and still let ConnectAsync return (seen on
+                // .NET 8 under load); GetStream would then throw InvalidOperationException. The caller asked to cancel: say so.
+                cancellationToken.ThrowIfCancellationRequested();
                 return tcp.GetStream();
             }
             catch (SocketException ex)
@@ -89,6 +93,7 @@ internal static class TcpConnector
             {
                 socket.Bind(from);
                 await socket.ConnectAsync(destination, port, cancellationToken).ConfigureAwait(false);
+                cancellationToken.ThrowIfCancellationRequested(); // as above: a cancelled connect must not surface as a closed socket
                 return new NetworkStream(socket, ownsSocket: true);
             }
             catch (SocketException ex)
