@@ -214,3 +214,74 @@ the large object heap, so Gen2 collections show it.
     benchmark containers set `REKEY_LIMIT="default none"`.
   * BusyBox `head -c` caps its output at about 130 MiB/s, so the benchmarks use `dd if=/dev/zero bs=1048576`.
   * Docker's userland proxy for published ports adds its own ceiling, so the lanes connect to each container's address directly.
+
+### A second machine: Windows and WSL
+
+A later round of measurements, on a laptop, covers what the Linux host above does not: a Windows client. It found five things worth
+fixing (#304-#307), all now in. Each change was measured on its own, against the code before it, with SSH.NET 2026.0.0 measured in
+the same run as the control.
+
+Machine: Intel Core i7-12800H (20 logical cores), Windows 11 with WSL 2 (Ubuntu 24.04, mirrored networking), OpenSSH 9.6p1 in WSL
+as the server (a separate `sshd` with `RekeyLimit default none` and the SFTP subsystem, pinned to cores 8-15), BenchmarkDotNet 0.15.8
+in-process, medium job. Ed25519 key authentication, `curve25519-sha256`, `ssh-ed25519` host key. Two clients:
+
+* **Linux:** the client runs inside WSL on .NET 10.0.7, pinned to cores 0-7, so client and server talk over Linux loopback.
+* **Windows:** the client runs on Windows on .NET 10.0.12. WSL's mirrored loopback relays the traffic, which caps it at about
+  85-95 MiB/s for both libraries, so the throughput there says little; the client CPU per GiB is what tells the libraries apart.
+
+Linux client, AES-256-GCM:
+
+| Benchmark | SSH.NET | SshSharp | Allocated (SSH.NET / SshSharp) |
+|---|---:|---:|---|
+| Connect and authenticate | 21.0 ms | 20.9 ms | 86.7 KB / 73.4 KB |
+| Run a command (`echo hi`) | 1.77 ms | 1.84 ms | 12.0 KB / 5.7 KB |
+| 8 commands in parallel | 7.83 ms | 3.87 ms | 85.0 KB / 47.5 KB |
+| Download 32 MiB (command output) | 251 ms | 181 ms | 876 KB / 206 KB |
+| SCP upload 32 MiB | 212 ms | 211 ms | 382 KB / 106 KB |
+| SFTP upload 32 MiB | 257 ms | 244 ms | 857 KB / 223 KB |
+| SFTP download 32 MiB | 235 ms | 188 ms | 2464 KB / 356 KB |
+| SFTP `CopyToAsync` into an open file, 32 MiB | 681 ms | 226 ms | 2282 KB / 241 KB |
+
+Streaming 2 GiB of command output (`--peak`), Linux client:
+
+| | SSH.NET | SshSharp |
+|---|---:|---:|
+| Throughput, AES-256-GCM | 132 MiB/s | 157 MiB/s |
+| Client CPU per GiB, AES-256-GCM | 8.4 s | 7.0 s |
+| Throughput, ChaCha20-Poly1305 | 127 MiB/s | 156 MiB/s |
+| Client CPU per GiB, ChaCha20-Poly1305 | 14.8 s | 10.8 s |
+
+With ChaCha20-Poly1305 the comparison measures SshSharp's managed cipher against SSH.NET's (BouncyCastle); with AES-GCM both use the
+platform's. `SSHSHARP_BENCH_CIPHER` picks the cipher forced on both.
+
+Streaming 1 GiB, Windows client (AES-256-GCM):
+
+| Client CPU per GiB | SSH.NET | SshSharp before #304 | SshSharp |
+|---|---:|---:|---:|
+| Default runtime settings | 2.6 s | 24.8 s | 4.4 s |
+| `DOTNET_ThreadPool_UnfairSemaphoreSpinLimit=0` | 1.5 s | 7.5 s | 2.2 s |
+
+What these measurements found:
+
+* **Small socket reads on Windows (#304).** The transport read the socket through a pipe with its default 4 KiB buffer, so one
+  32 KiB packet took nine or more reads, each an asynchronous completion handed through the thread pool, and each pool wake-up
+  spun. On Linux the same code cost little; on Windows it cost about ten times SSH.NET's CPU. Reads into a 128 KiB buffer, waiting
+  for a whole packet before decoding it, cut that by a factor of six. Zero-byte reads keep an idle connection from holding the
+  buffer, at no measured cost. The rest of the gap on Windows is SSH.NET's dedicated thread blocking on the socket, against
+  SshSharp's asynchronous reads through the thread pool.
+* **The public key query (#306).** Connect took 27 ms against SSH.NET's 18. A packet timeline (a logging proxy in front of the
+  server) showed why: after answering a public key query (PK_OK), OpenSSH's `sshd` waits before it reads the next request, about
+  6 ms here (`ensure_minimum_time_since`, its defence against telling users apart by timing). SSH.NET signs straight away and never
+  pays it. SshSharp now signs straight away with keys held in memory, and keeps the query for agent, signer and hardware keys.
+* **Unoptimized code on early connects (#306).** In a new process, the key exchange and the signature ran several times slower
+  than the crypto micro-benchmarks suggest: once-per-connect code runs unoptimized (tier 0) until it has been called often. The
+  managed X25519, Ed25519 and field arithmetic are now compiled fully optimized on first use (`AggressiveOptimization`), which
+  matters to a tool that connects once.
+* **Large arrays per SFTP request (#307).** With OpenSSH's 255 KiB requests, each write allocated three large-object-heap arrays and
+  each read reply one: 132 MB allocated and a thousand full collections per 32 MiB upload. Requests are now built in pooled buffers
+  of their exact size, and data replies are read into pooled buffers: 240 KB per upload, no full collections.
+* **Allocations on the send path (#305):** pooled SCP buffers and send state machines, one copy less per data packet, and padding
+  randomness drawn 256 bytes at a time took an SCP upload from 273 KB to 106 KB and a command from 7.3 KB to 5.7 KB.
+* **Setup pitfalls:**
+  * WSL's test server renews keys every 32 KiB (`RekeyLimit 32K`, for the tests), so the benchmarks use a separate `sshd`.
+  * With the client on Windows, WSL's loopback relay caps every transfer, so library-bound throughput needs the client inside WSL.
