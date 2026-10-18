@@ -231,7 +231,7 @@ internal sealed class SshEndpointOptionsValidator(SshEndpointRegistry registry) 
 
     /// <summary>
     /// Whether <paramref name="value"/> is an OpenSSH SHA-256 fingerprint: <c>SHA256:</c> and the hash in unpadded base64, written as
-    /// OpenSSH writes it (so that the ordinal comparison <see cref="SshHostKeyVerifier.Pinned"/> makes can match).
+    /// OpenSSH writes it (so that the ordinal comparison <see cref="SshHostKeyVerifier.Pinned(string[])"/> makes can match).
     /// </summary>
     internal static bool IsSha256Fingerprint(string value)
     {

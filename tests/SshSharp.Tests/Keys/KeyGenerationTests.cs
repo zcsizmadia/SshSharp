@@ -24,7 +24,7 @@ public class KeyGenerationTests
         var data = RandomNumberGenerator.GetBytes(100);
         var algorithm = key.SignatureAlgorithms[0];
         var signature = key.Sign(algorithm, data);
-        if (!global::SshSharp.Keys.SshPublicKey.Parse(key.PublicKey.Span).VerifySignature(algorithm, signature, data))
+        if (!global::SshSharp.Keys.VerifyingKey.Parse(key.PublicKey.Span).VerifySignature(algorithm, signature, data))
         {
             throw new InvalidOperationException($"A {key.KeyType} signature did not verify.");
         }

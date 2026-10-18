@@ -59,6 +59,13 @@ public sealed class SshSignature
     /// <summary>The SHA-256 fingerprint of the signer's key (of the certified key, for a certificate), as <c>ssh-keygen</c> prints it.</summary>
     public string Fingerprint => Certificate?.Fingerprint ?? "SHA256:" + Convert.ToBase64String(SHA256.HashData(PublicKey.Span)).TrimEnd('=');
 
+    /// <summary>
+    /// The signer's key as an <see cref="SshPublicKey"/> (the certified key, when it signed with a certificate), to compare with a key you
+    /// trust: <see cref="Verify(ReadOnlySpan{byte}, string)"/> proves only that this key signed.
+    /// </summary>
+    /// <exception cref="FormatException">The key is one <see cref="SshPublicKey"/> does not read (a FIDO security-key certificate).</exception>
+    public SshPublicKey GetPublicKey() => Certificate is { } certificate ? certificate.GetPublicKey() : SshPublicKey.Read(PublicKey.Span);
+
     /// <summary>What the signature is for, for example <c>git</c> or <c>file</c>; it must match when verifying.</summary>
     public string Namespace { get; }
 
@@ -197,10 +204,10 @@ public sealed class SshSignature
             return false;
         }
 
-        SshPublicKey key;
+        VerifyingKey key;
         try
         {
-            key = Certificate?.Key ?? SshPublicKey.Parse(PublicKey.Span);
+            key = Certificate?.Key ?? VerifyingKey.Parse(PublicKey.Span);
         }
         catch (SshProtocolException)
         {

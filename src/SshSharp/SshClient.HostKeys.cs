@@ -127,7 +127,7 @@ public sealed partial class SshClient
                 w.WriteString(key);
             });
             var algorithm = new SshReader(signature).ReadUtf8String();
-            var publicKey = SshPublicKey.Parse(key);
+            var publicKey = VerifyingKey.Parse(key);
             if (algorithm == "ssh-rsa" && publicKey.KeyType == "ssh-rsa")
             {
                 continue;
@@ -147,7 +147,7 @@ public sealed partial class SshClient
     /// <summary>A key as <c>ssh-keygen -l</c> names it: type and SHA-256 fingerprint.</summary>
     private static string Describe(byte[] blob)
     {
-        var key = SshPublicKey.Parse(blob);
+        var key = VerifyingKey.Parse(blob);
         return $"{key.KeyType} SHA256:{Convert.ToBase64String(System.Security.Cryptography.SHA256.HashData(blob)).TrimEnd('=')}";
     }
 
@@ -155,7 +155,7 @@ public sealed partial class SshClient
     {
         try
         {
-            SshPublicKey.Parse(blob);
+            VerifyingKey.Parse(blob);
             return true;
         }
         catch (SshProtocolException)

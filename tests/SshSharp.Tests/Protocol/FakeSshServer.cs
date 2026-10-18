@@ -76,7 +76,7 @@ internal sealed class FakeHostKey
 
     public byte[] Blob { get; }
 
-    public string Fingerprint => SshPublicKey.Parse(Blob).Fingerprint;
+    public string Fingerprint => VerifyingKey.Parse(Blob).Fingerprint;
 
     /// <summary>Returns the SSH signature blob (<c>string type || string signature</c>) of <paramref name="data"/> under <paramref name="algorithm"/>.</summary>
     public byte[] Sign(string algorithm, byte[] data) => _sign(algorithm, data);

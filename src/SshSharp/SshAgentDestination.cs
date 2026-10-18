@@ -27,6 +27,10 @@ public sealed record SshAgentHost(string HostName, IReadOnlyList<SshAgentHostKey
 /// <summary>A host key in a destination constraint, in SSH wire format; with <paramref name="IsCertificateAuthority"/>, a CA key whose host certificates count.</summary>
 public sealed record SshAgentHostKey(ReadOnlyMemory<byte> PublicKey, bool IsCertificateAuthority = false)
 {
+    /// <summary><see cref="PublicKey"/> as an <see cref="SshPublicKey"/>.</summary>
+    /// <exception cref="FormatException"><see cref="PublicKey"/> is not a key <see cref="SshPublicKey"/> reads.</exception>
+    public SshPublicKey GetPublicKey() => SshPublicKey.Read(PublicKey.Span);
+
     /// <summary>Equal when the key bytes and <see cref="IsCertificateAuthority"/> are.</summary>
     public bool Equals(SshAgentHostKey? other) =>
         other is not null && IsCertificateAuthority == other.IsCertificateAuthority && PublicKey.Span.SequenceEqual(other.PublicKey.Span);

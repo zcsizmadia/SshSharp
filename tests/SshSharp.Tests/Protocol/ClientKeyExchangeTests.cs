@@ -136,7 +136,7 @@ public class ClientKeyExchangeTests
         await Assert.That(Convert.ToHexString(result.ExchangeHash)).IsEqualTo(Convert.ToHexString(server.ExchangeHash));
         await Assert.That(result.ExchangeHash.Length).IsEqualTo(ExchangeHash.HashSize(client.Hash));
 
-        var key = SshPublicKey.Parse(result.HostKeyBlob);
+        var key = VerifyingKey.Parse(result.HostKeyBlob);
         await Assert.That(key.VerifySignature("ssh-ed25519", result.Signature, result.ExchangeHash)).IsTrue();
     }
 

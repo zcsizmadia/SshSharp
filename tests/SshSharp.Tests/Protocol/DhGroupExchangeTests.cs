@@ -129,7 +129,7 @@ public class DhGroupExchangeTests
         await Assert.That(Convert.ToHexString(result.SharedSecret)).IsEqualTo(Convert.ToHexString(Unsigned(k)));
         await Assert.That(Convert.ToHexString(result.ExchangeHash)).IsEqualTo(Convert.ToHexString(h));
         await Assert.That(result.SharedSecretIsString).IsFalse();
-        await Assert.That(SshPublicKey.Parse(result.HostKeyBlob).VerifySignature("ssh-ed25519", result.Signature, result.ExchangeHash)).IsTrue();
+        await Assert.That(VerifyingKey.Parse(result.HostKeyBlob).VerifySignature("ssh-ed25519", result.Signature, result.ExchangeHash)).IsTrue();
 
         // K lives only in the result, which wipes it.
         var secret = result.SharedSecret;

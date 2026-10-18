@@ -19,3 +19,32 @@ static SshSharp.SshCommandInput.FromStream(System.IO.Stream! stream) -> SshSharp
 static SshSharp.SshCommandInput.FromText(string! text, System.Text.Encoding? encoding = null) -> SshSharp.SshCommandInput!
 SshSharp.Sftp.SftpTransferOptions.MaxConcurrentFiles.get -> int
 SshSharp.Sftp.SftpTransferOptions.MaxConcurrentFiles.init -> void
+SshSharp.SshPublicKey
+SshSharp.SshPublicKey.Blob.get -> System.ReadOnlyMemory<byte>
+SshSharp.SshPublicKey.Comment.get -> string?
+SshSharp.SshPublicKey.Equals(SshSharp.SshPublicKey? other) -> bool
+SshSharp.SshPublicKey.Fingerprint.get -> string!
+SshSharp.SshPublicKey.GetFingerprint(System.Security.Cryptography.HashAlgorithmName hashAlgorithm) -> string!
+SshSharp.SshPublicKey.KeySizeBits.get -> int
+SshSharp.SshPublicKey.KeyType.get -> string!
+SshSharp.SshPublicKey.ToAuthorizedKeysLine() -> string!
+SshSharp.SshPublicKey.VerifySignature(System.ReadOnlySpan<byte> data, System.ReadOnlySpan<byte> signature) -> bool
+static SshSharp.SshPublicKey.FromBlob(System.ReadOnlyMemory<byte> blob, string? comment = null) -> SshSharp.SshPublicKey!
+static SshSharp.SshPublicKey.Parse(string! line) -> SshSharp.SshPublicKey!
+static SshSharp.SshPublicKey.TryParse(string? line, out SshSharp.SshPublicKey? key) -> bool
+static SshSharp.SshPublicKey.operator ==(SshSharp.SshPublicKey? left, SshSharp.SshPublicKey? right) -> bool
+static SshSharp.SshPublicKey.operator !=(SshSharp.SshPublicKey? left, SshSharp.SshPublicKey? right) -> bool
+override SshSharp.SshPublicKey.Equals(object? obj) -> bool
+override SshSharp.SshPublicKey.GetHashCode() -> int
+override SshSharp.SshPublicKey.ToString() -> string!
+SshSharp.SshPrivateKey.GetPublicKey() -> SshSharp.SshPublicKey!
+SshSharp.SshHostKey.GetPublicKey() -> SshSharp.SshPublicKey!
+SshSharp.SshCertificate.GetPublicKey() -> SshSharp.SshPublicKey!
+SshSharp.SshCertificate.GetAuthorityKey() -> SshSharp.SshPublicKey!
+SshSharp.SshSignature.GetPublicKey() -> SshSharp.SshPublicKey!
+SshSharp.SshAgentHostKey.GetPublicKey() -> SshSharp.SshPublicKey!
+SshSharp.Config.KnownHostsEntry.GetPublicKey() -> SshSharp.SshPublicKey!
+SshSharp.Config.KnownHostsFile.Add(string! host, int port, SshSharp.SshPublicKey! key, bool hash = false, string? comment = null, SshSharp.Config.KnownHostsMarker marker = SshSharp.Config.KnownHostsMarker.None) -> SshSharp.Config.KnownHostsEntry!
+SshSharp.Config.KnownHostsFile.Check(string! host, SshSharp.SshPublicKey! key) -> SshSharp.Config.KnownHostsCheckResult
+SshSharp.Config.KnownHostsFile.Check(string! host, int port, SshSharp.SshPublicKey! key) -> SshSharp.Config.KnownHostsCheckResult
+static SshSharp.SshHostKeyVerifier.Pinned(params SshSharp.SshPublicKey![]! keys) -> SshSharp.SshHostKeyVerifier!

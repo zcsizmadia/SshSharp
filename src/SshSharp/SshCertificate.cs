@@ -23,7 +23,7 @@ public sealed class SshCertificate
 {
     private const string Suffix = "-cert-v01@openssh.com";
 
-    private SshCertificate(string certificateType, byte[] blob, SshPublicKey key, byte[] publicKeyBlob, ulong serial, SshCertificateType type,
+    private SshCertificate(string certificateType, byte[] blob, VerifyingKey key, byte[] publicKeyBlob, ulong serial, SshCertificateType type,
         string keyId, IReadOnlyList<string> principals, ulong validAfter, ulong validBefore, IReadOnlyDictionary<string, string> criticalOptions,
         IReadOnlyList<string> extensions, byte[] authorityKey, byte[] signedData, byte[] signature)
     {
@@ -89,7 +89,17 @@ public sealed class SshCertificate
     /// <summary>The certificate authority's SHA-256 fingerprint.</summary>
     public string AuthorityFingerprint => "SHA256:" + Convert.ToBase64String(SHA256.HashData(AuthorityKey.Span)).TrimEnd('=');
 
-    internal SshPublicKey Key { get; }
+    /// <summary><see cref="PublicKey"/>, the certified key, as an <see cref="SshPublicKey"/>.</summary>
+    public SshPublicKey GetPublicKey() => SshPublicKey.FromVerifyingKey(Key);
+
+    /// <summary>
+    /// <see cref="AuthorityKey"/>, the certificate authority's key, as an <see cref="SshPublicKey"/>: compare it with the authority you
+    /// trust (<c>certificate.GetAuthorityKey() == trustedCa</c>).
+    /// </summary>
+    /// <exception cref="FormatException">The authority's key is not one <see cref="SshPublicKey"/> reads.</exception>
+    public SshPublicKey GetAuthorityKey() => SshPublicKey.Read(AuthorityKey.Span);
+
+    internal VerifyingKey Key { get; }
 
     internal ulong ValidAfterSeconds { get; }
 
@@ -195,7 +205,7 @@ public sealed class SshCertificate
                 throw new SshProtocolException($"Unsupported certificate key type '{keyType}'.");
         }
 
-        var parsedKey = SshPublicKey.Parse(plain);
+        var parsedKey = VerifyingKey.Parse(plain);
         var serial = reader.ReadUInt64();
         var type = reader.ReadUInt32() switch
         {
@@ -233,7 +243,7 @@ public sealed class SshCertificate
         try
         {
             var algorithm = new SshReader(Signature).ReadUtf8String();
-            return SshPublicKey.Parse(AuthorityKey.Span).VerifySignature(algorithm, Signature, SignedData);
+            return VerifyingKey.Parse(AuthorityKey.Span).VerifySignature(algorithm, Signature, SignedData);
         }
         catch (SshProtocolException)
         {

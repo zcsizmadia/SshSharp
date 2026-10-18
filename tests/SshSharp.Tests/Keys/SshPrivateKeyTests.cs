@@ -13,7 +13,7 @@ public class SshPrivateKeyTests
     private static async Task AssertSignsAndVerifies(SshPrivateKey key, byte[] expectedPublicBlob)
     {
         await Assert.That(key.PublicKey.ToArray()).IsEquivalentTo(expectedPublicBlob);
-        var publicKey = SshPublicKey.Parse(key.PublicKey.Span);
+        var publicKey = VerifyingKey.Parse(key.PublicKey.Span);
         await Assert.That(key.Fingerprint).IsEqualTo(publicKey.Fingerprint);
         foreach (var algorithm in key.SignatureAlgorithms)
         {

@@ -49,11 +49,41 @@ public class ParserRobustnessTests
     {
         var failures = Run(PublicKeyBlobs(), input =>
         {
-            var key = SshPublicKey.Parse(input);
+            var key = VerifyingKey.Parse(input);
 
             // Whatever parsed must also survive verifying garbage.
             key.VerifySignature(key.KeyType, input, input);
         }, ProtocolErrors);
+        await Assert.That(failures).IsEmpty();
+    }
+
+    [Test]
+    public async Task PublicSshPublicKey_OnlyEverFailsWithAFormatError()
+    {
+        // The public type over the same blobs and FIDO security keys, as a blob and as a .pub line: fingerprints, the line and
+        // verifying garbage must survive whatever parsed.
+        using var ecdsa = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var q = ecdsa.ExportParameters(false).Q;
+        byte[][] blobs =
+        [
+            .. PublicKeyBlobs(),
+            Blob(w => { w.WriteString("sk-ssh-ed25519@openssh.com"); w.WriteString(new byte[32]); w.WriteString("ssh:"); }),
+            Blob(w => { w.WriteString("sk-ecdsa-sha2-nistp256@openssh.com"); w.WriteString("nistp256"); w.WriteString([4, .. q.X!, .. q.Y!]); w.WriteString("ssh:"); }),
+        ];
+
+        static void Use(SshPublicKey key, byte[] input)
+        {
+            _ = key.GetFingerprint(HashAlgorithmName.MD5);
+            _ = key.ToAuthorizedKeysLine();
+            if (!key.KeyType.StartsWith("sk-", StringComparison.Ordinal))
+            {
+                key.VerifySignature(input, input);
+            }
+        }
+
+        var failures = Run(blobs, input => Use(SshPublicKey.FromBlob(input), input), FormatErrors);
+        var lines = blobs.Select(b => Encoding.UTF8.GetBytes($"{new SshReader(b).ReadUtf8String()} {Convert.ToBase64String(b)} user@example")).ToArray();
+        failures.AddRange(Run(lines, input => Use(SshPublicKey.Parse(Encoding.UTF8.GetString(input)), input), FormatErrors));
         await Assert.That(failures).IsEmpty();
     }
 
@@ -71,7 +101,7 @@ public class ParserRobustnessTests
             w.WriteString("ssh-ed25519");
             w.WriteString(signature);
         });
-        var key = SshPublicKey.Parse(Blob(w =>
+        var key = VerifyingKey.Parse(Blob(w =>
         {
             w.WriteString("ssh-ed25519");
             w.WriteString(pub);

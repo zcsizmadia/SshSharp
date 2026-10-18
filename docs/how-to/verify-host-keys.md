@@ -10,7 +10,8 @@ common policies and how to choose.
 |---|---|
 | Hosts are in the user's `known_hosts` (interactive tools, admin scripts) | `KnownHostsVerifier.ForCurrentUser(StrictHostKeyChecking.Yes)` |
 | A service with its own trust store, learning hosts on first contact | `new KnownHostsVerifier([path]) { Policy = AcceptNew }` |
-| A few fixed servers whose fingerprints you know | `SshHostKeyVerifier.Pinned(...)` |
+| A few fixed servers whose fingerprints you know | `SshHostKeyVerifier.Pinned(...)` with fingerprints |
+| A few fixed servers whose `.pub` files you have | `SshHostKeyVerifier.Pinned(...)` with `SshPublicKey`s |
 | An endpoint registered with `AddSshClient` (a container, Kubernetes) | the `HostKeyFingerprints` setting, from configuration |
 | Hosts with OpenSSH host certificates | `@cert-authority` lines in `known_hosts`, or a custom verifier |
 | An inventory, CMDB or vault knows the keys | `SshHostKeyVerifier.FromDelegate(...)` |
@@ -40,6 +41,17 @@ common policies and how to choose.
 [!code-csharp[](../snippets/HostKeys.cs#pinned)]
 
 Fingerprints are written as `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` prints them, with the `SHA256:` prefix.
+
+## Pin keys
+
+When you have the server's public keys themselves (its `/etc/ssh/ssh_host_*_key.pub` files, or the lines your provisioning
+printed), pin the keys instead of their fingerprints:
+
+[!code-csharp[](../snippets/HostKeys.cs#pinned-keys)]
+
+The server's key must be one of them byte for byte; for a host certificate, the certified key counts. `SshPublicKey.Parse` reads
+a `.pub` line and refuses anything else with `FormatException`, so a mistyped key fails at startup rather than at the first
+connection. See [Read a public key](agent-and-keys.md#read-a-public-key-and-its-fingerprint) for the format.
 
 ### With dependency injection
 
@@ -77,6 +89,17 @@ With `known_hosts`, the same is a single line: `@cert-authority *.example.com ss
 
 [!code-csharp[](../snippets/HostKeys.cs#rejected)]
 
+## Use the key after connecting
+
+`client.HostKey.GetPublicKey()` (and `SshHostKeyContext.HostKey.GetPublicKey()` in a verifier) is the server's key as an
+`SshPublicKey`: compare it with a key you hold, write it out as a line, or print another fingerprint.
+
+[!code-csharp[](../snippets/HostKeys.cs#compare-key)]
+
+To record a key you trust in a `known_hosts` file, or check one against it, `KnownHostsFile` takes an `SshPublicKey` too:
+
+[!code-csharp[](../snippets/HostKeys.cs#record-key)]
+
 ## Notes and pitfalls
 
 - **Connections over a stream** (a tunnel, `ProxyCommand`) have no host name: set `HostKeyAlias` so `known_hosts` can be consulted.
@@ -84,10 +107,11 @@ With `known_hosts`, the same is a single line: `@cert-authority *.example.com ss
 - **Key rotation.** `UpdateHostKeys = true` adds keys the server proves it holds after login and removes ones it no longer has, so a
   rotation does not break the next connection.
 - **After connecting**, `client.HostKey` is the verified key (`KeyType`, `Fingerprint`, `PublicKey`, and `Certificate` for a host
-  certificate).
+  certificate). `client.HostKey.GetPublicKey()` gives it as an `SshPublicKey` (see [Use the key after
+  connecting](#use-the-key-after-connecting)).
 
 ## See also
 
 - [Host keys](../host-keys.md) (in-depth: `UpdateHostKeys`, revocation lists, scanning options)
 - [Security model](../concepts/security-model.md)
-- <xref:SshSharp.KnownHostsVerifier> and <xref:SshSharp.SshHostKeyVerifier> in the API reference
+- <xref:SshSharp.KnownHostsVerifier>, <xref:SshSharp.SshHostKeyVerifier> and <xref:SshSharp.SshPublicKey> in the API reference

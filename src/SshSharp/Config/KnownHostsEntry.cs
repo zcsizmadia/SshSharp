@@ -73,6 +73,15 @@ public sealed class KnownHostsEntry
     /// <summary>The trailing comment, if any.</summary>
     public string? Comment { get; }
 
+    /// <summary><see cref="PublicKey"/> as an <see cref="SshPublicKey"/>, with the entry's <see cref="Comment"/>.</summary>
+    /// <exception cref="FormatException">The key is malformed, of a type <see cref="SshPublicKey"/> does not read, or not of the entry's
+    /// <see cref="KeyType"/>.</exception>
+    public SshPublicKey GetPublicKey()
+    {
+        var key = SshPublicKey.Read(PublicKey.Span, Comment);
+        return key.KeyType == KeyType ? key : throw new FormatException("The entry's key type does not match its key.");
+    }
+
     /// <summary>Whether the host field is hashed (<c>|1|salt|hash</c>).</summary>
     public bool IsHashed => HostPatterns.StartsWith(HashPrefix, StringComparison.Ordinal);
 

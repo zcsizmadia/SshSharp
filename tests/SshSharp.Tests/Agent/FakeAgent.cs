@@ -240,7 +240,7 @@ internal sealed class FakeAgent : IAsyncDisposable
                     var forwarding = reader.ReadBoolean();
                     var plain = global::SshSharp.SshCertificate.IsCertificateAlgorithm(new SshReader(hostKey).ReadUtf8String())
                         ? global::SshSharp.SshCertificate.FromBlob(hostKey).Key
-                        : global::SshSharp.Keys.SshPublicKey.Parse(hostKey);
+                        : global::SshSharp.Keys.VerifyingKey.Parse(hostKey);
                     var signatureAlgorithm = new SshReader(signature).ReadUtf8String();
                     var binding = new Binding(hostKey, sessionId, forwarding, plain.VerifySignature(signatureAlgorithm, signature, sessionId));
                     lock (Bindings)

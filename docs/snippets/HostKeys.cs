@@ -40,6 +40,31 @@ internal static class HostKeys
         return verifier;
     }
 
+    public static async Task<SshHostKeyVerifier> PinnedKeysAsync(CancellationToken cancellationToken)
+    {
+        // <pinned-keys>
+        // The server's own public keys (its /etc/ssh/ssh_host_*_key.pub files), shipped with the application or taken from the
+        // provisioning output. Any one of them is accepted.
+        var verifier = SshHostKeyVerifier.Pinned(
+            SshPublicKey.Parse(await File.ReadAllTextAsync("trusted/ssh_host_ed25519_key.pub", cancellationToken)),
+            SshPublicKey.Parse(await File.ReadAllTextAsync("trusted/ssh_host_ecdsa_key.pub", cancellationToken)));
+        // </pinned-keys>
+        return verifier;
+    }
+
+    public static async Task CompareAfterConnectingAsync(SshClient client, CancellationToken cancellationToken)
+    {
+        // <compare-key>
+        // The verified key as an SshPublicKey: compare it with a key you hold, print it as a known_hosts or .pub line, or
+        // print the MD5 fingerprint an older inventory lists.
+        var expected = SshPublicKey.Parse(await File.ReadAllTextAsync("trusted/ssh_host_ed25519_key.pub", cancellationToken));
+        var hostKey = client.HostKey.GetPublicKey();
+        Console.WriteLine(hostKey == expected ? "the expected server" : "another key");
+        Console.WriteLine(hostKey.ToAuthorizedKeysLine());
+        Console.WriteLine(hostKey.GetFingerprint(System.Security.Cryptography.HashAlgorithmName.MD5));
+        // </compare-key>
+    }
+
     public static SshHostKeyVerifier Inventory(IHostInventory inventory)
     {
         // <delegate>
@@ -88,6 +113,16 @@ internal static class HostKeys
             Console.WriteLine($"{key.KeyType} {key.Fingerprint}");
         }
         // </scan>
+    }
+
+    public static void RecordKey(KnownHostsFile knownHosts, SshPublicKey key)
+    {
+        // <record-key>
+        // A key you trust, for example one read with SshPublicKey.Parse from the server's .pub file.
+        knownHosts.Add("new-host.example.com", 22, key, hash: true);
+        var result = knownHosts.Check("new-host.example.com", key);   // KnownHostsCheckResult.Match
+        // </record-key>
+        _ = result;
     }
 
     public static async Task HandleRejectionAsync(SshClientOptions options, CancellationToken cancellationToken)

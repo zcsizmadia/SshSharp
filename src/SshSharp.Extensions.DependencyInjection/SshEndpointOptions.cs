@@ -51,7 +51,7 @@ public sealed class SshEndpointOptions
 
     /// <summary>
     /// Trust only host keys with one of these SHA-256 fingerprints, in OpenSSH's format (<c>SHA256:</c> and 43 base64 characters, as
-    /// <c>ssh-keygen -lf</c> prints them), as <see cref="SshHostKeyVerifier.Pinned"/> does. They replace known_hosts: setting
+    /// <c>ssh-keygen -lf</c> prints them), as <see cref="SshHostKeyVerifier.Pinned(string[])"/> does. They replace known_hosts: setting
     /// <see cref="KnownHostsFiles"/>, <see cref="AcceptNewHostKeys"/> or <see cref="ConfigAlias"/> as well fails validation, so it is
     /// never unclear which of them decides. List more than one to allow for a host key rotation.
     /// </summary>

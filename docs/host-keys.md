@@ -90,6 +90,11 @@ configuration. `UpdateHostKeys` never learns a revoked key.
 var verifier = SshHostKeyVerifier.Pinned("SHA256:47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU");
 ```
 
+Or pin the keys themselves, read from the server's `.pub` files with `SshPublicKey.Parse`; the server's key must then be one of
+them byte for byte (the certified key, for a host certificate):
+
+[!code-csharp[](snippets/HostKeys.cs#pinned-keys)]
+
 ## Your own rule
 
 ```csharp
@@ -125,7 +130,15 @@ or keeps to FIPS-approved algorithms (`FipsMode`); `Timeout` bounds each connect
 ## After connecting
 
 `client.HostKey` is the verified key (`KeyType`, `Algorithm`, `Fingerprint`, `PublicKey`, `KeySizeBits`, and `Certificate`
-when the server presented a host certificate).
+when the server presented a host certificate). `Algorithm` is the signature algorithm the server used (`rsa-sha2-512`), `KeyType`
+the key's type (`ssh-rsa`).
+
+`client.HostKey.GetPublicKey()` gives the key as an `SshPublicKey`: equal to another `SshPublicKey` when the key bytes are, with
+`ToAuthorizedKeysLine()` for the `<type> <base64>` text and `GetFingerprint(HashAlgorithmName.MD5)` for the legacy `MD5:aa:bb:...`
+form. `KnownHostsEntry.GetPublicKey()`, `KnownHostsFile.Add(host, port, key)` and `KnownHostsFile.Check(host, port, key)` work with
+the same type, and `SshCertificate.GetPublicKey()` and `GetAuthorityKey()` give a certificate's two keys.
+
+[!code-csharp[](snippets/HostKeys.cs#compare-key)]
 
 ## See also
 
