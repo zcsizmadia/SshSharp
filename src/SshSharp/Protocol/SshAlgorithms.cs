@@ -139,9 +139,10 @@ internal static class SshAlgorithms
 
     private static readonly HashSet<string> FipsKex = new(StringComparer.Ordinal)
     {
-        // ML-KEM (FIPS 203) with a NIST curve and SHA-2: both halves are FIPS-approved, unlike the X25519 hybrid.
-        MlKem768Nistp256Sha256, MlKem1024Nistp384Sha384, EcdhNistp256, EcdhNistp384, EcdhNistp521, DhGroupExchangeSha256, DhGroup16Sha512,
-        DhGroup18Sha512, DhGroup14Sha256,
+        // ML-KEM (FIPS 203) with a NIST curve and SHA-2: both halves are FIPS-approved, unlike the X25519 hybrid. Finite-field DH only in
+        // the fixed RFC 3526 groups, which SP 800-56A rev. 3 approves; not group exchange, where the server picks an arbitrary group.
+        MlKem768Nistp256Sha256, MlKem1024Nistp384Sha384, EcdhNistp256, EcdhNistp384, EcdhNistp521, DhGroup16Sha512, DhGroup18Sha512,
+        DhGroup14Sha256,
     };
 
     private static readonly HashSet<string> FipsHostKeys = new(StringComparer.Ordinal)

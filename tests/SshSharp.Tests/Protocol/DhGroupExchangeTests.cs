@@ -343,7 +343,7 @@ public class DhGroupExchangeTests
     }
 
     [Test]
-    public async Task BothAreOffered_InOpenSshsOrder_AndInFipsMode()
+    public async Task BothAreOffered_InOpenSshsOrder_AndOnlyTheFixedGroupInFipsMode()
     {
         var defaults = new AlgorithmPreferences().Kex.ToList();
         var gex = defaults.IndexOf(SshAlgorithms.DhGroupExchangeSha256);
@@ -352,7 +352,8 @@ public class DhGroupExchangeTests
             "diffie-hellman-group-exchange-sha256,diffie-hellman-group16-sha512,diffie-hellman-group18-sha512,diffie-hellman-group14-sha256");
 
         var fips = AlgorithmPreferences.Fips().Kex;
-        await Assert.That(fips).Contains(SshAlgorithms.DhGroupExchangeSha256);
+        // SP 800-56A rev. 3 approves the fixed safe-prime groups (RFC 3526), not a group the server picks.
+        await Assert.That(fips).DoesNotContain(SshAlgorithms.DhGroupExchangeSha256);
         await Assert.That(fips).Contains(SshAlgorithms.DhGroup18Sha512);
         await Assert.That(SshAlgorithms.IsPostQuantum(SshAlgorithms.DhGroupExchangeSha256)).IsFalse();
         await Assert.That(ClientKeyExchange.Create(SshAlgorithms.DhGroup18Sha512).Hash).IsEqualTo(HashAlgorithmName.SHA512);
