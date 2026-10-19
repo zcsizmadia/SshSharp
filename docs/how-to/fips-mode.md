@@ -38,6 +38,10 @@ The NIST-curve ML-KEM hybrids keep a post-quantum key exchange in FIPS mode wher
   keys you authenticate with. Ed25519 is not FIPS-approved, so use ECDSA or RSA keys.
 - **Connecting by alias.** `FipsMode` is an `SshClientOptions` setting; `SshConfigConnectOptions` has no equivalent. With
   `ssh_config`, restrict `KexAlgorithms`, `HostKeyAlgorithms`, `Ciphers` and `MACs` to the lists above.
+- **With your own algorithm lists.** `SshClientOptions.KexAlgorithms`, `HostKeyAlgorithms`, `Ciphers` and `Macs` narrow or reorder
+  the lists further; FIPS mode then removes what it excludes from them. A list left with nothing FIPS mode allows (only
+  `chacha20-poly1305@openssh.com`, say) throws `ArgumentException` before connecting. See
+  [Choose algorithms and authentication methods](algorithms-and-authentication-order.md).
 - **Servers with only Ed25519 host keys** cannot be reached in FIPS mode: the connection fails with `KeyExchangeFailed`. Add an
   ECDSA or RSA host key on the server.
 - **Host key scans** take `SshHostKeyScanOptions.FipsMode` too.

@@ -365,6 +365,23 @@ ciphers, then `aes*-ctr` with the plain `hmac-sha2-256` and `hmac-sha2-512` for 
 so FIPS mode keeps a post-quantum key exchange where the server offers one. Keys are renewed after
 `RekeyAfterBytes` (default 1 GiB) or `RekeyAfterTime` (default 1 hour).
 
+To change the lists, set `KexAlgorithms`, `HostKeyAlgorithms`, `Ciphers` or `Macs` to an `SshAlgorithmList`, in the forms of
+`ssh_config`'s directives of the same names: `SshAlgorithmList.Remove("diffie-hellman-*")` drops from the defaults, `Prepend` moves
+to the front, `Append` adds at the end, and `Only` replaces them. `FipsMode` still applies on top. `RequiredRsaSize` sets the
+smallest RSA host key accepted (2048 bits by default). See
+[Choose algorithms and authentication methods](how-to/algorithms-and-authentication-order.md).
+
+```csharp
+var options = new SshClientOptions
+{
+    UserName = "deploy",
+    PrivateKeys = [key],
+    HostKeyVerifier = verifier,
+    KexAlgorithms = SshAlgorithmList.Remove("diffie-hellman-*"),
+    Ciphers = SshAlgorithmList.Prepend("aes128-gcm@openssh.com"),
+};
+```
+
 `client.Algorithms` shows what a connection negotiated: key exchange, host key algorithm, ciphers and MACs (empty for AEAD
 ciphers), and whether strict key exchange is on. `client.Algorithms.IsPostQuantum` tells whether the key exchange resists a
 future quantum computer. When it does not, the client logs it at `Information` level, the counterpart of OpenSSH 10.1's

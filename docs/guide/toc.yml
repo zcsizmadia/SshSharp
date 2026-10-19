@@ -39,6 +39,8 @@
           href: ../how-to/ssh-config-and-known-hosts.md
         - name: Verify host keys
           href: ../how-to/verify-host-keys.md
+        - name: Choose algorithms and authentication methods
+          href: ../how-to/algorithms-and-authentication-order.md
     - name: Authentication
       items:
         - name: Keys and the SSH agent

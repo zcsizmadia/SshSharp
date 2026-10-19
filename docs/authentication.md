@@ -28,8 +28,23 @@ flowchart TD
 
 A method is tried only when the server lists it and you supplied what it needs. After a partial success (the server requires
 another method too), the order is walked again with the methods the server still lists, since the one it wants next may come
-earlier in the order. Connecting by `ssh_config` alias follows
-`PreferredAuthentications` instead, when it is set.
+earlier in the order.
+
+`SshClientOptions.PreferredAuthentications` sets another order, as `ssh_config`'s `PreferredAuthentications` does when connecting
+by alias: any of `gssapi-with-mic`, `publickey`, `keyboard-interactive` and `password`. A method left out of it is never tried,
+even when its credentials are set, so `["publickey"]` keeps a service account from ever sending a password:
+
+```csharp
+var options = new SshClientOptions
+{
+    UserName = "deploy",
+    PrivateKeys = [key],
+    HostKeyVerifier = verifier,
+    PreferredAuthentications = ["publickey"],
+};
+```
+
+See [Choose algorithms and authentication methods](how-to/algorithms-and-authentication-order.md).
 
 ## Password
 

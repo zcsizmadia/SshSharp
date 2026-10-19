@@ -75,8 +75,8 @@ jobs:
             mutate: -m "**/Config/SshTokens.cs" -m "**/Config/Glob.cs"
             tests: Config/*Tests.cs;Fuzz/ParserRobustnessTests.cs;ConfigConnectTests.cs
           - scope: config-resolver
-            mutate: -m "**/Config/SshConfigResolver.cs" -m "**/Config/SshConfigResolveOptions.cs" -m "**/Config/SshHostConfig.cs" -m "**/Config/SshAlgorithmList.cs"
-            tests: Config/*Tests.cs;ConfigConnectTests.cs;ConfigForwardingTests.cs
+            mutate: -m "**/Config/SshConfigResolver.cs" -m "**/Config/SshConfigResolveOptions.cs" -m "**/Config/SshHostConfig.cs" -m "**/SshAlgorithmList.cs"
+            tests: Config/*Tests.cs;ConfigConnectTests.cs;ConfigForwardingTests.cs;AlgorithmOptionsTests.cs
           - scope: config-known-hosts
             mutate: -m "**/Config/KnownHosts*.cs" -m "**/Config/ForwardSpec.cs" -m "**/Config/SshExecMatcher.cs" -m "**/Config/SshTime.cs"
             tests: Config/*Tests.cs;KnownHostsVerifierTests.cs;ConfigForwardingTests.cs;Fuzz/ParserRobustnessTests.cs;Keys/SshPublicKeyTests.cs

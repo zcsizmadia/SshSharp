@@ -306,7 +306,7 @@ public sealed class SshConfig
             AddKeysToAgent = ParseAddKeysToAgent(All("addkeystoagent") is { Count: > 0 } addKeys ? string.Join(' ', addKeys) : null),
             ChannelTimeouts = ParseChannelTimeouts(All("channeltimeout")),
             ObscureKeystrokeTiming = ParseObscureKeystrokeTiming(First("obscurekeystroketiming")),
-            RequiredRsaSize = int.TryParse(First("requiredrsasize"), NumberStyles.None, CultureInfo.InvariantCulture, out var rsaBits) && rsaBits >= 1024
+            RequiredRsaSize = int.TryParse(First("requiredrsasize"), NumberStyles.None, CultureInfo.InvariantCulture, out var rsaBits) && rsaBits >= SshClientOptions.LowestRequiredRsaSize
                 ? rsaBits
                 : null,
             RequestTty = ParseTty(First("requesttty")),

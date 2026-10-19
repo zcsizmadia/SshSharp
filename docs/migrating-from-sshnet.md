@@ -94,8 +94,7 @@ See [Connecting](connecting.md) for streams, jump hosts and timeouts.
 | `client.Disconnect()`, `Dispose()` | `await client.DisposeAsync()` |
 | `ConnectionInfo.Timeout` | `SshClientOptions.ConnectTimeout` (`ConnectTimeout` in `ssh_config`); it covers the TCP connection, key exchange and authentication. A `CancellationToken` works too |
 | `client.KeepAliveInterval` | `SshClientOptions.KeepAliveInterval` and `KeepAliveCountMax` (`ServerAliveInterval` in `ssh_config`) |
-| `ConnectionInfo.Encryptions` / `KeyExchangeAlgorithms` / `HostKeyAlgorithms` (removing entries) | `Ciphers`, `KexAlgorithms`, `HostKeyAlgorithms` in `ssh_config` (the defaults are modern only; `SshClientOptions.FipsMode` restricts them to FIPS algorithms) |
-| `ConnectionInfo.ProxyType`, `ProxyHost`, `ProxyPort`, `ProxyUsername`, `ProxyPassword` | `SshClientOptions.Proxy = SshProxy.Http(host, port, credentials)` (or `Socks5`, `Socks4`, or `SshProxy.FromUri(new Uri("socks5://proxy:1080"))`) |
+| `ConnectionInfo.Encryptions` / `KeyExchangeAlgorithms` / `HostKeyAlgorithms` (removing entries) | `SshClientOptions.Ciphers`, `KexAlgorithms`, `HostKeyAlgorithms` and `Macs`, for example `Ciphers = SshAlgorithmList.Remove("aes*-ctr")`; or the same directives in `ssh_config` (the defaults are modern only; `SshClientOptions.FipsMode` restricts them to FIPS algorithms) || `ConnectionInfo.ProxyType`, `ProxyHost`, `ProxyPort`, `ProxyUsername`, `ProxyPassword` | `SshClientOptions.Proxy = SshProxy.Http(host, port, credentials)` (or `Socks5`, `Socks4`, or `SshProxy.FromUri(new Uri("socks5://proxy:1080"))`) |
 | `client.IsConnected` | `client.IsConnected`; `client.ConnectionClosed` (a `CancellationToken`) fires when the connection drops |
 | `client.ErrorOccurred` event | `client.ConnectionClosed` and `client.ConnectionError` |
 | `client.ConnectionInfo.ServerVersion` | `client.ServerIdentification` |

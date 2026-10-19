@@ -105,3 +105,22 @@ SshSharp.SshAgentRequest.Namespace.init -> void
 SshSharp.SshAgentRequest.Purpose.init -> void
 SshSharp.SshAgentRequest.UserName.init -> void
 SshSharp.SshSignaturePurpose.Other = 3 -> SshSharp.SshSignaturePurpose
+SshSharp.SshAlgorithmList
+override SshSharp.SshAlgorithmList.ToString() -> string!
+static SshSharp.SshAlgorithmList.Append(params string![]! algorithms) -> SshSharp.SshAlgorithmList!
+static SshSharp.SshAlgorithmList.Only(params string![]! algorithms) -> SshSharp.SshAlgorithmList!
+static SshSharp.SshAlgorithmList.Parse(string! specification) -> SshSharp.SshAlgorithmList!
+static SshSharp.SshAlgorithmList.Prepend(params string![]! algorithms) -> SshSharp.SshAlgorithmList!
+static SshSharp.SshAlgorithmList.Remove(params string![]! patterns) -> SshSharp.SshAlgorithmList!
+SshSharp.SshClientOptions.Ciphers.get -> SshSharp.SshAlgorithmList?
+SshSharp.SshClientOptions.Ciphers.init -> void
+SshSharp.SshClientOptions.HostKeyAlgorithms.get -> SshSharp.SshAlgorithmList?
+SshSharp.SshClientOptions.HostKeyAlgorithms.init -> void
+SshSharp.SshClientOptions.KexAlgorithms.get -> SshSharp.SshAlgorithmList?
+SshSharp.SshClientOptions.KexAlgorithms.init -> void
+SshSharp.SshClientOptions.Macs.get -> SshSharp.SshAlgorithmList?
+SshSharp.SshClientOptions.Macs.init -> void
+SshSharp.SshClientOptions.PreferredAuthentications.get -> System.Collections.Generic.IReadOnlyList<string!>?
+SshSharp.SshClientOptions.PreferredAuthentications.init -> void
+SshSharp.SshClientOptions.RequiredRsaSize.get -> int
+SshSharp.SshClientOptions.RequiredRsaSize.init -> void

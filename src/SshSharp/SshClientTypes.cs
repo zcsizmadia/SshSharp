@@ -189,8 +189,39 @@ public sealed class SshClientOptions
     /// </remarks>
     public Func<SshAgentRequest, CancellationToken, ValueTask<bool>>? ForwardAgentFilter { get; init; }
 
-    /// <summary>The methods to try and their order (ssh's <c>PreferredAuthentications</c>); null for publickey, keyboard-interactive, password.</summary>
-    internal IReadOnlyList<string>? AuthenticationOrder { get; init; }
+    /// <summary>
+    /// The authentication methods to try and their order, as ssh_config's <c>PreferredAuthentications</c>: any of
+    /// <c>gssapi-with-mic</c>, <c>publickey</c>, <c>keyboard-interactive</c> and <c>password</c>. A method that is left out is not tried,
+    /// even when its credentials are set. Null (the default) uses ssh's order: <c>gssapi-with-mic</c> (only with <see cref="Gssapi"/>),
+    /// <c>publickey</c>, <c>keyboard-interactive</c>, <c>password</c>. A method is tried only when the server offers it and its credentials
+    /// are set (<see cref="PrivateKeys"/>, <see cref="Password"/>, <see cref="KeyboardInteractive"/>, <see cref="Gssapi"/>).
+    /// </summary>
+    /// <exception cref="ArgumentException">A name is not one of the methods above (SshSharp does not implement <c>hostbased</c>).</exception>
+    public IReadOnlyList<string>? PreferredAuthentications
+    {
+        get => _preferredAuthentications;
+        init
+        {
+            if (value is not null)
+            {
+                foreach (var method in value)
+                {
+                    if (method is null || !SshClient.DefaultAuthenticationOrder.Contains(method, StringComparer.Ordinal))
+                    {
+                        throw new ArgumentException(
+                            $"'{method}' is not an authentication method SshSharp supports. Supported: {string.Join(", ", SshClient.DefaultAuthenticationOrder)}.",
+                            nameof(value));
+                    }
+                }
+
+                value = [.. value.Distinct(StringComparer.Ordinal)];
+            }
+
+            _preferredAuthentications = value;
+        }
+    }
+
+    private readonly IReadOnlyList<string>? _preferredAuthentications;
 
     /// <summary>
     /// Authenticate with Kerberos (<c>gssapi-with-mic</c>) when the server offers it, before the other methods, as ssh does with
@@ -357,12 +388,87 @@ public sealed class SshClientOptions
     /// </summary>
     public bool FipsMode { get; init; }
 
+    /// <summary>
+    /// The key exchange methods to offer, as ssh_config's <c>KexAlgorithms</c>: for example
+    /// <c>SshAlgorithmList.Remove("diffie-hellman-group*")</c>, or <c>SshAlgorithmList.Only("mlkem768x25519-sha256", "curve25519-sha256")</c>.
+    /// Null (the default) offers SshSharp's defaults, post-quantum hybrids first. ML-KEM methods are dropped where the platform lacks ML-KEM
+    /// (before .NET 10), and <see cref="FipsMode"/> still removes what it excludes.
+    /// </summary>
+    /// <exception cref="ArgumentException">A name is not a key exchange method SshSharp implements.</exception>
+    public SshAlgorithmList? KexAlgorithms
+    {
+        get => _kexAlgorithms;
+        init => _kexAlgorithms = Protocol.AlgorithmPreferences.Validate(value, Protocol.AlgorithmKind.Kex, nameof(value));
+    }
+
+    private readonly SshAlgorithmList? _kexAlgorithms;
+
+    /// <summary>
+    /// The host key algorithms to accept from the server, as ssh_config's <c>HostKeyAlgorithms</c>: for example
+    /// <c>SshAlgorithmList.Only("ssh-ed25519")</c>. Certificate algorithms (<c>-cert-v01@openssh.com</c>) may be listed too. Null (the
+    /// default) accepts SshSharp's defaults. When the <see cref="HostKeyVerifier"/> trusts a certificate authority for the host, the
+    /// certificate versions of the allowed algorithms are asked for first, as ssh does. <see cref="FipsMode"/> still removes Ed25519.
+    /// </summary>
+    /// <exception cref="ArgumentException">A name is not a host key algorithm SshSharp implements.</exception>
+    public SshAlgorithmList? HostKeyAlgorithms
+    {
+        get => _hostKeyAlgorithms;
+        init => _hostKeyAlgorithms = Protocol.AlgorithmPreferences.Validate(value, Protocol.AlgorithmKind.HostKey, nameof(value));
+    }
+
+    private readonly SshAlgorithmList? _hostKeyAlgorithms;
+
+    /// <summary>
+    /// The ciphers to offer, as ssh_config's <c>Ciphers</c>: for example <c>SshAlgorithmList.Prepend("chacha20-poly1305@openssh.com")</c>.
+    /// Null (the default) offers SshSharp's defaults. <see cref="FipsMode"/> still removes ChaCha20-Poly1305.
+    /// </summary>
+    /// <exception cref="ArgumentException">A name is not a cipher SshSharp implements.</exception>
+    public SshAlgorithmList? Ciphers
+    {
+        get => _ciphers;
+        init => _ciphers = Protocol.AlgorithmPreferences.Validate(value, Protocol.AlgorithmKind.Cipher, nameof(value));
+    }
+
+    private readonly SshAlgorithmList? _ciphers;
+
+    /// <summary>
+    /// The MACs to offer, as ssh_config's <c>MACs</c>: for example <c>SshAlgorithmList.Only("hmac-sha2-512-etm@openssh.com")</c>. Null (the
+    /// default) offers SshSharp's defaults. AEAD ciphers (AES-GCM, ChaCha20-Poly1305) authenticate themselves and use no MAC.
+    /// </summary>
+    /// <exception cref="ArgumentException">A name is not a MAC SshSharp implements.</exception>
+    public SshAlgorithmList? Macs
+    {
+        get => _macs;
+        init => _macs = Protocol.AlgorithmPreferences.Validate(value, Protocol.AlgorithmKind.Mac, nameof(value));
+    }
+
+    private readonly SshAlgorithmList? _macs;
+
+    /// <summary>
+    /// The smallest RSA host key accepted, in bits, as ssh_config's <c>RequiredRSASize</c>; a smaller one fails the connection with an
+    /// <see cref="SshHostKeyException"/>. Default 2048 (ssh's default is 1024). At least 1024, the least ssh accepts.
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException">The value is below 1024.</exception>
+    public int RequiredRsaSize
+    {
+        get => _requiredRsaSize;
+        init
+        {
+            ArgumentOutOfRangeException.ThrowIfLessThan(value, LowestRequiredRsaSize);
+            _requiredRsaSize = value;
+        }
+    }
+
+    private readonly int _requiredRsaSize = DefaultMinimumRsaBits;
+
+    /// <summary>The algorithms resolved from an ssh_config host, which take the place of the typed lists above (unknown names dropped as ssh_config's are).</summary>
     internal Protocol.AlgorithmPreferences? AlgorithmPreferences { get; init; }
 
-    internal int MinimumRsaBits { get; init; } = DefaultMinimumRsaBits;
-
-    /// <summary>The smallest RSA host key accepted unless <c>RequiredRSASize</c> says otherwise (ssh's default is 1024).</summary>
+    /// <summary>The smallest RSA host key accepted unless <see cref="RequiredRsaSize"/> says otherwise (ssh's default is 1024).</summary>
     internal const int DefaultMinimumRsaBits = 2048;
+
+    /// <summary>The lowest <see cref="RequiredRsaSize"/>, as for ssh_config's <c>RequiredRSASize</c>: ssh refuses anything below it.</summary>
+    internal const int LowestRequiredRsaSize = 1024;
 }
 
 /// <summary>The signal that ended a remote program, from the server's <c>exit-signal</c> (RFC 4254 section 6.10).</summary>

@@ -39,12 +39,15 @@ value.
 
 | Directive | Property | Applied |
 |---|---|---|
-| `KexAlgorithms` | `KexAlgorithms` | Yes, applied to the [defaults](algorithms.md); names SshSharp does not implement are dropped. |
-| `HostKeyAlgorithms` | `HostKeyAlgorithms` | Yes. |
-| `Ciphers` | `Ciphers` | Yes. |
-| `MACs` | `Macs` | Yes. |
+| `KexAlgorithms` | `KexAlgorithms` | Yes, applied to the [defaults](algorithms.md); names SshSharp does not implement are dropped. `SshClientOptions.KexAlgorithms` in code. |
+| `HostKeyAlgorithms` | `HostKeyAlgorithms` | Yes. `SshClientOptions.HostKeyAlgorithms` in code. |
+| `Ciphers` | `Ciphers` | Yes. `SshClientOptions.Ciphers` in code. |
+| `MACs` | `Macs` | Yes. `SshClientOptions.Macs` in code. |
 | `PubkeyAcceptedAlgorithms` (`PubkeyAcceptedKeyTypes`) | `PubkeyAcceptedAlgorithms` | Yes. |
-| `RequiredRSASize` | `RequiredRsaSize` | Yes: the smallest RSA key accepted (default 2048). |
+| `RequiredRSASize` | `RequiredRsaSize` | Yes: the smallest RSA host key accepted (default 2048; values under 1024 are ignored, as `ssh` refuses them). `SshClientOptions.RequiredRsaSize` in code. |
+
+The `SshClientOptions` lists take an `SshAlgorithmList` in the same `+`, `-`, `^` and plain forms; see
+[Choose algorithms and authentication methods](../how-to/algorithms-and-authentication-order.md).
 
 ## Host keys
 
@@ -67,7 +70,7 @@ value.
 | `IdentityAgent` | `IdentityAgent` | Yes (`SSH_AUTH_SOCK`, a path, or `none`). |
 | `IdentitiesOnly` | `IdentitiesOnly` | Yes: only the agent keys that match an `IdentityFile`. |
 | `AddKeysToAgent` | `AddKeysToAgent` | Yes (`yes`, `confirm`, a lifetime); `ask` is treated as `no`. |
-| `PreferredAuthentications` | `PreferredAuthentications` | Yes. |
+| `PreferredAuthentications` | `PreferredAuthentications` | Yes. `SshClientOptions.PreferredAuthentications` in code. |
 | `PubkeyAuthentication`, `PasswordAuthentication`, `KbdInteractiveAuthentication` (`ChallengeResponseAuthentication`) | same names | Yes. |
 | `GSSAPIAuthentication`, `GSSAPIDelegateCredentials` | `GssapiAuthentication`, `GssapiDelegateCredentials` | Yes (.NET 10). |
 | `BatchMode` | `BatchMode` | Yes: no prompts or passphrase requests. |
