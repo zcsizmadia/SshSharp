@@ -541,8 +541,8 @@ public sealed class SshClientOptions
     /// </para>
     /// <para>
     /// It is called once for each socket SshSharp creates, and each address of the server that is tried gets a socket of its own: once
-    /// for an IP address or a name with one address, and again for each further address tried when a name has several and the first
-    /// cannot be reached. The socket's family is the address's (IPv4 or IPv6, not dual-mode). It runs on the connecting thread and should
+    /// per attempt for an IP address or a name with one address, and again for each further address tried when a name has several and
+    /// the first cannot be reached. Each retry that <see cref="ConnectionAttempts"/> makes creates new sockets too. The socket's family is the address's (IPv4 or IPv6, not dual-mode). It runs on the connecting thread and should
     /// only set options.
     /// An exception it throws ends the attempt and is thrown from <c>ConnectAsync</c> as it is.
     /// </para>

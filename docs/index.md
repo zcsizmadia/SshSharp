@@ -122,6 +122,6 @@ All four are released together with the same version, target .NET 8 and .NET 10,
 - **Something is wrong:** [troubleshooting](reference/troubleshooting.md) and the [FAQ](reference/faq.md).
 
 > [!NOTE]
-> SshSharp 1.0 follows semantic versioning: breaking changes wait for a major version. The managed cryptography has had an
+> SshSharp 1.x follows semantic versioning: breaking changes wait for a major version. The managed cryptography has had an
 > internal constant-time review but not yet an outside one; see the [cryptography review](crypto-review.md) and the
 > [security policy](https://github.com/zcsizmadia/SshSharp/blob/main/SECURITY.md).
