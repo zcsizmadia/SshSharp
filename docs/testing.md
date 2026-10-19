@@ -29,7 +29,9 @@ are not used. The file system, the environment and `Match exec` sit behind small
 Inputs come from the real tools wherever possible:
 - `known_hosts` files and KRLs made by OpenSSH
 - private keys made by `ssh-keygen`, in every format and with every cipher it can encrypt a key with
-- PuTTY `.ppk` files
+- PuTTY `.ppk` files made by `puttygen`
+- the key files SshSharp writes (OpenSSH, PKCS#8, `.ppk`), read back by `ssh-keygen`, OpenSSL and `puttygen`; and unencrypted keys
+  OpenSSL and `puttygen` make, written back byte for byte
 - `ssh_config` files using OpenSSH's own syntax and tokens
 
 ## Cryptography

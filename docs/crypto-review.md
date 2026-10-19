@@ -15,7 +15,7 @@ outside review is planned (1.0 shipped with this internal review as its basis).
 | ChaCha20, Poly1305, chacha20-poly1305@openssh.com | RFC 8439 vectors, the framework's RFC 8439 AEAD, OpenSSH's construction, interop with OpenSSH; the vectorized ChaCha20 against the scalar code, and Poly1305's 64-bit limbs against its 26-bit code and a `BigInteger` computation of the definition (below) |
 | bcrypt_pbkdf | pyca/bcrypt known answer; keys encrypted by ssh-keygen with every supported cipher |
 | BLAKE2b | RFC 7693 |
-| Argon2d/i/id | RFC 9106 section 5 vectors; .ppk files written by PuTTY's puttygen (CI) |
+| Argon2d/i/id | RFC 9106 section 5 vectors; .ppk files written by PuTTY's puttygen (CI), and .ppk files SshSharp writes read by puttygen (CI) |
 | sntrup761 | The NTRU Prime round-3 known-answer tests (key pair, ciphertext and shared secret, replayed with NIST's AES-256 CTR DRBG); `sntrup761x25519-sha512` and its `@openssh.com` name against OpenSSH (CI: the Linux runners and the OpenSSH containers that offer it; OpenSSH for Windows 9.5, the CI runners' server, does not offer it: its default key exchange list has no sntrup761); implicit rejection of tampered ciphertexts |
 
 ## Constant-time review of the secret-key paths (M3)
@@ -254,6 +254,22 @@ What survives:
 array it outgrows and the final one when done, so no copy of the private fields is left in the heap. The bytes of the file
 are cleared after writing; the string `ToOpenSshPrivateKey` returns cannot be.
 
+The PKCS#8 and PuTTY writers (`ToPkcs8PrivateKey`, `ToPuttyPrivateKey`, `SaveAsync` with a `SshPrivateKeyFormat`) follow the same
+rules: their buffers zero what they hold, and only the returned string is left to the garbage collector. They add no primitive:
+
+- **PKCS#8, RSA and ECDSA:** the platform exports the key (`ExportPkcs8PrivateKey`) and encrypts it
+  (`ExportEncryptedPkcs8PrivateKey`: PBES2, PBKDF2-HMAC-SHA256 with 600,000 iterations, AES-256-CBC). The iteration count is OWASP's
+  for PBKDF2-HMAC-SHA256; OpenSSL's default, 2048, would not slow down guessing. CBC here is the file format's cipher, the one
+  PBES2 offers in the platform, not a transport cipher; legacy algorithms still stay out of the protocol.
+- **PKCS#8, Ed25519:** the PrivateKeyInfo of RFC 8410 has a fixed DER layout, so it is written as a constant prefix and the seed,
+  which keeps the seed out of an ASN.1 writer's buffers; RFC 8410's example key is written back byte for byte. The platform has no
+  Ed25519 to encrypt one with, so encrypting one is refused (`NotSupportedException`) rather than implemented here.
+- **PuTTY `.ppk` version 3:** Argon2id (this library's, as for reading) with 46 MiB, one pass and one lane, OWASP's first Argon2id
+  setting; then the platform's AES-256-CBC and HMAC-SHA256, as PuTTY defines them. The padding to the AES block is random bytes
+  where PuTTYgen uses bytes of a SHA-1 hash of the blob: any bytes do, as the MAC covers them, and no SHA-1 is used. Version 2
+  (SHA-1) is never written. PuTTY 0.81's `puttygen` reads every exported key, plain and encrypted, and an unencrypted file
+  `puttygen` made is written back byte for byte (CI).
+
 ## Accepted risks
 
 - **DH group 14/16/18 and group exchange** use `BigInteger.ModPow` on the ephemeral exponent, which is not constant-time. The
@@ -264,7 +280,8 @@ are cleared after writing; the string `ToOpenSshPrivateKey` returns cannot be.
   needs no weak group to read its own session. More rounds, or proving (p-1)/2 prime, cost a full-size `BigInteger.ModPow` each:
   measured on Windows 11, .NET 10, x64, a connection to OpenSSH 9.6 on localhost takes 0.87 s with an 8192-bit group (0.22 s for
   `diffie-hellman-group18-sha512`), of which about 0.65 s is the one round.
-- **bcrypt_pbkdf and Argon2** index tables with data derived from the passphrase. They run once, locally, when a key file is loaded.
+- **bcrypt_pbkdf and Argon2** index tables with data derived from the passphrase. They run once, locally, when a key file is loaded or
+  written.
 - **Managed strings** (the password option) cannot be wiped.
 
 ## Open

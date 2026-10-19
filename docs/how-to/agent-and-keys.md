@@ -150,6 +150,40 @@ that come through agent forwarding; this client's own authentication through an 
 `SaveAsync` writes the private key in the OpenSSH format (encrypted with `aes256-ctr` and `bcrypt_pbkdf` when given a passphrase),
 readable only by the current user, and the public key next to it as `.pub`. It never overwrites an existing file.
 
+`bcrypt_pbkdf` runs 16 rounds by default, as `ssh-keygen` does. To choose the number, as `ssh-keygen -a` does:
+
+[!code-csharp[](../snippets/Keys.cs#save-rounds)]
+
+## Export a key to PKCS#8 or PuTTY
+
+A key loaded from any format, or generated, can be written in another format: for PuTTY, Pageant and WinSCP, or for OpenSSL and the
+.NET cryptography APIs. Use it to hand a key to a tool that does not read the OpenSSH format, or to convert a key once instead of
+keeping copies in several formats.
+
+[!code-csharp[](../snippets/Keys.cs#export)]
+
+| Format | Text | File | Encrypted with a passphrase |
+|---|---|---|---|
+| OpenSSH (`BEGIN OPENSSH PRIVATE KEY`) | `ToOpenSshPrivateKey` | `SaveAsync(path, SshPrivateKeyFormat.OpenSsh, ...)` | `aes256-ctr`, `bcrypt_pbkdf` (16 rounds, or your own) |
+| PKCS#8 (`BEGIN PRIVATE KEY`, `BEGIN ENCRYPTED PRIVATE KEY`) | `ToPkcs8PrivateKey` | `SaveAsync(path, SshPrivateKeyFormat.Pkcs8, ...)` | AES-256-CBC, PBKDF2-HMAC-SHA256 with 600,000 iterations (PBES2); RSA and ECDSA only |
+| PuTTY `.ppk` version 3 | `ToPuttyPrivateKey` | `SaveAsync(path, SshPrivateKeyFormat.Putty, ...)` | AES-256-CBC, Argon2id (46 MiB, one pass), HMAC-SHA256 |
+
+Every format is read back by `SshPrivateKey.LoadAsync` and `Parse`. Each `SaveAsync` writes the private key readable only by the
+current user and the public key next to it (`path` + `.pub`, an `authorized_keys` line), and never overwrites an existing file.
+
+### Limits of each format
+
+- **PKCS#8 has no comment.** The key's comment is not kept; the `.pub` file `SaveAsync` writes has it.
+- **Encrypted Ed25519 in PKCS#8 is not supported.** .NET has no Ed25519, so it cannot encrypt one; `ToPkcs8PrivateKey(passphrase)`
+  throws `NotSupportedException` for an Ed25519 key. Use the OpenSSH or PuTTY format, or PKCS#8 without a passphrase in a store
+  that is encrypted itself. An unencrypted Ed25519 key is written as RFC 8410 and OpenSSL describe it.
+- **PuTTY 0.75 or later.** Version 3 `.ppk` files (Argon2) are what PuTTYgen has written since 0.75; older PuTTY versions read
+  only version 2, which is defined with SHA-1 and is not written. The comment is kept; a comment with a line break cannot be.
+- **Keys held elsewhere cannot be exported.** A key in an agent, from `FromRsa`, `FromECDsa` or `FromSigner`, or paired with a
+  certificate throws `NotSupportedException`: export the key the certificate was made for.
+- **The text is the private key.** Never log the strings these methods return, and write them only where other users cannot
+  read them; prefer `SaveAsync`, which also clears its copy of the file's bytes.
+
 ## Read a public key and its fingerprint
 
 `SshPublicKey` is a public key on its own: a `.pub` file, an `authorized_keys` line, or the key of a private key
@@ -213,5 +247,5 @@ the answer against the public key before using it.
 - [Signing files and commits](../signing.md)
 - [Scenario: a KMS-held key forwarded through a bastion](../scenarios/kms-agent-forwarding.md)
 - [Threat model: agent forwarding](../threat-model.md#channels-the-server-opens)
-- <xref:SshSharp.SshPrivateKey>, <xref:SshSharp.SshPublicKey>, <xref:SshSharp.SshAgent> and <xref:SshSharp.SshKeySigner> in the API
-  reference
+- <xref:SshSharp.SshPrivateKey>, <xref:SshSharp.SshPrivateKeyFormat>, <xref:SshSharp.SshPublicKey>, <xref:SshSharp.SshAgent> and
+  <xref:SshSharp.SshKeySigner> in the API reference

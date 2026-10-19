@@ -7,7 +7,7 @@ using SshSharp.Tests.Agent;
 
 namespace SshSharp.Tests.Keys;
 
-/// <summary><see cref="SshPrivateKey.Generate"/>, <see cref="SshPrivateKey.ToOpenSshPrivateKey"/> and <see cref="SshPrivateKey.SaveAsync"/> (#117).</summary>
+/// <summary><see cref="SshPrivateKey.Generate"/>, <see cref="SshPrivateKey.ToOpenSshPrivateKey"/> and <see cref="SshPrivateKey.SaveAsync(string, string?, CancellationToken)"/> (#117).</summary>
 public class KeyGenerationTests
 {
     public static IEnumerable<(SshKeyType Type, string KeyType, int Bits)> Types() =>

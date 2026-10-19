@@ -121,7 +121,13 @@ The private key file is created readable only by the current user (mode 0600 on 
 user, as OpenSSH for Windows requires). `SaveAsync` never overwrites: it fails if either file exists. Types: `Ed25519`,
 `EcdsaNistp256/384/521`, and `Rsa` (3072 bits by default, `rsaBits` for 2048 to 16384). `ToOpenSshPrivateKey(passphrase)` returns
 the file's text instead, for a secret store; it holds the private key, so never log it. Keys loaded from any format can be
-written this way too, which converts them to the OpenSSH format; keys held by an agent cannot.
+written this way too, which converts them to the OpenSSH format; keys held by an agent cannot. `SaveAsync(path, passphrase,
+kdfRounds)` sets the `bcrypt_pbkdf` rounds, as `ssh-keygen -a` does.
+
+Other tools get the key in their own format: `ToPkcs8PrivateKey` writes PKCS#8 PEM for OpenSSL and the .NET cryptography APIs,
+`ToPuttyPrivateKey` a version 3 `.ppk` file for PuTTY, Pageant and WinSCP, and `SaveAsync(path, SshPrivateKeyFormat.Pkcs8 or
+.Putty, passphrase)` saves either as the OpenSSH format is saved. PKCS#8 keeps no comment and cannot encrypt an Ed25519 key. See
+[Export a key to PKCS#8 or PuTTY](how-to/agent-and-keys.md#export-a-key-to-pkcs8-or-putty).
 
 ### Keys held elsewhere (key vaults, HSMs, TPM)
 

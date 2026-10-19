@@ -29,7 +29,7 @@ Console.WriteLine(result.StandardOutputText);
   `@cert-authority`, `@revoked`), resolved like `ssh -G`.
 - **Authentication:** password, public keys (OpenSSH, PKCS#8, PKCS#1/SEC1 and PuTTY `.ppk` formats, encrypted too),
   OpenSSH user certificates, ssh-agent (Unix sockets, the Windows OpenSSH agent and PuTTY's Pageant), FIDO security keys
-  held by the agent, agent forwarding (also of an agent served in-process from your keys or KMS signers, with a filter on what the server may sign), keyboard-interactive (one-time codes, PAM), and multi-factor chains. Key generation, saved as `ssh-keygen` does; signing and verifying
+  held by the agent, agent forwarding (also of an agent served in-process from your keys or KMS signers, with a filter on what the server may sign), keyboard-interactive (one-time codes, PAM), and multi-factor chains. Key generation, saved as `ssh-keygen` does, and export to PKCS#8 and PuTTY `.ppk`; signing and verifying
   files and git commits with SSH keys (`ssh-keygen -Y`). Issuing and checking user and host certificates as a certificate
   authority (`ssh-keygen -s`), with the CA key in an agent or a KMS if you like.
 - **Host verification:** `StrictHostKeyChecking` policies, host certificates, `UpdateHostKeys`, key pinning, or your own
@@ -91,7 +91,7 @@ Console.WriteLine(result.StandardOutputText);
 | Kerberos (GSSAPI, `gssapi-with-mic`; .NET 10) | ✅ | ❌ |
 | OpenSSH certificates | User and host; issuing them as a CA | User (authentication) |
 | Private key formats | OpenSSH, PKCS#1/#8, SEC1, PuTTY `.ppk` | OpenSSH, PKCS#1/#8, PuTTY `.ppk`, ssh.com |
-| Key generation (Ed25519, ECDSA, RSA; saved in the OpenSSH format) | ✅ | ❌ |
+| Key generation (Ed25519, ECDSA, RSA) and export (OpenSSH, PKCS#8, PuTTY `.ppk`) | ✅ | ❌ |
 | Signing and verifying files and git commits (`ssh-keygen -Y`, SSHSIG, allowed-signers files) | ✅ | ❌ |
 | Post-quantum key exchange `sntrup761x25519-sha512` (OpenSSH 8.5+, also as `@openssh.com`) | ✅ (managed: every platform, .NET 8 too) | ✅ |
 | Post-quantum key exchange `mlkem768x25519-sha256` (OpenSSH 9.9+) | ✅ (.NET 10 with platform ML-KEM) | ✅ |

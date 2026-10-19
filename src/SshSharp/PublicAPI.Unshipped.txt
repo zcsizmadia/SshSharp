@@ -132,3 +132,11 @@ SshSharp.Sftp.SftpClient.ReadAllBytesAsync(string! path, System.Threading.Cancel
 SshSharp.Sftp.SftpClient.ReadAllTextAsync(string! path, System.Text.Encoding? encoding = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<string!>!
 SshSharp.Sftp.SftpClient.WriteAllBytesAsync(string! path, System.ReadOnlyMemory<byte> bytes, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
 SshSharp.Sftp.SftpClient.WriteAllTextAsync(string! path, string! contents, System.Text.Encoding? encoding = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+SshSharp.SshPrivateKey.SaveAsync(string! path, SshSharp.SshPrivateKeyFormat format, string? passphrase = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+SshSharp.SshPrivateKey.SaveAsync(string! path, string? passphrase, int kdfRounds, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+SshSharp.SshPrivateKey.ToPkcs8PrivateKey(string? passphrase = null) -> string!
+SshSharp.SshPrivateKey.ToPuttyPrivateKey(string? passphrase = null) -> string!
+SshSharp.SshPrivateKeyFormat
+SshSharp.SshPrivateKeyFormat.OpenSsh = 0 -> SshSharp.SshPrivateKeyFormat
+SshSharp.SshPrivateKeyFormat.Pkcs8 = 1 -> SshSharp.SshPrivateKeyFormat
+SshSharp.SshPrivateKeyFormat.Putty = 2 -> SshSharp.SshPrivateKeyFormat

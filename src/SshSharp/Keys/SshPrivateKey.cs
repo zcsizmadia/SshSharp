@@ -13,7 +13,9 @@ namespace SshSharp;
 /// the OpenSSH key format (<c>BEGIN OPENSSH PRIVATE KEY</c>, as <c>ssh-keygen</c> writes by default, also passphrase-protected), PuTTY
 /// <c>.ppk</c> (versions 2 and 3, also encrypted), PKCS#8 (<c>BEGIN PRIVATE KEY</c>,
 /// and <c>BEGIN ENCRYPTED PRIVATE KEY</c> for RSA and ECDSA), and PKCS#1/SEC1 PEM (<c>BEGIN RSA PRIVATE KEY</c>, <c>BEGIN EC PRIVATE KEY</c>).
-/// Key types: Ed25519, ECDSA (nistp256/384/521) and RSA (2048 bits or more).
+/// Key types: Ed25519, ECDSA (nistp256/384/521) and RSA (2048 bits or more). A key held here can be written in the OpenSSH format
+/// (<see cref="ToOpenSshPrivateKey"/>), PKCS#8 (<see cref="ToPkcs8PrivateKey"/>) or PuTTY's (<see cref="ToPuttyPrivateKey"/>), or saved
+/// to a file in any of them (<see cref="SaveAsync(string, SshPrivateKeyFormat, string?, CancellationToken)"/>).
 /// </summary>
 public abstract class SshPrivateKey : IDisposable
 {
@@ -86,8 +88,8 @@ public abstract class SshPrivateKey : IDisposable
     }
 
     /// <summary>
-    /// Generates a new key pair, as <c>ssh-keygen -t</c> does. Write it with <see cref="SaveAsync"/> or <see cref="ToOpenSshPrivateKey"/>,
-    /// and give the server <see cref="ToAuthorizedKeysLine"/>.
+    /// Generates a new key pair, as <c>ssh-keygen -t</c> does. Write it with <see cref="SaveAsync(string, string?, CancellationToken)"/>
+    /// or <see cref="ToOpenSshPrivateKey"/>, and give the server <see cref="ToAuthorizedKeysLine"/>.
     /// </summary>
     /// <param name="type">The key type. Ed25519 is the usual choice; ECDSA or RSA where FIPS-approved algorithms are required.</param>
     /// <param name="comment">The comment stored with the key, often <c>user@host</c>.</param>
@@ -186,7 +188,7 @@ public abstract class SshPrivateKey : IDisposable
     /// <summary>
     /// The key in the OpenSSH private key format (<c>BEGIN OPENSSH PRIVATE KEY</c>), as <c>ssh-keygen</c> writes it: encrypted with
     /// <c>aes256-ctr</c> and <c>bcrypt_pbkdf</c> when <paramref name="passphrase"/> is given, otherwise unencrypted. The text holds the
-    /// private key: do not log it, and write it only to files other users cannot read (<see cref="SaveAsync"/> does).
+    /// private key: do not log it, and write it only to files other users cannot read (<see cref="SaveAsync(string, string?, CancellationToken)"/> does).
     /// </summary>
     /// <param name="passphrase">The passphrase to encrypt with; null or empty for an unencrypted key.</param>
     /// <param name="kdfRounds">bcrypt_pbkdf rounds (<c>ssh-keygen -a</c>): 16 by default; more make guessing the passphrase slower, and
@@ -195,18 +197,36 @@ public abstract class SshPrivateKey : IDisposable
     /// paired with a certificate (export the key it was made from).</exception>
     public string ToOpenSshPrivateKey(string? passphrase = null, int kdfRounds = 16)
     {
-        ArgumentOutOfRangeException.ThrowIfLessThan(kdfRounds, 1);
-        ArgumentOutOfRangeException.ThrowIfGreaterThan(kdfRounds, OpenSshKeyWriter.MaxRounds);
-        var bytes = OpenSshKeyWriter.Write(this, passphrase, kdfRounds);
-        try
-        {
-            return Encoding.UTF8.GetString(bytes);
-        }
-        finally
-        {
-            CryptographicOperations.ZeroMemory(bytes);
-        }
+        CheckKdfRounds(kdfRounds);
+        return ToText(OpenSshKeyWriter.Write(this, passphrase, kdfRounds));
     }
+
+    /// <summary>
+    /// The key in PKCS#8 PEM, which OpenSSL, <c>ssh-keygen</c> and the .NET cryptography APIs (<see cref="AsymmetricAlgorithm.ImportFromPem"/>,
+    /// <see cref="AsymmetricAlgorithm.ImportFromEncryptedPem(ReadOnlySpan{char}, ReadOnlySpan{char})"/>) read: <c>BEGIN PRIVATE KEY</c>,
+    /// or, when <paramref name="passphrase"/> is given, <c>BEGIN ENCRYPTED PRIVATE KEY</c>, encrypted with AES-256-CBC under a key from
+    /// PBKDF2-HMAC-SHA256 with 600,000 iterations (PBES2, RFC 8018). PKCS#8 has no comment: <see cref="Comment"/> is not kept. The text
+    /// holds the private key: do not log it, and write it only to files other users cannot read
+    /// (<see cref="SaveAsync(string, SshPrivateKeyFormat, string?, CancellationToken)"/> does).
+    /// </summary>
+    /// <param name="passphrase">The passphrase to encrypt with; null or empty for an unencrypted key.</param>
+    /// <exception cref="NotSupportedException">The private key is not available: a key held by an agent or an external signer, or one
+    /// paired with a certificate (export the key it was made from). Or an Ed25519 key with a passphrase: .NET has no Ed25519, so it cannot
+    /// encrypt one; use <see cref="ToOpenSshPrivateKey"/> or <see cref="ToPuttyPrivateKey"/> for an encrypted Ed25519 key.</exception>
+    public string ToPkcs8PrivateKey(string? passphrase = null) => ToText(Pkcs8KeyWriter.Write(this, passphrase));
+
+    /// <summary>
+    /// The key as a PuTTY key file (<c>.ppk</c>, version 3), as PuTTYgen 0.75 and later writes it: when <paramref name="passphrase"/> is
+    /// given, encrypted with AES-256-CBC under a key from Argon2id (46 MiB, one pass), otherwise unencrypted; authenticated with
+    /// HMAC-SHA256 either way. PuTTY, Pageant and WinSCP read it; versions of PuTTY before 0.75 do not. The text holds the private key:
+    /// do not log it, and write it only to files other users cannot read
+    /// (<see cref="SaveAsync(string, SshPrivateKeyFormat, string?, CancellationToken)"/> does).
+    /// </summary>
+    /// <param name="passphrase">The passphrase to encrypt with; null or empty for an unencrypted key.</param>
+    /// <exception cref="NotSupportedException">The private key is not available: a key held by an agent or an external signer, or one
+    /// paired with a certificate (export the key it was made from). Or the <see cref="Comment"/> has a line break, which a <c>.ppk</c>
+    /// file cannot hold.</exception>
+    public string ToPuttyPrivateKey(string? passphrase = null) => ToText(PuttyKeyWriter.Write(this, passphrase));
 
     /// <summary>
     /// Writes the key as <c>ssh-keygen</c> does: the private key to <paramref name="path"/> (<see cref="ToOpenSshPrivateKey"/>), readable
@@ -218,16 +238,85 @@ public abstract class SshPrivateKey : IDisposable
     /// <param name="cancellationToken">Cancels writing.</param>
     /// <exception cref="IOException">One of the files exists already, or could not be written.</exception>
     /// <inheritdoc cref="ToOpenSshPrivateKey" path="/exception"/>
-    public async Task SaveAsync(string path, string? passphrase = null, CancellationToken cancellationToken = default)
+    public Task SaveAsync(string path, string? passphrase = null, CancellationToken cancellationToken = default) =>
+        SaveAsync(path, SshPrivateKeyFormat.OpenSsh, passphrase, cancellationToken);
+
+    /// <summary>
+    /// Writes the key as <see cref="SaveAsync(string, string?, CancellationToken)"/> does, encrypted with <paramref name="kdfRounds"/>
+    /// rounds of <c>bcrypt_pbkdf</c> (<c>ssh-keygen -a</c>).
+    /// </summary>
+    /// <param name="path">The private key file, for example <c>~/.ssh/id_ed25519</c>.</param>
+    /// <param name="passphrase">The passphrase to encrypt with; null or empty for an unencrypted key.</param>
+    /// <param name="kdfRounds">bcrypt_pbkdf rounds: 16 is ssh-keygen's default; more make guessing the passphrase slower, and loading the
+    /// key too. From 1 to 65536.</param>
+    /// <param name="cancellationToken">Cancels writing.</param>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="kdfRounds"/> is out of range.</exception>
+    /// <exception cref="IOException">One of the files exists already, or could not be written.</exception>
+    /// <inheritdoc cref="ToOpenSshPrivateKey" path="/exception"/>
+    public async Task SaveAsync(string path, string? passphrase, int kdfRounds, CancellationToken cancellationToken = default)
+    {
+        // Arguments are checked in the async method, so a bad one faults the task, as the first overload always has.
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        CheckKdfRounds(kdfRounds);
+        await SaveCoreAsync(path, () => OpenSshKeyWriter.Write(this, passphrase, kdfRounds), cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Writes the key in <paramref name="format"/>: the private key to <paramref name="path"/> (<see cref="ToOpenSshPrivateKey"/>,
+    /// <see cref="ToPkcs8PrivateKey"/> or <see cref="ToPuttyPrivateKey"/>), readable only by the current user (mode 0600 on Unix, an
+    /// owner-only ACL on Windows), and the public key to <paramref name="path"/><c>.pub</c> as an <c>authorized_keys</c> line, for every
+    /// format. Neither file may exist yet: an existing key is never overwritten.
+    /// </summary>
+    /// <param name="path">The private key file, for example <c>~/.ssh/id_ed25519</c>, or <c>id_ed25519.ppk</c> for PuTTY.</param>
+    /// <param name="format">The file format.</param>
+    /// <param name="passphrase">The passphrase to encrypt with; null or empty for an unencrypted key.</param>
+    /// <param name="cancellationToken">Cancels writing.</param>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="format"/> is not a defined format.</exception>
+    /// <exception cref="IOException">One of the files exists already, or could not be written.</exception>
+    /// <exception cref="NotSupportedException">The private key is not available (a key held by an agent or an external signer, or one
+    /// paired with a certificate), or the format cannot hold this key: see <see cref="ToPkcs8PrivateKey"/> and
+    /// <see cref="ToPuttyPrivateKey"/>.</exception>
+    public async Task SaveAsync(string path, SshPrivateKeyFormat format, string? passphrase = null, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        Func<byte[]> write = format switch
+        {
+            SshPrivateKeyFormat.OpenSsh => () => OpenSshKeyWriter.Write(this, passphrase, 16),
+            SshPrivateKeyFormat.Pkcs8 => () => Pkcs8KeyWriter.Write(this, passphrase),
+            SshPrivateKeyFormat.Putty => () => PuttyKeyWriter.Write(this, passphrase),
+            _ => throw new ArgumentOutOfRangeException(nameof(format), format, "Unknown private key format."),
+        };
+        await SaveCoreAsync(path, write, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static void CheckKdfRounds(int kdfRounds)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(kdfRounds, 1);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(kdfRounds, OpenSshKeyWriter.MaxRounds);
+    }
+
+    /// <summary>The text of a key file a writer returned as UTF-8 bytes, which are cleared.</summary>
+    private static string ToText(byte[] bytes)
+    {
+        try
+        {
+            return Encoding.UTF8.GetString(bytes);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(bytes);
+        }
+    }
+
+    private async Task SaveCoreAsync(string path, Func<byte[]> write, CancellationToken cancellationToken)
+    {
         var publicPath = path + ".pub";
         if (File.Exists(path) || File.Exists(publicPath))
         {
             throw new IOException($"'{(File.Exists(path) ? path : publicPath)}' exists already; a key file is never overwritten.");
         }
 
-        var bytes = OpenSshKeyWriter.Write(this, passphrase, 16); // bytes, not a string, so they can be cleared afterwards
+        var bytes = write(); // bytes, not a string, so they can be cleared afterwards
         bool createdPrivate = false, createdPublic = false;
         try
         {
@@ -275,8 +364,16 @@ public abstract class SshPrivateKey : IDisposable
     }
 
     /// <summary>Writes the type-specific private fields of the OpenSSH private key format (PROTOCOL.key), after the key type.</summary>
-    internal virtual void WritePrivateFields(SshWriter writer) =>
-        throw new NotSupportedException("This key's private material cannot be exported: it is held by an agent, or paired with a certificate (export the key it was made from).");
+    internal virtual void WritePrivateFields(SshWriter writer) => throw NotExportable();
+
+    /// <summary>
+    /// The key's PKCS#8 PrivateKeyInfo (DER), or its EncryptedPrivateKeyInfo when <paramref name="passphrase"/> is not null; the caller
+    /// zeroes it.
+    /// </summary>
+    internal virtual byte[] ExportPkcs8(string? passphrase) => throw NotExportable();
+
+    private static NotSupportedException NotExportable() =>
+        new("This key's private material cannot be exported: it is held by an agent, or paired with a certificate (export the key it was made from).");
 
     /// <summary>
     /// Whether the private material is here, in this process: false for a key an agent or an external signer holds (and a certificate
@@ -449,6 +546,18 @@ public abstract class SshPrivateKey : IDisposable
             }
         }
 
+        internal override byte[] ExportPkcs8(string? passphrase)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            if (passphrase is not null)
+            {
+                throw new NotSupportedException(
+                    "An Ed25519 key cannot be written as encrypted PKCS#8: .NET has no Ed25519 to encrypt it with. Use the OpenSSH or PuTTY format, which encrypt every key type.");
+            }
+
+            return Pkcs8KeyWriter.Ed25519(_seed);
+        }
+
         private static byte[] DerivePublicKey(ReadOnlySpan<byte> seed)
         {
             var publicKey = new byte[Ed25519.PublicKeySize];
@@ -497,6 +606,8 @@ public abstract class SshPrivateKey : IDisposable
                 CryptographicOperations.ZeroMemory(parameters.D);
             }
         }
+
+        internal override byte[] ExportPkcs8(string? passphrase) => Pkcs8KeyWriter.Export(_ecdsa, passphrase);
 
         internal override IReadOnlyList<string> SignatureAlgorithms => [KeyType];
 
@@ -595,6 +706,8 @@ public abstract class SshPrivateKey : IDisposable
         }
 
         private protected override void DisposeCore() => _rsa.Dispose();
+
+        internal override byte[] ExportPkcs8(string? passphrase) => Pkcs8KeyWriter.Export(_rsa, passphrase);
 
         // mpint n, e, d, iqmp, p, q. The framework's InverseQ is q^-1 mod p, which is OpenSSH's iqmp.
         internal override void WritePrivateFields(SshWriter writer)
