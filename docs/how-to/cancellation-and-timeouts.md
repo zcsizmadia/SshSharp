@@ -1,7 +1,8 @@
 # Cancellation and timeouts
 
 Every network operation in SshSharp is asynchronous and takes a `CancellationToken`. Apart from connecting, which has
-`SshClientOptions.ConnectTimeout`, there are no separate timeout properties to learn: a timeout is a token that cancels itself.
+`SshClientOptions.ConnectTimeout`, and SFTP, whose `SftpClient.OperationTimeout` catches a server that stops answering, there are
+no separate timeout properties to learn: a timeout is a token that cancels itself.
 
 ## When to use
 
@@ -42,6 +43,12 @@ A token gives the same bound without the option, with an exception of your choos
 
 [!code-csharp[](../snippets/Resilience.cs#command-timeout)]
 
+## Bound SFTP requests
+
+A token bounds one call, however long it should take. For SFTP, where a large transfer may rightly take hours, set
+`OperationTimeout` instead: it fails a request only once the server has sent nothing at all for that long, so slow transfers go on
+while a hung server is caught. See [Fail when the server stops answering](transfer-files-sftp.md#fail-when-the-server-stops-answering).
+
 ## Stop the program when you give up
 
 Cancelling closes the command's channel on this side; the connection stays usable. Without a terminal, OpenSSH does not signal the
@@ -63,6 +70,7 @@ Link your token with `client.ConnectionClosed`, so waits end when either side gi
 | Your token was cancelled | `OperationCanceledException` (or `TaskCanceledException`, a subclass) |
 | `SshClientOptions.ConnectTimeout`, or `ConnectTimeout` from `ssh_config`, passed | `SshException`, `Reason = Timeout` (inner `TimeoutException`) |
 | The server missed `KeepAliveCountMax` keep-alives | `SshException`, `Reason = Timeout` |
+| An SFTP server sent nothing for `SftpClient.OperationTimeout` | `SshException`, `Reason = Timeout` (inner `TimeoutException`) |
 | The connection ended during the operation | `SshException`, `Reason = ConnectionClosed` |
 | The DI factory's `ConnectTimeout` passed | `TimeoutException` |
 

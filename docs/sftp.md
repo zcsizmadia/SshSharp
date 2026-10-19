@@ -193,7 +193,11 @@ A synchronous `Dispose` also waits for the writes in flight, blocking the thread
 | `ExistsAsync(path)` | Whether the path exists. |
 | `ListDirectoryAsync(path)` | The entries, as `IAsyncEnumerable<SftpFileInfo>`, without `.` and `..`. A name that is not valid UTF-8 is listed with replacement characters (and cannot be opened by that name); a listing stops with an error after 1,000,000 entries. |
 | `CreateDirectoryAsync`, `DeleteDirectoryAsync` | One directory (deleting needs it empty). |
+| `CreateDirectoryAsync(path, createParents: true)` | As `mkdir -p`: the missing directories above it too, and an existing directory is not an error (a file in the path is). `permissions` apply to the last one. |
+| `DeleteDirectoryAsync(path, recursive: true)` | As `rm -r`: the directory and everything in it, many requests at once; links are removed, never followed. The first failure stops it and is thrown, leaving the rest ([details](how-to/transfer-files-sftp.md#delete-recursively)). |
 | `DeleteFileAsync` | A file, or a link itself. |
+| `ReadAllBytesAsync`, `ReadAllTextAsync(path, encoding)` | A whole file into memory, with many reads in flight; text honours a byte order mark, else UTF-8 or `encoding`. |
+| `WriteAllBytesAsync`, `WriteAllTextAsync(path, contents, encoding)` | Create or replace a file with these contents (UTF-8 without a byte order mark by default). A failure part way leaves it partly written. |
 | `RenameAsync(old, new, overwrite)` | Rename or move; `overwrite` replaces the target atomically (`posix-rename@openssh.com`). |
 | `CreateSymbolicLinkAsync`, `ReadSymbolicLinkAsync` | Symbolic links. |
 | `CreateHardLinkAsync` | Hard links (`hardlink@openssh.com`). |
@@ -266,12 +270,24 @@ var reports = fs.Directory.GetFiles("reports", "*.txt", SearchOption.AllDirector
 The synchronous methods wait for SFTP round trips; the `...Async` ones do not block. `IFile`'s Unix-mode methods are marked
 Unix-only for local files, but work over SFTP from any client OS (suppress CA1416 where you call them).
 
+## Timeouts
+
+Each method takes a `CancellationToken`, and `SftpClient.OperationTimeout` (off by default) fails a request once the server has sent
+nothing at all for that long: `SshException` with `Reason = Timeout` and an inner `TimeoutException`. It limits the server's silence,
+not how long an operation takes, so a transfer whose window of requests takes longer than the timeout to work through goes on as long
+as replies keep coming. A request that timed out is abandoned (its late reply is dropped, a handle it opens is closed) and the session
+stays usable. See [Fail when the server stops answering](how-to/transfer-files-sftp.md#fail-when-the-server-stops-answering).
+
+The adapters above (`IFileProvider`, `IFileSystem`) have an `OperationTimeout` of their own, which they apply to each call with a
+token and report their own way (`SshException` and `IOException`). They do not change the `SftpClient`'s; set that too if you want
+both, and the adapters report its timeout as they report a failed session.
+
 ## Errors
 
 A request the server refuses throws `SftpException`, an `SshException` with `Reason = SftpFailed`, `Status` (the SFTP status
 code, such as `NoSuchFile`, `PermissionDenied` or `Failure`) and the `Path` concerned. A broken SFTP session or connection is an
-`SshException` with `ChannelClosed` or `ConnectionClosed`. An operation needing an extension the server lacks (an overwriting
-rename, a hard link) throws `NotSupportedException`.
+`SshException` with `ChannelClosed` or `ConnectionClosed`, and a passed `OperationTimeout` one with `Timeout`. An operation needing
+an extension the server lacks (an overwriting rename, a hard link) throws `NotSupportedException`.
 
 ## SFTP or SCP?
 

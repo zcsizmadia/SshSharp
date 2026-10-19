@@ -116,6 +116,46 @@ internal static class FileTransfer
         // </sftp-browse>
     }
 
+    public static async Task WholeFilesAsync(SftpClient sftp, CancellationToken cancellationToken)
+    {
+        // <sftp-whole-files>
+        // Small files in one call each, as File.ReadAllTextAsync and File.WriteAllBytesAsync do locally.
+        var settings = await sftp.ReadAllTextAsync("/etc/myapp/settings.json", cancellationToken: cancellationToken);
+        await sftp.WriteAllTextAsync("/etc/myapp/settings.json", settings.Replace("\"debug\": false", "\"debug\": true"), cancellationToken: cancellationToken);
+
+        byte[] logo = await sftp.ReadAllBytesAsync("/srv/www/logo.png", cancellationToken);
+        await sftp.WriteAllBytesAsync("/srv/www/logo-copy.png", logo, cancellationToken);
+        // </sftp-whole-files>
+    }
+
+    public static async Task TreesAsync(SftpClient sftp, CancellationToken cancellationToken)
+    {
+        // <sftp-trees>
+        // mkdir -p: creates what is missing, and an existing directory is fine.
+        await sftp.CreateDirectoryAsync("/srv/releases/2026-10-18/assets", createParents: true, cancellationToken: cancellationToken);
+
+        // rm -r: the directory and everything in it; symbolic links are removed, never followed.
+        await sftp.DeleteDirectoryAsync("/srv/releases/2026-09-01", recursive: true, cancellationToken);
+        // </sftp-trees>
+    }
+
+    public static async Task OperationTimeoutAsync(SftpClient sftp, CancellationToken cancellationToken)
+    {
+        // <sftp-operation-timeout>
+        // Fail requests once the server has sent nothing for 30 seconds, rather than wait for as long as the connection lasts.
+        // A long transfer is not cut off: while replies keep coming, the server is answering.
+        sftp.OperationTimeout = TimeSpan.FromSeconds(30);
+        try
+        {
+            await sftp.DownloadFileAsync("backups/db.tar.zst", "db.tar.zst", cancellationToken: cancellationToken);
+        }
+        catch (SshException ex) when (ex.Reason == SshFailureReason.Timeout)
+        {
+            Console.WriteLine("The server stopped answering; reconnect and resume.");
+        }
+        // </sftp-operation-timeout>
+    }
+
     public static async Task RandomAccessAsync(SftpClient sftp, CancellationToken cancellationToken)
     {
         // <sftp-stream>

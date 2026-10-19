@@ -319,7 +319,9 @@ await sftp.UploadFileAsync("report.pdf", "incoming/report.pdf");
 | `DownloadFile(path, stream)`, `DownloadFileAsync` | `DownloadAsync(path, stream)`, or `DownloadFileAsync(path, localPath)` |
 | `ListDirectory(path)`, `ListDirectoryAsync` | `ListDirectoryAsync(path)`: `IAsyncEnumerable<SftpFileInfo>`, without `.` and `..` |
 | `Exists`, `Get`, `GetAttributes` | `ExistsAsync`, `GetAttributesAsync` |
-| `CreateDirectory`, `DeleteDirectory`, `DeleteFile`, `Delete` | `CreateDirectoryAsync`, `DeleteDirectoryAsync`, `DeleteFileAsync` |
+| `CreateDirectory`, `DeleteDirectory`, `DeleteFile`, `Delete` | `CreateDirectoryAsync`, `DeleteDirectoryAsync`, `DeleteFileAsync`; also `CreateDirectoryAsync(path, createParents: true)` (`mkdir -p`) and `DeleteDirectoryAsync(path, recursive: true)` (`rm -r`) |
+| `ReadAllBytes`, `ReadAllText`, `WriteAllBytes`, `WriteAllText` | `ReadAllBytesAsync`, `ReadAllTextAsync`, `WriteAllBytesAsync`, `WriteAllTextAsync` |
+| `OperationTimeout` | `SftpClient.OperationTimeout` (off by default; it limits how long the server may stay silent, so long transfers are not cut off) |
 | `RenameFile(old, new, isPosix)` | `RenameAsync(old, new, overwrite)` |
 | `Open`, `OpenRead`, `OpenWrite`, `Create`, `AppendText` | `OpenAsync(path, FileMode, FileAccess)`, `OpenReadAsync`, `OpenWriteAsync` |
 | `ChangePermissions`, `SetLastWriteTime`, `SetAttributes` | `SetAttributesAsync(path, new SftpFileAttributes { Permissions = ..., LastWriteTime = ... })` |
@@ -365,7 +367,7 @@ See [File transfer (SCP)](scp.md).
 |---|---|
 | `SshConnectionException` | `SshException` with `Reason` (`ConnectFailed`, `ConnectionClosed`, `ProtocolError`, `KeyExchangeFailed`, ...) |
 | `SshAuthenticationException` | `SshAuthenticationException` (a subclass of `SshException`) |
-| `SshOperationTimeoutException` | `OperationCanceledException` when your token was cancelled; `SshException` with `Reason = Timeout` for `SshClientOptions.ConnectTimeout` (or `ConnectTimeout` in `ssh_config`) |
+| `SshOperationTimeoutException` | `OperationCanceledException` when your token was cancelled; `SshException` with `Reason = Timeout` for `SshClientOptions.ConnectTimeout` (or `ConnectTimeout` in `ssh_config`) and `SftpClient.OperationTimeout` |
 | `ProxyException` | `SshException` with `Reason = ConnectFailed`, saying what the proxy answered |
 | `ScpException` | `SshException` with `Reason = TransferFailed` |
 

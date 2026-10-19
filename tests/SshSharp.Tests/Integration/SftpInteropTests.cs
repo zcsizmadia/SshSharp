@@ -577,6 +577,101 @@ public class SftpInteropTests
     }
 
     [Test]
+    public async Task CreateWithParents_WholeFiles_AndRecursiveDelete_WorkOnARealServer()
+    {
+        if (RealServer.Endpoint is not var (host, port) || await RealServer.OptionsAsync() is not { } options)
+        {
+            Skip.Test("SSHSHARP_TEST_SSHD and SSHSHARP_TEST_USER with a password or key are needed.");
+            return;
+        }
+
+        if (!RealServer.HasSftp)
+        {
+            Skip.Test("This server has no sftp-server.");
+            return;
+        }
+
+        await using var client = await SshClient.ConnectAsync(host, port, options, Timeout());
+        await using var sftp = await client.OpenSftpAsync(Timeout());
+        sftp.OperationTimeout = TimeSpan.FromSeconds(60); // every request below goes through the timeout's path, and none should need it
+
+        var name = ".sshsharp-conv-" + Guid.NewGuid().ToString("N")[..12];
+        var root = RealServer.SftpPath(name);
+        var outside = RealServer.SftpPath(name + "-outside");
+        try
+        {
+            // mkdir -p: missing parents are created, from the first that exists (a chrooted server's top is never touched); an existing
+            // directory is fine; a file in the way is not.
+            await sftp.CreateDirectoryAsync(root + "/a/b/c", createParents: true, cancellationToken: Timeout());
+            await sftp.CreateDirectoryAsync(root + "/a/b/c", createParents: true, cancellationToken: Timeout());
+            await sftp.CreateDirectoryAsync(root + "/a", createParents: true, cancellationToken: Timeout());
+            await Assert.That((await sftp.GetAttributesAsync(root + "/a/b/c", cancellationToken: Timeout())).IsDirectory).IsTrue();
+
+            // Whole files, both ways.
+            await sftp.WriteAllTextAsync(root + "/a/b/c/note.txt", "héllo, server", cancellationToken: Timeout());
+            await Assert.That(await sftp.ReadAllTextAsync(root + "/a/b/c/note.txt", cancellationToken: Timeout())).IsEqualTo("héllo, server");
+            var data = RandomNumberGenerator.GetBytes(300_000);
+            await sftp.WriteAllBytesAsync(root + "/a/blob", data, Timeout());
+            await Assert.That((await sftp.ReadAllBytesAsync(root + "/a/blob", Timeout())).AsSpan().SequenceEqual(data)).IsTrue();
+            await sftp.WriteAllBytesAsync(root + "/a/blob", "short"u8.ToArray(), Timeout());
+            await Assert.That(await sftp.ReadAllTextAsync(root + "/a/blob", cancellationToken: Timeout())).IsEqualTo("short");
+
+            await Assert.That(async () => await sftp.CreateDirectoryAsync(root + "/a/blob/x", createParents: true, cancellationToken: Timeout()))
+                .Throws<SftpException>();
+
+            // A wider tree to delete: several directories, each with files.
+            for (var d = 0; d < 4; d++)
+            {
+                await sftp.CreateDirectoryAsync($"{root}/a/d{d}/inner", createParents: true, cancellationToken: Timeout());
+                for (var f = 0; f < 8; f++)
+                {
+                    await sftp.WriteAllBytesAsync($"{root}/a/d{d}/inner/f{f}", new[] { (byte)f }, Timeout());
+                }
+            }
+
+            // A link out of the tree: the delete removes the link, never what it points to.
+            var linked = false;
+            if (!RealServer.IsWindows)
+            {
+                await sftp.CreateDirectoryAsync(outside, cancellationToken: Timeout());
+                await sftp.WriteAllTextAsync(outside + "/keep", "keep", cancellationToken: Timeout());
+                try
+                {
+                    // Relative, so it resolves the same on servers that store a relative target under their working directory.
+                    await sftp.CreateSymbolicLinkAsync(root + "/a/to-outside", "../../" + name + "-outside", Timeout());
+                    linked = true;
+                }
+                catch (SftpException) when (RealServer.IsMsys)
+                {
+                    // An MSYS2 or Cygwin server without the privilege to create links.
+                }
+            }
+
+            await sftp.DeleteDirectoryAsync(root, recursive: true, Timeout());
+
+            await Assert.That(await sftp.ExistsAsync(root, Timeout())).IsFalse();
+            if (linked)
+            {
+                await Assert.That(await sftp.ReadAllTextAsync(outside + "/keep", cancellationToken: Timeout())).IsEqualTo("keep");
+            }
+        }
+        finally
+        {
+            foreach (var path in new[] { root, outside })
+            {
+                try
+                {
+                    await sftp.DeleteDirectoryAsync(path, recursive: true, Timeout());
+                }
+                catch (SftpException)
+                {
+                    // Not there (deleted above, or never created).
+                }
+            }
+        }
+    }
+
+    [Test]
     public async Task ASegmentedDownload_FetchesTheFileOverSeveralSessions()
     {
         if (RealServer.Endpoint is not var (host, port) || await RealServer.OptionsAsync() is not { } options)

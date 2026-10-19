@@ -1,6 +1,7 @@
 using System.Buffers;
 using System.Buffers.Binary;
 using System.Collections.Concurrent;
+using System.Globalization;
 using SshSharp.Protocol;
 
 namespace SshSharp.Sftp;
@@ -95,6 +96,10 @@ internal sealed class SftpChannel : IAsyncDisposable
     private int _nextId;
     private int _disposed;
 
+    // OperationTimeout in ticks (negative: none), and when the server last sent anything (Environment.TickCount64).
+    private long _timeoutTicks = Timeout.InfiniteTimeSpan.Ticks;
+    private long _lastReceived = Environment.TickCount64;
+
     private SftpChannel(SshSession session)
     {
         _session = session;
@@ -109,6 +114,16 @@ internal sealed class SftpChannel : IAsyncDisposable
 
     /// <summary>The extensions the server announced in SSH_FXP_VERSION, with their data (usually a version number).</summary>
     public IReadOnlyDictionary<string, string> Extensions { get; private set; } = new Dictionary<string, string>();
+
+    /// <summary>
+    /// How long a request may wait for its reply, or for its turn to be sent, while the server sends nothing at all
+    /// (<see cref="Timeout.InfiniteTimeSpan"/>: no limit). See <see cref="SftpClient.OperationTimeout"/>.
+    /// </summary>
+    public TimeSpan OperationTimeout
+    {
+        get => TimeSpan.FromTicks(Volatile.Read(ref _timeoutTicks));
+        set => Volatile.Write(ref _timeoutTicks, value.Ticks);
+    }
 
     /// <summary>Sends SSH_FXP_INIT, reads SSH_FXP_VERSION, and starts matching replies to requests.</summary>
     public static async Task<SftpChannel> OpenAsync(SshSession session, CancellationToken cancellationToken)
@@ -239,9 +254,9 @@ internal sealed class SftpChannel : IAsyncDisposable
             }
 
             sent = true;
-            return await reply.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+            return await WaitAsync(reply.Task, cancellationToken).ConfigureAwait(false);
         }
-        catch (OperationCanceledException) when (sent && orphaned is not null)
+        catch (Exception ex) when (sent && orphaned is not null && (ex is OperationCanceledException || IsTimeout(ex)))
         {
             // The server will still answer: hand the reply over when it does (the session failing completes it with an exception).
             _ = reply.Task.ContinueWith(
@@ -265,10 +280,69 @@ internal sealed class SftpChannel : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// Waits for <paramref name="reply"/> within <see cref="OperationTimeout"/>. The limit is on the server's silence, not on this one
+    /// request: while other replies keep arriving (a window of pipelined reads working through the server's queue on a slow link), the
+    /// server is answering and the wait goes on; once it has sent nothing for the whole timeout, the request fails.
+    /// </summary>
+    private async Task<SftpResponse> WaitAsync(Task<SftpResponse> reply, CancellationToken cancellationToken)
+    {
+        var timeout = OperationTimeout;
+        if (timeout < TimeSpan.Zero)
+        {
+            return await reply.WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        var wait = timeout;
+        while (true)
+        {
+            try
+            {
+                return await reply.WaitAsync(wait, cancellationToken).ConfigureAwait(false);
+            }
+            catch (TimeoutException ex)
+            {
+                wait = Remaining(timeout) ?? throw TimedOut(timeout, ex);
+            }
+        }
+    }
+
+    /// <summary>How much longer to wait before the server has been silent for <paramref name="timeout"/>; null once it has.</summary>
+    private TimeSpan? Remaining(TimeSpan timeout)
+    {
+        var quiet = TimeSpan.FromMilliseconds(Environment.TickCount64 - Volatile.Read(ref _lastReceived));
+        return quiet >= timeout ? null : TimeSpan.FromMilliseconds(Math.Max(1, (timeout - quiet).TotalMilliseconds));
+    }
+
+    /// <summary>What a passed <see cref="OperationTimeout"/> is reported as: <see cref="SshFailureReason.Timeout"/>, with a <see cref="TimeoutException"/> inside.</summary>
+    private static SshException TimedOut(TimeSpan timeout, TimeoutException inner) => new(SshFailureReason.Timeout,
+        $"The SFTP server sent nothing for OperationTimeout ({timeout.TotalSeconds.ToString("0.###", CultureInfo.InvariantCulture)} s).", inner);
+
+    private static bool IsTimeout(Exception ex) => ex is SshException { Reason: SshFailureReason.Timeout };
+
+    /// <summary>Takes the send lock, within <see cref="OperationTimeout"/> of the server's silence (see <see cref="WaitAsync"/>).</summary>
+    private async Task LockAsync(CancellationToken cancellationToken)
+    {
+        var timeout = OperationTimeout;
+        if (timeout < TimeSpan.Zero)
+        {
+            await _sendLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        // A send waits here while another is held up by the channel's flow-control window, which only a server that reads opens again.
+        // The send holding the lock is not cut off (half a packet cannot be taken back); the requests behind it give up.
+        var wait = timeout;
+        while (!await _sendLock.WaitAsync(wait, cancellationToken).ConfigureAwait(false))
+        {
+            wait = Remaining(timeout) ?? throw TimedOut(timeout, new TimeoutException());
+        }
+    }
+
     /// <summary>Writes one whole frame (length included) to the session.</summary>
     private async Task SendAsync(ReadOnlyMemory<byte> frame, CancellationToken cancellationToken)
     {
-        await _sendLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        await LockAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             // A packet is written whole: cancelling halfway would leave the server reading a broken stream.
@@ -353,6 +427,7 @@ internal sealed class SftpChannel : IAsyncDisposable
         {
             while (await ReadPacketAsync(_stop.Token).ConfigureAwait(false) is { } packet)
             {
+                Volatile.Write(ref _lastReceived, Environment.TickCount64);
                 var id = BinaryPrimitives.ReadUInt32BigEndian(packet.Packet.Span[1..]);
 
                 // The request takes the reply over. An unknown id belongs to a request that was cancelled, and a request that failed

@@ -46,7 +46,8 @@ Console.WriteLine(result.StandardOutputText);
   ECDH, and finite-field DH (group exchange, and groups 14, 16 and 18) key exchange; ChaCha20-Poly1305, AES-GCM and
   AES-CTR with HMAC-SHA2 (ETM preferred, plain `hmac-sha2-256/512` for network equipment); Ed25519, ECDSA and RSA (SHA-2) keys; strict key exchange (Terrapin) always on; a FIPS mode.
 - **File transfer:** SFTP (version 3 with OpenSSH's extensions: pipelined uploads and downloads, seekable remote file
-  streams, directory transfers with several files at once, links and attributes), and SCP uploads and downloads of files,
+  streams, directory transfers with several files at once, pipelined recursive delete and `mkdir -p`, whole-file reads and
+  writes, a timeout for a server that stops answering, links and attributes), and SCP uploads and downloads of files,
   streams and directories, with progress, kept times, and checks that stop a hostile server from writing outside the target.
 - **Files for the rest of .NET:** `SshSharp.IO.Abstractions` implements System.IO.Abstractions' `IFileSystem` over SFTP (code written
   against `IFileSystem` reads and writes the server unchanged), and `SshSharp.FileProviders` serves a directory as an `IFileProvider`, for
