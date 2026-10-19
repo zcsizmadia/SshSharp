@@ -129,6 +129,47 @@ Console.WriteLine(result.StandardOutputText);
 or a long track record. Moving from SSH.NET? See the
 [migration guide](https://github.com/zcsizmadia/SshSharp/blob/main/docs/migrating-from-sshnet.md).
 
+## Compared with Tmds.Ssh
+
+[Tmds.Ssh](https://github.com/tmds/Tmds.Ssh) is another modern, async-first .NET SSH client, MIT-licensed, with a similar focus on
+OpenSSH compatibility and modern algorithms only. The two overlap more than SshSharp and SSH.NET do. The table lists the
+differences we could verify in its public documentation, NuGet package and source.
+
+Checked on 2026-10-19 against Tmds.Ssh 0.26.0 (NuGet, published 2026-10-10) and its `main` branch at commit `e186178`
+(2026-10-14). Sources: the [documentation](https://tmds.github.io/Tmds.Ssh/), the [NuGet page](https://www.nuget.org/packages/Tmds.Ssh)
+and the [source](https://github.com/tmds/Tmds.Ssh/tree/main/src/Tmds.Ssh) (`Tmds.Ssh.csproj`, `SshConfigOption.cs`,
+`SshSession.Authentication.cs`, `PacketEncryptionAlgorithm.cs`, `PrivateKeyParser.cs`). Tmds.Ssh is pre-1.0 and changes quickly, so
+check its current documentation; corrections are welcome.
+
+| | SshSharp | Tmds.Ssh 0.26.0 |
+|---|---|---|
+| Version | 1.x (stable public API) | 0.x (pre-1.0) |
+| Target frameworks | .NET 8, .NET 10 | .NET 8, 9, 10 and 11 |
+| Cryptography | The platform's (BCL), plus managed code where the platform has none | The platform's (BCL) and BouncyCastle (a package dependency) |
+| Async API with `CancellationToken` | ✅ | ✅ |
+| Native AOT | ✅ (an AOT-compiled binary connects to a real server in CI) | `IsAotCompatible` set in the project |
+| `ssh_config` | Most client directives, `Match` (including `exec` and `tagged`), `ProxyCommand`, forwardings ([list](https://github.com/zcsizmadia/SshSharp/blob/main/docs/reference/ssh-config.md)) | A subset of directives; `Match exec` and `tagged`, and `ProxyCommand`, are not supported, and forwarding directives are ignored |
+| Jump hosts | ✅ (`ProxyJump`, or `JumpHosts` in code) | ✅ (`ProxyJump`, or `SshProxy` and `Proxy.Chain` in code) |
+| HTTP and SOCKS proxies for the connection | ✅ | ❌ (not found in the documentation or source) |
+| Password, public key, Kerberos (`gssapi-with-mic`) | ✅ | ✅ |
+| Keyboard-interactive and multi-factor | ✅ | ❌ (not attempted by its authentication code) |
+| OpenSSH user certificates | ✅ (and issuing them as a CA) | ✅ |
+| SSH agent | `ssh-agent`, Windows OpenSSH agent, Pageant; agent key management; in-process agent | `SSH_AUTH_SOCK` and the Windows OpenSSH agent pipe |
+| Agent forwarding | ✅ | ✅ |
+| X11 forwarding | ❌ | ✅ |
+| Private key formats | OpenSSH, PKCS#1/#8, SEC1, PuTTY `.ppk` | OpenSSH (`openssh-key-v1`) only |
+| Ciphers | AES-GCM, ChaCha20-Poly1305, AES-CTR with HMAC-SHA2 | AES-GCM, ChaCha20-Poly1305 |
+| Key exchange | `mlkem768x25519-sha256`, `sntrup761x25519-sha512`, Curve25519, NIST ECDH, SHA-2 finite-field DH | `mlkem768x25519-sha256`, `sntrup761x25519-sha512`, Curve25519, NIST ECDH |
+| Compression (`zlib@openssh.com`) | ❌ | ✅ (off by default) |
+| Local, remote and dynamic forwarding, Unix sockets | ✅ | ✅ |
+| SFTP, including directory transfers | ✅ | ✅ |
+| SCP | ✅ | ❌ (a separate `ssh-cp` tool) |
+| Logging | `ILogger`; never records user names, host names or keys | `ILogger`; its documentation warns that `Debug` and `Trace` include user names, host names and public keys |
+| Tracing and metrics (`ActivitySource`, `Meter`) | ✅ | ❌ (not found in the source) |
+| Dependency injection package, file system adapters | ✅ | ❌ |
+
+**Consider Tmds.Ssh** when you need X11 forwarding, compression, or .NET 9 or 11 target builds, or prefer its API.
+
 ## Install
 
 ```

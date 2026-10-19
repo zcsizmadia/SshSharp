@@ -133,6 +133,7 @@ prove the same host key as at the start, or the connection fails. Keys are renew
 
 ## See also
 
+- [Tune for throughput](performance-tuning.md)
 - [Connecting](../connecting.md)
 - [Channels and flow control](../concepts/channels.md)
 - [Transfer files with SFTP](transfer-files-sftp.md#download-large-files-faster)

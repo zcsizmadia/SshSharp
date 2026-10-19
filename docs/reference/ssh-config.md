@@ -120,6 +120,64 @@ These describe sessions, which your code starts; read them from `SshHostConfig` 
 | `SetEnv` | `SetEnv` |
 | `RequestTTY` | `RequestTty` |
 
+## Directives and typed options
+
+Code that does not read `ssh_config` sets the same things in code. This table maps each directive SshSharp applies to its typed
+equivalent, where one exists:
+
+- **`SshClientOptions`**: `SshClient.ConnectAsync(host, port, options)`, with no configuration file.
+- **`SshConfigConnectOptions`**: connecting by alias, where the option overrides or supplements what the configuration says.
+- **`SshEndpointOptions`**: a named endpoint in the dependency injection package. With `Host` set it builds an `SshClientOptions`
+  (and `ConfigureClientOptions` can set anything in the first column); with `ConfigAlias` set, the configuration decides, and only
+  `Password`, `AddressFamily` and `ConnectTimeout` are used.
+
+A dash means there is no typed equivalent. The "Applied" tables above say how each directive behaves.
+
+| Directive | `SshClientOptions` (or code) | `SshConfigConnectOptions` | `SshEndpointOptions` |
+|---|---|---|---|
+| `HostName`, `Port` | The `host` and `port` arguments of `ConnectAsync` | `Port` | `Host`, `Port` |
+| `User` | `UserName` | `user@` in the destination | `UserName` |
+| `ProxyJump` | `JumpHosts` (one `SshJumpHost` per hop, each with its own options) | - | `JumpHosts` through `ConfigureClientOptions` |
+| `ProxyCommand` | `Proxy = SshProxy.FromConnector(...)`, a connection you make in code | `AllowProxyCommand` (whether it may run) | - |
+| `ConnectTimeout` | `ConnectTimeout` | `ConnectTimeout` | `ConnectTimeout` |
+| `ConnectionAttempts` | - | `ConnectionAttempts` | - |
+| `AddressFamily` | `AddressFamily` | `AddressFamily` | `AddressFamily` |
+| `BindAddress` | `LocalEndPoint` | - | - |
+| `ServerAliveInterval` | `KeepAliveInterval` | `KeepAliveInterval` | `KeepAliveInterval` (with `Host`) |
+| `ServerAliveCountMax` | `KeepAliveCountMax` | `KeepAliveCountMax` | - |
+| `ChannelTimeout` | `ChannelTimeouts` | - | - |
+| `ObscureKeystrokeTiming` | `ObscureKeystrokeTiming` | - | - |
+| `KexAlgorithms`, `HostKeyAlgorithms`, `Ciphers`, `MACs` | `KexAlgorithms`, `HostKeyAlgorithms`, `Ciphers`, `Macs` | - | - |
+| `RequiredRSASize` | `RequiredRsaSize` | - | - |
+| `StrictHostKeyChecking` | `HostKeyVerifier = new KnownHostsVerifier(...) { Policy = ... }` | `HostKeyVerifier` (replaces it), `AskHostKey` (answers `ask`) | `AcceptNewHostKeys` (`accept-new`; otherwise `yes`), `HostKeyFingerprints` (pinned keys instead) |
+| `UserKnownHostsFile`, `GlobalKnownHostsFile` | The `KnownHostsVerifier` constructor's two lists | - | `KnownHostsFiles` |
+| `HashKnownHosts` | `KnownHostsVerifier.HashNewEntries` | - | - |
+| `UpdateHostKeys` | `KnownHostsVerifier.UpdateHostKeys`, `ConfirmHostKeyUpdate` | `ConfirmHostKeyUpdate` (answers `ask`) | - |
+| `HostKeyAlias` | `HostKeyAlias` | - | - |
+| `RevokedHostKeys` | `KnownHostsVerifier.RevokedHostKeys` | - | - |
+| `KnownHostsCommand` | - | `AllowKnownHostsCommand` (whether it may run) | - |
+| `IdentityFile` | `PrivateKeys` (`SshPrivateKey.LoadAsync`) | `PassphraseProvider` (encrypted files); `PrivateKeys` are offered first | `PrivateKeyFiles`, `PrivateKeyPassphrase`, `PrivateKeys` |
+| `CertificateFile` | `PrivateKeys` with `SshPrivateKey.WithCertificate` | - | - |
+| `IdentityAgent` | `PrivateKeys` from `SshAgent.GetKeysAsync` | `Agent`, `UseAgent` | - |
+| `AddKeysToAgent` | `SshAgent.AddKeyAsync` with `SshAgentKeyConstraints` | - | - |
+| `PreferredAuthentications` | `PreferredAuthentications` | - | - |
+| `PubkeyAuthentication`, `PasswordAuthentication`, `KbdInteractiveAuthentication` | Give or leave out `PrivateKeys`, `Password`, `KeyboardInteractive`, or list the methods in `PreferredAuthentications` | - | - |
+| `NumberOfPasswordPrompts` | `NumberOfPasswordPrompts` (with `PasswordProvider`) | - | - |
+| `GSSAPIAuthentication`, `GSSAPIDelegateCredentials` | `Gssapi`, `SshGssapiOptions.DelegateCredentials` | - | - |
+| `BatchMode` | - (leave the prompting callbacks unset) | - | - |
+| `ForwardAgent` | `ForwardAgent`, `ForwardAgentFilter` | `Agent` (the one forwarded), `ForwardAgentFilter` | - |
+| `LocalForward` | `ForwardLocalPortAsync`, `ForwardLocalUnixSocketAsync` | `StartForwardings` | - |
+| `RemoteForward` | `ForwardRemotePortAsync`, `ForwardRemoteDynamicPortAsync`, `ForwardRemoteUnixSocketAsync` | `StartForwardings` | - |
+| `PermitRemoteOpen` | `ForwardRemoteDynamicPortAsync`'s `allowDestination` | - | - |
+| `DynamicForward` | `ForwardDynamicPortAsync` | `StartForwardings` | - |
+| `GatewayPorts` | The bind address given to each forwarding | - | - |
+| `SendEnv`, `SetEnv` | `SshSessionOptions.Environment` | - | - |
+| `RequestTTY` | `SshSessionOptions.Terminal` | - | - |
+
+Some options have no directive: `VersionAddendum`, `ConfigureSocket`, `ChannelWindowSize` and `ChannelMaxPacketSize` (see
+[Tune and inspect a connection](../how-to/tune-and-inspect-connections.md)), `FipsMode`, `MaxForwardedConnections`, and the
+`Proxy` for an HTTP or SOCKS proxy (`SshClientOptions.Proxy`, `SshConfigConnectOptions.Proxy`, `SshEndpointOptions.Proxy`).
+
 ## See also
 
 - [Use ssh_config and known_hosts](../how-to/ssh-config-and-known-hosts.md)

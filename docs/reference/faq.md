@@ -15,6 +15,12 @@ contracts: `IFileProvider` and parts of `IFileSystem`.
 No. It is pure managed C#. The only external programs it ever runs are the ones your configuration names (`ProxyCommand`, an
 opt-in `Match exec` or `KnownHostsCommand`) and `scp` on the server for SCP transfers.
 
+**How does it compare with SSH.NET and Tmds.Ssh?**
+The README compares them feature by feature:
+[Why not SSH.NET?](https://github.com/zcsizmadia/SshSharp#why-not-sshnet) and
+[Compared with Tmds.Ssh](https://github.com/zcsizmadia/SshSharp#compared-with-tmdsssh), with the versions and dates checked and
+the sources. [Benchmarks](../benchmarks.md) measures SshSharp against SSH.NET.
+
 **Is it a server too?**
 No, SshSharp is a client library. Server-side SSH is out of scope.
 

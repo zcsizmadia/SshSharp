@@ -21,6 +21,36 @@ Running commands in parallel on one connection:
 
 [!code-csharp[](../snippets/Commands.cs#run-parallel)]
 
+### What must not be shared
+
+- **Two readers of one stream**, or two writers: `StandardOutput` read from two tasks at once, two tasks writing `StandardInput` or one
+  tunnel stream. Bytes would interleave unpredictably. Give each stream one reader and one writer, or serialize them yourself.
+- **One SFTP file stream from two tasks.** Concurrent calls on one `Stream` are not supported, as for `FileStream`. Open the file
+  twice, or use `SftpClient`'s methods, which are safe to call concurrently.
+- **`SshExpect` from two tasks**, or alongside your own reads of `StandardOutput`.
+- **A disposed object.** Disposing while another task is using an object is allowed and makes that call fail (see below), but no
+  call may start after `DisposeAsync`.
+
+## Lifetime: who disposes what
+
+Every object a method returns is the caller's to dispose, with `await using`. Disposing one closes what it owns, never what it was
+made from:
+
+| Object | Owned by | Disposing it | When its owner goes away |
+|---|---|---|---|
+| `SshClient` | The caller of `ConnectAsync` (the shared connection of `ISshConnectionProvider` belongs to the provider: never dispose it). | Disconnects, stops the forwardings started from `ssh_config`, closes the connection and every `ProxyJump` or `JumpHosts` hop, and the stream unless `leaveOpen` was given. | - |
+| `SshSession` | The caller of `StartCommandAsync`, `StartShellAsync`, `StartSubsystemAsync`. | Closes the channel; a program still running gets a hangup from the server. The connection stays up. | Calls waiting on it fail with `SshException` (`ConnectionClosed`). |
+| `SftpClient` | The caller of `OpenSftpAsync` (or of `ISshConnectionProvider.OpenSftpAsync`). | Ends the SFTP session; requests still waiting fail. The connection stays up. | Its requests fail. |
+| SFTP file streams | The caller of `OpenAsync`, `OpenReadAsync`, `OpenWriteAsync`. | Waits for writes in flight and closes the handle. Dispose them before their `SftpClient`. | Later calls fail, and writes not yet answered may not have reached the file. |
+| Tunnel streams (`OpenTcpTunnelAsync`, `OpenUnixSocketTunnelAsync`) | The caller. | Closes the channel. | Reads end and writes fail. |
+| Forwarders (`SshLocalPortForwarder`, `SshLocalSocketForwarder`, `SshDynamicPortForwarder`, `SshRemotePortForwarder`, `SshRemoteSocketForwarder`) | The caller of the `Forward...Async` method. | Stops listening (a remote one cancels the forwarding on the server), closes the forwarded connections, and removes a local socket file. | A local one stops listening and removes its socket file; its connections close. Dispose it anyway. |
+| `SshPrivateKey` (in `PrivateKeys`) | Whoever loaded it. | Clears the key material. | The client does not dispose the keys you pass in options: dispose them after connecting. |
+| `SftpFileSystem`, `SftpFileProvider` | The caller. | Built from an `SftpClient`, leaves it to you; built from a session factory, disposes the sessions it opened (never the connection). | - |
+| `ISshClientFactory.ConnectAsync`'s client | The caller. | As `SshClient`. | - |
+
+`DisposeAsync` is safe to call more than once and from several tasks: the first call does the work. A call in progress on another
+task fails with `SshException` (`ConnectionClosed` or `ChannelClosed`) or `ObjectDisposedException`, rather than hanging.
+
 ## Callbacks
 
 Callbacks you supply (host key verifiers, `AskHostKey`, `KeyboardInteractive`, `PassphraseProvider`, `AuthenticationBanner`,
