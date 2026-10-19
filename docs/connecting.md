@@ -289,9 +289,11 @@ await using var remote = await client.ForwardRemotePortAsync("localhost", 8080, 
 Handlers run concurrently, one per connection. One that throws closes its own connection only (the exception is logged by type).
 A handler that stops reading holds the server back at the channel window. `maxConnections` (100 by default) caps the connections
 served at once by the forwarding, and the server's channels above it are refused. The handler's token is cancelled when the
-forwarder is disposed or the connection ends; disposal cancels the forwarding on the server, cancels the handlers, waits up to 5
-seconds for them, and then closes the connections of any still running. `ForwardRemoteUnixSocketAsync` takes a handler in the same
-way. See [Serving a remote port from your app](how-to/port-forwarding.md#serving-a-remote-port-from-your-app).
+forwarder is disposed or the connection ends; disposal cancels the forwarding on the server, cancels the handlers, waits up to
+`HandlerShutdownTimeout` (5 seconds by default) for them, and then closes the connections of any still running.
+`connection.ShutdownSendAsync()` ends the handler's side only (end-of-file to the program on the server), and the handler keeps
+reading. `ForwardRemoteUnixSocketAsync` takes a handler in the same way. See
+[Serving a remote port from your app](how-to/port-forwarding.md#serving-a-remote-port-from-your-app).
 
 The server can open at most `SshClientOptions.MaxForwardedConnections` (1,000) forwarded connections at a time over all remote
 forwardings; more are refused until some close.

@@ -61,8 +61,8 @@ Host relay
   5000)`) instead.
 - **Port in use.** `sshd` refuses to listen on a port already taken on the relay (the call throws `SshException`); a second
   instance of the application needs another port.
-- **Disposal.** Disposing the forwarder stops the relay listening first, then cancels the handlers and gives them up to 5 seconds
-  to finish the request in progress.
+- **Disposal.** Disposing the forwarder stops the relay listening first, then cancels the handlers and gives them up to
+  `HandlerShutdownTimeout` (5 seconds by default; set it on the forwarder for slower requests) to finish the request in progress.
 
 ## See also
 

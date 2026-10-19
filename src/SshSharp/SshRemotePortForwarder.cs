@@ -43,14 +43,51 @@ public sealed class SshRemotePortForwarder : IAsyncDisposable
 
     /// <summary>A forwarding to a handler in this process: each connection is passed to <paramref name="handler"/>.</summary>
     internal SshRemotePortForwarder(string bindAddress, int port, Func<SshForwardedConnection, CancellationToken, Task> handler, int maxConnections,
-        ILogger logger, Func<SshRemotePortForwarder, CancellationToken, Task> cancel, CancellationToken connectionClosed)
+        ILogger logger, TimeProvider time, Func<SshRemotePortForwarder, CancellationToken, Task> cancel, CancellationToken connectionClosed)
         : this(bindAddress, port, string.Empty, 0, logger, cancel, connectionClosed)
     {
-        _handlers = new ForwardedHandlerSet(handler, maxConnections, logger);
+        _handlers = new ForwardedHandlerSet(handler, maxConnections, logger, time);
     }
 
-    /// <summary>Whether connections go to a handler in this process rather than to a host and port.</summary>
-    internal bool IsHandler => _handlers is not null;
+    /// <summary>
+    /// Whether connections go to a handler in this process (<see cref="SshClient.ForwardRemotePortAsync(string, int, Func{SshForwardedConnection, CancellationToken, Task}, int, CancellationToken)"/>)
+    /// rather than to a host and port or, for a dynamic forwarding, where each connection asks.
+    /// </summary>
+    public bool IsHandler => _handlers is not null;
+
+    /// <summary>
+    /// The most connections this forwarding serves at once: a handler's <c>maxConnections</c>, above which the server's channels are
+    /// refused until some end; <see cref="int.MaxValue"/> (no limit of its own) for a forwarding to a host and port or a dynamic one.
+    /// <see cref="SshClientOptions.MaxForwardedConnections"/> applies across all forwardings either way.
+    /// </summary>
+    public int MaxConnections => _handlers?.MaxConnections ?? int.MaxValue;
+
+    /// <summary>
+    /// For a forwarding to a handler (<see cref="IsHandler"/>): how long <see cref="DisposeAsync"/> waits for the handlers it cancelled to
+    /// return before it closes the connections of those still running under them. 5 seconds by default; <see cref="TimeSpan.Zero"/>
+    /// closes them at once, and <see cref="Timeout.InfiniteTimeSpan"/> waits as long as they take. Set it before disposing; it does not
+    /// apply to other forwardings, whose connections are closed at once.
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException">The value is negative (other than <see cref="Timeout.InfiniteTimeSpan"/>), or longer
+    /// than <see cref="int.MaxValue"/> milliseconds (about 24 days).</exception>
+    public TimeSpan HandlerShutdownTimeout
+    {
+        get => _handlers?.ShutdownTimeout ?? _handlerShutdownTimeout;
+        set
+        {
+            ForwardedHandlerSet.Validate(value, nameof(value));
+            if (_handlers is { } handlers)
+            {
+                handlers.ShutdownTimeout = value;
+            }
+            else
+            {
+                _handlerShutdownTimeout = value; // kept only to be read back: there are no handlers to wait for
+            }
+        }
+    }
+
+    private TimeSpan _handlerShutdownTimeout = ForwardedHandlerSet.DefaultShutdownTimeout;
 
     /// <summary>
     /// A remote dynamic forwarding: no fixed destination; each connection names its own through SOCKS. With
@@ -97,12 +134,12 @@ public sealed class SshRemotePortForwarder : IAsyncDisposable
 
     /// <summary>
     /// Counts a connection the server is opening, before its channel is confirmed, unless this forwarding already serves its most
-    /// (a handler's <c>maxConnections</c>): then the server's channel is refused. Undone by <see cref="Release"/>, or when the
+    /// (<see cref="MaxConnections"/>): then the server's channel is refused. Undone by <see cref="Release"/>, or when the
     /// connection <see cref="Accept"/> serves ends.
     /// </summary>
     internal bool TryReserve()
     {
-        var limit = _handlers?.MaxConnections ?? int.MaxValue;
+        var limit = MaxConnections;
         while (true)
         {
             var active = Volatile.Read(ref _active);
@@ -382,8 +419,9 @@ public sealed class SshRemotePortForwarder : IAsyncDisposable
 
     /// <summary>
     /// Cancels the forwarding on the server (<c>cancel-tcpip-forward</c>) and closes every forwarded connection. For a forwarding to a
-    /// handler, the token each handler was given is cancelled, and this waits up to 5 seconds for the handlers to return; the
-    /// connections of any still running then are closed under them, and this returns without waiting for them further.
+    /// handler, the token each handler was given is cancelled, and this waits up to <see cref="HandlerShutdownTimeout"/> (5 seconds by
+    /// default) for the handlers to return; the connections of any still running then are closed under them, and this returns without
+    /// waiting for them further.
     /// </summary>
     public async ValueTask DisposeAsync()
     {

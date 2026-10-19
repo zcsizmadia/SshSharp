@@ -118,6 +118,8 @@ A man in the middle can read, change, drop and inject bytes. The server itself m
   `SshForwardedConnection`'s addresses and ports are what the server reported; they describe the connection and do not
   authenticate the peer. Each forwarding serves at most `maxConnections` (100 by default) at once and refuses the server's channels
   above it; a handler that throws closes its own connection only, and its exception is logged by type, never with its message.
+  Disposal waits `HandlerShutdownTimeout` (5 seconds by default) for cancelled handlers, then closes their connections; with
+  `Timeout.InfiniteTimeSpan`, a handler that ignores its token holds disposal up for as long as it runs.
 - **Agent forwarding** relays the agent protocol unchanged, as `ssh -A` does: while the connection is up, the server can ask the
   agent to sign with any of its keys. Forward the agent only to servers you trust, and narrow what it can do: with
   `ForwardAgentFilter`, destination constraints (`ssh-add -h`), or the agent's own confirmation (`ssh-add -c`) for sensitive keys.

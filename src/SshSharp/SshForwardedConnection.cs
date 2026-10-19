@@ -15,8 +15,12 @@ namespace SshSharp;
 /// </remarks>
 public sealed class SshForwardedConnection
 {
-    internal SshForwardedConnection(Stream stream, string? boundAddress, int? boundPort, string? remoteSocketPath, string? originatorAddress, int? originatorPort)
+    private readonly SshChannelStream _stream;
+
+    internal SshForwardedConnection(SshChannelStream stream, string? boundAddress, int? boundPort, string? remoteSocketPath, string? originatorAddress,
+        int? originatorPort)
     {
+        _stream = stream;
         Stream = stream;
         BoundAddress = boundAddress;
         BoundPort = boundPort;
@@ -29,9 +33,25 @@ public sealed class SshForwardedConnection
     /// The connection as a duplex stream (asynchronous only): reads return what the remote program sends, and reads end (return 0) when
     /// it has finished sending. Writes go to it. Disposing the stream closes the connection. While nothing reads it, the server is not
     /// allowed to send more than the channel's window (2 MiB), so a handler that stops reading slows the remote program down rather than
-    /// buffering without limit.
+    /// buffering without limit. <see cref="ShutdownSendAsync"/> ends the writing side only.
     /// </summary>
     public Stream Stream { get; }
+
+    /// <summary>
+    /// Ends the writing side of <see cref="Stream"/> without closing the connection, as <see cref="System.Net.Sockets.Socket.Shutdown"/>
+    /// with <see cref="System.Net.Sockets.SocketShutdown.Send"/> does: the server is sent end-of-file (<c>SSH_MSG_CHANNEL_EOF</c>), so the
+    /// remote program reads to the end of what the handler wrote, while the handler can still read what the program sends. For a
+    /// protocol where the end of a request or a response is the end of the stream.
+    /// </summary>
+    /// <param name="cancellationToken">Cancels waiting to send.</param>
+    /// <remarks>
+    /// Call it once the handler's writes have completed, not while one is in progress. Writes after it throw
+    /// <see cref="InvalidOperationException"/>, and a second call does nothing. Disposing <see cref="Stream"/> (or returning from the handler)
+    /// still closes the connection. OpenSSH's sshd passes the end-of-file on by shutting the remote program's socket down for writing; a
+    /// server that does not may keep the remote program waiting until the connection closes.
+    /// </remarks>
+    /// <exception cref="ObjectDisposedException"><see cref="Stream"/> was disposed.</exception>
+    public Task ShutdownSendAsync(CancellationToken cancellationToken = default) => _stream.ShutdownSendAsync(cancellationToken).AsTask();
 
     /// <summary>For a forwarded port: the address that was connected on the server, as it reports it. Null for a Unix socket.</summary>
     public string? BoundAddress { get; }
@@ -55,7 +75,7 @@ public sealed class SshForwardedConnection
     /// A <c>forwarded-tcpip</c> connection (RFC 4254 section 7.2): the address and port that were connected, then the originator's. A
     /// server that leaves the originator out, or sends one that cannot be read, gets null for it rather than a refused connection.
     /// </summary>
-    internal static SshForwardedConnection ForTcp(Stream stream, byte[] data)
+    internal static SshForwardedConnection ForTcp(SshChannelStream stream, byte[] data)
     {
         var reader = new SshReader(data);
         var boundAddress = reader.ReadUtf8String();
@@ -77,6 +97,6 @@ public sealed class SshForwardedConnection
     }
 
     /// <summary>A <c>forwarded-streamlocal@openssh.com</c> connection: only the socket path that was connected.</summary>
-    internal static SshForwardedConnection ForUnixSocket(Stream stream, string socketPath) =>
+    internal static SshForwardedConnection ForUnixSocket(SshChannelStream stream, string socketPath) =>
         new(stream, null, null, socketPath, null, null);
 }

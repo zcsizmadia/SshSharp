@@ -96,6 +96,15 @@ SshSharp.SshForwardedConnection.OriginatorAddress.get -> string?
 SshSharp.SshForwardedConnection.OriginatorPort.get -> int?
 SshSharp.SshForwardedConnection.RemoteSocketPath.get -> string?
 SshSharp.SshForwardedConnection.Stream.get -> System.IO.Stream!
+SshSharp.SshForwardedConnection.ShutdownSendAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+SshSharp.SshRemotePortForwarder.IsHandler.get -> bool
+SshSharp.SshRemotePortForwarder.MaxConnections.get -> int
+SshSharp.SshRemotePortForwarder.HandlerShutdownTimeout.get -> System.TimeSpan
+SshSharp.SshRemotePortForwarder.HandlerShutdownTimeout.set -> void
+SshSharp.SshRemoteSocketForwarder.IsHandler.get -> bool
+SshSharp.SshRemoteSocketForwarder.MaxConnections.get -> int
+SshSharp.SshRemoteSocketForwarder.HandlerShutdownTimeout.get -> System.TimeSpan
+SshSharp.SshRemoteSocketForwarder.HandlerShutdownTimeout.set -> void
 SshSharp.SshAgent.IsInProcess.get -> bool
 static SshSharp.SshAgent.FromKeys(params SshSharp.SshPrivateKey![]! keys) -> SshSharp.SshAgent!
 SshSharp.SshAgentOperation

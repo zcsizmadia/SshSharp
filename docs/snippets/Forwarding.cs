@@ -114,6 +114,26 @@ internal static class Forwarding
         // </remote-handler-socket>
     }
 
+    public static async Task RemoteHandlerHalfCloseAsync(SshClient client, Stream upload, CancellationToken cancellationToken)
+    {
+        // <remote-handler-half-close>
+        // A protocol where the end of a message is the end of the stream: the program on the server reads the whole greeting, then
+        // sends its upload on the same connection.
+        await using var remote = await client.ForwardRemotePortAsync("localhost", 7000, async (connection, ct) =>
+        {
+            await connection.Stream.WriteAsync("ready\n"u8.ToArray(), ct);
+            await connection.ShutdownSendAsync(ct);             // end-of-file for the program; the connection stays open
+            await connection.Stream.CopyToAsync(upload, ct);    // what it sends, until it closes its side
+        }, maxConnections: 1, cancellationToken);
+        // </remote-handler-half-close>
+
+        // <remote-handler-shutdown>
+        // Disposing cancels the handlers' tokens, then waits this long for them before closing their connections (5 s by default).
+        remote.HandlerShutdownTimeout = TimeSpan.FromSeconds(30);
+        Console.WriteLine($"handler: {remote.IsHandler}, at most {remote.MaxConnections} at once");   // handler: True, at most 1 at once
+        // </remote-handler-shutdown>
+    }
+
     public static async Task DynamicAsync(SshClient client, CancellationToken cancellationToken)
     {
         // <dynamic>

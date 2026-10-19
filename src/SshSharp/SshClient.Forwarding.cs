@@ -310,9 +310,10 @@ public sealed partial class SshClient
     /// <param name="remotePort">The port the server listens on; 0 lets it pick one (see <see cref="SshRemotePortForwarder.RemotePort"/>).</param>
     /// <param name="handler">
     /// Serves one connection; it runs concurrently for concurrent connections. It owns the connection's stream: disposing it closes
-    /// the connection, and it is disposed when the handler returns. Its token is cancelled when the forwarder is disposed or the SSH
-    /// connection ends. A handler that throws closes its own connection only; the exception is logged by type, and the forwarding goes
-    /// on. Anyone who can reach the port on the server can connect, so treat what arrives as untrusted input.
+    /// the connection, and it is disposed when the handler returns. Its token is cancelled when the forwarder is disposed (which then
+    /// waits <see cref="SshRemotePortForwarder.HandlerShutdownTimeout"/> for it) or the SSH connection ends. A handler that throws closes
+    /// its own connection only; the exception is logged by type, and the forwarding goes on. Anyone who can reach the port on the server
+    /// can connect, so treat what arrives as untrusted input.
     /// </param>
     /// <param name="maxConnections">
     /// The most connections served at once by this forwarding; the server's channels above it are refused (resource shortage) until
@@ -329,7 +330,8 @@ public sealed partial class SshClient
         ArgumentNullException.ThrowIfNull(handler);
         ArgumentOutOfRangeException.ThrowIfLessThan(maxConnections, 1);
         return StartRemoteForwardAsync(bindAddress, remotePort,
-            port => new SshRemotePortForwarder(bindAddress, port, handler, maxConnections, _logger, CancelRemoteForwardAsync, _connection.Closed),
+            port => new SshRemotePortForwarder(bindAddress, port, handler, maxConnections, _logger, _connection.Time, CancelRemoteForwardAsync,
+                _connection.Closed),
             cancellationToken);
     }
 
@@ -370,9 +372,10 @@ public sealed partial class SshClient
     /// <param name="remoteSocketPath">The Unix socket the server listens on.</param>
     /// <param name="handler">
     /// Serves one connection; it runs concurrently for concurrent connections. It owns the connection's stream: disposing it closes
-    /// the connection, and it is disposed when the handler returns. Its token is cancelled when the forwarder is disposed or the SSH
-    /// connection ends. A handler that throws closes its own connection only; the exception is logged by type, and the forwarding goes
-    /// on. Anyone who can open the socket on the server can connect, so treat what arrives as untrusted input.
+    /// the connection, and it is disposed when the handler returns. Its token is cancelled when the forwarder is disposed (which then
+    /// waits <see cref="SshRemoteSocketForwarder.HandlerShutdownTimeout"/> for it) or the SSH connection ends. A handler that throws closes
+    /// its own connection only; the exception is logged by type, and the forwarding goes on. Anyone who can open the socket on the server
+    /// can connect, so treat what arrives as untrusted input.
     /// </param>
     /// <param name="maxConnections">
     /// The most connections served at once by this forwarding; the server's channels above it are refused (resource shortage) until
@@ -389,7 +392,8 @@ public sealed partial class SshClient
         ArgumentNullException.ThrowIfNull(handler);
         ArgumentOutOfRangeException.ThrowIfLessThan(maxConnections, 1);
         return StartRemoteSocketForwardAsync(remoteSocketPath,
-            path => new SshRemoteSocketForwarder(path, handler, maxConnections, _logger, CancelRemoteSocketForwardAsync, _connection.Closed), cancellationToken);
+            path => new SshRemoteSocketForwarder(path, handler, maxConnections, _logger, _connection.Time, CancelRemoteSocketForwardAsync,
+                _connection.Closed), cancellationToken);
     }
 
     private static void ValidateSocketPath(string path, string name)

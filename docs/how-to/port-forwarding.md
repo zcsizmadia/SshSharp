@@ -155,11 +155,47 @@ How the handler runs:
   above it are refused (resource shortage) until some end, as are those above `SshClientOptions.MaxForwardedConnections` over all
   forwardings.
 - **Stopping.** The handler's token is cancelled when the forwarder is disposed or the SSH connection ends. Disposing the forwarder
-  sends the cancel request to the server, so it stops listening; it then cancels the handlers and waits up to 5 seconds for them to
-  return. The connections of any still running then are closed under them, and disposal returns without waiting further.
+  sends the cancel request to the server, so it stops listening; it then cancels the handlers and waits up to
+  `HandlerShutdownTimeout` (5 seconds by default) for them to return. The connections of any still running then are closed under
+  them, and disposal returns without waiting further.
 
 The forwarder is the usual `SshRemotePortForwarder` (or `SshRemoteSocketForwarder`), with `RemotePort` set when port 0 was
-requested; its `LocalHost` is empty and `LocalPort` 0.
+requested; its `LocalHost` is empty and `LocalPort` 0. `IsHandler` is true for a forwarding to a handler, and `MaxConnections` is
+its cap (`int.MaxValue` for the other kinds, which have none of their own).
+
+### End your side and keep reading
+
+Some protocols mark the end of a request or a response by the end of the stream. `connection.ShutdownSendAsync()` sends the
+server end-of-file (`SSH_MSG_CHANNEL_EOF`) without closing the connection, as `Socket.Shutdown(SocketShutdown.Send)` does: the
+program on the server reads to the end of what the handler wrote, and the handler can go on reading what the program sends.
+
+[!code-csharp[](../snippets/Forwarding.cs#remote-handler-half-close)]
+
+```mermaid
+sequenceDiagram
+    participant P as Program on the server
+    participant S as sshd
+    participant H as Handler (this process)
+    S->>H: forwarded-tcpip channel
+    H->>S: data "ready"
+    H->>S: CHANNEL_EOF (ShutdownSendAsync)
+    S->>P: "ready", then end of stream (shutdown SHUT_WR)
+    P->>S: upload
+    S->>H: data (the handler still reads)
+    P->>S: closes its side
+    S->>H: CHANNEL_EOF, CHANNEL_CLOSE
+```
+
+Call it once the handler's writes have completed: writes after it throw `InvalidOperationException`, and a second call does
+nothing. The connection still closes when the stream is disposed or the handler returns.
+
+### Give handlers longer to stop
+
+[!code-csharp[](../snippets/Forwarding.cs#remote-handler-shutdown)]
+
+`HandlerShutdownTimeout` is how long disposal waits for the handlers it cancelled: `TimeSpan.Zero` closes their connections at
+once, and `Timeout.InfiniteTimeSpan` waits as long as they take (a handler that ignores its token then holds disposal up). Set it
+before disposing; forwardings to a host and port, or dynamic ones, close their connections at once and do not use it.
 
 > [!IMPORTANT]
 > Anyone who can reach the forwarded port on the server (every user and process there, or every machine with a bind address other
