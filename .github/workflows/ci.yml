@@ -388,7 +388,10 @@ jobs:
         with:
           build: true
       - name: SFTP interop tests against the server
-        run: dotnet test --project tests/SshSharp.Tests -c Release -f net10.0 --no-build --treenode-filter "/*/*/SftpInteropTests/*"
+        # Few tests at a time: atmoz/sftp's sshd keeps OpenSSH's default MaxStartups 10:30:100 and drops some connections once ten are
+        # waiting to authenticate ("drop connection ... Maxstartups" in its log; the client sees the connection close before the
+        # identification line).
+        run: dotnet test --project tests/SshSharp.Tests -c Release -f net10.0 --no-build --treenode-filter "/*/*/SftpInteropTests/*" --maximum-parallel-tests 4
       - name: Server log
         if: failure()
         run: |
