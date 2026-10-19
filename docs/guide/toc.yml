@@ -45,6 +45,8 @@
       items:
         - name: Keys and the SSH agent
           href: ../how-to/agent-and-keys.md
+        - name: Passwords, prompts and expiry
+          href: ../how-to/passwords.md
         - name: Certificates
           href: ../how-to/certificates.md
         - name: Kerberos

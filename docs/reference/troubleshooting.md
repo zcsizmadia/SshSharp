@@ -91,6 +91,19 @@ A connection over your own `Stream` has no host name. Set `SshClientOptions.Host
 | `publickey,keyboard-interactive` after a partial success | | The server requires both (multi-factor): give both. |
 | `gssapi-with-mic` | | Needs `SshClientOptions.Gssapi` and .NET 10. |
 
+`SshAuthenticationException.Attempts` (and the message) lists what was tried, in order, with an outcome for each:
+
+| `Attempts` shows | Then |
+|---|---|
+| `publickey <fingerprint> (Rejected)` for every key | The server does not know these keys for this user. Check `authorized_keys` against the fingerprints (`ssh-keygen -lf`). |
+| `publickey (NotOffered)`, `password (NotOffered)` | You gave credentials the server does not take; `AllowedMethods` says what it does take. |
+| `publickey <fingerprint> (NoAcceptedAlgorithm)` | The server accepts no signature algorithm the key makes (an RSA key, and a server without `rsa-sha2-*`). |
+| `publickey <fingerprint> (SigningFailed)` | The agent did not sign: the key was removed, or a confirmation was declined. |
+| `password (PasswordChangeRequired)` | The password is right but has expired: set `ChangePassword`, or change it another way. See [Change an expired password](../how-to/passwords.md#change-an-expired-password). |
+| `password (Declined)` | `PasswordProvider` returned null. |
+| `keyboard-interactive (Declined)` | The server asked something the password does not answer (a one-time code): it needs a `KeyboardInteractive` handler. |
+| nothing | No credentials for any method the client tries were given. |
+
 Also check the user name, and the server's log (`journalctl -u ssh` / `/var/log/auth.log`), which says why it refused.
 
 ### An encrypted key file is skipped

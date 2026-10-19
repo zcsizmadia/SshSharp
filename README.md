@@ -27,7 +27,7 @@ Console.WriteLine(result.StandardOutputText);
   packet handling.
 - **OpenSSH configuration:** `ssh_config` (`Host`, `Match`, `Include`, tokens) and `known_hosts` (hashed hosts,
   `@cert-authority`, `@revoked`), resolved like `ssh -G`.
-- **Authentication:** password, public keys (OpenSSH, PKCS#8, PKCS#1/SEC1 and PuTTY `.ppk` formats, encrypted too),
+- **Authentication:** password (asked for only when keys fail, and changed when it has expired), public keys (OpenSSH, PKCS#8, PKCS#1/SEC1 and PuTTY `.ppk` formats, encrypted too),
   OpenSSH user certificates, ssh-agent (Unix sockets, the Windows OpenSSH agent and PuTTY's Pageant), FIDO security keys
   held by the agent, agent forwarding (also of an agent served in-process from your keys or KMS signers, with a filter on what the server may sign), keyboard-interactive (one-time codes, PAM), and multi-factor chains. Key generation, saved as `ssh-keygen` does, and export to PKCS#8 and PuTTY `.ppk`; signing and verifying
   files and git commits with SSH keys (`ssh-keygen -Y`). Issuing and checking user and host certificates as a certificate

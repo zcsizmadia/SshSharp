@@ -8,7 +8,12 @@ namespace SshSharp.Protocol;
 /// <param name="RemainingMethods">The methods the server will still accept (from <c>SSH_MSG_USERAUTH_FAILURE</c>).</param>
 /// <param name="PartialSuccess">Whether the attempt succeeded but the server requires further methods.</param>
 /// <param name="KeyAcceptable">For a publickey query: the server would accept this key with a signature (<c>SSH_MSG_USERAUTH_PK_OK</c>).</param>
-internal sealed record AuthOutcome(bool Success, IReadOnlyList<string> RemainingMethods, bool PartialSuccess, bool KeyAcceptable = false);
+/// <param name="ChangeRequest">For a password: the server wants it changed (<c>SSH_MSG_USERAUTH_PASSWD_CHANGEREQ</c>); the other fields are then unset.</param>
+internal sealed record AuthOutcome(bool Success, IReadOnlyList<string> RemainingMethods, bool PartialSuccess, bool KeyAcceptable = false,
+    PasswordChangeRequested? ChangeRequest = null);
+
+/// <summary>The body of <c>SSH_MSG_USERAUTH_PASSWD_CHANGEREQ</c> (RFC 4252 section 8).</summary>
+internal sealed record PasswordChangeRequested(string Prompt, string Language);
 
 /// <summary>Client side of user authentication (RFC 4252) for one connection.</summary>
 internal sealed class SshUserAuth(SshTransport transport, string userName, Func<string, CancellationToken, ValueTask>? banner)
@@ -44,13 +49,29 @@ internal sealed class SshUserAuth(SshTransport transport, string userName, Func<
     public Task<AuthOutcome> NoneAsync(CancellationToken cancellationToken) =>
         RequestAsync("none", null, Reply.None, cancellationToken);
 
-    /// <summary>The <c>password</c> method (RFC 4252 section 8).</summary>
+    /// <summary>
+    /// The <c>password</c> method (RFC 4252 section 8). The outcome carries <see cref="AuthOutcome.ChangeRequest"/> when the password has
+    /// expired and the server asks for a new one (<see cref="ChangePasswordAsync"/>).
+    /// </summary>
     public Task<AuthOutcome> PasswordAsync(string password, CancellationToken cancellationToken) =>
         RequestAsync("password", w =>
         {
             w.WriteBoolean(false); // not a password change
             w.WriteString(password);
-        }, Reply.None, cancellationToken);
+        }, Reply.PasswordChange, cancellationToken);
+
+    /// <summary>
+    /// Answers a password change request (RFC 4252 section 8): the old password and the new one in one request. The server answers
+    /// SUCCESS (changed, and authenticated), FAILURE with partial success (changed, and another method is required), FAILURE (not
+    /// changed), or another change request (the new password was not acceptable).
+    /// </summary>
+    public Task<AuthOutcome> ChangePasswordAsync(string oldPassword, string newPassword, CancellationToken cancellationToken) =>
+        RequestAsync("password", w =>
+        {
+            w.WriteBoolean(true);
+            w.WriteString(oldPassword);
+            w.WriteString(newPassword);
+        }, Reply.PasswordChange, cancellationToken);
 
     /// <summary>
     /// The <c>publickey</c> method (RFC 4252 section 7). A key whose private material is in this process signs straight away: session
@@ -383,6 +404,7 @@ internal sealed class SshUserAuth(SshTransport transport, string userName, Func<
         None,
         PkOk,
         InfoRequest,
+        PasswordChange,
     }
 
     private readonly record struct Received(AuthOutcome? Outcome, SshKeyboardInteractiveRequest? Request);
@@ -442,10 +464,13 @@ internal sealed class SshUserAuth(SshTransport transport, string userName, Func<
                     case SshMessage.UserAuthInfoRequest when reply == Reply.InfoRequest:
                         result = new Received(null, ReadInfoRequest(ref reader));
                         break;
-                    case SshMessage.UserAuthPkOk:
-                        // SSH_MSG_USERAUTH_PASSWD_CHANGEREQ shares the number 60.
-                        throw new SshException(SshFailureReason.AuthenticationFailed, "The server requires the password to be changed.");
+                    case SshMessage.UserAuthPasswordChangeRequest when reply == Reply.PasswordChange:
+                        var prompt = reader.ReadUtf8String();
+                        var language = reader.ReadUtf8String();
+                        result = new Received(new AuthOutcome(false, [], false, ChangeRequest: new PasswordChangeRequested(prompt, language)), null);
+                        break;
                     default:
+                        // Message 60 included: it is PK_OK, INFO_REQUEST or PASSWD_CHANGEREQ only in answer to the matching request.
                         throw new SshProtocolException($"Unexpected message {type} during user authentication.");
                 }
             }

@@ -8,7 +8,7 @@ Everything SshSharp raises for SSH-level problems is an `SshException` with a `R
 |---|---|---|
 | `ConnectFailed` | The TCP connection (or ProxyJump hop, or ProxyCommand) could not be established | `SshException` |
 | `HostKeyRejected` | The host key verifier refused the server's key; `HostKey` has the key | `SshHostKeyException` |
-| `AuthenticationFailed` | No credential was accepted; `AllowedMethods` lists what the server takes | `SshAuthenticationException` |
+| `AuthenticationFailed` | No credential was accepted; `AllowedMethods` lists what the server takes, `Attempts` what was tried and why each attempt failed | `SshAuthenticationException` |
 | `KeyExchangeFailed` | No common algorithms, or the key exchange failed | `SshException` |
 | `ProtocolError` | The server sent something that violates the protocol | `SshProtocolException` |
 | `ConnectionClosed` | The connection was lost or the server disconnected | `SshException` |

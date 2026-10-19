@@ -314,6 +314,9 @@ public sealed class SshConfig
             PubkeyAuthentication = Bool(First("pubkeyauthentication"), true),
             PasswordAuthentication = Bool(First("passwordauthentication"), true),
             KbdInteractiveAuthentication = Bool(First("kbdinteractiveauthentication") ?? First("challengeresponseauthentication"), true),
+            NumberOfPasswordPrompts = int.TryParse(First("numberofpasswordprompts"), NumberStyles.None, CultureInfo.InvariantCulture, out var passwordPrompts)
+                ? passwordPrompts
+                : SshClientOptions.DefaultNumberOfPasswordPrompts,
             BatchMode = Bool(First("batchmode"), false),
             SendEnv = ResolveSendEnv(All("sendenv")),
             SetEnv = ResolveSetEnv(All("setenv")),

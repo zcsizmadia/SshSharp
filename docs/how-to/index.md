@@ -42,6 +42,7 @@ Every example on these pages is compiled with the library in CI, so it matches t
 | Guide | Use it to |
 |---|---|
 | [Keys and the SSH agent](agent-and-keys.md) | Log in with key files, the agent, generated keys, or keys in a TPM, HSM or KMS; export keys to PKCS#8 or PuTTY. |
+| [Passwords: prompts, expiry and failures](passwords.md) | Prompt for a password only when keys did not work, change an expired password, and see why a login failed. |
 | [Certificates](certificates.md) | Log in with OpenSSH user certificates, check certificates, and issue them as a certificate authority. |
 | [Kerberos](kerberos.md) | Log in with a Kerberos ticket (Active Directory). |
 

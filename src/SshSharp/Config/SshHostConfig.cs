@@ -214,6 +214,12 @@ public sealed class SshHostConfig
     /// <summary>Whether keyboard-interactive authentication is allowed.</summary>
     public bool KbdInteractiveAuthentication { get; init; } = true;
 
+    /// <summary>
+    /// <c>NumberOfPasswordPrompts</c>: how many times to ask for a password before giving up (see
+    /// <see cref="SshClientOptions.NumberOfPasswordPrompts"/>). Default 3, as in ssh; a value that is not a number from 0 up also gives 3.
+    /// </summary>
+    public int NumberOfPasswordPrompts { get; init; } = SshClientOptions.DefaultNumberOfPasswordPrompts;
+
     /// <summary>Whether non-interactive mode is requested (<c>BatchMode</c>).</summary>
     public bool BatchMode { get; init; }
 

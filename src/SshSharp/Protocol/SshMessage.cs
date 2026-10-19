@@ -32,6 +32,7 @@ internal static class SshMessage
     public const byte UserAuthBanner = 53;
     public const byte UserAuthPkOk = 60;
     public const byte UserAuthInfoRequest = 60;
+    public const byte UserAuthPasswordChangeRequest = 60;
     public const byte UserAuthInfoResponse = 61;
 
     public const byte GlobalRequest = 80;

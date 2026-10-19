@@ -141,6 +141,11 @@ public sealed partial class SshClient
                 Password = destination && (hostConfig.PasswordAuthentication || hostConfig.KbdInteractiveAuthentication) ? options.Password : null,
                 PrivateKeys = hostConfig.PubkeyAuthentication ? [.. options.PrivateKeys, .. keys] : [],
                 KeyboardInteractive = destination && !hostConfig.BatchMode ? options.KeyboardInteractive : null,
+                PasswordProvider = destination && !hostConfig.BatchMode && (hostConfig.PasswordAuthentication || hostConfig.KbdInteractiveAuthentication)
+                    ? options.PasswordProvider
+                    : null,
+                NumberOfPasswordPrompts = hostConfig.NumberOfPasswordPrompts,
+                ChangePassword = destination && !hostConfig.BatchMode ? options.ChangePassword : null,
                 AuthenticationBanner = options.AuthenticationBanner,
                 PreferredAuthentications = AuthenticationOrder(hostConfig),
                 ForwardAgent = hostConfig.ForwardAgent ? agent : null,
