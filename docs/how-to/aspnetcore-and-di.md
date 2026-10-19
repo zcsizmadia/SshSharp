@@ -234,9 +234,10 @@ the agent need no code: they are settings. Keep what the endpoint built, jump ho
 - **Host keys.** Without `ConfigAlias`, the endpoint verifies against `KnownHostsFiles` (default `~/.ssh/known_hosts`) with
   `StrictHostKeyChecking yes`; `AcceptNewHostKeys` switches to `accept-new`. In a container, pin `HostKeyFingerprints` or mount a
   `known_hosts` file.
-- **`ConfigAlias`** connects through `ssh_config` instead; then `Host`, `Port`, `UserName`, `PrivateKeyFiles`, `KnownHostsFiles`,
-  `AcceptNewHostKeys`, `KeepAliveInterval` and `ConfigureClientOptions` are not used, and `PrivateKeys`, `HostKeyFingerprints`,
-  `Proxy` and `JumpHosts` fail validation. `AddressFamily`, when set, overrides `ssh_config`'s.
+- **`ConfigAlias`** connects through `ssh_config` instead; then `Host`, `Port`, `UserName`, `PrivateKeyFiles`, `PrivateKeyPassphrase`,
+  `KnownHostsFiles`, `AcceptNewHostKeys`, `KeepAliveInterval` and `ConfigureClientOptions` are not used, and `PrivateKeys`,
+  `HostKeyFingerprints`, `Proxy` and `JumpHosts` fail validation. `AddressFamily`, when set, overrides `ssh_config`'s, and
+  `UseAgent` set to `false` turns the agent off (`true` uses the agent registered in the container).
 - **IPv4 or IPv6 only.** `AddressFamily` (`Inet` or `Inet6`, `"AddressFamily": "Inet"` in configuration) limits which of the server's
   addresses are tried, as `ssh -4` and `-6` do: for a host whose IPv6 address is published but not reachable from the cluster. It
   is the built `SshClientOptions.AddressFamily`.

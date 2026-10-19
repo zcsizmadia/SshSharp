@@ -70,22 +70,25 @@ await using var client = await SshClient.ConnectAsync("deploy@prod-db", new SshC
 
 What is taken from the configuration: `HostName`, `Port`, `User`, `IdentityFile`, `CertificateFile`, `IdentityAgent`,
 `IdentitiesOnly`, `UserKnownHostsFile`, `GlobalKnownHostsFile`, `RevokedHostKeys`, `StrictHostKeyChecking`, `HashKnownHosts`,
-`UpdateHostKeys`, `HostKeyAlias`, `KexAlgorithms`, `HostKeyAlgorithms`, `Ciphers`, `MACs`, `PubkeyAcceptedAlgorithms`,
-`PreferredAuthentications`, `PubkeyAuthentication`, `PasswordAuthentication`, `KbdInteractiveAuthentication`, `BatchMode`,
-`ProxyJump`, `ProxyCommand`, `ServerAliveInterval`, `ServerAliveCountMax`, `ConnectTimeout`, `ConnectionAttempts`, `AddressFamily`,
-`BindAddress`, `BindInterface`, `TCPKeepAlive`, `IPQoS`, `ForwardAgent`, `AddKeysToAgent` (`ask` with `ConfirmAddKeyToAgent`),
-`GSSAPIAuthentication`, `GSSAPIDelegateCredentials`, `ChannelTimeout`, `ObscureKeystrokeTiming`, `RefuseConnection` and
-`KnownHostsCommand` (with `AllowKnownHostsCommand`); with `StartForwardings`, also `LocalForward`, `RemoteForward`,
-`DynamicForward`, `PermitRemoteOpen`, `GatewayPorts`, `StreamLocalBindMask`, `StreamLocalBindUnlink`, `ExitOnForwardFailure` and
-`ClearAllForwardings`. `Match` (including `Match exec`, which needs an opt-in) and `Include` work as in OpenSSH.
+`UpdateHostKeys`, `HostKeyAlias`, `KexAlgorithms`, `HostKeyAlgorithms`, `Ciphers`, `MACs`, `RequiredRSASize`,
+`PreferredAuthentications`, `PubkeyAuthentication`, `PasswordAuthentication`, `KbdInteractiveAuthentication`,
+`NumberOfPasswordPrompts`, `BatchMode`, `ProxyJump`, `ProxyCommand`, `ServerAliveInterval`, `ServerAliveCountMax`,
+`ConnectTimeout`, `ConnectionAttempts`, `AddressFamily`, `BindAddress`, `BindInterface`, `TCPKeepAlive`, `IPQoS`, `ForwardAgent`,
+`AddKeysToAgent` (`ask` with `ConfirmAddKeyToAgent`), `GSSAPIAuthentication`, `GSSAPIDelegateCredentials`, `ChannelTimeout`,
+`ObscureKeystrokeTiming`, `RefuseConnection` and `KnownHostsCommand` (with `AllowKnownHostsCommand`); with `StartForwardings`,
+also `LocalForward`, `RemoteForward`, `DynamicForward`, `PermitRemoteOpen`, `GatewayPorts`, `StreamLocalBindMask`,
+`StreamLocalBindUnlink`, `ExitOnForwardFailure` and `ClearAllForwardings`. `CanonicalizeHostname` and the other `Canonicalize*`
+directives apply when `ResolveOptions` turns on `UseDnsCanonicalizer` or sets a `HostCanonicalizer`. `Match` (including
+`Match exec`, which needs an opt-in) and `Include` work as in OpenSSH.
 
 `SshConfigConnectOptions` also takes a `Config` (default: the user's and the system's files), `ResolveOptions` (home
-directory, environment, local user), a `Password`, extra `PrivateKeys`, a `PassphraseProvider` for encrypted identity files,
-`KeyboardInteractive`, a `HostKeyVerifier` that replaces the configured one, `AskHostKey` and `ConfirmHostKeyUpdate`,
-`ConfirmAddKeyToAgent` (for `AddKeysToAgent ask`), `UseAgent`/`Agent`, `AllowProxyCommand`, `AllowKnownHostsCommand`, a `Proxy`
-(HTTP or SOCKS), `ConfigureSocket` (run after `TCPKeepAlive` and `IPQoS`), `StartForwardings`, `AuthenticationBanner` and a
-`Logger`. `Port`, `ConnectTimeout`, `ConnectionAttempts`, `AddressFamily`, `KeepAliveInterval` and `KeepAliveCountMax` override what the
-configuration says (see [Override what the configuration says](how-to/ssh-config-and-known-hosts.md#override-what-the-configuration-says)).
+directory, environment, local user, host name canonicalization), a `Password` or `PasswordProvider`, `ChangePassword`, extra
+`PrivateKeys`, a `PassphraseProvider` for encrypted identity files, `KeyboardInteractive`, a `HostKeyVerifier` that replaces the
+configured one, `AskHostKey` and `ConfirmHostKeyUpdate`, `ConfirmAddKeyToAgent` (for `AddKeysToAgent ask`), `UseAgent`/`Agent`,
+`ForwardAgentFilter`, `AllowProxyCommand`, `AllowKnownHostsCommand`, a `Proxy` (HTTP or SOCKS), `ConfigureSocket` (run after
+`TCPKeepAlive` and `IPQoS`), `StartForwardings`, `AuthenticationBanner` and a `Logger`. `Port`, `ConnectTimeout`,
+`ConnectionAttempts`, `AddressFamily`, `KeepAliveInterval` and `KeepAliveCountMax` override what the configuration says (see
+[Override what the configuration says](how-to/ssh-config-and-known-hosts.md#override-what-the-configuration-says)).
 
 ### Jump hosts and proxy commands
 

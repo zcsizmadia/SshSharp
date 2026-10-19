@@ -63,7 +63,7 @@ them to it):
 | `HostKeyAlgorithms` | `HostKeyAlgorithms` | Yes. `SshClientOptions.HostKeyAlgorithms` in code. |
 | `Ciphers` | `Ciphers` | Yes. `SshClientOptions.Ciphers` in code. |
 | `MACs` | `Macs` | Yes. `SshClientOptions.Macs` in code. |
-| `PubkeyAcceptedAlgorithms` (`PubkeyAcceptedKeyTypes`) | `PubkeyAcceptedAlgorithms` | Yes. |
+| `PubkeyAcceptedAlgorithms` (`PubkeyAcceptedKeyTypes`) | `PubkeyAcceptedAlgorithms` | No: resolved, but not applied. Each key is offered with the first of its signature algorithms the server lists in `server-sig-algs` (RFC 8308). |
 | `RequiredRSASize` | `RequiredRsaSize` | Yes: the smallest RSA host key accepted (default 2048; values under 1024 are ignored, as `ssh` refuses them). `SshClientOptions.RequiredRsaSize` in code. |
 
 The `SshClientOptions` lists take an `SshAlgorithmList` in the same `+`, `-`, `^` and plain forms; see
@@ -133,7 +133,7 @@ equivalent, where one exists:
 - **`SshConfigConnectOptions`**: connecting by alias, where the option overrides or supplements what the configuration says.
 - **`SshEndpointOptions`**: a named endpoint in the dependency injection package. With `Host` set it builds an `SshClientOptions`
   (and `ConfigureClientOptions` can set anything in the first column); with `ConfigAlias` set, the configuration decides, and only
-  `Password`, `AddressFamily` and `ConnectTimeout` are used.
+  `Password`, `AddressFamily`, `UseAgent` and `ConnectTimeout` are used.
 
 A dash means there is no typed equivalent. The "Applied" tables above say how each directive behaves.
 
@@ -141,16 +141,19 @@ A dash means there is no typed equivalent. The "Applied" tables above say how ea
 |---|---|---|---|
 | `HostName`, `Port` | The `host` and `port` arguments of `ConnectAsync` | `Port` | `Host`, `Port` |
 | `User` | `UserName` | `user@` in the destination | `UserName` |
-| `ProxyJump` | `JumpHosts` (one `SshJumpHost` per hop, each with its own options) | - | `JumpHosts` through `ConfigureClientOptions` |
+| `ProxyJump` | `JumpHosts` (one `SshJumpHost` per hop, each with its own options) | - | `JumpHosts` (one `SshEndpointJumpHost` per hop, each with its own credentials and host keys) |
 | `ProxyCommand` | `Proxy = SshProxy.FromConnector(...)`, a connection you make in code | `AllowProxyCommand` (whether it may run) | - |
 | `ConnectTimeout` | `ConnectTimeout` | `ConnectTimeout` | `ConnectTimeout` |
-| `ConnectionAttempts` | - | `ConnectionAttempts` | - |
+| `ConnectionAttempts` | `ConnectionAttempts` | `ConnectionAttempts` | - |
 | `AddressFamily` | `AddressFamily` | `AddressFamily` | `AddressFamily` |
-| `BindAddress` | `LocalEndPoint` | - | - |
+| `BindAddress`, `BindInterface` | `LocalEndPoint` (for `BindInterface`, an address of that interface) | - | - |
+| `TCPKeepAlive`, `IPQoS` | `ConfigureSocket` (`SocketOptionName.KeepAlive`, `SocketOptionName.TypeOfService`) | `ConfigureSocket` (runs after them, so what it sets wins) | - |
 | `ServerAliveInterval` | `KeepAliveInterval` | `KeepAliveInterval` | `KeepAliveInterval` (with `Host`) |
 | `ServerAliveCountMax` | `KeepAliveCountMax` | `KeepAliveCountMax` | - |
 | `ChannelTimeout` | `ChannelTimeouts` | - | - |
 | `ObscureKeystrokeTiming` | `ObscureKeystrokeTiming` | - | - |
+| `RefuseConnection` | - | - | - |
+| `CanonicalizeHostname` and the other `Canonicalize*` directives | - (pass the fully qualified name as `host`) | `ResolveOptions` with `UseDnsCanonicalizer` (`ssh`'s DNS rules) or `HostCanonicalizer` (your own lookup) | - |
 | `KexAlgorithms`, `HostKeyAlgorithms`, `Ciphers`, `MACs` | `KexAlgorithms`, `HostKeyAlgorithms`, `Ciphers`, `Macs` | - | - |
 | `RequiredRSASize` | `RequiredRsaSize` | - | - |
 | `StrictHostKeyChecking` | `HostKeyVerifier = new KnownHostsVerifier(...) { Policy = ... }` | `HostKeyVerifier` (replaces it), `AskHostKey` (answers `ask`) | `AcceptNewHostKeys` (`accept-new`; otherwise `yes`), `HostKeyFingerprints` (pinned keys instead) |
@@ -162,8 +165,9 @@ A dash means there is no typed equivalent. The "Applied" tables above say how ea
 | `KnownHostsCommand` | - | `AllowKnownHostsCommand` (whether it may run) | - |
 | `IdentityFile` | `PrivateKeys` (`SshPrivateKey.LoadAsync`) | `PassphraseProvider` (encrypted files); `PrivateKeys` are offered first | `PrivateKeyFiles`, `PrivateKeyPassphrase`, `PrivateKeys` |
 | `CertificateFile` | `PrivateKeys` with `SshPrivateKey.WithCertificate` | - | - |
-| `IdentityAgent` | `PrivateKeys` from `SshAgent.GetKeysAsync` | `Agent`, `UseAgent` | - |
-| `AddKeysToAgent` | `SshAgent.AddKeyAsync` with `SshAgentKeyConstraints` | - | - |
+| `IdentityAgent` | `PrivateKeys` from `SshAgent.GetKeysAsync` | `Agent`, `UseAgent` | `UseAgent` |
+| `IdentitiesOnly` | Only the `PrivateKeys` you give are offered | - | Without `ConfigAlias`, the agent's keys are offered only with `UseAgent = true` |
+| `AddKeysToAgent` | `SshAgent.AddKeyAsync` with `SshAgentKeyConstraints` | `ConfirmAddKeyToAgent` (answers `ask`) | - |
 | `PreferredAuthentications` | `PreferredAuthentications` | - | - |
 | `PubkeyAuthentication`, `PasswordAuthentication`, `KbdInteractiveAuthentication` | Give or leave out `PrivateKeys`, `Password`, `KeyboardInteractive`, or list the methods in `PreferredAuthentications` | - | - |
 | `NumberOfPasswordPrompts` | `NumberOfPasswordPrompts` (with `PasswordProvider`) | - | - |
@@ -172,13 +176,16 @@ A dash means there is no typed equivalent. The "Applied" tables above say how ea
 | `ForwardAgent` | `ForwardAgent`, `ForwardAgentFilter` | `Agent` (the one forwarded), `ForwardAgentFilter` | - |
 | `LocalForward` | `ForwardLocalPortAsync`, `ForwardLocalUnixSocketAsync` | `StartForwardings` | - |
 | `RemoteForward` | `ForwardRemotePortAsync`, `ForwardRemoteDynamicPortAsync`, `ForwardRemoteUnixSocketAsync` | `StartForwardings` | - |
-| `PermitRemoteOpen` | `ForwardRemoteDynamicPortAsync`'s `allowDestination` | - | - |
-| `DynamicForward` | `ForwardDynamicPortAsync` | `StartForwardings` | - |
-| `GatewayPorts` | The bind address given to each forwarding | - | - |
+| `PermitRemoteOpen` | `ForwardRemoteDynamicPortAsync`'s `allowDestination` | `StartForwardings` | - |
+| `DynamicForward` | `ForwardDynamicPortAsync` (with a `NetworkCredential` for a SOCKS 5 password) | `StartForwardings` | - |
+| `GatewayPorts` | The bind address given to each forwarding | `StartForwardings` | - |
+| `StreamLocalBindMask` | `ForwardLocalUnixSocketAsync` with a `UnixFileMode socketMode` | `StartForwardings` | - |
+| `StreamLocalBindUnlink` | - (remove a stale socket file before `ForwardLocalUnixSocketAsync`) | `StartForwardings` | - |
+| `ExitOnForwardFailure`, `ClearAllForwardings` | - (your code decides which forwardings to start, and what a failure means) | `StartForwardings` | - |
 | `SendEnv`, `SetEnv` | `SshSessionOptions.Environment` | - | - |
 | `RequestTTY` | `SshSessionOptions.Terminal` | - | - |
 
-Some options have no directive: `VersionAddendum`, `ConfigureSocket`, `ChannelWindowSize` and `ChannelMaxPacketSize` (see
+Some options have no directive: `VersionAddendum`, `ChannelWindowSize` and `ChannelMaxPacketSize` (see
 [Tune and inspect a connection](../how-to/tune-and-inspect-connections.md)), `FipsMode`, `MaxForwardedConnections`, and the
 `Proxy` for an HTTP or SOCKS proxy (`SshClientOptions.Proxy`, `SshConfigConnectOptions.Proxy`, `SshEndpointOptions.Proxy`).
 
