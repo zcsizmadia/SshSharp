@@ -62,7 +62,7 @@ would see other data later. `MemoryStream`, `FileStream` and the BCL's other str
 
 ### Segmented downloads
 
-One SFTP session is one SSH channel, and the data in flight on a channel is bounded by its flow-control window (2 MiB here), so
+One SFTP session is one SSH channel, and the data in flight on a channel is bounded by its flow-control window (2 MiB unless `SshClientOptions.ChannelWindowSize` raises it), so
 a single download moves at most about 2 MiB per round trip: some 20 MiB/s at 100 ms of latency, however many requests are in
 flight. `Segments` splits a file into ranges and fetches each over its own session on the same connection, each with its own
 window (and, on OpenSSH, its own `sftp-server` process), writing them into the local file at their offsets:

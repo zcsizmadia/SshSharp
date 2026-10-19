@@ -10,7 +10,7 @@ proxies, remote dynamic and Unix-socket forwarding, destination-constrained agen
 ## Trusted
 
 - **The application** that uses the library, its options and callbacks (host key verifier, loggers, `Match exec` runner, a custom
-  proxy's connector).
+  proxy's connector, `ConfigureSocket`, which gets the TCP socket before it connects).
 - **Signers** (`SshKeySigner`, `SshPrivateKey.FromSigner`, `FromRsa`, `FromECDsa`): application code, or a key service it trusts,
   that signs for a key SshSharp never sees. Each request says what it is for (`SshSignRequest.Purpose`: logging in, an SSH
   signature with its namespace, a certificate the key issues as a CA, or `Other`: data of another form that a program on a server asked a forwarded in-process agent to sign), so a signer can refuse by policy. What it signs includes the session identifier and the user name,
@@ -57,7 +57,12 @@ A man in the middle can read, change, drop and inject bytes. The server itself m
   no small-order Ed25519 keys, an RSA exponent ≥ 3. Public keys the application reads itself (`SshPublicKey.Parse` and
   `FromBlob`: `.pub` and `authorized_keys` lines, key blobs) get the same checks, are bounded to 8 KiB, and are refused with
   `FormatException`; a line with `authorized_keys` options is refused rather than read without its restrictions.
-- **Resource exhaustion:** packets are limited to 256 KiB, channel data to the advertised window and maximum packet size,
+- **What the client says before encryption:** the identification line (`SSH-2.0-SshSharp_x.y.z`) is sent in the clear, as every
+  SSH client's is, so anyone on the path learns the library and its version. `SshClientOptions.VersionAddendum` adds the
+  application's own comment to it, equally in the clear and kept in server logs; nothing else is added, and the documentation
+  warns against putting secrets or personal data there.
+- **Resource exhaustion:** packets are limited to 256 KiB, channel data to the advertised window (`ChannelWindowSize`, 2 MiB by
+  default and at most 1 GiB, which is also the most unread data one channel can buffer) and maximum packet size,
   command output to `MaxCommandOutputBytes`, and banners, identification lines and `EXT_INFO` entries are bounded.
   A peer that overruns the window is a protocol error.
 - **Keys and nonces:** keys are renewed after 1 GiB (configurable, capped at 64 GiB), 2^31 packets or one hour, so sequence
@@ -253,7 +258,8 @@ connection, but not read or change it: each host's key is verified end to end, b
 ### Secrets in memory and logs
 
 - Passwords, private keys and command text are never logged. User names and host names are not logged either; host key
-  fingerprints and algorithm names are.
+  fingerprints and algorithm names are. The connection's addresses (`SshClient.RemoteEndPoint`, `LocalEndPoint`) and session id
+  are there for the application to read, and are never logged or recorded in telemetry.
 - `SshAuthenticationException` (its message and `Attempts`) names methods, outcomes and the SHA-256 fingerprints of the keys
   offered, which identify public keys only. It never holds a password, a keyboard-interactive answer or the user name. A key
   fingerprint can link a failed login to its owner, as it can in the server's own log; treat it as you treat host key fingerprints.

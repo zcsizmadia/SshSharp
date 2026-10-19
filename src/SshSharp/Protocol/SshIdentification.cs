@@ -16,8 +16,26 @@ internal sealed record SshIdentification(string ProtocolVersion, string Software
     /// <summary>The identification line without the CR LF terminator.</summary>
     public string Line => $"SSH-{ProtocolVersion}-{SoftwareVersion}" + (string.IsNullOrEmpty(Comments) ? string.Empty : " " + Comments);
 
-    /// <summary>This library's identification.</summary>
-    public static SshIdentification ForClient() => new("2.0", SshSharpInfo.SoftwareVersion, null);
+    /// <summary>This library's identification, with <paramref name="comments"/> after the software version when given.</summary>
+    public static SshIdentification ForClient(string? comments = null) =>
+        new("2.0", SshSharpInfo.SoftwareVersion, string.IsNullOrEmpty(comments) ? null : comments);
+
+    /// <summary>
+    /// The longest comment this library's identification line can carry: the line, with its CR LF, is at most <see cref="MaxLength"/>
+    /// bytes (RFC 4253 section 4.2).
+    /// </summary>
+    public static int MaxClientCommentsLength => MaxLength - "SSH-2.0-".Length - SshSharpInfo.SoftwareVersion.Length - " \r\n".Length;
+
+    /// <summary>
+    /// Whether <paramref name="comments"/> may follow this library's software version: printable US-ASCII (spaces inside it allowed, as
+    /// the line ends only at CR LF), not starting or ending with a space, and short enough for the line to fit.
+    /// </summary>
+    public static bool IsValidClientComments(string comments) =>
+        comments.Length > 0
+        && comments.Length <= MaxClientCommentsLength
+        && comments.All(c => c is >= ' ' and <= '~')
+        && comments[0] != ' '
+        && comments[^1] != ' ';
 
     /// <summary>Parses an identification line (without CR LF). Only protocol versions 2.0 and 1.99 are accepted.</summary>
     public static bool TryParse(string line, out SshIdentification? identification)

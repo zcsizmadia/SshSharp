@@ -172,4 +172,46 @@ public class SshIdentificationTests
         var id = await read;
         await Assert.That(id.SoftwareVersion).IsEqualTo("Slow");
     }
+
+    // The client's comment (SshClientOptions.VersionAddendum)
+
+    [Test]
+    public async Task ForClient_PutsTheComment_AfterTheSoftwareVersion()
+    {
+        await Assert.That(SshIdentification.ForClient().Line).IsEqualTo($"SSH-2.0-{SshSharpInfo.SoftwareVersion}");
+        await Assert.That(SshIdentification.ForClient(null).Comments).IsNull();
+        await Assert.That(SshIdentification.ForClient(string.Empty).Comments).IsNull();
+        await Assert.That(SshIdentification.ForClient("app/1 (x)").Line).IsEqualTo($"SSH-2.0-{SshSharpInfo.SoftwareVersion} app/1 (x)");
+    }
+
+    [Test]
+    [Arguments("a", true)]
+    [Arguments("app/1.0 (build 7)", true)]
+    [Arguments("!~", true)] // the ends of printable US-ASCII
+    [Arguments("", false)]
+    [Arguments(" a", false)]
+    [Arguments("a ", false)]
+    [Arguments(" ", false)]
+    [Arguments("a\u001fb", false)] // the last control character before space
+    [Arguments("a\u007fb", false)] // DEL, just after '~'
+    [Arguments("a\rb", false)]
+    [Arguments("a\nb", false)]
+    [Arguments("é", false)]
+    public async Task IsValidClientComments_AllowsPrintableAscii_WithSpacesOnlyInside(string comments, bool valid)
+    {
+        await Assert.That(SshIdentification.IsValidClientComments(comments)).IsEqualTo(valid);
+    }
+
+    [Test]
+    public async Task TheLongestValidComment_FillsTheLine_To255Bytes()
+    {
+        var longest = SshIdentification.MaxClientCommentsLength;
+        await Assert.That($"SSH-2.0-{SshSharpInfo.SoftwareVersion} {new string('c', longest)}\r\n".Length).IsEqualTo(SshIdentification.MaxLength);
+        await Assert.That(SshIdentification.IsValidClientComments(new string('c', longest))).IsTrue();
+        await Assert.That(SshIdentification.IsValidClientComments(new string('c', longest + 1))).IsFalse();
+
+        var buffer = new ArrayBufferWriter<byte>();
+        SshIdentification.ForClient(new string('c', longest)).Write(buffer);
+        await Assert.That(buffer.WrittenCount).IsEqualTo(SshIdentification.MaxLength);
+    }
 }

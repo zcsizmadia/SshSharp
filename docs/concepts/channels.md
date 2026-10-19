@@ -20,7 +20,7 @@ Channels the server opens are accepted only when you asked for them (a forwardin
 ## Flow control
 
 Each side of a channel grants the other a window: how many bytes it may send before it must wait. SshSharp grants 2 MiB per
-channel and tops the window up as your code consumes data. If your code stops reading, the window runs out and the server stops
+channel by default (`SshClientOptions.ChannelWindowSize`) and tops the window up as your code consumes data. If your code stops reading, the window runs out and the server stops
 sending on that channel, which pushes back all the way to the program on the server:
 
 ```mermaid
@@ -46,8 +46,9 @@ Consequences:
 - **Memory is bounded.** A channel buffers at most its window, however fast the server sends.
 - **stdout and stderr share one window.** Reading only one of them stalls the program once the other has filled the window; read
   both, as [Stream large output](../how-to/stream-output.md) shows.
-- **Throughput per channel** is at most one window per round trip. On a 100 ms link that is about 20 MiB/s per channel, which is
-  why SFTP's `Segments` uses several channels.
+- **Throughput per channel** is at most one window per round trip. On a 100 ms link that is about 20 MiB/s per channel with the
+  default window. A larger `ChannelWindowSize` raises it, and SFTP's `Segments` uses several channels (see
+  [Tune and inspect a connection](../how-to/tune-and-inspect-connections.md#move-more-data-per-round-trip-on-long-links)).
 - **Channels do not block each other.** A stalled channel does not slow the others on the same connection.
 
 ## Receive buffering
@@ -68,7 +69,8 @@ Received data is copied as little as possible on its way to your code:
 
 - **Sessions per connection.** Servers limit open session channels (sshd's `MaxSessions`, 10 by default). Commands, shells and SFTP
   sessions count; tunnels do not.
-- **Packet size.** SshSharp accepts packets up to 256 KiB and asks for at most 32 KiB of data per channel packet.
+- **Packet size.** SshSharp accepts packets up to 256 KiB and asks for at most 32 KiB of data per channel packet by default
+  (`SshClientOptions.ChannelMaxPacketSize`, up to 255 KiB).
 - **Forwarded connections.** At most `SshClientOptions.MaxForwardedConnections` (1,000) channels opened by the server at a time.
 - **Idle channels.** `SshClientOptions.ChannelTimeouts` closes channels of a given type that carry no data for a while (OpenSSH's
   `ChannelTimeout`), without closing the connection.

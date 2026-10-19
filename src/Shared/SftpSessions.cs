@@ -77,7 +77,11 @@ internal sealed class SftpSessions : IAsyncDisposable
         {
             return await open.WaitAsync(cancellationToken).ConfigureAwait(false);
         }
-        catch (Exception ex) when (open.IsFaulted && ex is not ObjectDisposedException)
+        // Not the caller's own cancellation: when its timeout and the open's pass together, the open may have faulted by the time this
+        // filter runs, and the caller's OperationCanceledException (which the adapters report as a timeout) would be taken for the
+        // open's failure and reported as ConnectFailed.
+        catch (Exception ex) when (open.IsFaulted && ex is not ObjectDisposedException
+            && !(ex is OperationCanceledException && cancellationToken.IsCancellationRequested))
         {
             throw new SshException(ex is SshException ssh ? ssh.Reason : SshFailureReason.ConnectFailed,
                 "The SFTP session could not be opened: " + ex.Message, ex);

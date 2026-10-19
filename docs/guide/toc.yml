@@ -33,6 +33,8 @@
           href: ../how-to/port-forwarding.md
         - name: Jump hosts (ProxyJump)
           href: ../how-to/jump-hosts.md
+        - name: Tune and inspect a connection
+          href: ../how-to/tune-and-inspect-connections.md
     - name: Configuration and trust
       items:
         - name: Use ssh_config and known_hosts
