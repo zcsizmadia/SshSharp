@@ -3,6 +3,7 @@ using System.Text;
 namespace SshSharp.Tests.Integration;
 
 /// <summary>Shells and streamed commands against a real server. Needs SSHSHARP_TEST_SSHD and SSHSHARP_TEST_USER with SSHSHARP_TEST_PASSWORD or SSHSHARP_TEST_KEYDIR.</summary>
+[Category("Integration")]
 public class SessionInteropTests
 {
     private static CancellationToken Timeout() => new CancellationTokenSource(TimeSpan.FromSeconds(60)).Token;

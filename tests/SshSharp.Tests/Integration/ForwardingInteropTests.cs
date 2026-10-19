@@ -8,6 +8,7 @@ namespace SshSharp.Tests.Integration;
 /// Tunnels and local forwarding through a real server: the server connects back to its own sshd, whose identification line proves the
 /// path works. Needs SSHSHARP_TEST_SSHD and SSHSHARP_TEST_USER with SSHSHARP_TEST_PASSWORD or SSHSHARP_TEST_KEYDIR.
 /// </summary>
+[Category("Integration")]
 public class ForwardingInteropTests
 {
     private static CancellationToken Timeout() => new CancellationTokenSource(TimeSpan.FromSeconds(60)).Token;

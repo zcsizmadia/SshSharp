@@ -11,7 +11,7 @@ on:
         description: Runs per job
         default: '20'
       unit-filter:
-        description: TUnit tree filter for the unit test jobs (empty for all)
+        description: TUnit tree filter for the unit test jobs (empty for every unit test, Integration and Measure left out)
         default: ''
 
 permissions:
@@ -21,6 +21,10 @@ permissions:
 env:
   ITERATIONS: ${{ inputs.iterations }}
   UNIT_FILTER: ${{ inputs.unit-filter }}
+  # As in CI (ci.yml): the unit jobs leave out the tests that need a real server and the opt-in measurements; the interop jobs run the
+  # tests that need a server, except the ssh-audit one.
+  UNIT_TESTS: /*/*/*/*[(Category!=Integration)&(Category!=Measure)]
+  INTEROP_TESTS: /*/*/*/*[(Category=Integration)&(Category!=SshAudit)&(Category!=Measure)]
 
 concurrency:
   group: stress-${{ github.ref }}
@@ -45,7 +49,7 @@ jobs:
           build-args: -p:SshSharpInstrument=true
       - name: Loop
         shell: bash
-        run: tests/stress/loop.sh "$ITERATIONS" "$RUNNER_TEMP/stress" net8.0,net10.0 "$UNIT_FILTER"
+        run: tests/stress/loop.sh "$ITERATIONS" "$RUNNER_TEMP/stress" net8.0,net10.0 "${UNIT_FILTER:-$UNIT_TESTS}"
       - name: Summary
         if: always()
         shell: bash
@@ -107,7 +111,7 @@ jobs:
           build-args: -p:SshSharpInstrument=true
       - name: Loop
         # Few tests at a time, as in CI: Dropbear limits unauthenticated connections per address.
-        run: tests/stress/loop.sh "$ITERATIONS" "$RUNNER_TEMP/stress" net10.0,net8.0 "/*/*/*InteropTests/*" --maximum-parallel-tests 4
+        run: tests/stress/loop.sh "$ITERATIONS" "$RUNNER_TEMP/stress" net10.0,net8.0 "$INTEROP_TESTS" --maximum-parallel-tests 4
       - name: Summary and server log
         if: always()
         run: |
@@ -139,7 +143,7 @@ jobs:
       - name: Loop
         shell: bash
         # Few tests at a time, as in CI: OpenSSH for Windows fails some accepts under a burst of connections (#188).
-        run: tests/stress/loop.sh "$ITERATIONS" "$RUNNER_TEMP/stress" net10.0,net8.0 "/*/*/*InteropTests/*" --maximum-parallel-tests 4
+        run: tests/stress/loop.sh "$ITERATIONS" "$RUNNER_TEMP/stress" net10.0,net8.0 "$INTEROP_TESTS" --maximum-parallel-tests 4
       - name: Summary and server log
         if: always()
         shell: pwsh

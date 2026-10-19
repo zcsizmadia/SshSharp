@@ -65,3 +65,8 @@ validation checks each package against the last release, so 1.x changes must be 
 ## Tests
 
 New behavior needs tests in `tests/SshSharp.Tests`. Interop tests against real servers run in CI.
+
+Test classes that need a real server carry `[Category("Integration")]`; the unit jobs leave them out and the interop jobs run only
+them. Each CI job lists the tests it may skip (`tests/ci/skips/`), and an unexpected skip fails the job. See
+[Test categories and skips](docs/testing.md#test-categories-and-skips) for the filters, how to run unit and interop tests locally,
+and how to update a skip list.

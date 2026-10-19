@@ -6,6 +6,7 @@ namespace SshSharp.Tests.Integration;
 /// UpdateHostKeys against OpenSSH: accept-new records the key used for the connection, then sshd announces all its host keys and proves
 /// the others, which get recorded too. Needs SSHSHARP_TEST_SSHD and SSHSHARP_TEST_USER with SSHSHARP_TEST_PASSWORD or SSHSHARP_TEST_KEYDIR.
 /// </summary>
+[Category("Integration")]
 public sealed class UpdateHostKeysInteropTests : IDisposable
 {
     private readonly string _dir = Path.Combine(Path.GetTempPath(), "sshsharp-uhki-" + Guid.NewGuid().ToString("N"));

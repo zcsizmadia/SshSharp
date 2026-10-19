@@ -116,6 +116,7 @@ public sealed class SftpWriteBehindTests
     }
 
     [Test]
+    [Category("Measure")] // opt-in with SSHSHARP_MEASURE=1; CI leaves it out
     public async Task CopyToAsync_OverLatency_Measure()
     {
         // A measurement, not a check: with SSHSHARP_MEASURE=1, prints how long 4 MiB takes over 25 ms of reply latency (in requests of

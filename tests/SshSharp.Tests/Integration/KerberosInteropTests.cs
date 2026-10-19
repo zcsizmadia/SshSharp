@@ -5,6 +5,7 @@ namespace SshSharp.Tests.Integration;
 /// GSSAPIAuthentication yes whose keytab holds host/localhost), SSHSHARP_TEST_USER, and a ticket for that user in the credential cache
 /// (KRB5CCNAME); CI sets up a throwaway MIT realm for it.
 /// </summary>
+[Category("Integration")]
 public class KerberosInteropTests
 {
     [Test]

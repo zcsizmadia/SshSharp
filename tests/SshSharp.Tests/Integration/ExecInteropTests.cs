@@ -5,6 +5,7 @@ namespace SshSharp.Tests.Integration;
 /// SSHSHARP_TEST_PASSWORD or SSHSHARP_TEST_KEYDIR for an account on that server; skipped when any is missing. CI creates a throwaway
 /// account and password.
 /// </summary>
+[Category("Integration")]
 public class ExecInteropTests
 {
     private static bool Configured => RealServer.HasAccount;

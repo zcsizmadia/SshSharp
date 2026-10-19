@@ -6,6 +6,7 @@ namespace SshSharp.Tests.Integration;
 /// The connection options and introspection of #266 against a real server (see <see cref="RealServer"/>): a forced key re-exchange, a
 /// larger channel window and packet, the identification comment, and the endpoints and byte counters of a TCP connection.
 /// </summary>
+[Category("Integration")]
 public class ConnectionOptionsInteropTests
 {
     private const int BulkOutputBytes = 12_000_000;

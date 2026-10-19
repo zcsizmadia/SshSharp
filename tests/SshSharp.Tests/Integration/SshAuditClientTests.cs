@@ -5,6 +5,8 @@ namespace SshSharp.Tests.Integration;
 /// in its KEXINIT, and closes the connection; tests/ssh-audit/check_client_audit.py then judges its report. Runs only when the job
 /// sets SSHSHARP_TEST_SSHAUDIT (the port for the default options) or SSHSHARP_TEST_SSHAUDIT_FIPS (the port for FIPS mode).
 /// </summary>
+[Category("Integration")]
+[Category("SshAudit")] // needs ssh-audit listening (the audit job), not an SSH server: the interop jobs leave it out
 public class SshAuditClientTests
 {
     [Test]

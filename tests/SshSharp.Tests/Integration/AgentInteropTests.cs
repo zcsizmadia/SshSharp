@@ -5,6 +5,7 @@ namespace SshSharp.Tests.Integration;
 /// purpose), SSH_AUTH_SOCK, SSHSHARP_TEST_SSHD and SSHSHARP_TEST_USER, with the agent's keys in the user's authorized_keys.
 /// </summary>
 [NotInParallel("ssh-agent")] // one agent for all of them, and one test adds constrained keys to it
+[Category("Integration")]
 public class AgentInteropTests
 {
     [Test]

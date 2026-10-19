@@ -8,6 +8,7 @@ namespace SshSharp.Tests.Integration;
 /// them: OpenSSL and <c>ssh-keygen</c> read PKCS#8, PuTTY's <c>puttygen</c> reads <c>.ppk</c>; and keys those tools made export to the
 /// same bytes. Each test is skipped when its tool is not on the PATH (CI's interop job installs all three).
 /// </summary>
+[Category("LocalTools")] // ssh-keygen, openssl and puttygen only, no server: it runs with the unit tests
 public class KeyExportInteropTests
 {
     public static IEnumerable<(SshKeyType Type, string KeyType)> Types() =>

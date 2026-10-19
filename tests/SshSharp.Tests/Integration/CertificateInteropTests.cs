@@ -5,6 +5,7 @@ namespace SshSharp.Tests.Integration;
 /// and that signed sshd's HostCertificate), <c>user</c> (a key that is NOT in authorized_keys) and <c>user-cert.pub</c> (its user
 /// certificate for SSHSHARP_TEST_USER). With SSHSHARP_TEST_SSHD too; skipped otherwise.
 /// </summary>
+[Category("Integration")]
 public sealed class CertificateInteropTests : IDisposable
 {
     private readonly string _dir = Path.Combine(Path.GetTempPath(), "sshsharp-certi-" + Guid.NewGuid().ToString("N"));

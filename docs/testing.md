@@ -137,6 +137,75 @@ Before 0.6.0 this hunt ([#188](https://github.com/zcsizmadia/SshSharp/issues/188
 - **Flaws in the tests themselves:** fixed waits, counters read without their lock, fake servers that spun a thread. These are
   fixed in the tests, not tolerated.
 
+## Test categories and skips
+
+A test that cannot run where it is (no server, no tool, a platform without the feature) skips itself and says why. A skip passes,
+so CI checks that every skip is one it expects.
+
+### Categories
+
+The test classes carry a TUnit `[Category]`, and each CI job selects its tests by category:
+
+| Category | What | Where it runs |
+|---|---|---|
+| (none) | Unit tests: fake servers, in-memory streams, no network | The unit jobs, on every OS and target framework |
+| `LocalTools` | Key files read back by `ssh-keygen`, OpenSSL and `puttygen`; no server | The unit jobs, and the OpenSSH runner job, the only one with `puttygen` |
+| `Integration` | Tests against a real server (`SSHSHARP_TEST_SSHD` and the other `SSHSHARP_TEST_*` variables) | The interop jobs |
+| `SshAudit` | The client audit; also `Integration`, but it needs ssh-audit listening, not an SSH server | The audit job |
+| `Measure` | Measurements, not checks (`SSHSHARP_MEASURE=1`) | Nowhere in CI; by hand |
+
+The selections, as TUnit tree filters (Microsoft.Testing.Platform's `--treenode-filter`):
+
+| Run | Filter |
+|---|---|
+| Unit tests | `/*/*/*/*[(Category!=Integration)&(Category!=Measure)]` |
+| Interop tests | `/*/*/*/*[(Category=Integration)&(Category!=SshAudit)&(Category!=Measure)]` |
+| A measurement | `/*/*/*/*[Category=Measure]`, with `SSHSHARP_MEASURE=1` |
+
+A new test class that needs a real server gets `[Category("Integration")]`. Without it, the class runs in the unit jobs, where it
+skips, and the skip check fails the job.
+
+### Running them locally
+
+Build once, then run the test assembly with a filter (`dotnet test --project tests/SshSharp.Tests -f net10.0 --treenode-filter ...`
+takes the same filters):
+
+```shell
+dotnet build tests/SshSharp.Tests -c Release
+# the unit tests
+dotnet tests/SshSharp.Tests/bin/Release/net10.0/SshSharp.Tests.dll --treenode-filter "/*/*/*/*[(Category!=Integration)&(Category!=Measure)]"
+# the interop tests, against a server named by SSHSHARP_TEST_SSHD, SSHSHARP_TEST_USER and so on (without one they all skip)
+dotnet tests/SshSharp.Tests/bin/Release/net10.0/SshSharp.Tests.dll --treenode-filter "/*/*/*/*[(Category=Integration)&(Category!=SshAudit)&(Category!=Measure)]"
+```
+
+Without a filter everything runs, and the Integration tests skip at once when no server is configured.
+
+### Expected skips
+
+Each CI job lists the tests it may skip, in
+[tests/ci/skips](https://github.com/zcsizmadia/SshSharp/tree/main/tests/ci/skips): one file per job, such as
+`unit-ubuntu-latest-net8.0.txt` or `interop-dropbear-alpine-3.22.txt`, with one `Class.DisplayName` per line. The jobs write a TRX
+report (`--report-trx`), and
+[tests/ci/check-skips.ps1](https://github.com/zcsizmadia/SshSharp/blob/main/tests/ci/check-skips.ps1) compares its skips with the
+list:
+
+- a skip that is not on the list fails the job, naming the test and its reason;
+- a listed test that ran, or was not in the run, gives a notice, so the list can be tightened;
+- the job summary counts the skips by reason.
+
+The lists hold only what a job cannot run: .NET 8 without ML-KEM or `gssapi-with-mic`, a Linux without ML-KEM in its OpenSSL,
+Windows without FIFOs, servers without an algorithm, an extension or a key setup. A new skip is not added to a list until it is
+understood. A skip can hide a regression as well as a limit of the platform.
+
+When a job's skips change on purpose, update its list. To regenerate one from a TRX report (the `coverage-<os>` artifact holds
+the unit jobs'), run the script with `-Update` and review the diff before committing it:
+
+```shell
+pwsh tests/ci/check-skips.ps1 -Job "unit (ubuntu-latest) net10.0" -Trx TestResults/unit-net10.0.trx -Update
+```
+
+The file name comes from the job's name, in lower case, with anything but letters, digits and dots replaced by `-`.
+
 ## Coverage
 
 The unit tests alone cover about 95% of lines and 91% of branches, merged across the platforms. Code that only the interop tests

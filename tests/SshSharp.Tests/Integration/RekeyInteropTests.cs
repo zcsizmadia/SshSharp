@@ -5,6 +5,7 @@ namespace SshSharp.Tests.Integration;
 /// authenticated, so these run real commands. They need the interop account (see <see cref="ExecInteropTests"/>); the server-initiated
 /// ones also need sshd configured with a small RekeyLimit (for example "RekeyLimit 32K") and SSHSHARP_TEST_SSHD_REKEY=1. CI sets all of it.
 /// </summary>
+[Category("Integration")]
 public class RekeyInteropTests
 {
     private const int BulkOutputBytes = 3_000_000;

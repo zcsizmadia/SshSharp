@@ -9,6 +9,7 @@ namespace SshSharp.Tests.Integration;
 /// exchange starts new zlib streams, which both sides must agree on), and an SFTP file. OpenSSH's sshd offers it unless configured with
 /// <c>Compression no</c>; the other servers may not, and then the tests skip, saying so.
 /// </summary>
+[Category("Integration")]
 public class CompressionInteropTests
 {
     private static CancellationToken Timeout() => new CancellationTokenSource(TimeSpan.FromSeconds(120)).Token;

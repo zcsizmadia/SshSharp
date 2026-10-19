@@ -582,6 +582,7 @@ public sealed class SftpConcurrentFilesTests : IDisposable
     }
 
     [Test]
+    [Category("Measure")] // opt-in with SSHSHARP_MEASURE=1; CI leaves it out
     public async Task OverLatency_SeveralFilesAtOnce_Measure()
     {
         // A measurement, not a check: run with SSHSHARP_MEASURE=1 to print how long a tree of small files takes over 25 ms of latency,
