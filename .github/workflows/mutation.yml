@@ -93,8 +93,8 @@ jobs:
             mutate: -m "**/Sftp/SftpGlob.cs"
             tests: Sftp/SftpGlobTests.cs
           - scope: config-resolver
-            mutate: -m "**/Config/SshConfigResolver.cs" -m "**/Config/SshConfigResolveOptions.cs" -m "**/Config/SshHostConfig.cs" -m "**/Config/SshDnsLookup.cs" -m "**/SshAlgorithmList.cs"
-            tests: Config/*Tests.cs;ConfigConnectTests.cs;ConfigForwardingTests.cs;AlgorithmOptionsTests.cs
+            mutate: -m "**/Config/SshConfigResolver.cs" -m "**/Config/SshConfigResolveOptions.cs" -m "**/Config/SshHostConfig.cs" -m "**/Config/SshDnsLookup.cs" -m "**/SshAlgorithmList.cs" -m "**/Protocol/AlgorithmNegotiator.cs"
+            tests: Config/*Tests.cs;ConfigConnectTests.cs;ConfigForwardingTests.cs;AlgorithmOptionsTests.cs;PubkeyAcceptedAlgorithmsTests.cs;Protocol/KexNegotiationTests.cs
           # The SOCKS server of dynamic forwarding: request parsing, and the username/password check (RFC 1929).
           - scope: socks
             mutate: -m "**/Protocol/SocksHandshake.cs"

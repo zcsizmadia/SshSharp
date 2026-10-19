@@ -608,7 +608,8 @@ public sealed partial class SshClient : IAsyncDisposable
         {
             await transport.ConnectAsync(cancellationToken).ConfigureAwait(false);
             var acceptedKeys = new List<SshPrivateKey>();
-            await AuthenticateAsync(transport, options, logger, acceptedKeys, host, port, cancellationToken).ConfigureAwait(false);
+            await AuthenticateAsync(transport, options, transportOptions.Preferences.PublicKeys, logger, acceptedKeys, host, port, cancellationToken)
+                .ConfigureAwait(false);
             var client = CompleteConnection(transport, stream, options, leaveOpen, owner, host, port, logger, measurement);
             client.AcceptedKeys = acceptedKeys;
             return client;
@@ -726,7 +727,7 @@ public sealed partial class SshClient : IAsyncDisposable
         // Before the receive loop starts: the server announces its host keys right after authentication.
         WatchHostKeyUpdates(connection, options, host, port, publicHostKey, logger);
         connection.Start();
-        if (options.KeepAliveInterval is { } keepAlive)
+        if (options.EffectiveKeepAliveInterval is { } keepAlive)
         {
             connection.StartKeepAlive(keepAlive, options.KeepAliveCountMax);
         }
@@ -792,8 +793,8 @@ public sealed partial class SshClient : IAsyncDisposable
     /// <summary>Requests for a new password the client answers for one password, before it treats the password as expired and unchanged.</summary>
     internal const int MaxPasswordChangeRequests = 3;
 
-    private static async Task AuthenticateAsync(SshTransport transport, SshClientOptions options, ILogger logger, List<SshPrivateKey> acceptedKeys,
-        string? host, int port, CancellationToken cancellationToken)
+    private static async Task AuthenticateAsync(SshTransport transport, SshClientOptions options, IReadOnlyList<string>? allowedSignatures, ILogger logger,
+        List<SshPrivateKey> acceptedKeys, string? host, int port, CancellationToken cancellationToken)
     {
         var auth = new SshUserAuth(transport, options.UserName, options.AuthenticationBanner);
         await auth.RequestServiceAsync(cancellationToken).ConfigureAwait(false);
@@ -907,9 +908,10 @@ public sealed partial class SshClient : IAsyncDisposable
                                 break;
                             }
 
-                            if (SshUserAuth.ChooseSignatureAlgorithm(key, transport.ServerExtensions) is not { } algorithm)
+                            if (SshUserAuth.ChooseSignatureAlgorithm(key, transport.ServerExtensions, allowedSignatures) is not { } algorithm)
                             {
-                                // The server accepts no signature algorithm this key can make (for example an RSA key and no rsa-sha2-*).
+                                // The server accepts no signature algorithm this key can make (for example an RSA key and no rsa-sha2-*),
+                                // or PubkeyAcceptedAlgorithms allows none of them: as ssh, the key is not offered.
                                 attempts.Add(new SshAuthenticationAttempt("publickey", SshAuthenticationOutcome.NoAcceptedAlgorithm, key.Fingerprint));
                                 continue;
                             }

@@ -240,6 +240,49 @@ public sealed class DnsCanonicalizerTests
         await Assert.That(client.IsConnected).IsTrue();
     }
 
+    /// <summary>Connects by alias to a fake server, through the test's resolver; returns the name the connection was made to.</summary>
+    private static async Task<string?> ConnectAsync(FakeDns dns, SshProxy? proxy = null, SshAddressFamily? family = null)
+    {
+        var password = Guid.NewGuid().ToString("N");
+        await using var server = new FakeSessionServer { Password = password };
+        string? connectedTo = null;
+        await using var client = await SshClient.ConnectAsync("build", new SshConfigConnectOptions
+        {
+            Config = SshConfig.Parse(Canonicalize + "Host *\n User tester\n StrictHostKeyChecking no\n UserKnownHostsFile none\n"),
+            ResolveOptions = Options(dns),
+            UseAgent = false,
+            Password = password,
+            Proxy = proxy,
+            AddressFamily = family,
+            TcpConnector = (host, _, _, _) =>
+            {
+                connectedTo = host;
+                _ = server.StartAsync();
+                return ValueTask.FromResult<(Stream, IAsyncDisposable?)>((server.ClientStream, null));
+            },
+        }, new CancellationTokenSource(TimeSpan.FromSeconds(60)).Token);
+        return connectedTo;
+    }
+
+    [Test]
+    public async Task ThroughAnSshConfigConnectOptionsProxy_NamesAreNotLookedUpHere()
+    {
+        // The proxy resolves the name (socks5h, HTTP CONNECT): as with ProxyCommand, this machine's DNS is not asked.
+        var dns = new FakeDns(("build.corp.example.com.", "build.corp.example.com"));
+        var connectedTo = await ConnectAsync(dns, proxy: SshProxy.Socks5("proxy.example.com", 1080));
+        await Assert.That(connectedTo).IsEqualTo("build");
+        await Assert.That(dns.Lookups).IsEmpty();
+    }
+
+    [Test]
+    public async Task TheAddressFamilyOverride_IsTheLookupsFamily()
+    {
+        var dns = new FakeDns(("build.corp.example.com.", "build.corp.example.com"));
+        var connectedTo = await ConnectAsync(dns, family: SshAddressFamily.Inet6);
+        await Assert.That(connectedTo).IsEqualTo("build.corp.example.com");
+        await Assert.That(dns.Lookups.Select(l => l.Family).Distinct()).IsEquivalentTo(new[] { SshAddressFamily.Inet6 });
+    }
+
     [Test]
     public async Task TheSystemResolver_FindsLocalhost()
     {

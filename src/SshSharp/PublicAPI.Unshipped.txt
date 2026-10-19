@@ -143,6 +143,8 @@ SshSharp.SshClientOptions.KexAlgorithms.get -> SshSharp.SshAlgorithmList?
 SshSharp.SshClientOptions.KexAlgorithms.init -> void
 SshSharp.SshClientOptions.Macs.get -> SshSharp.SshAlgorithmList?
 SshSharp.SshClientOptions.Macs.init -> void
+SshSharp.SshClientOptions.PubkeyAcceptedAlgorithms.get -> SshSharp.SshAlgorithmList?
+SshSharp.SshClientOptions.PubkeyAcceptedAlgorithms.init -> void
 SshSharp.SshClientOptions.PreferredAuthentications.get -> System.Collections.Generic.IReadOnlyList<string!>?
 SshSharp.SshClientOptions.PreferredAuthentications.init -> void
 SshSharp.SshClientOptions.RequiredRsaSize.get -> int

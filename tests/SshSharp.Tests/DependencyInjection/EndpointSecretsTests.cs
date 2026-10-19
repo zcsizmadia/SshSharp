@@ -250,6 +250,46 @@ public sealed class EndpointSecretsTests : IDisposable
     }
 
     [Test]
+    public async Task TimesTheClientCannotUse_FailValidation()
+    {
+        // Above SshClientOptions.ConnectTimeout's bound every connection would fail; a negative keep-alive interval would only after
+        // authenticating.
+        await Assert.That(ValidationError(o => o.ConnectTimeout = TimeSpan.FromDays(30))).Contains("ConnectTimeout must be positive, and at most");
+        await Assert.That(ValidationError(o => o.ConnectTimeout = TimeSpan.Zero)).Contains("ConnectTimeout must be positive");
+        await Assert.That(ValidationError(o => o.KeepAliveInterval = TimeSpan.FromSeconds(-1))).Contains("KeepAliveInterval must not be negative");
+
+        // The longest allowed, and a zero keep-alive interval (none), are fine.
+        var services = new ServiceCollection();
+        services.AddSshClient("deploy", o =>
+        {
+            o.Host = "ssh.example.com";
+            o.UserName = "deploy";
+            o.ConnectTimeout = TimeSpan.FromMilliseconds(int.MaxValue);
+            o.KeepAliveInterval = TimeSpan.Zero;
+        });
+        using var provider = services.BuildServiceProvider();
+        await Assert.That(provider.GetRequiredService<IOptionsMonitor<SshEndpointOptions>>().Get("deploy").KeepAliveInterval).IsEqualTo(TimeSpan.Zero);
+    }
+
+    [Test]
+    public async Task UseAgentWithConfigAlias_IsTheRegisteredAgent_ElseTheEnvironments()
+    {
+        var registered = SshAgent.FromKeys();
+        var environment = SshAgent.FromKeys();
+        Task<SshAgent?> FromEnvironment(CancellationToken _) => Task.FromResult<SshAgent?>(environment);
+        Task<SshAgent?> NoAgent(CancellationToken _) => Task.FromResult<SshAgent?>(null);
+        Task<SshAgent?> NotAsked(CancellationToken _) => throw new InvalidOperationException("The environment was asked.");
+
+        await Assert.That(await SshClientFactory.AliasAgentAsync(true, registered, NotAsked, CancellationToken.None)).IsSameReferenceAs(registered);
+        await Assert.That(await SshClientFactory.AliasAgentAsync(true, null, FromEnvironment, CancellationToken.None)).IsSameReferenceAs(environment);
+
+        // No agent anywhere: ssh_config's IdentityAgent decides. Null or false: ssh_config decides, or the agent is off.
+        await Assert.That(await SshClientFactory.AliasAgentAsync(true, null, NoAgent, CancellationToken.None)).IsNull();
+        await Assert.That(await SshClientFactory.AliasAgentAsync(null, registered, NotAsked, CancellationToken.None)).IsNull();
+        await Assert.That(await SshClientFactory.AliasAgentAsync(false, registered, NotAsked, CancellationToken.None)).IsNull();
+    }
+
+    [Test]
     public async Task ValuesThatSshConfigDecides_FailValidationWithConfigAlias()
     {
         using var key = SshPrivateKey.Generate(SshKeyType.Ed25519);

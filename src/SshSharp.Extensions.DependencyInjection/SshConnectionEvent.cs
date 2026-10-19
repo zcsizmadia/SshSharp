@@ -44,6 +44,12 @@ public sealed class SshConnectionEvent
     /// <see cref="SshConnectionEventKind.Reconnected"/> (owned by the provider: do not dispose it), the one that ended for
     /// <see cref="SshConnectionEventKind.Disconnected"/> (no longer usable).
     /// </summary>
+    /// <remarks>
+    /// Events are delivered after the fact, so by the time one is handled the client may have ended and already been disposed: the
+    /// provider disposes an ended connection when the next <see cref="ISshConnectionProvider.GetClientAsync"/> replaces it. Using it can
+    /// then throw <see cref="ObjectDisposedException"/> as well as <see cref="SshException"/>; check <see cref="SshClient.IsConnected"/>
+    /// when either is caught, and wait for the next event.
+    /// </remarks>
     public SshClient Client { get; }
 
     /// <summary>

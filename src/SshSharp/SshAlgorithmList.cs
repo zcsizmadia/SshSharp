@@ -4,15 +4,21 @@ namespace SshSharp;
 
 /// <summary>
 /// An algorithm list for <see cref="SshClientOptions.KexAlgorithms"/>, <see cref="SshClientOptions.HostKeyAlgorithms"/>,
-/// <see cref="SshClientOptions.Ciphers"/> or <see cref="SshClientOptions.Macs"/>, in the forms ssh_config's <c>Ciphers</c>,
-/// <c>KexAlgorithms</c>, <c>MACs</c> and <c>HostKeyAlgorithms</c> take: a list that replaces SshSharp's defaults
-/// (<see cref="Only"/>), or a change to them that keeps up with new defaults in later versions (<see cref="Append"/>,
-/// <see cref="Prepend"/>, <see cref="Remove"/>).
+/// <see cref="SshClientOptions.Ciphers"/>, <see cref="SshClientOptions.Macs"/> or <see cref="SshClientOptions.PubkeyAcceptedAlgorithms"/>,
+/// in the forms ssh_config's <c>Ciphers</c>, <c>KexAlgorithms</c>, <c>MACs</c>, <c>HostKeyAlgorithms</c> and
+/// <c>PubkeyAcceptedAlgorithms</c> take: a list that replaces SshSharp's defaults (<see cref="Only"/>), or a change to them that keeps
+/// up with new defaults in later versions (<see cref="Append"/>, <see cref="Prepend"/>, <see cref="Remove"/>).
 /// </summary>
 /// <remarks>
+/// <para>
 /// The names are checked when the list is assigned to an option: one SshSharp does not implement for that kind of algorithm is an
 /// <see cref="ArgumentException"/>, so a typo does not silently fall back to the defaults. <see cref="SshClientOptions.FipsMode"/> still
 /// applies on top of the list. <see cref="ToString"/> gives the ssh_config form, which <see cref="Parse"/> reads back.
+/// </para>
+/// <para>
+/// A list means what the same text means in ssh_config, where SshSharp applies it as ssh does, with one restriction: only
+/// <see cref="Remove"/> takes wildcards here, while in ssh_config a pattern in any form stands for the names it matches.
+/// </para>
 /// </remarks>
 public sealed class SshAlgorithmList
 {
@@ -30,13 +36,23 @@ public sealed class SshAlgorithmList
     /// <summary>Whether this list removes from the defaults, where its entries are patterns rather than names.</summary>
     internal bool IsRemoval => _operation == '-';
 
+    /// <summary>
+    /// Whether the list decides the order itself (a plain list, or <c>^</c>), rather than changing the defaults' (<c>+</c>, <c>-</c>).
+    /// As in ssh, only for the latter may the client reorder host key algorithms (certificates first when an authority is trusted).
+    /// </summary>
+    internal bool SetsOrder => _operation is '\0' or '^';
+
+    /// <summary>Whether this is a removal (<c>-</c>) one of whose patterns matches <paramref name="name"/>.</summary>
+    internal bool Removes(string name) => IsRemoval && Algorithms.Any(p => Glob.IsMatch(p, name));
+
     /// <summary>Exactly these algorithms, in this order of preference (ssh_config's plain list, <c>Ciphers a,b</c>).</summary>
     /// <param name="algorithms">The algorithm names, most preferred first.</param>
     /// <exception cref="ArgumentException">The list is empty, or a name is empty, contains a comma, white space or a wildcard.</exception>
     public static SshAlgorithmList Only(params string[] algorithms) => Create('\0', algorithms);
 
     /// <summary>The defaults, with these algorithms added at the end (ssh_config's <c>+</c>, <c>Ciphers +a,b</c>).</summary>
-    /// <param name="algorithms">The algorithm names to add. One already among the defaults moves to the end.</param>
+    /// <param name="algorithms">The algorithm names to add. One already among the defaults stays where it is, as with ssh_config's
+    /// <c>+</c> (use <see cref="Prepend"/> to move it).</param>
     /// <exception cref="ArgumentException">The list is empty, or a name is empty, contains a comma, white space or a wildcard.</exception>
     public static SshAlgorithmList Append(params string[] algorithms) => Create('+', algorithms);
 
@@ -64,32 +80,39 @@ public sealed class SshAlgorithmList
     /// <summary>The list in ssh_config's syntax, for example <c>-chacha20-poly1305@openssh.com</c>.</summary>
     public override string ToString() => (_operation == '\0' ? string.Empty : _operation.ToString()) + string.Join(',', Algorithms);
 
-    /// <summary>Applies the list to <paramref name="defaults"/>: the resulting algorithms in preference order, without duplicates.</summary>
-    internal IReadOnlyList<string> Apply(IReadOnlyList<string> defaults)
+    /// <summary>
+    /// Applies the list to <paramref name="defaults"/> as ssh applies an ssh_config value (its <c>kex_assemble_names</c>): the resulting
+    /// algorithms in preference order, without duplicates. <c>+</c> adds the names after the defaults and <c>^</c> before them, a name
+    /// listed twice keeping its first place (so <c>+</c> of a default changes nothing); <c>-</c> removes the defaults its patterns match.
+    /// In a plain, <c>+</c> or <c>^</c> list (which only ssh_config gives wildcards), an entry with wildcards stands for each name of
+    /// <paramref name="known"/> it matches, in that order.
+    /// </summary>
+    internal IReadOnlyList<string> Apply(IReadOnlyList<string> defaults, IReadOnlyList<string>? known = null)
     {
         ArgumentNullException.ThrowIfNull(defaults);
-        switch (_operation)
+        if (_operation == '-')
         {
-            case '+':
-                return Distinct([.. defaults.Where(d => !Algorithms.Contains(d, StringComparer.Ordinal)), .. Algorithms]);
-            case '^':
-                return Distinct([.. Algorithms, .. defaults]);
-            case '-':
-                return [.. defaults.Where(d => !Algorithms.Any(p => Glob.IsMatch(p, d)))];
-            default:
-                return Distinct(Algorithms);
+            return [.. defaults.Where(d => !Removes(d))];
         }
+
+        IEnumerable<string> names = _operation switch
+        {
+            '+' => [.. defaults, .. Algorithms],
+            '^' => [.. Algorithms, .. defaults],
+            _ => Algorithms,
+        };
+        return Distinct(names.SelectMany(name => name.AsSpan().IndexOfAny('*', '?') >= 0 ? (known ?? defaults).Where(k => Glob.IsMatch(name, k)) : [name]));
     }
 
     /// <summary>
-    /// Applies an ssh_config specification to <paramref name="defaults"/> as ssh does, without checking the names: unknown ones are the
-    /// caller's to drop, and an empty specification leaves the defaults.
+    /// Applies an ssh_config specification to <paramref name="defaults"/> as ssh does (wildcards expand against <paramref name="known"/>,
+    /// or the defaults), without checking the names: unknown ones are the caller's to drop, and an empty specification leaves the defaults.
     /// </summary>
-    internal static IReadOnlyList<string> Apply(string specification, IReadOnlyList<string> defaults)
+    internal static IReadOnlyList<string> Apply(string specification, IReadOnlyList<string> defaults, IReadOnlyList<string>? known = null)
     {
         ArgumentNullException.ThrowIfNull(specification);
         ArgumentNullException.ThrowIfNull(defaults);
-        return FromConfig(specification)?.Apply(defaults) ?? [.. defaults];
+        return FromConfig(specification)?.Apply(defaults, known) ?? [.. defaults];
     }
 
     /// <summary>An ssh_config specification as a list, unchecked as ssh_config values are; null when it is empty (the defaults apply).</summary>

@@ -74,8 +74,10 @@ public sealed class SshEndpointOptions
 
     /// <summary>
     /// Connect by this <c>ssh_config</c> alias instead (ProxyJump, IdentityFile, known_hosts and the rest come from the user's and the
-    /// system's ssh_config). <see cref="Host"/>, <see cref="Port"/>, <see cref="UserName"/>, <see cref="PrivateKeyFiles"/> and
-    /// <see cref="KnownHostsFiles"/> are then ignored; <see cref="Password"/> is still offered. <see cref="PrivateKeys"/>,
+    /// system's ssh_config). <see cref="Host"/>, <see cref="Port"/>, <see cref="UserName"/>, <see cref="PrivateKeyFiles"/>,
+    /// <see cref="KnownHostsFiles"/>, <see cref="AcceptNewHostKeys"/> (ssh_config's <c>StrictHostKeyChecking</c> decides),
+    /// <see cref="KeepAliveInterval"/> (its <c>ServerAliveInterval</c> does) and <see cref="ConfigureClientOptions"/> are then ignored;
+    /// <see cref="Password"/> is still offered, to the destination only. <see cref="PrivateKeys"/>,
     /// <see cref="HostKeyFingerprints"/>, <see cref="Proxy"/> and <see cref="JumpHosts"/> cannot be combined with it (validation fails), as
     /// ssh_config decides keys, host keys, proxies and jump hosts there.
     /// </summary>
@@ -93,14 +95,17 @@ public sealed class SshEndpointOptions
     /// <summary>
     /// Whether to offer the keys of the user's SSH agent. Without <see cref="ConfigAlias"/>, true offers them after
     /// <see cref="PrivateKeyFiles"/> and <see cref="PrivateKeys"/>, and null or false does not (the default). With <see cref="ConfigAlias"/>,
-    /// null leaves it to ssh_config (<c>IdentityAgent</c>, as ssh does), false turns the agent off, and true uses the agent registered in
-    /// the container, if any. That agent is the one registered as <see cref="SshAgent"/> (<see cref="SshAgent.FromKeys"/> for keys held in
-    /// this process); without one, it is the environment's (<see cref="SshAgent.FromEnvironmentAsync"/>). An agent that is not running is
-    /// skipped, as ssh skips it.
+    /// null leaves it to ssh_config (<c>IdentityAgent</c>, as ssh does), false turns the agent off, and true uses the agent below in
+    /// place of ssh_config's <c>IdentityAgent</c> (which decides only when there is none). The agent is the one registered in the container
+    /// as <see cref="SshAgent"/> (<see cref="SshAgent.FromKeys"/> for keys held in this process); without one, it is the environment's
+    /// (<see cref="SshAgent.FromEnvironmentAsync"/>). An agent that is not running is skipped, as ssh skips it.
     /// </summary>
     public bool? UseAgent { get; set; }
 
-    /// <summary>Send keep-alives at this interval, so a dead connection is noticed (none by default).</summary>
+    /// <summary>
+    /// Send keep-alives at this interval, so a dead connection is noticed (none by default, or when zero). A negative value fails
+    /// validation. Not used with <see cref="ConfigAlias"/>, where ssh_config's <c>ServerAliveInterval</c> applies.
+    /// </summary>
     public TimeSpan? KeepAliveInterval { get; set; }
 
     /// <summary>
@@ -112,7 +117,8 @@ public sealed class SshEndpointOptions
     public Config.SshAddressFamily? AddressFamily { get; set; }
 
     /// <summary>
-    /// How long one connection attempt, handshake and authentication included, may take (default 30 seconds). It is also the
+    /// How long one connection attempt, handshake and authentication included, may take (default 30 seconds; at most about 24 days,
+    /// <see cref="int.MaxValue"/> milliseconds, as <see cref="SshClientOptions.ConnectTimeout"/> allows). It is also the
     /// <see cref="SshClientOptions.ConnectTimeout"/> of the client options built from these settings, which
     /// <see cref="ConfigureClientOptions"/> may shorten; it cannot extend the attempt past this limit.
     /// </summary>

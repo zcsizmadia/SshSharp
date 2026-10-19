@@ -384,18 +384,23 @@ internal sealed class SshUserAuth(SshTransport transport, string userName, Func<
 
     /// <summary>
     /// Picks the signature algorithm for <paramref name="key"/>: the first one the key supports that the server lists in
-    /// <c>server-sig-algs</c> (RFC 8308), or the key's preferred one when the server did not say.
+    /// <c>server-sig-algs</c> (RFC 8308), or the key's preferred one when the server did not say. With <paramref name="allowed"/>
+    /// (<c>PubkeyAcceptedAlgorithms</c>), only the key's algorithms in that list count, in its order, as ssh picks them; null when none
+    /// is left, and the key is not offered.
     /// </summary>
-    public static string? ChooseSignatureAlgorithm(SshPrivateKey key, IReadOnlyDictionary<string, string> serverExtensions)
+    public static string? ChooseSignatureAlgorithm(SshPrivateKey key, IReadOnlyDictionary<string, string> serverExtensions, IReadOnlyList<string>? allowed = null)
     {
+        IEnumerable<string> candidates = allowed is null
+            ? key.SignatureAlgorithms
+            : allowed.Where(a => key.SignatureAlgorithms.Contains(a, StringComparer.Ordinal));
         if (!serverExtensions.TryGetValue("server-sig-algs", out var list))
         {
-            return key.SignatureAlgorithms[0];
+            return candidates.FirstOrDefault();
         }
 
         var accepted = list.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         // server-sig-algs lists plain algorithms; a certificate algorithm is acceptable when its base one is.
-        return key.SignatureAlgorithms.FirstOrDefault(a => accepted.Contains(SshCertificate.BaseAlgorithm(a), StringComparer.Ordinal));
+        return candidates.FirstOrDefault(a => accepted.Contains(SshCertificate.BaseAlgorithm(a), StringComparer.Ordinal));
     }
 
     /// <summary>What message 60 means for the request in flight: it is PK_OK, PASSWD_CHANGEREQ and INFO_REQUEST depending on the method.</summary>
