@@ -75,7 +75,19 @@ public class SshTransportRekeyTests
         var serverTask = fake.StartAsync(token);
         await transport.ConnectAsync(token);
         await serverTask;
+        await AuthenticateAsync(fake, transport);
         return (transport, fake, new Pump(ct => transport.ReceiveAsync(ct)), new Pump(ct => fake.ReceiveAsync(ct)));
+    }
+
+    /// <summary>
+    /// The server's USERAUTH_SUCCESS, received: the client starts re-exchanges on its thresholds only once the user is authenticated,
+    /// as OpenSSH does.
+    /// </summary>
+    private static async Task AuthenticateAsync(FakeSshServer server, SshTransport client)
+    {
+        await server.SendAsync(new byte[] { SshMessage.UserAuthSuccess }, Timeout());
+        using var success = await client.ReceiveAsync(Timeout());
+        await Assert.That(success.Payload.Span[0]).IsEqualTo(SshMessage.UserAuthSuccess);
     }
 
     private static byte[] Message(byte tag, int index, int size)
@@ -464,13 +476,14 @@ public class SshTransportRekeyTests
     {
         // The server never reads, so the client's own re-exchange can never complete and its application sends queue up behind it.
         var fake = new FakeSshServer();
-        var transport = new SshTransport(fake.ClientStream, ClientOptions(rekeyBytes: 100));
+        var transport = new SshTransport(fake.ClientStream, ClientOptions(rekeyBytes: 5_000));
         var token = Timeout();
         var serverTask = fake.StartAsync(token);
         await transport.ConnectAsync(token);
         await serverTask;
 
-        await transport.SendAsync(Message(90, 0, 200), Timeout()); // crosses the threshold: our KEXINIT goes out
+        await AuthenticateAsync(fake, transport);
+        await transport.SendAsync(Message(90, 0, 6_000), Timeout()); // crosses the threshold: our KEXINIT goes out
         var blocked = transport.SendAsync(Message(90, 1, 10), Timeout()).AsTask();
         await Task.Delay(100);
         await Assert.That(blocked.IsCompleted).IsFalse();
@@ -484,13 +497,14 @@ public class SshTransportRekeyTests
     public async Task ASendWaitingForARekeyHonoursCancellation()
     {
         var fake = new FakeSshServer();
-        await using var transport = new SshTransport(fake.ClientStream, ClientOptions(rekeyBytes: 100));
+        await using var transport = new SshTransport(fake.ClientStream, ClientOptions(rekeyBytes: 5_000));
         var token = Timeout();
         var serverTask = fake.StartAsync(token);
         await transport.ConnectAsync(token);
         await serverTask;
 
-        await transport.SendAsync(Message(90, 0, 200), Timeout());
+        await AuthenticateAsync(fake, transport);
+        await transport.SendAsync(Message(90, 0, 6_000), Timeout());
         using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
         await Assert.That(async () => await transport.SendAsync(Message(90, 1, 10), cts.Token)).Throws<OperationCanceledException>();
         await fake.DisposeAsync();

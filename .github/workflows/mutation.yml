@@ -80,7 +80,7 @@ jobs:
           # zlib@openssh.com: the bounded inflater of what the server sends, and the Huffman-only compressor.
           - scope: packet-compression
             mutate: -m "**/Protocol/PacketCompression.cs"
-            tests: Protocol/PacketCompressionTests.cs;Protocol/SshTransportCompressionTests.cs;Fuzz/ParserRobustnessTests.cs
+            tests: Protocol/PacketCompressionTests.cs;Protocol/SshTransportCompressionTests.cs;CompressionTests.cs;Fuzz/ParserRobustnessTests.cs
           - scope: userauth
             mutate: -m "**/Protocol/SshUserAuth.cs"
             tests: KeyboardInteractiveTests.cs;PasswordAuthenticationTests.cs;PublicKeyAuthTests.cs;Agent/AgentServerTests.cs;Protocol/GssapiTests.cs
@@ -89,7 +89,7 @@ jobs:
             tests: Protocol/SshIdentificationTests.cs;ConnectionOptionsTests.cs
           - scope: config-parser
             mutate: -m "**/Config/SshConfig.cs" -m "**/Config/SshConfigLine.cs"
-            tests: Config/*Tests.cs;Fuzz/ParserRobustnessTests.cs;ConfigConnectTests.cs;ConfigForwardingTests.cs;KeyboardInteractiveTests.cs;ObscureKeystrokeTimingTests.cs;Agent/AgentKeyManagementTests.cs
+            tests: Config/*Tests.cs;Fuzz/ParserRobustnessTests.cs;ConfigConnectTests.cs;ConfigForwardingTests.cs;KeyboardInteractiveTests.cs;ObscureKeystrokeTimingTests.cs;Agent/AgentKeyManagementTests.cs;CompressionTests.cs
           - scope: config-tokens-glob
             mutate: -m "**/Config/SshTokens.cs" -m "**/Config/Glob.cs"
             tests: Config/*Tests.cs;Fuzz/ParserRobustnessTests.cs;ConfigConnectTests.cs
@@ -98,7 +98,7 @@ jobs:
             tests: Sftp/SftpGlobTests.cs
           - scope: config-resolver
             mutate: -m "**/Config/SshConfigResolver.cs" -m "**/Config/SshConfigResolveOptions.cs" -m "**/Config/SshHostConfig.cs" -m "**/Config/SshDnsLookup.cs" -m "**/SshAlgorithmList.cs" -m "**/Protocol/AlgorithmNegotiator.cs"
-            tests: Config/*Tests.cs;ConfigConnectTests.cs;ConfigForwardingTests.cs;AlgorithmOptionsTests.cs;PubkeyAcceptedAlgorithmsTests.cs;Protocol/KexNegotiationTests.cs
+            tests: Config/*Tests.cs;ConfigConnectTests.cs;ConfigForwardingTests.cs;AlgorithmOptionsTests.cs;PubkeyAcceptedAlgorithmsTests.cs;Protocol/KexNegotiationTests.cs;CompressionTests.cs
           # The SOCKS server of dynamic forwarding: request parsing, and the username/password check (RFC 1929).
           - scope: socks
             mutate: -m "**/Protocol/SocksHandshake.cs"

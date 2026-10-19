@@ -29,7 +29,7 @@ public sealed class CompressionTests : IDisposable
     private static FakeSessionServer Server(IReadOnlyList<string>? compression = null) =>
         new(new FakeServerOptions { Compression = compression ?? ServerOffers }) { Password = Password };
 
-    private static async Task<SshClient> ConnectAsync(FakeSessionServer server, bool compression, bool fipsMode = false)
+    private static async Task<SshClient> ConnectAsync(FakeSessionServer server, bool compression, bool fipsMode = false, long rekeyAfterBytes = 1L << 30)
     {
         _ = server.StartAsync();
         return await SshClient.ConnectAsync(server.ClientStream, new SshClientOptions
@@ -39,6 +39,7 @@ public sealed class CompressionTests : IDisposable
             HostKeyVerifier = SshHostKeyVerifier.FromDelegate((_, _) => ValueTask.FromResult(true)),
             Compression = compression,
             FipsMode = fipsMode,
+            RekeyAfterBytes = rekeyAfterBytes,
         }, leaveOpen: true, Timeout());
     }
 
@@ -87,6 +88,27 @@ public sealed class CompressionTests : IDisposable
         // Everything the server sent after the authentication went compressed; what the client sent too, where it compresses.
         await Assert.That(server.Raw.SentPackets.Count(p => p.Compressed)).IsGreaterThan(5);
         await Assert.That(server.Raw.ReceivedPackets.Any(p => p.Compressed)).IsEqualTo(SshAlgorithms.CanCompressOutgoing);
+    }
+
+    [Test]
+    public async Task ASmallRekeyLimit_ReachedDuringAuthentication_DoesNotBreakTheConnection()
+    {
+        // The password request alone crosses a 100-byte limit. A re-exchange started then sent a plain KEXINIT that the server, inflating
+        // from its USERAUTH_SUCCESS on, took as compressed: the connection broke. It now waits for the authentication, as in OpenSSH,
+        // and then runs over the compressed connection.
+        await using var server = Server();
+        var output = Listing(5_000);
+        server.OnExec = async script =>
+        {
+            await script.StdoutAsync(output);
+            await script.FinishAsync(0);
+        };
+
+        await using var client = await ConnectAsync(server, compression: true, rekeyAfterBytes: 100);
+        var result = await client.RunCommandAsync("ls -l", Timeout());
+        await Assert.That(result.ExitStatus).IsEqualTo(0);
+        await Assert.That(result.StandardOutput.Span.SequenceEqual(output)).IsTrue();
+        await Assert.That(server.Raw.KeyExchangeCount).IsGreaterThan(1);
     }
 
     [Test]

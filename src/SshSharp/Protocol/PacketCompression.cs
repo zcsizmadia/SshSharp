@@ -144,6 +144,12 @@ internal sealed class ZlibDecompressor : IDisposable
     }
 
     /// <summary>
+    /// Called with the output buffer of a packet that failed, once it is wiped and just before it goes back to the pool (tests check it
+    /// holds nothing of the payload).
+    /// </summary>
+    internal Action<byte[]>? Discarding { get; init; }
+
+    /// <summary>
     /// Inflates the payload of <paramref name="compressed"/>, which it disposes, into a packet of its own (the caller disposes that one).
     /// </summary>
     /// <exception cref="SshProtocolException">
@@ -223,7 +229,11 @@ internal sealed class ZlibDecompressor : IDisposable
             _input.Clear();
             if (buffer is not null)
             {
-                PacketCodec.ZeroAndReturn(buffer, total, nameof(ZlibDecompressor));
+                // The packet failed. A read that fails has often written output past total first (zlib inflates into the buffer, then
+                // meets the bad data and the count is lost), so all of it that zlib could write to is wiped, not only the counted bytes.
+                CryptographicOperations.ZeroMemory(buffer.AsSpan(0, capacity));
+                Discarding?.Invoke(buffer);
+                PacketCodec.ZeroAndReturn(buffer, 0, nameof(ZlibDecompressor));
             }
         }
     }

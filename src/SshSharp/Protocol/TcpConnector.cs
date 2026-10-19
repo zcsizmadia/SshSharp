@@ -56,12 +56,30 @@ internal static class TcpConnector
     /// <param name="configure">Sets the caller's socket options.</param>
     /// <param name="resolve">Resolves a host name to its addresses.</param>
     /// <param name="cancellationToken">Cancels resolving and connecting.</param>
+    internal static Task<NetworkStream> ConnectAsync(string host, int port, IReadOnlyList<IPEndPoint>? local, SshAddressFamily family, string what,
+        Action<Socket>? configure, Func<string, CancellationToken, Task<IPAddress[]>> resolve, CancellationToken cancellationToken) =>
+        ConnectAsync(host, port, local, family, what, configure, resolve, OSSupports, cancellationToken);
+
+    /// <summary>
+    /// Connects as above, trying only addresses of the families <paramref name="supports"/> says the system has (tests stand in for a
+    /// system without IPv6).
+    /// </summary>
+    /// <param name="host">The host name or address.</param>
+    /// <param name="port">The port.</param>
+    /// <param name="local">Local endpoints to connect from, or null for any.</param>
+    /// <param name="family">The <c>AddressFamily</c> restriction.</param>
+    /// <param name="what">"the server" or "the proxy", for the error message.</param>
+    /// <param name="configure">Sets the caller's socket options.</param>
+    /// <param name="resolve">Resolves a host name to its addresses.</param>
+    /// <param name="supports">Whether the system can create sockets of an address family.</param>
+    /// <param name="cancellationToken">Cancels resolving and connecting.</param>
     internal static async Task<NetworkStream> ConnectAsync(string host, int port, IReadOnlyList<IPEndPoint>? local, SshAddressFamily family, string what,
-        Action<Socket>? configure, Func<string, CancellationToken, Task<IPAddress[]>> resolve, CancellationToken cancellationToken)
+        Action<Socket>? configure, Func<string, CancellationToken, Task<IPAddress[]>> resolve, Func<AddressFamily, bool> supports,
+        CancellationToken cancellationToken)
     {
         // An address of the other family has nothing to try (the socket would refuse it with a NotSupportedException).
         if (family != SshAddressFamily.Any && IPAddress.TryParse(host, out var address)
-            && address.AddressFamily != (family == SshAddressFamily.Inet ? AddressFamily.InterNetwork : AddressFamily.InterNetworkV6))
+            && Unmapped(address).AddressFamily !=(family == SshAddressFamily.Inet ? AddressFamily.InterNetwork : AddressFamily.InterNetworkV6))
         {
             throw new SshException(SshFailureReason.ConnectFailed,
                 $"The address of {what} is not {(family == SshAddressFamily.Inet ? "IPv4" : "IPv6")}, the only family AddressFamily allows.");
@@ -77,7 +95,11 @@ internal static class TcpConnector
             throw new SshException(SshFailureReason.ConnectFailed, $"Could not resolve the address of {what}: {ex.SocketErrorCode}.", ex);
         }
 
+        // An IPv4-mapped IPv6 address (::ffff:192.0.2.10, given as HostName or returned by a resolver) is an IPv4 destination. An IPv6
+        // socket reaches it only in dual mode, which these sockets are not (Windows refuses the connect with AddressNotAvailable), and
+        // the bind address for it is an IPv4 one. It is connected to over IPv4, with an IPv4 socket.
         var allowed = destinations
+            .Select(Unmapped)
             .Where(d => family switch
             {
                 SshAddressFamily.Inet => d.AddressFamily == AddressFamily.InterNetwork,
@@ -104,6 +126,15 @@ internal static class TcpConnector
                 $"None of the addresses of {what} is of the bind address's family ({string.Join(" or ", local!.Select(l => l.AddressFamily == AddressFamily.InterNetwork ? "IPv4" : "IPv6").Distinct())}).");
         }
 
+        // A family the system has no sockets for (IPv6 turned off) is skipped, as ssh goes on when socket() fails: what is reported is then
+        // why the addresses that could be tried failed, not that the system has no IPv6.
+        candidates = candidates.Where(c => supports(c.Destination.AddressFamily)).ToList();
+        if (candidates.Count == 0)
+        {
+            throw new SshException(SshFailureReason.ConnectFailed,
+                $"None of the addresses of {what} is of an address family this system supports.");
+        }
+
         SocketException? last = null;
         foreach (var (destination, from) in candidates)
         {
@@ -111,7 +142,8 @@ internal static class TcpConnector
             var configuring = false;
             try
             {
-                // A socket of the destination's family. Where the system has no IPv6, creating one fails here and the next address is tried.
+                // A socket of the destination's family. Where creating one still fails (the family is not there after all), the next
+                // address is tried.
                 socket = new Socket(destination.AddressFamily, SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
                 if (from is not null)
                 {
@@ -136,7 +168,11 @@ internal static class TcpConnector
                     throw new SshException(SshFailureReason.ConnectFailed, $"Could not bind to the local address: {ex.SocketErrorCode}.", ex);
                 }
 
-                last = ex;
+                // A connect's error says more than a family the system turned out not to have, whichever of them came last.
+                if (last is null || ex.SocketErrorCode != SocketError.AddressFamilyNotSupported)
+                {
+                    last = ex;
+                }
             }
             catch
             {
@@ -147,6 +183,17 @@ internal static class TcpConnector
 
         throw new SshException(SshFailureReason.ConnectFailed, $"Could not connect to {what}: {last!.SocketErrorCode}.", last);
     }
+
+    /// <summary>The address, or the IPv4 address an IPv4-mapped IPv6 address carries.</summary>
+    private static IPAddress Unmapped(IPAddress address) => address.IsIPv4MappedToIPv6 ? address.MapToIPv4() : address;
+
+    /// <summary>Whether the system can create sockets of <paramref name="family"/>.</summary>
+    private static bool OSSupports(AddressFamily family) => family switch
+    {
+        AddressFamily.InterNetwork => Socket.OSSupportsIPv4,
+        AddressFamily.InterNetworkV6 => Socket.OSSupportsIPv6,
+        _ => false,
+    };
 
     /// <summary>
     /// ssh_config's socket settings followed by the caller's <paramref name="then"/> (<see cref="SshConfigConnectOptions.ConfigureSocket"/>),

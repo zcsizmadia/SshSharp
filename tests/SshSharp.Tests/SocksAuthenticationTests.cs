@@ -184,6 +184,26 @@ public sealed class SocksAuthenticationTests
     }
 
     [Test]
+    [Arguments((byte)2, 0x15)] // BIND, which the proxy does not do
+    [Arguments((byte)1, 0)] // CONNECT to port 0
+    public async Task Socks4_ARequestRefusedAnyway_GetsOneRefusal(byte command, int port)
+    {
+        // The parse refuses such a request itself; the refusal for asking without a password must not follow it as a second reply.
+        var (server, client, proxy) = await StartAsync(Credentials);
+        await using (server)
+        await using (client)
+        await using (proxy)
+        {
+            using var socket = await OpenAsync(proxy);
+            await SendAsync(socket, [4, command, 0, (byte)port, 192, 0, 2, 10, .. Encoding.ASCII.GetBytes(ProxyUser), 0]);
+            var reply = await ReceiveAsync(socket, 16); // all the proxy sends before it closes the connection
+            await Assert.That(reply.Length).IsEqualTo(8);
+            await Assert.That(reply[1]).IsEqualTo((byte)0x5B);
+            await Assert.That(server.DirectTcpIpRequests).IsEmpty();
+        }
+    }
+
+    [Test]
     public async Task SshSharpsOwnSocksClient_Authenticates()
     {
         var (server, client, proxy) = await StartAsync(Credentials);

@@ -283,6 +283,10 @@ rules: their buffers zero what they hold, and only the returned string is left t
 - **bcrypt_pbkdf and Argon2** index tables with data derived from the passphrase. They run once, locally, when a key file is loaded or
   written.
 - **Managed strings** (the password option) cannot be wiped.
+- **Compression buffers** cannot be wiped. With `zlib@openssh.com` negotiated, .NET's `ZLibStream` rents an 8 KiB buffer from
+  `ArrayPool<byte>.Shared` per direction and returns it uncleared, holding the last compressed payloads (plaintext to anyone who
+  inflates them), and zlib frees its native window unwiped. SshSharp's own buffers, the decompressor's output included, are zeroed
+  (see the [threat model](threat-model.md#compression)). Compression is off by default.
 
 ## Open
 
