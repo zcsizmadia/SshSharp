@@ -54,8 +54,11 @@ Both adapters take either one `SftpClient` or a **session factory**, `Func<Cance
 which `UseStaticFiles` and a container's singletons have no way to do. With a factory, the adapter follows the connection:
 
 - It opens a session on first use and shares it between all its callers.
-- When the session or the connection under it fails, it disposes that session and opens a new one. Ordinary SFTP errors (a missing
-  file, a denied request) and timeouts do not count: the session stays.
+- When the session or the connection under it has ended, it disposes that session and opens a new one. That is decided on the
+  session's state (`SftpClient.IsConnected`), not on the error: a drop, a connection a keep-alive declared dead (which fails with
+  `Timeout`), a failed key exchange all count. One request's failure does not, and the session stays for the other callers: an
+  SFTP error (a missing file, a denied request), a reply that timed out, a listing or reply too large to take. A session found
+  ended before a call starts (the connection dropped while the adapter was idle) is replaced before the call uses it.
 - Callers that find no session share one call to the factory, so a drop is followed by one reconnect, not one per request.
 - A call that only reads (a lookup, a listing, a whole-file read, opening a file to read) and meets the dropped connection is tried once
   more on the new session. A call that writes is not, because the server may have done it before the connection dropped: it fails, and

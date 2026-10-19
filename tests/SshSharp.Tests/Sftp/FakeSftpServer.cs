@@ -179,6 +179,21 @@ internal sealed class FakeSftpServer
 
     private int _held;
 
+    /// <summary>
+    /// Once a request (the raw packet, type first) this matches has arrived, its session stops reading what the client sends, and so
+    /// stops opening the channel's window, until <see cref="ReadingResumed"/> completes: an <c>sftp-server</c> that hangs while sshd
+    /// goes on (and answers keep-alives). The requests that arrived before are still answered.
+    /// </summary>
+    public Func<byte[], bool>? StopReading { get; set; }
+
+    /// <summary>Completed to let sessions <see cref="StopReading"/> stopped read again.</summary>
+    public TaskCompletionSource ReadingResumed { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    /// <summary>How many sessions <see cref="StopReading"/> has stopped.</summary>
+    public int StoppedReading => Volatile.Read(ref _stoppedReading);
+
+    private int _stoppedReading;
+
     /// <summary>The offset of a WRITE request (the raw packet), or null for another request.</summary>
     public static long? WriteOffset(byte[] packet)
     {
@@ -436,6 +451,11 @@ internal sealed class FakeSftpServer
                     }
 
                     queue.Writer.TryWrite(packet);
+                    if (StopReading?.Invoke(packet) == true)
+                    {
+                        Interlocked.Increment(ref _stoppedReading);
+                        await ReadingResumed.Task;
+                    }
                 }
             }
 

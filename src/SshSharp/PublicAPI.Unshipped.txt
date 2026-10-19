@@ -350,3 +350,4 @@ SshSharp.Sftp.SftpFileHash.Algorithm.get -> string!
 SshSharp.Sftp.SftpFileHash.Hash.get -> System.ReadOnlyMemory<byte>
 SshSharp.Sftp.SftpFileHash.Matches(System.ReadOnlySpan<byte> hash) -> bool
 const SshSharp.Sftp.SftpClient.UploadCleanupIncompleteKey = "SshSharp.Sftp.UploadCleanupIncomplete" -> string!
+SshSharp.Sftp.SftpClient.IsConnected.get -> bool

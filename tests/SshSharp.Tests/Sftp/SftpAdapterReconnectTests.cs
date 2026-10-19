@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using Microsoft.Extensions.Time.Testing;
 using SshSharp.FileProviders;
 using SshSharp.IO.Abstractions;
 using SshSharp.Sftp;
@@ -47,6 +48,9 @@ public class SftpAdapterReconnectTests
         /// <summary>While set, opens fail with it (a server that is down).</summary>
         public Exception? Failure { get; set; }
 
+        /// <summary>When set, connections send keep-alives on this clock (every 30 s, one unanswered probe ends them).</summary>
+        public FakeTimeProvider? Clock { get; init; }
+
         public async Task<SftpClient> OpenAsync(CancellationToken cancellationToken)
         {
             Interlocked.Increment(ref _opened);
@@ -68,6 +72,9 @@ public class SftpAdapterReconnectTests
                 UserName = "tester",
                 Password = _password,
                 HostKeyVerifier = SshHostKeyVerifier.FromDelegate((_, _) => ValueTask.FromResult(true)),
+                KeepAliveInterval = Clock is null ? null : TimeSpan.FromSeconds(30),
+                KeepAliveCountMax = 1,
+                TimeProvider = Clock ?? TimeProvider.System,
             }, leaveOpen: true, cancellationToken);
             lock (_connections)
             {
@@ -94,6 +101,31 @@ public class SftpAdapterReconnectTests
             }
         }
 
+        /// <summary>
+        /// Ends the newest connection the way a dead peer does behind a live TCP connection: the server stops answering keep-alives, and
+        /// the client's keep-alive fails the connection with <see cref="SshFailureReason.Timeout"/>. Needs <see cref="Clock"/>.
+        /// </summary>
+        public async Task TimeOutByKeepAliveAsync()
+        {
+            (FakeSessionServer Server, SshClient Client) newest;
+            lock (_connections)
+            {
+                newest = _connections[^1];
+            }
+
+            newest.Server.IgnoreGlobalRequests = true;
+            for (var i = 0; i < 500 && newest.Client.IsConnected; i++)
+            {
+                Clock!.Advance(TimeSpan.FromSeconds(30));
+                await Task.Delay(10); // what the clock released is on its way
+            }
+
+            if (newest.Client.ConnectionError is not SshException { Reason: SshFailureReason.Timeout })
+            {
+                throw new InvalidOperationException("The connection did not time out: " + newest.Client.ConnectionError);
+            }
+        }
+
         /// <summary>Waits until the server has no SFTP session open (the client closed them).</summary>
         public async Task<int> OpenSessionsAfterSettlingAsync()
         {
@@ -107,6 +139,7 @@ public class SftpAdapterReconnectTests
 
         public async ValueTask DisposeAsync()
         {
+            Files.Released.TrySetResult(); // a held session answers, and can end
             foreach (var (server, client) in _connections)
             {
                 await client.DisposeAsync();
@@ -209,6 +242,69 @@ public class SftpAdapterReconnectTests
 
         await Assert.That(exists).IsTrue();
         await Assert.That(opens).IsEqualTo(1);
+    }
+
+    [Test]
+    public async Task TheProvider_FollowsAConnectionTheKeepAliveDeclaredDead_DuringALookup()
+    {
+        // The keep-alive fails the connection with Timeout, not ConnectionClosed: the session is replaced because it has ended, whatever
+        // the reason the lookup failed with.
+        var time = new FakeTimeProvider();
+        await using var connections = new Connections { Clock = time };
+        await using var provider = new SftpFileProvider(connections.OpenAsync, "site", NoCache);
+        await Assert.That(provider.GetFileInfo("index.html").Exists).IsTrue();
+
+        // A lookup in flight when the connection dies: the server holds it, then stops answering keep-alives.
+        connections.Files.Hold = packet => packet[0] is 7 or 17; // LSTAT, STAT
+        var lookup = Task.Run(() => provider.GetFileInfo("css/site.css").Exists);
+        for (var i = 0; i < 500 && connections.Files.Held == 0; i++)
+        {
+            await Task.Delay(10);
+        }
+
+        connections.Files.Hold = null; // the next session answers
+        await connections.TimeOutByKeepAliveAsync();
+
+        await Assert.That(await lookup).IsTrue(); // tried again on a new session
+        await Assert.That(connections.Opened).IsEqualTo(2);
+        await Assert.That(provider.GetFileInfo("index.html").Exists).IsTrue();
+        await Assert.That(connections.Opened).IsEqualTo(2);
+    }
+
+    [Test]
+    public async Task TheFileSystem_FollowsAConnectionTheKeepAliveDeclaredDead_WhileIdle()
+    {
+        var time = new FakeTimeProvider();
+        await using var connections = new Connections { Clock = time };
+        await using var fs = new SftpFileSystem(connections.OpenAsync);
+        await Assert.That(fs.File.ReadAllText("site/index.html")).IsEqualTo("<h1>hello</h1>");
+
+        await connections.TimeOutByKeepAliveAsync();
+
+        // The session ended while nothing ran on it: the next call, a write included, opens a new one rather than fail on the old.
+        fs.File.WriteAllText("site/after.txt", "written");
+        await Assert.That(Encoding.UTF8.GetString(connections.Files.FileData(Site + "/after.txt")!)).IsEqualTo("written");
+        await Assert.That(connections.Opened).IsEqualTo(2);
+    }
+
+    [Test]
+    public async Task OneRequestsProtocolError_LeavesTheSharedSessionInUse()
+    {
+        // A listing that never ends is stopped with ProtocolError: that request's failure, not the session's.
+        await using var connections = new Connections();
+        await using var provider = new SftpFileProvider(connections.OpenAsync, "site", NoCache);
+        await using var fs = new SftpFileSystem(connections.OpenAsync);
+        await Assert.That(provider.GetFileInfo("index.html").Exists).IsTrue();
+        await Assert.That(fs.File.Exists("site/index.html")).IsTrue();
+
+        connections.Files.EndlessListing = true;
+        await Assert.That(() => provider.GetDirectoryContents("css").ToList()).Throws<SshException>();
+        await Assert.That(() => fs.Directory.GetFiles("site")).Throws<IOException>();
+        connections.Files.EndlessListing = false;
+
+        await Assert.That(provider.GetDirectoryContents("css").Select(f => f.Name)).IsEquivalentTo(["site.css"]);
+        await Assert.That(fs.Directory.GetFiles("site/css").Length).IsEqualTo(1);
+        await Assert.That(connections.Opened).IsEqualTo(2); // one session each, never replaced
     }
 
     [Test]
@@ -365,10 +461,19 @@ public class SftpAdapterReconnectTests
         await using var fs = new SftpFileSystem(connections.OpenAsync);
         fs.File.WriteAllText("site/a.txt", "first");
 
+        // The connection drops while the write is in flight (a drop noticed before a call starts just means a new session for it).
+        connections.Files.Hold = packet => packet[0] == 6; // WRITE
+        var write = Task.Run(() => fs.File.WriteAllBytes("site/b.txt", "lost"u8.ToArray()));
+        for (var i = 0; i < 500 && connections.Files.Held == 0; i++)
+        {
+            await Task.Delay(10);
+        }
+
+        connections.Files.Hold = null;
         await connections.DropAsync();
 
         // The server may have done it before the connection dropped, so the write fails rather than running twice.
-        await Assert.That(() => fs.File.WriteAllBytes("site/b.txt", "lost"u8.ToArray())).Throws<IOException>();
+        await Assert.That(async () => await write).Throws<IOException>();
         await Assert.That(connections.Opened).IsEqualTo(1);
 
         // The next call opens a new session.

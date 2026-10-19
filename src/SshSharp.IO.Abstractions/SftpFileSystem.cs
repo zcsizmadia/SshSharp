@@ -53,7 +53,9 @@ public sealed class SftpFileSystem : IFileSystem, IDisposable, IAsyncDisposable
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Only a failed session or connection is replaced; an SFTP error (a missing file, a denied request) is not a failure. Calls that
+    /// Only a session that has ended is replaced (<see cref="SftpClient.IsConnected"/> false: the connection dropped, a keep-alive
+    /// declared it dead, and so on), and one found ended before a call is replaced before that call uses it; an SFTP error (a missing
+    /// file, a denied request) or one request's timeout is not a failure of the session. Calls that
     /// find no session share one call to the factory, so a dropped connection is followed by one reconnect, not one per caller. The
     /// call that meets the dropped connection fails with an <see cref="IOException"/>, unless it only reads (an attribute lookup, a
     /// listing, a whole-file read, opening a file to read): those are tried once more on a new session. A call that writes is not, since

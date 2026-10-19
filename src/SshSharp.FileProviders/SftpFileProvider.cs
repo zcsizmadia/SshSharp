@@ -55,7 +55,9 @@ public sealed class SftpFileProvider : IFileProvider, IDisposable, IAsyncDisposa
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Only a failed session or connection is replaced; a missing or unreadable file is not a failure. Lookups that find no session
+    /// Only a session that has ended is replaced (<see cref="SftpClient.IsConnected"/> false: the connection dropped, a keep-alive
+    /// declared it dead, and so on), and one found ended before a lookup is replaced before that lookup uses it; a missing or
+    /// unreadable file, or one request's timeout, is not a failure of the session. Lookups that find no session
     /// share one call to the factory, so a dropped connection is followed by one reconnect, not one per request; a lookup that fails
     /// because the connection dropped is tried once more on a new session. If the factory fails, the lookup fails with an
     /// <see cref="SshException"/> and the next one calls the factory again. Opening a session counts against
