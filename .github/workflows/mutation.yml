@@ -19,8 +19,8 @@ permissions:
 
 # Actions are pinned by commit SHA (the tag in the comment is for humans and Dependabot).
 jobs:
-  stryker:
-    name: stryker (${{ matrix.scope }})
+  mutation:
+    name: mutation (${{ matrix.scope }})
     runs-on: ubuntu-latest
     timeout-minutes: 340
     strategy:
@@ -84,9 +84,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0 # MinVer computes the version from tags and history
-      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+      - uses: ./.github/actions/setup-dotnet
         with:
-          global-json-file: global.json
+          dotnet-8: false
       - run: dotnet tool restore
       - name: Stryker
         working-directory: tests/SshSharp.Tests

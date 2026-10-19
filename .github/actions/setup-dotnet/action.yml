@@ -1,0 +1,35 @@
+name: Set up .NET
+description: >-
+  The SDK from global.json, the .NET 8 runtime the tests also target, and optionally the NuGet cache and a Release build of the
+  solution. The repository must be checked out first, with fetch-depth 0 when the build runs (MinVer computes the version from tags
+  and history).
+inputs:
+  dotnet-8:
+    description: Also install the .NET 8 runtime (for the net8.0 tests and tools)
+    default: 'true'
+  cache:
+    description: Cache the NuGet packages (keyed on Directory.Packages.props)
+    default: 'true'
+  build:
+    description: Restore and build the solution in Release
+    default: 'false'
+  build-args:
+    description: Extra arguments for dotnet build
+    default: ''
+runs:
+  using: composite
+  steps:
+    # Actions are pinned by commit SHA (the tag in the comment is for humans and Dependabot).
+    - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+      with:
+        global-json-file: global.json
+        dotnet-version: ${{ inputs.dotnet-8 == 'true' && '8.0.x' || '' }}
+        cache: ${{ inputs.cache == 'true' }}
+        cache-dependency-path: '**/Directory.Packages.props'
+    - if: inputs.build == 'true'
+      shell: bash
+      env:
+        BUILD_ARGS: ${{ inputs.build-args }}
+      run: |
+        dotnet restore
+        dotnet build -c Release --no-restore $BUILD_ARGS
