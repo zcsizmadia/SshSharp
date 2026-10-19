@@ -202,3 +202,18 @@ SshSharp.SshClientOptions.JumpHosts.get -> System.Collections.Generic.IReadOnlyL
 SshSharp.SshClientOptions.JumpHosts.init -> void
 SshSharp.SshProxyType.Custom = 3 -> SshSharp.SshProxyType
 static SshSharp.SshProxy.FromConnector(System.Func<string!, int, System.Threading.CancellationToken, System.Threading.Tasks.ValueTask<System.IO.Stream!>>! connector) -> SshSharp.SshProxy!
+SshSharp.SshClientOptions.ConfigureSocket.get -> System.Action<System.Net.Sockets.Socket!>?
+SshSharp.SshClientOptions.ConfigureSocket.init -> void
+SshSharp.SshClientOptions.VersionAddendum.get -> string?
+SshSharp.SshClientOptions.VersionAddendum.init -> void
+SshSharp.SshClientOptions.ChannelWindowSize.get -> int
+SshSharp.SshClientOptions.ChannelWindowSize.init -> void
+SshSharp.SshClientOptions.ChannelMaxPacketSize.get -> int
+SshSharp.SshClientOptions.ChannelMaxPacketSize.init -> void
+SshSharp.SshClient.SessionId.get -> System.ReadOnlyMemory<byte>
+SshSharp.SshClient.ConnectedAt.get -> System.DateTimeOffset
+SshSharp.SshClient.RemoteEndPoint.get -> System.Net.EndPoint?
+SshSharp.SshClient.LocalEndPoint.get -> System.Net.EndPoint?
+SshSharp.SshClient.BytesSent.get -> long
+SshSharp.SshClient.BytesReceived.get -> long
+SshSharp.SshClient.RekeyAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!

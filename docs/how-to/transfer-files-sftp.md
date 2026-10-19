@@ -78,6 +78,10 @@ It helps on high-latency links and where one server process is the limit; it doe
 server may allow fewer sessions than asked (sshd's `MaxSessions`). Segments apply to `DownloadFileAsync` and
 `DownloadDirectoryAsync` only, and not together with `Resume`.
 
+A larger window does the same for one session, for every download (and for `Resume`): set `ChannelWindowSize` on the connection,
+for example to 16 MiB. The two combine. See
+[Tune and inspect a connection](tune-and-inspect-connections.md#move-more-data-per-round-trip-on-long-links).
+
 ## Copy whole directories
 
 [!code-csharp[](../snippets/FileTransfer.cs#sftp-directories)]

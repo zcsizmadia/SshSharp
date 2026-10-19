@@ -23,6 +23,13 @@ With dependency injection, clients log through the container's `ILoggerFactory` 
 
 [!code-csharp[](../snippets/Diagnostics.cs#inspect)]
 
+The client also has the connection's endpoints, when it was made, its session id and how many bytes it has carried:
+
+[!code-csharp[](../snippets/ConnectionTuning.cs#inspect-connection)]
+
+These are for your own reports: SshSharp never logs or records the endpoints itself. See
+[Tune and inspect a connection](tune-and-inspect-connections.md#inspect-a-connection).
+
 ## Trace and measure with OpenTelemetry
 
 ```csharp

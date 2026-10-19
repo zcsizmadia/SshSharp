@@ -59,6 +59,14 @@ the method with `KexAlgorithms -diffie-hellman-group-exchange-sha256`.
 - Against OpenSSH for Windows, keep-alives often go unanswered and the connection ends after `KeepAliveCountMax` intervals: leave
   keep-alive off, or use a long interval with a generous count.
 - `ChannelTimeouts` closes idle channels by design; check the configuration's `ChannelTimeout`.
+- A firewall drops idle TCP flows faster than keep-alives come: shorten `KeepAliveInterval`, or turn on TCP keep-alive with
+  `ConfigureSocket` (see [Tune and inspect a connection](../how-to/tune-and-inspect-connections.md#set-socket-options)).
+
+### Transfers are slow over a long-distance link
+
+One channel moves at most one window per round trip: with the default 2 MiB window, about 20 MiB/s at 100 ms, whatever the
+bandwidth. Raise `ChannelWindowSize` (for example to 16 MiB), or use SFTP's `Segments` for downloads. See
+[Move more data per round trip on long links](../how-to/tune-and-inspect-connections.md#move-more-data-per-round-trip-on-long-links).
 
 ## Host keys
 

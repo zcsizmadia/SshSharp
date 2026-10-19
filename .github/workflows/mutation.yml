@@ -74,6 +74,9 @@ jobs:
           - scope: userauth
             mutate: -m "**/Protocol/SshUserAuth.cs"
             tests: KeyboardInteractiveTests.cs;PasswordAuthenticationTests.cs;PublicKeyAuthTests.cs;Agent/AgentServerTests.cs;Protocol/GssapiTests.cs
+          - scope: identification
+            mutate: -m "**/Protocol/SshIdentification.cs"
+            tests: Protocol/SshIdentificationTests.cs;ConnectionOptionsTests.cs
           - scope: config-parser
             mutate: -m "**/Config/SshConfig.cs" -m "**/Config/SshConfigLine.cs"
             tests: Config/*Tests.cs;Fuzz/ParserRobustnessTests.cs;ConfigConnectTests.cs;ConfigForwardingTests.cs;KeyboardInteractiveTests.cs;ObscureKeystrokeTimingTests.cs;Agent/AgentKeyManagementTests.cs

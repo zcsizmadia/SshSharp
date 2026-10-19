@@ -80,7 +80,7 @@ builder.Services.AddOpenTelemetry()
 |---|---|---|
 | `sshsharp.connections` | `{connection}` | Open connections |
 | `sshsharp.connect.duration` | `s` | Time to connect, exchange keys and authenticate, successful (tagged `ssh.kex.post_quantum`) or not (tagged `error.type`) |
-| `sshsharp.bytes.sent` / `sshsharp.bytes.received` | `By` | Message payload bytes |
+| `sshsharp.bytes.sent` / `sshsharp.bytes.received` | `By` | Message payload bytes, across connections (each connection's own are `SshClient.BytesSent` and `BytesReceived`) |
 | `sshsharp.key_exchanges` | `{exchange}` | Completed key exchanges |
 | `sshsharp.channels` | `{channel}` | Open channels |
 | `sshsharp.commands` | `{command}` | Commands run, tagged `result` (`success`, `failure` for a non-zero exit status, `error`) and, for errors, `error.type` |

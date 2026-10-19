@@ -159,6 +159,20 @@ except an `SshException` (passed as it is) and the caller's own cancellation. Th
 The transport is not trusted: the server's host key is verified over it as over TCP. Connecting over a stream you opened yourself
 (`SshClient.ConnectAsync(stream, ...)`) remains possible, but a custom proxy keeps the rest: `ConnectTimeout` covering the connection,
 jump hosts behind it, the DI package's endpoints and `ssh_config`.
+## Socket options, identification and channel sizes
+
+Three options shape the connection itself. [Tune and inspect a connection](how-to/tune-and-inspect-connections.md) has the details.
+
+- **`ConfigureSocket`** is called with the TCP socket before it connects, to set TCP keep-alive, buffer sizes or the type of
+  service. It applies to the TCP connection SshSharp opens, to the server or to the first of `JumpHosts`: not through a `Proxy`,
+  and not over a stream you opened.
+- **`VersionAddendum`** adds a comment to the client's identification line (`SSH-2.0-SshSharp_1.2.0 inventory-sync/3.4`), which
+  servers log. It is sent unencrypted, so it must not hold anything secret or personal.
+- **`ChannelWindowSize`** (default 2 MiB) and **`ChannelMaxPacketSize`** (default 32 KiB) set how much the server may send on
+  each channel before waiting, and in what packet size. A channel moves at most one window per round trip, so a larger window speeds
+  up downloads, command output and tunnels over fast links with a long round trip:
+
+[!code-csharp[](snippets/ConnectionTuning.cs#channel-window)]
 
 ## Tunnels and port forwarding
 
@@ -332,6 +346,12 @@ client.ConnectionClosed.Register(() => Console.WriteLine($"Disconnected: {client
 `IsConnected` turns false once the server disconnects, the connection fails (including missed keep-alives) or the client
 is disposed.
 
+The client also describes the connection: `RemoteEndPoint` and `LocalEndPoint` (when it runs over a socket), `ConnectedAt`, the
+`SessionId`, and the `BytesSent` and `BytesReceived` so far. `RekeyAsync()` renews the keys on demand, as ssh's `~R` escape does;
+they are renewed on their own after `RekeyAfterBytes` (1 GiB) or `RekeyAfterTime` (1 hour) anyway:
+
+[!code-csharp[](snippets/ConnectionTuning.cs#inspect-connection)]
+
 Keep-alive probes are OpenSSH transport pings (`ping@openssh.com`) where the server announces them (OpenSSH 9.5 and later), and
 `keepalive@openssh.com` requests otherwise, as OpenSSH's client sends. Any packet from the server counts as an answer.
 `client.PingAsync()` measures a round trip the same way, and also proves the connection is alive:
@@ -424,6 +444,7 @@ if (!client.Algorithms.IsPostQuantum)
 
 - How-to guides: [Port forwarding and tunnels](how-to/port-forwarding.md), [Jump hosts](how-to/jump-hosts.md),
   [Use ssh_config and known_hosts](how-to/ssh-config-and-known-hosts.md),
-  [Keep-alive and reconnecting](how-to/keepalive-and-reconnect.md), [Cancellation and timeouts](how-to/cancellation-and-timeouts.md)
+  [Keep-alive and reconnecting](how-to/keepalive-and-reconnect.md), [Cancellation and timeouts](how-to/cancellation-and-timeouts.md),
+  [Tune and inspect a connection](how-to/tune-and-inspect-connections.md)
 - [ssh_config directives](reference/ssh-config.md)
 - [Channels and flow control](concepts/channels.md)

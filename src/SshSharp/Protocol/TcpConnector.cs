@@ -19,7 +19,22 @@ internal static class TcpConnector
     /// <param name="family">The <c>AddressFamily</c> restriction.</param>
     /// <param name="what">"the server" or "the proxy", for the error message.</param>
     /// <param name="cancellationToken">Cancels resolving and connecting.</param>
-    public static async Task<NetworkStream> ConnectAsync(string host, int port, IReadOnlyList<IPEndPoint>? local, SshAddressFamily family, string what, CancellationToken cancellationToken)
+    public static Task<NetworkStream> ConnectAsync(string host, int port, IReadOnlyList<IPEndPoint>? local, SshAddressFamily family, string what, CancellationToken cancellationToken) =>
+        ConnectAsync(host, port, local, family, what, configure: null, cancellationToken);
+
+    /// <summary>
+    /// Connects like <see cref="ConnectAsync(string, int, IReadOnlyList{IPEndPoint}?, SshAddressFamily, string, CancellationToken)"/>, and
+    /// calls <paramref name="configure"/> with each socket before it connects (<see cref="SshClientOptions.ConfigureSocket"/>).
+    /// </summary>
+    /// <param name="host">The host name or address.</param>
+    /// <param name="port">The port.</param>
+    /// <param name="local">Local endpoints to connect from, or null for any.</param>
+    /// <param name="family">The <c>AddressFamily</c> restriction.</param>
+    /// <param name="what">"the server" or "the proxy", for the error message.</param>
+    /// <param name="configure">Sets the caller's socket options; what it throws is thrown as it is, not reported as a failure to connect.</param>
+    /// <param name="cancellationToken">Cancels resolving and connecting.</param>
+    public static async Task<NetworkStream> ConnectAsync(string host, int port, IReadOnlyList<IPEndPoint>? local, SshAddressFamily family, string what,
+        Action<Socket>? configure, CancellationToken cancellationToken)
     {
         // An address of the other family has nothing to try (the socket would refuse it with a NotSupportedException).
         if (family != SshAddressFamily.Any && IPAddress.TryParse(host, out var address)
@@ -38,8 +53,13 @@ internal static class TcpConnector
                 _ => new TcpClient(),
             };
             tcp.NoDelay = true;
+            var configuring = false;
             try
             {
+                // TcpClient connects this same socket, to each of the name's addresses in turn.
+                configuring = true;
+                configure?.Invoke(tcp.Client);
+                configuring = false;
                 await tcp.ConnectAsync(host, port, cancellationToken).ConfigureAwait(false);
 
                 // A cancellation racing the connect's completion can close the socket and still let ConnectAsync return (seen on
@@ -47,7 +67,7 @@ internal static class TcpConnector
                 cancellationToken.ThrowIfCancellationRequested();
                 return tcp.GetStream();
             }
-            catch (SocketException ex)
+            catch (SocketException ex) when (!configuring)
             {
                 tcp.Dispose();
                 throw new SshException(SshFailureReason.ConnectFailed, $"Could not connect to {what}: {ex.SocketErrorCode}.", ex);
@@ -89,14 +109,18 @@ internal static class TcpConnector
         foreach (var (destination, from) in candidates)
         {
             var socket = new Socket(from!.AddressFamily, SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
+            var configuring = false;
             try
             {
                 socket.Bind(from);
+                configuring = true;
+                configure?.Invoke(socket);
+                configuring = false;
                 await socket.ConnectAsync(destination, port, cancellationToken).ConfigureAwait(false);
                 cancellationToken.ThrowIfCancellationRequested(); // as above: a cancelled connect must not surface as a closed socket
                 return new NetworkStream(socket, ownsSocket: true);
             }
-            catch (SocketException ex)
+            catch (SocketException ex) when (!configuring)
             {
                 socket.Dispose();
                 if (ex.SocketErrorCode is SocketError.AddressNotAvailable or SocketError.AddressAlreadyInUse)

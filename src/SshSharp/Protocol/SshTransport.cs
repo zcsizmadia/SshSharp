@@ -50,6 +50,15 @@ internal sealed class SshTransport : IAsyncDisposable
     private long _packetsReceivedSinceKex;
     private long _kexStartedAt;
 
+    // A whole exchange, from a KEXINIT until the peer's NEWKEYS, for RekeyAsync: _rekeying ends at our NEWKEYS, before the peer's arrives.
+    // _exchangeDone is replaced when an exchange completes, before _exchangePending is cleared (RekeyAsync relies on that order).
+    private bool _exchangePending;
+    private TaskCompletionSource _exchangeDone = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    // Message payload bytes over the connection's life, as the sshsharp.bytes.* metrics count them; read from any thread.
+    private long _bytesSent;
+    private long _bytesReceived;
+
     public SshTransport(Stream stream, SshTransportOptions options)
     {
         ArgumentNullException.ThrowIfNull(stream);
@@ -98,6 +107,12 @@ internal sealed class SshTransport : IAsyncDisposable
 
     /// <summary>How many key exchanges have completed, including the first.</summary>
     public int KeyExchangeCount { get; private set; }
+
+    /// <summary>Message payload bytes sent so far (before encryption, padding and MAC), as <c>sshsharp.bytes.sent</c> counts them.</summary>
+    public long BytesSent => Interlocked.Read(ref _bytesSent);
+
+    /// <summary>Message payload bytes received so far, as <c>sshsharp.bytes.received</c> counts them.</summary>
+    public long BytesReceived => Interlocked.Read(ref _bytesReceived);
 
     /// <summary>Extensions announced by the server in <c>SSH_MSG_EXT_INFO</c> (RFC 8308), for example <c>server-sig-algs</c>.</summary>
     public IReadOnlyDictionary<string, string> ServerExtensions { get; private set; } = new Dictionary<string, string>();
@@ -521,6 +536,11 @@ internal sealed class SshTransport : IAsyncDisposable
         KeyExchangeCount++;
         SshTelemetry.KeyExchanges.Add(1);
         SshLog.KeyExchangeCompleted(_options.Logger, KeyExchangeCount);
+
+        // The task first, then the flag: RekeyAsync relies on that order.
+        var exchanged = Interlocked.Exchange(ref _exchangeDone, new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously));
+        Volatile.Write(ref _exchangePending, false);
+        exchanged.TrySetResult();
     }
 
     private bool RekeyDue() =>
@@ -554,6 +574,47 @@ internal sealed class SshTransport : IAsyncDisposable
         {
             _sendLock.Release();
         }
+    }
+
+    /// <summary>
+    /// Starts a key re-exchange now, whatever the thresholds say, and completes once it has finished: both directions use the new keys.
+    /// When one is already running, it waits for that one instead, whose keys are just as new. The receive loop carries the exchange out,
+    /// so it must be running.
+    /// </summary>
+    public async Task RekeyAsync(CancellationToken cancellationToken)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (!_connected)
+        {
+            throw new InvalidOperationException("The transport is not connected.");
+        }
+
+        Task done;
+        await _sendLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (_failed is { } failed)
+            {
+                throw failed;
+            }
+
+            // The task before the flag. An exchange that completes in between replaces the task first, so a flag still set means this
+            // task is that exchange's, and it completes. A clear flag means the last exchange has replaced its task already, so this one
+            // belongs to the exchange started here: none can start without the send lock, which this holds.
+            done = Volatile.Read(ref _exchangeDone).Task;
+            if (!Volatile.Read(ref _exchangePending))
+            {
+                SshLog.RekeyStarting(_options.Logger, "requested by the application");
+                Instrumentation.Trace("kex: we start a re-exchange (requested)");
+                await SendClientKexInitLockedAsync(cancellationToken).ConfigureAwait(false);
+            }
+        }
+        finally
+        {
+            _sendLock.Release();
+        }
+
+        await done.WaitAsync(cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>The peer started a re-exchange (or answered ours): make sure our KEXINIT is out, then run the exchange.</summary>
@@ -600,6 +661,7 @@ internal sealed class SshTransport : IAsyncDisposable
         var payload = Serialize(clientInit.Write);
         Instrumentation.Trace($"kex: our KEXINIT out (bytes since the last exchange {Interlocked.Read(ref _bytesSinceKex)}, packets received {Interlocked.Read(ref _packetsReceivedSinceKex)})");
         _rekeying = true;
+        Volatile.Write(ref _exchangePending, true);
         _pendingClientInit = clientInit;
         _pendingClientInitPayload = payload;
         PacketCodec.Encode(_writer, [], payload, _sendProtector, _sendSequence++, _padding);
@@ -660,6 +722,7 @@ internal sealed class SshTransport : IAsyncDisposable
                     onCommitted?.Invoke();
                     Interlocked.Add(ref _bytesSinceKex, length);
                     Interlocked.Increment(ref _packetsSentSinceKex);
+                    Interlocked.Add(ref _bytesSent, length);
                     SshTelemetry.BytesSent.Add(length);
                     var flush = _writer.FlushAsync(_lifetime.Token);
                     if (flush.IsCompleted)
@@ -765,6 +828,9 @@ internal sealed class SshTransport : IAsyncDisposable
     {
         _rekeyDone.TrySetException(exception);
         _ = _rekeyDone.Task.Exception; // mark observed: nobody may be waiting
+        var exchange = Volatile.Read(ref _exchangeDone);
+        exchange.TrySetException(exception);
+        _ = exchange.Task.Exception;
     }
 
     // Pooled: completes asynchronously for nearly every packet, and would otherwise allocate a state machine box each time.
@@ -791,6 +857,7 @@ internal sealed class SshTransport : IAsyncDisposable
                 TraceKexMessage("received", packet.Payload.Span[0], _receiveSequence - 1);
                 Interlocked.Add(ref _bytesSinceKex, packet.Payload.Length);
                 Interlocked.Increment(ref _packetsReceivedSinceKex);
+                Interlocked.Add(ref _bytesReceived, packet.Payload.Length);
                 SshTelemetry.BytesReceived.Add(packet.Payload.Length);
                 return packet;
             }

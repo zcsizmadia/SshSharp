@@ -133,5 +133,5 @@ public sealed partial class SshClient
         CancellationToken cancellationToken) =>
         options.Proxy is { } proxy
             ? await proxy.ConnectAsync(host, port, local, cancellationToken).ConfigureAwait(false)
-            : await TcpConnector.ConnectAsync(host, port, local, options.AddressFamily, what, cancellationToken).ConfigureAwait(false);
+            : await TcpConnector.ConnectAsync(host, port, local, options.AddressFamily, what, options.ConfigureSocket, cancellationToken).ConfigureAwait(false);
 }

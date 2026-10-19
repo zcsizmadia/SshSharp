@@ -459,6 +459,102 @@ public sealed class SshClientOptions
     public Config.SshAddressFamily AddressFamily { get; init; }
 
     /// <summary>
+    /// Sets socket options on the TCP connection to the server: TCP keep-alive, buffer sizes, the type of service (DSCP), and so on. It is
+    /// called with the new socket before it connects (after it is bound to <see cref="LocalEndPoint"/>, if set), so options that must be
+    /// set before the handshake, such as the receive buffer size that TCP window scaling depends on, take effect. Null (the default)
+    /// leaves the system's defaults; SshSharp itself turns Nagle's algorithm off (<see cref="System.Net.Sockets.Socket.NoDelay"/>).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Used by <see cref="SshClient.ConnectAsync(string, int, SshClientOptions, CancellationToken)"/> only, for a direct connection: it
+    /// is not called when the connection goes through a <see cref="Proxy"/>, nor over a stream you opened yourself
+    /// (<see cref="SshClient.ConnectAsync(Stream, SshClientOptions, bool, CancellationToken)"/>), where the socket, if there is one, is
+    /// yours to configure.
+    /// </para>
+    /// <para>
+    /// It is called once for each socket SshSharp creates: once, unless a <see cref="LocalEndPoint"/> is set and the server's name has
+    /// several addresses, when each address tried gets a socket of its own. It runs on the connecting thread and should only set options.
+    /// An exception it throws ends the attempt and is thrown from <c>ConnectAsync</c> as it is.
+    /// </para>
+    /// </remarks>
+    public Action<System.Net.Sockets.Socket>? ConfigureSocket { get; init; }
+
+    /// <summary>
+    /// A comment appended to this client's identification line, which then reads <c>SSH-2.0-SshSharp_1.2.3 comment</c> (RFC 4253 section
+    /// 4.2), for example to tell your application's connections apart in the server's logs. Null (the default) sends none. The line is
+    /// sent before encryption starts, so anyone on the network path can read it, and servers log it: put no secrets or personal data in it.
+    /// </summary>
+    /// <exception cref="ArgumentException">The comment is empty, has a character other than printable US-ASCII (space to <c>~</c>),
+    /// starts or ends with a space, or makes the line longer than the 255 bytes RFC 4253 allows.</exception>
+    public string? VersionAddendum
+    {
+        get => _versionAddendum;
+        init
+        {
+            if (value is not null && !Protocol.SshIdentification.IsValidClientComments(value))
+            {
+                throw new ArgumentException(
+                    $"The version addendum must be 1 to {Protocol.SshIdentification.MaxClientCommentsLength} printable US-ASCII characters, not starting or ending with a space.",
+                    nameof(value));
+            }
+
+            _versionAddendum = value;
+        }
+    }
+
+    private readonly string? _versionAddendum;
+
+    /// <summary>
+    /// The window each channel grants the server (RFC 4254 section 5.2): how many bytes it may send on a channel before SshSharp has
+    /// consumed some. One channel moves at most one window per round trip, so on a link with a large bandwidth-delay product (a fast,
+    /// distant link) a larger window makes a single download, command output or tunnel faster: 2 MiB per 100 ms of round trip is about
+    /// 20 MiB/s. Each channel can then hold up to this much received data that your code has not read yet. It applies to every channel:
+    /// sessions, SFTP, SCP, tunnels and forwarded connections. Default 2 MiB, as OpenSSH. Between 1 KiB and 1 GiB.
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException">The value is below 1 KiB or above 1 GiB.</exception>
+    public int ChannelWindowSize
+    {
+        get => _channelWindowSize;
+        init
+        {
+            ArgumentOutOfRangeException.ThrowIfLessThan(value, MinChannelSize);
+            ArgumentOutOfRangeException.ThrowIfGreaterThan(value, MaxChannelWindowSize);
+            _channelWindowSize = value;
+        }
+    }
+
+    private readonly int _channelWindowSize = (int)Protocol.SshChannel.DefaultWindowSize;
+
+    /// <summary>
+    /// The most data the server may put in one packet on a channel (RFC 4254 section 5.1). Larger packets mean fewer of them, and less
+    /// work per byte, for bulk transfers. It applies to every channel, as <see cref="ChannelWindowSize"/> does, and is capped at it. Default
+    /// 32 KiB, as OpenSSH. Between 1 KiB and 255 KiB: SshSharp accepts packets of up to 256 KiB, as OpenSSH does, and the rest is room for
+    /// the packet's header, padding and MAC. What the client sends is limited by what the server asks for, not by this.
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException">The value is below 1 KiB or above 255 KiB.</exception>
+    public int ChannelMaxPacketSize
+    {
+        get => _channelMaxPacketSize;
+        init
+        {
+            ArgumentOutOfRangeException.ThrowIfLessThan(value, MinChannelSize);
+            ArgumentOutOfRangeException.ThrowIfGreaterThan(value, Protocol.SshChannel.MaxDataPerPacket);
+            _channelMaxPacketSize = value;
+        }
+    }
+
+    private readonly int _channelMaxPacketSize = (int)Protocol.SshChannel.DefaultMaxPacketSize;
+
+    /// <summary>The smallest <see cref="ChannelWindowSize"/> and <see cref="ChannelMaxPacketSize"/>.</summary>
+    internal const int MinChannelSize = 1024;
+
+    /// <summary>
+    /// The largest <see cref="ChannelWindowSize"/>. RFC 4254 allows up to 4 GiB, but every channel may buffer this much unread data, so
+    /// the bound keeps a mistake from becoming unbounded memory; 1 GiB covers 10 Gbit/s at 800 ms of round trip.
+    /// </summary>
+    internal const int MaxChannelWindowSize = 1 << 30;
+
+    /// <summary>
     /// Restrict key exchange, host key, cipher and MAC algorithms to FIPS-approved ones (NIST curves and DH groups, RSA/ECDSA, AES, HMAC-SHA2).
     /// Curve25519, Ed25519 and ChaCha20-Poly1305 are excluded. This limits what is negotiated; it does not make the process FIPS-validated.
     /// </summary>

@@ -71,6 +71,36 @@ internal sealed class SshConnection : IAsyncDisposable
     /// <summary>How many key exchanges have completed, including the first.</summary>
     public int KeyExchangeCount => _transport.KeyExchangeCount;
 
+    /// <summary>The window each channel advertises (<see cref="SshClientOptions.ChannelWindowSize"/>).</summary>
+    public uint ChannelWindowSize { get; init; } = SshChannel.DefaultWindowSize;
+
+    /// <summary>The largest data packet each channel accepts (<see cref="SshClientOptions.ChannelMaxPacketSize"/>); at most the window.</summary>
+    public uint ChannelMaxPacketSize { get; init; } = SshChannel.DefaultMaxPacketSize;
+
+    /// <summary>Message payload bytes sent over the connection's life.</summary>
+    public long BytesSent => _transport.BytesSent;
+
+    /// <summary>Message payload bytes received over the connection's life.</summary>
+    public long BytesReceived => _transport.BytesReceived;
+
+    /// <summary>Re-exchanges keys now and completes when the new keys are in use both ways (see <see cref="SshTransport.RekeyAsync"/>).</summary>
+    public async Task RekeyAsync(CancellationToken cancellationToken)
+    {
+        if (_failure is { } failure)
+        {
+            throw failure;
+        }
+
+        try
+        {
+            await _transport.RekeyAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (IOException ex)
+        {
+            throw SendFailed(ex);
+        }
+    }
+
     /// <summary>Why the connection ended, if it did.</summary>
     public Exception? Failure => _failure;
 
@@ -917,8 +947,8 @@ internal sealed class SshConnection : IAsyncDisposable
         }
 
         // The confirmation must be on the wire before anything the handler sends on the channel, so it is sent first, not posted.
-        var confirmation = SshChannel.FixedMessage(SshMessage.ChannelOpenConfirmation, senderChannel, accepted.LocalId, SshChannel.LocalWindowSize,
-            SshChannel.LocalMaxPacketSize);
+        var confirmation = SshChannel.FixedMessage(SshMessage.ChannelOpenConfirmation, senderChannel, accepted.LocalId, ChannelWindowSize,
+            ChannelMaxPacketSize);
         _ = Task.Run(async () =>
         {
             try

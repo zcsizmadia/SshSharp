@@ -51,6 +51,13 @@ No. Within a process, one `SshClient` already multiplexes any number of channels
 **Can I connect through an HTTP or SOCKS proxy?**
 Yes: `SshClientOptions.Proxy = SshProxy.Http(...)`, `SshProxy.Socks5(...)` or `SshProxy.FromUri(...)`.
 
+**Can I set socket options, such as TCP keep-alive or buffer sizes?**
+Yes, with `SshClientOptions.ConfigureSocket`, called with the socket before it connects. See
+[Tune and inspect a connection](../how-to/tune-and-inspect-connections.md#set-socket-options).
+
+**Can I force a key re-exchange?**
+Yes: `client.RekeyAsync()`, as ssh's `~R` escape. Keys are also renewed on their own after `RekeyAfterBytes` or `RekeyAfterTime`.
+
 ## Authentication
 
 **In what order are credentials tried?**

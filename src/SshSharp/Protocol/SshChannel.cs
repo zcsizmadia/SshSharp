@@ -73,11 +73,11 @@ internal sealed class ChannelData : IDisposable
 /// <summary>One channel of the SSH connection layer (RFC 4254 section 5): open/close, requests, flow-controlled data.</summary>
 internal sealed class SshChannel
 {
-    /// <summary>The window we advertise: how much the peer may send before we have processed some (OpenSSH uses the same).</summary>
-    public const uint LocalWindowSize = 2 * 1024 * 1024;
+    /// <summary>The window we advertise unless <see cref="SshClientOptions.ChannelWindowSize"/> says otherwise (OpenSSH uses the same).</summary>
+    public const uint DefaultWindowSize = 2 * 1024 * 1024;
 
-    /// <summary>The largest data packet we accept.</summary>
-    public const uint LocalMaxPacketSize = 32 * 1024;
+    /// <summary>The largest data packet we accept unless <see cref="SshClientOptions.ChannelMaxPacketSize"/> says otherwise.</summary>
+    public const uint DefaultMaxPacketSize = 32 * 1024;
 
     private readonly SshConnection _connection;
     // Not single-reader: besides the reader, DiscardUnread and StopReceiving take what is queued, and can do so while a read is in
@@ -97,7 +97,11 @@ internal sealed class SshChannel
 
     // The peer's window, from its confirmation of the open (null until then).
     private SendWindow? _sendWindow;
-    private long _localWindow = LocalWindowSize;
+    private long _localWindow;
+
+    // What we advertise in the open (or its confirmation): the connection's settings, copied so the per-packet checks read a field.
+    private readonly uint _windowSize;
+    private readonly uint _maxPacketSize;
     private long _consumedSinceAdjust;
     private uint _remoteMaxPacket;
     private bool _closeSent;
@@ -110,6 +114,9 @@ internal sealed class SshChannel
     {
         _connection = connection;
         LocalId = localId;
+        _windowSize = connection.ChannelWindowSize;
+        _maxPacketSize = connection.ChannelMaxPacketSize;
+        _localWindow = _windowSize;
         _isOpenForSending = () => !Volatile.Read(ref _closeSent);
         _lastActivity = connection.Time.GetTimestamp();
     }
@@ -163,8 +170,8 @@ internal sealed class SshChannel
             w.WriteByte(SshMessage.ChannelOpen);
             w.WriteString(type);
             w.WriteUInt32(LocalId);
-            w.WriteUInt32(LocalWindowSize);
-            w.WriteUInt32(LocalMaxPacketSize);
+            w.WriteUInt32(_windowSize);
+            w.WriteUInt32(_maxPacketSize);
             typeSpecificData?.Invoke(w);
         });
         await _connection.SendAsync(payload, cancellationToken).ConfigureAwait(false);
@@ -411,7 +418,7 @@ internal sealed class SshChannel
     internal void Consumed(int length)
     {
         var total = Interlocked.Add(ref _consumedSinceAdjust, length);
-        if (total < LocalWindowSize / 2)
+        if (total < _windowSize / 2)
         {
             return;
         }
@@ -593,7 +600,7 @@ internal sealed class SshChannel
     /// <summary>Takes received bytes out of our window, or fails if the peer sent more than it allows.</summary>
     private void Reserve(int length)
     {
-        if (length > LocalMaxPacketSize || length > Interlocked.Read(ref _localWindow))
+        if (length > _maxPacketSize || length > Interlocked.Read(ref _localWindow))
         {
             throw new SshProtocolException("The peer sent more channel data than the window or maximum packet size allows.");
         }

@@ -53,6 +53,53 @@ public sealed partial class SshClient : IAsyncDisposable
     public SshNegotiatedAlgorithms Algorithms => new(_connection.Algorithms);
 
     /// <summary>
+    /// The session identifier (RFC 4253 section 7.2): the exchange hash of the first key exchange, which stays the same for the
+    /// connection's life, re-exchanges included. Both sides know it, and signatures made during authentication are bound to it, so it
+    /// identifies this connection, for example to correlate with the server's records or to bind something of your own to it. It is not
+    /// secret. This is a copy, which stays readable after the client is disposed.
+    /// </summary>
+    public ReadOnlyMemory<byte> SessionId { get; private init; }
+
+    /// <summary>When the connection was established (the moment authentication succeeded), in UTC.</summary>
+    public DateTimeOffset ConnectedAt { get; private init; }
+
+    /// <summary>
+    /// The address and port of the server, as the TCP connection sees it, when the connection runs over a socket: a TCP connection
+    /// SshSharp made (with <see cref="ConnectAsync(string, int, SshClientOptions, CancellationToken)"/>, or by <c>ssh_config</c> alias
+    /// without a jump host or proxy command), or a <see cref="NetworkStream"/> passed to
+    /// <see cref="ConnectAsync(Stream, SshClientOptions, bool, CancellationToken)"/>. Through an HTTP or SOCKS proxy it is the proxy's
+    /// address. Null over any other stream (a ProxyJump tunnel, a ProxyCommand, a pipe). Read once, when the connection is made. An IPv4
+    /// address is given as such, not in the IPv4-mapped IPv6 form (<c>::ffff:192.0.2.1</c>) a dual-mode socket reports.
+    /// </summary>
+    public System.Net.EndPoint? RemoteEndPoint { get; private init; }
+
+    /// <summary>The local address and port of the TCP connection, under the same conditions as <see cref="RemoteEndPoint"/>; null otherwise.</summary>
+    public System.Net.EndPoint? LocalEndPoint { get; private init; }
+
+    /// <summary>
+    /// SSH message bytes sent over the connection so far, from the key exchange on: the payload of each packet, before
+    /// encryption, padding and MAC, as the <c>sshsharp.bytes.sent</c> metric counts them. Safe to read from any thread.
+    /// </summary>
+    public long BytesSent => _connection.BytesSent;
+
+    /// <summary>SSH message bytes received over the connection so far, counted as <see cref="BytesSent"/> is.</summary>
+    public long BytesReceived => _connection.BytesReceived;
+
+    /// <summary>
+    /// Re-exchanges keys now, as ssh's <c>~R</c> escape does, and completes once the new keys are in use in both directions. Keys are also
+    /// renewed on their own after <see cref="SshClientOptions.RekeyAfterBytes"/> or <see cref="SshClientOptions.RekeyAfterTime"/>, and when
+    /// the server asks; if a re-exchange is already running, this waits for it instead of starting another. Channels stay open: data waits
+    /// while the keys change and then continues. The host key must be the same as at the start, or the connection fails.
+    /// </summary>
+    /// <param name="cancellationToken">Stops waiting. Once started, the exchange continues; the connection cannot go back to the old keys.</param>
+    /// <exception cref="SshException">The connection is closed or failed, or failed during the exchange.</exception>
+    public Task RekeyAsync(CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed != 0, this);
+        return _connection.RekeyAsync(cancellationToken);
+    }
+
+    /// <summary>
     /// Whether the connection is still up: false once the server disconnected, the connection failed (including a missed keep-alive,
     /// see <see cref="SshClientOptions.KeepAliveInterval"/>), or the client was disposed.
     /// </summary>
@@ -593,6 +640,7 @@ public sealed partial class SshClient : IAsyncDisposable
 
         return new SshTransportOptions
         {
+            ClientIdentification = SshIdentification.ForClient(options.VersionAddendum),
             Preferences = preferences,
             MinimumRsaBits = options.RequiredRsaSize,
             RekeyBytes = Math.Min(options.RekeyAfterBytes, SshClientOptions.MaxRekeyAfterBytes),
@@ -633,7 +681,12 @@ public sealed partial class SshClient : IAsyncDisposable
         var hostKey = transport.HostKey!;
         var algorithms = transport.Algorithms!;
         var publicHostKey = new SshHostKey(hostKey.Algorithm, hostKey.KeyType, hostKey.Fingerprint, hostKey.Blob, hostKey.KeySizeBits) { Certificate = hostKey.Certificate };
-        var connection = new SshConnection(transport, logger, options.TimeProvider);
+        var connection = new SshConnection(transport, logger, options.TimeProvider)
+        {
+            ChannelWindowSize = (uint)options.ChannelWindowSize,
+            // A packet larger than the window could never be sent whole, so the window bounds it.
+            ChannelMaxPacketSize = (uint)Math.Min(options.ChannelMaxPacketSize, options.ChannelWindowSize),
+        };
 
         // Before the receive loop starts: the server announces its host keys right after authentication.
         WatchHostKeyUpdates(connection, options, host, port, publicHostKey, logger);
@@ -658,9 +711,40 @@ public sealed partial class SshClient : IAsyncDisposable
             SshLog.KeyExchangeNotPostQuantum(logger, algorithms.Kex);
         }
 
+        var (remote, local) = EndPointsOf(stream);
         return new SshClient(
             connection, options, stream, leaveOpen, owner, transport.ServerIdentification!.Line,
-            publicHostKey, logger) { AgentBinding = transport.AgentBinding };
+            publicHostKey, logger)
+        {
+            AgentBinding = transport.AgentBinding,
+            // A copy: the transport wipes its own when the connection is disposed, and the caller cannot reach it through this one.
+            SessionId = transport.SessionId!.AsSpan().ToArray(),
+            ConnectedAt = options.TimeProvider.GetUtcNow(),
+            RemoteEndPoint = remote,
+            LocalEndPoint = local,
+        };
+    }
+
+    /// <summary>The endpoints of the socket under <paramref name="stream"/>, when it is a <see cref="NetworkStream"/>; read once, while it is open.</summary>
+    private static (System.Net.EndPoint? Remote, System.Net.EndPoint? Local) EndPointsOf(Stream stream)
+    {
+        if (stream is not NetworkStream { Socket: var socket })
+        {
+            return (null, null);
+        }
+
+        try
+        {
+            return (Unmapped(socket.RemoteEndPoint), Unmapped(socket.LocalEndPoint));
+        }
+        catch (Exception ex) when (ex is SocketException or ObjectDisposedException)
+        {
+            return (null, null); // already closed: the connection fails on its own
+        }
+
+        // A dual-mode socket (the default, for a host name) reports an IPv4 peer as ::ffff:a.b.c.d: give the address that was reached.
+        static System.Net.EndPoint? Unmapped(System.Net.EndPoint? endPoint) =>
+            endPoint is System.Net.IPEndPoint { Address.IsIPv4MappedToIPv6: true } ip ? new System.Net.IPEndPoint(ip.Address.MapToIPv4(), ip.Port) : endPoint;
     }
 
     /// <summary>ssh's default order, less hostbased (not implemented); gssapi-with-mic is tried only with <see cref="SshClientOptions.Gssapi"/>.</summary>
