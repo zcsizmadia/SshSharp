@@ -221,7 +221,7 @@ An application can also be the certificate authority: `SshCertificateBuilder` is
 Keys held by `ssh-agent` (or the Windows OpenSSH agent service, or PuTTY's Pageant) never enter your process: the agent signs.
 
 ```csharp
-var agent = SshAgent.FromEnvironment(); // SSH_AUTH_SOCK, or on Windows the OpenSSH agent, else Pageant
+var agent = await SshAgent.FromEnvironmentAsync(); // SSH_AUTH_SOCK, or on Windows the OpenSSH agent, else Pageant
 var keys = agent is null ? [] : await agent.GetKeysAsync();
 var options = new SshClientOptions { UserName = "deploy", PrivateKeys = keys, HostKeyVerifier = verifier };
 ```

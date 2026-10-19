@@ -28,11 +28,17 @@ internal sealed class TcpFakeSshServer : IAsyncDisposable
     /// <summary>The server's host key fingerprint (<c>SHA256:...</c>), the same for every connection.</summary>
     public string HostKeyFingerprint => _options.HostKey.Fingerprint;
 
+    /// <summary>The server's host key as a public key line, as its <c>.pub</c> file holds it.</summary>
+    public string HostKeyLine => $"{_options.HostKey.KeyType} {Convert.ToBase64String(_options.HostKey.Blob)} host-key";
+
     /// <summary>
     /// Public keys (SSH wire format) every connection's server accepts. When set, the servers offer only public key authentication;
     /// otherwise only the password.
     /// </summary>
     public List<byte[]> AuthorizedKeys { get; init; } = [];
+
+    /// <summary>The password the servers accept, when they offer password authentication (null: the fake server's default).</summary>
+    public string? Password { get; init; }
 
     /// <summary>Sets up each connection's server before it starts, for example to install an SFTP subsystem.</summary>
     public Action<FakeSessionServer>? Configure { get; init; }
@@ -87,7 +93,7 @@ internal sealed class TcpFakeSshServer : IAsyncDisposable
 
             var server = AuthorizedKeys.Count > 0
                 ? new FakeSessionServer(_options) { AdvertisedMethods = ["publickey"], AuthorizedKeys = AuthorizedKeys }
-                : new FakeSessionServer(_options);
+                : Password is { } password ? new FakeSessionServer(_options) { Password = password } : new FakeSessionServer(_options);
             Configure?.Invoke(server);
             _ = server.StartAsync();
             lock (_live)

@@ -446,7 +446,9 @@ public sealed partial class SshClient
 
         return hostConfig.IdentityAgent switch
         {
-            null or "SSH_AUTH_SOCK" => await (fromEnvironment ?? SshAgent.FromEnvironmentAsync)().ConfigureAwait(false),
+            null or "SSH_AUTH_SOCK" => fromEnvironment is not null
+                ? await fromEnvironment().ConfigureAwait(false)
+                : await SshAgent.FromEnvironmentAsync(CancellationToken.None).ConfigureAwait(false),
             var none when none.Equals("none", StringComparison.OrdinalIgnoreCase) => null,
             var path => new SshAgent(path),
         };

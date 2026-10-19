@@ -261,3 +261,4 @@ SshSharp.SshConfigConnectOptions.KeepAliveInterval.get -> System.TimeSpan?
 SshSharp.SshConfigConnectOptions.KeepAliveInterval.init -> void
 SshSharp.SshConfigConnectOptions.Port.get -> int?
 SshSharp.SshConfigConnectOptions.Port.init -> void
+static SshSharp.SshAgent.FromEnvironmentAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SshSharp.SshAgent?>!

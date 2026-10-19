@@ -60,9 +60,10 @@ configuration (`appsettings.json`, an environment variable such as `Ssh__Deploy_
 
 [!code-csharp[](../snippets/DependencyInjection.cs#pin-in-code)]
 
-They replace known_hosts for that endpoint: `KnownHostsFiles` or `AcceptNewHostKeys` alongside them fails validation, and a
-fingerprint not in OpenSSH's `SHA256:` format fails it at startup (with `ValidateOnStart`). See
-[Dependency injection: containers and Kubernetes](../dependency-injection.md#containers-and-kubernetes).
+An entry can also be the key itself: the server's `.pub` line (`ssh-ed25519 AAAA...`) or a known_hosts line, as `ssh-keyscan`
+prints it, so a key file can be pasted into configuration as it is. They replace known_hosts for that endpoint: `KnownHostsFiles` or
+`AcceptNewHostKeys` alongside them fails validation, and an entry that is none of these fails it at startup (with `ValidateOnStart`).
+See [Dependency injection: containers and Kubernetes](../dependency-injection.md#containers-and-kubernetes).
 
 ## Ask your own source of truth
 

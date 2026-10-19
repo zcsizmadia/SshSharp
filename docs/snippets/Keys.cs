@@ -40,8 +40,8 @@ internal static class Keys
     public static async Task AgentAsync(SshHostKeyVerifier verifier, CancellationToken cancellationToken)
     {
         // <agent>
-        // SSH_AUTH_SOCK, else on Windows the OpenSSH agent service, else Pageant.
-        var agent = SshAgent.FromEnvironment() ?? throw new InvalidOperationException("No SSH agent is running.");
+        // SSH_AUTH_SOCK, else on Windows the OpenSSH agent service, else Pageant (found without blocking a thread).
+        var agent = await SshAgent.FromEnvironmentAsync(cancellationToken) ?? throw new InvalidOperationException("No SSH agent is running.");
         var keys = await agent.GetKeysAsync(cancellationToken);   // the agent signs; the private keys never enter this process
 
         await using var client = await SshClient.ConnectAsync("example.com", 22, new SshClientOptions

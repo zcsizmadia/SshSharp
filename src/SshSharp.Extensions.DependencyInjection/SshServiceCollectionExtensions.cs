@@ -12,7 +12,8 @@ namespace Microsoft.Extensions.DependencyInjection;
 public static class SshServiceCollectionExtensions
 {
     /// <summary>
-    /// Registers the SSH endpoint <paramref name="name"/>, with <see cref="ISshClientFactory"/> and <see cref="ISshConnectionProvider"/>.
+    /// Registers the SSH endpoint <paramref name="name"/>, with <see cref="ISshClientFactory"/> and <see cref="ISshConnectionProvider"/>,
+    /// and <see cref="ISshEndpoint"/> keyed by <paramref name="name"/> (<c>[FromKeyedServices("deploy")] ISshEndpoint deploy</c>).
     /// Configure it through the returned builder, for example <c>.BindConfiguration("Ssh:Deploy")</c> or <c>.Configure(o => ...)</c>,
     /// and add <c>.ValidateOnStart()</c> to check its settings when the host starts.
     /// </summary>
@@ -30,6 +31,11 @@ public static class SshServiceCollectionExtensions
         }
 
         registry.Add(name);
+
+        // Keyed by the name, a view of the shared provider and factory for that name (not a client: resolving a service cannot wait for
+        // a connection without blocking a thread).
+        services.TryAddKeyedSingleton<ISshEndpoint>(name, (sp, _) => new SshEndpoint(
+            name, sp.GetRequiredService<ISshConnectionProvider>(), sp.GetRequiredService<ISshClientFactory>()));
         services.TryAddSingleton(sp => new SshClientFactory(
             sp, registry, sp.GetRequiredService<IOptionsMonitor<SshEndpointOptions>>(), sp.GetService<ILoggerFactory>()));
         services.TryAddSingleton<ISshClientFactory>(sp => sp.GetRequiredService<SshClientFactory>());

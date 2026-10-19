@@ -1,3 +1,4 @@
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using SshSharp.Config;
@@ -35,11 +36,15 @@ internal sealed class SshEndpointRegistry
     }
 }
 
-internal sealed class SshClientFactory(
+internal sealed partial class SshClientFactory(
     IServiceProvider services, SshEndpointRegistry registry, IOptionsMonitor<SshEndpointOptions> endpoints, ILoggerFactory? loggerFactory = null)
     : ISshClientFactory
 {
     private readonly ILogger? _logger = loggerFactory?.CreateLogger("SshSharp");
+
+    public SshEndpointRegistry Registry => registry;
+
+    private IServiceProvider Services => services;
 
     /// <summary>The endpoint's settings, validated (an invalid one throws <see cref="OptionsValidationException"/>).</summary>
     public SshEndpointOptions Endpoint(string name)
@@ -61,6 +66,9 @@ internal sealed class SshClientFactory(
                     Password = endpoint.Password,
                     Logger = _logger,
                     AddressFamily = endpoint.AddressFamily,
+                    // Null leaves the agent to ssh_config, as before UseAgent existed; true prefers an agent the application registered.
+                    UseAgent = endpoint.UseAgent ?? true,
+                    Agent = endpoint.UseAgent == true ? services.GetService<SshAgent>() : null,
                 }, timeout.Token).ConfigureAwait(false)
                 : await ConnectDirectAsync(name, endpoint, timeout.Token).ConfigureAwait(false);
         }
@@ -72,19 +80,17 @@ internal sealed class SshClientFactory(
 
     private async Task<SshClient> ConnectDirectAsync(string name, SshEndpointOptions endpoint, CancellationToken cancellationToken)
     {
-        var keys = new List<SshPrivateKey>();
+        // Every key loaded for this connection, the jump hosts' included, disposed once it has authenticated.
+        var owned = new List<SshPrivateKey>();
+        var agent = new AgentKeys(this);
         try
         {
-            foreach (var file in endpoint.PrivateKeyFiles)
+            var keys = await LoadKeysAsync(endpoint.PrivateKeyFiles, endpoint.PrivateKeyPassphrase, endpoint.PrivateKeys,
+                endpoint.UseAgent == true ? agent : null, owned, cancellationToken).ConfigureAwait(false);
+            var jumpHosts = new List<SshJumpHost>(endpoint.JumpHosts.Count);
+            foreach (var hop in endpoint.JumpHosts)
             {
-                keys.Add(await SshPrivateKey.LoadAsync(ExpandHome(file), endpoint.PrivateKeyPassphrase, cancellationToken).ConfigureAwait(false));
-            }
-
-            // Keys given as values come after the files. Validation has parsed each already, so a failure here is not expected; they are
-            // read again for each connection, as the files are, so no decrypted key outlives its authentication.
-            foreach (var entry in endpoint.PrivateKeys)
-            {
-                keys.Add(SshPrivateKey.Parse(entry.Key!, entry.Passphrase));
+                jumpHosts.Add(await JumpHostAsync(endpoint, hop, agent, owned, cancellationToken).ConfigureAwait(false));
             }
 
             var options = new SshClientOptions
@@ -92,8 +98,9 @@ internal sealed class SshClientFactory(
                 UserName = endpoint.UserName!,
                 Password = endpoint.Password,
                 PrivateKeys = keys,
-                HostKeyVerifier = HostKeyVerifier(endpoint),
+                HostKeyVerifier = HostKeyVerifier(endpoint.HostKeyFingerprints, endpoint.KnownHostsFiles, endpoint.AcceptNewHostKeys),
                 Proxy = endpoint.Proxy is { Length: > 0 } proxy ? SshEndpointOptionsValidator.ParseProxy(proxy) : null,
+                JumpHosts = jumpHosts,
                 KeepAliveInterval = endpoint.KeepAliveInterval,
                 ConnectTimeout = endpoint.ConnectTimeout,
                 AddressFamily = endpoint.AddressFamily ?? SshAddressFamily.Any,
@@ -118,7 +125,7 @@ internal sealed class SshClientFactory(
         finally
         {
             // Keys are needed only to authenticate; the connected client does not keep them.
-            foreach (var key in keys)
+            foreach (var key in owned)
             {
                 key.Dispose();
             }
@@ -126,22 +133,75 @@ internal sealed class SshClientFactory(
     }
 
     /// <summary>
-    /// Pinned fingerprints when the endpoint has them (validation has rejected known_hosts files and accept-new alongside them), otherwise
-    /// its known_hosts files.
+    /// One of <see cref="SshEndpointOptions.JumpHosts"/>, with only its own credentials. Its host key is checked against its own pins or
+    /// files, or else against the endpoint's known_hosts files (validation has rejected a hop without either behind a pinned endpoint).
     /// </summary>
-    private static SshHostKeyVerifier HostKeyVerifier(SshEndpointOptions endpoint)
+    private async Task<SshJumpHost> JumpHostAsync(SshEndpointOptions endpoint, SshEndpointJumpHost hop, AgentKeys agent, List<SshPrivateKey> owned,
+        CancellationToken cancellationToken)
     {
-        if (endpoint.HostKeyFingerprints.Count > 0)
+        var keys = await LoadKeysAsync(hop.PrivateKeyFiles, hop.PrivateKeyPassphrase, hop.PrivateKeys, hop.UseAgent ? agent : null, owned,
+            cancellationToken).ConfigureAwait(false);
+        var ownHostKeys = hop.HostKeyFingerprints.Count > 0 || hop.KnownHostsFiles.Count > 0;
+        return new SshJumpHost(hop.Host!.Trim(), hop.Port, new SshClientOptions
         {
-            return SshHostKeyVerifier.Pinned([.. endpoint.HostKeyFingerprints.Select(f => f.Trim())]);
+            UserName = hop.UserName!,
+            Password = hop.Password,
+            PrivateKeys = keys,
+            HostKeyVerifier = ownHostKeys
+                ? HostKeyVerifier(hop.HostKeyFingerprints, hop.KnownHostsFiles, hop.AcceptNewHostKeys)
+                : HostKeyVerifier([], endpoint.KnownHostsFiles, hop.AcceptNewHostKeys || endpoint.AcceptNewHostKeys),
+            KeepAliveInterval = endpoint.KeepAliveInterval,
+            ConnectTimeout = endpoint.ConnectTimeout,
+            Logger = _logger,
+        });
+    }
+
+    /// <summary>Key files, then keys given as values, then (when <paramref name="agent"/> is given) the agent's keys.</summary>
+    private static async Task<List<SshPrivateKey>> LoadKeysAsync(IList<string> files, string? passphrase, IList<SshEndpointPrivateKey> values,
+        AgentKeys? agent, List<SshPrivateKey> owned, CancellationToken cancellationToken)
+    {
+        var keys = new List<SshPrivateKey>();
+        foreach (var file in files)
+        {
+            var key = await SshPrivateKey.LoadAsync(ExpandHome(file), passphrase, cancellationToken).ConfigureAwait(false);
+            owned.Add(key);
+            keys.Add(key);
         }
 
-        string[] knownHosts = endpoint.KnownHostsFiles.Count > 0
-            ? [.. endpoint.KnownHostsFiles.Select(ExpandHome)]
+        // Keys given as values come after the files. Validation has parsed each already, so a failure here is not expected; they are
+        // read again for each connection, as the files are, so no decrypted key outlives its authentication.
+        foreach (var entry in values)
+        {
+            var key = SshPrivateKey.Parse(entry.Key!, entry.Passphrase);
+            owned.Add(key);
+            keys.Add(key);
+        }
+
+        if (agent is not null)
+        {
+            keys.AddRange(await agent.GetAsync(owned, cancellationToken).ConfigureAwait(false));
+        }
+
+        return keys;
+    }
+
+    /// <summary>
+    /// Pinned keys when there are any (validation has rejected known_hosts files and accept-new alongside them), otherwise the known_hosts
+    /// files (default <c>~/.ssh/known_hosts</c>).
+    /// </summary>
+    private static SshHostKeyVerifier HostKeyVerifier(IList<string> pins, IList<string> knownHostsFiles, bool acceptNew)
+    {
+        if (pins.Count > 0)
+        {
+            return SshHostKeyVerifier.Pinned([.. pins.Select(p => SshEndpointOptionsValidator.ParsePin(p, out _)!)]);
+        }
+
+        string[] knownHosts = knownHostsFiles.Count > 0
+            ? [.. knownHostsFiles.Select(ExpandHome)]
             : [Path.Combine(Home(), ".ssh", "known_hosts")];
         return new KnownHostsVerifier(knownHosts)
         {
-            Policy = endpoint.AcceptNewHostKeys ? StrictHostKeyChecking.AcceptNew : StrictHostKeyChecking.Yes,
+            Policy = acceptNew ? StrictHostKeyChecking.AcceptNew : StrictHostKeyChecking.Yes,
         };
     }
 
@@ -149,6 +209,45 @@ internal sealed class SshClientFactory(
 
     private static string ExpandHome(string path) =>
         path == "~" ? Home() : path.StartsWith("~/", StringComparison.Ordinal) ? Path.Combine(Home(), path[2..]) : path;
+
+    [LoggerMessage(EventId = 1001, Level = LogLevel.Debug, Message = "The SSH agent is not available ({Reason}); connecting without its keys")]
+    private static partial void AgentUnavailable(ILogger logger, SshFailureReason reason);
+
+    /// <summary>
+    /// The agent's keys, listed once per connection however many hops use them: the agent registered in the container, or else the
+    /// environment's. An agent that is not running gives none, as with ssh.
+    /// </summary>
+    private sealed class AgentKeys(SshClientFactory factory)
+    {
+        private IReadOnlyList<SshPrivateKey>? _keys;
+
+        public async Task<IReadOnlyList<SshPrivateKey>> GetAsync(List<SshPrivateKey> owned, CancellationToken cancellationToken)
+        {
+            if (_keys is not null)
+            {
+                return _keys;
+            }
+
+            var agent = factory.Services.GetService<SshAgent>() ?? await SshAgent.FromEnvironmentAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                _keys = agent is null ? [] : await agent.GetKeysAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (SshException ex) when (ex.Reason == SshFailureReason.AgentFailed)
+            {
+                // Only the reason: the agent's message can name its socket, which can hold the user's name.
+                if (factory._logger is { } logger)
+                {
+                    AgentUnavailable(logger, ex.Reason);
+                }
+
+                _keys = [];
+            }
+
+            owned.AddRange(_keys);
+            return _keys;
+        }
+    }
 }
 
 /// <summary>Checks an endpoint's settings when they are first read (or at start, with <c>ValidateOnStart</c>).</summary>
@@ -164,12 +263,13 @@ internal sealed class SshEndpointOptionsValidator(SshEndpointRegistry registry) 
         var failures = new List<string>();
         if (!string.IsNullOrEmpty(options.ConfigAlias))
         {
-            // ssh_config decides keys, host keys and proxies for an alias: a pin or key set here would otherwise be silently unused.
+            // ssh_config decides keys, host keys, proxies and jump hosts for an alias: one set here would otherwise be silently unused.
             string[] unused =
             [
                 .. options.HostKeyFingerprints.Count > 0 ? [nameof(options.HostKeyFingerprints)] : Array.Empty<string>(),
                 .. options.PrivateKeys.Count > 0 ? [nameof(options.PrivateKeys)] : Array.Empty<string>(),
                 .. !string.IsNullOrEmpty(options.Proxy) ? [nameof(options.Proxy)] : Array.Empty<string>(),
+                .. options.JumpHosts.Count > 0 ? [nameof(options.JumpHosts)] : Array.Empty<string>(),
             ];
             if (unused.Length > 0)
             {
@@ -178,20 +278,7 @@ internal sealed class SshEndpointOptionsValidator(SshEndpointRegistry registry) 
         }
         else
         {
-            if (string.IsNullOrEmpty(options.Host))
-            {
-                failures.Add($"SSH endpoint '{name}': set Host, or ConfigAlias to connect through ssh_config.");
-            }
-
-            if (string.IsNullOrEmpty(options.UserName))
-            {
-                failures.Add($"SSH endpoint '{name}': set UserName.");
-            }
-
-            if (options.Port is < 1 or > 65535)
-            {
-                failures.Add($"SSH endpoint '{name}': Port must be between 1 and 65535.");
-            }
+            ValidateServer(failures, $"SSH endpoint '{name}'", options.Host, options.UserName, options.Port, "set Host, or ConfigAlias to connect through ssh_config.");
         }
 
         if (options.ConnectTimeout <= TimeSpan.Zero)
@@ -204,8 +291,8 @@ internal sealed class SshEndpointOptionsValidator(SshEndpointRegistry registry) 
             failures.Add($"SSH endpoint '{name}': ReconnectDelay must be positive, and MaxReconnectDelay at least as long.");
         }
 
-        ValidateHostKeyFingerprints(name, options, failures);
-        ValidatePrivateKeys(name, options, failures);
+        ValidateHostKeys(failures, $"SSH endpoint '{name}'", options.HostKeyFingerprints, options.KnownHostsFiles, options.AcceptNewHostKeys);
+        ValidatePrivateKeys(failures, $"SSH endpoint '{name}'", options.PrivateKeys);
         if (!string.IsNullOrEmpty(options.Proxy) && ParseProxy(options.Proxy) is null)
         {
             // The value is not shown: it may hold the proxy's password.
@@ -213,6 +300,7 @@ internal sealed class SshEndpointOptionsValidator(SshEndpointRegistry registry) 
                 "optional port and user, as in http://proxy.example.com:3128).");
         }
 
+        ValidateJumpHosts(failures, name, options);
         return failures.Count > 0 ? ValidateOptionsResult.Fail(failures) : ValidateOptionsResult.Success;
     }
 
@@ -251,42 +339,116 @@ internal sealed class SshEndpointOptionsValidator(SshEndpointRegistry registry) 
             && string.Equals(Convert.ToBase64String(hash[..32]).TrimEnd('='), value[Prefix.Length..], StringComparison.Ordinal);
     }
 
-    private static void ValidateHostKeyFingerprints(string name, SshEndpointOptions options, List<string> failures)
+    /// <summary>
+    /// The SHA-256 fingerprint a <see cref="SshEndpointOptions.HostKeyFingerprints"/> entry pins: the entry itself when it is one, or the
+    /// fingerprint of the key in a public key line or a known_hosts line. Null when it is none of them, with the reason in
+    /// <paramref name="problem"/> (never the entry's text: a key line's comment is often a user and host name).
+    /// </summary>
+    internal static string? ParsePin(string? value, out string? problem)
     {
-        if (options.HostKeyFingerprints.Count == 0)
+        const string Unreadable = "is not an OpenSSH SHA-256 fingerprint ('SHA256:' and 43 base64 characters, as ssh-keygen -lf prints), a " +
+            "public key line (as a .pub file holds) or a known_hosts line";
+        problem = null;
+        var text = value?.Trim();
+        if (string.IsNullOrEmpty(text))
+        {
+            problem = Unreadable;
+            return null;
+        }
+
+        if (IsSha256Fingerprint(text))
+        {
+            return text;
+        }
+
+        if (text.AsSpan().IndexOfAny('\r', '\n') >= 0)
+        {
+            problem = "holds more than one line; give each key as an entry of its own";
+            return null;
+        }
+
+        if (SshPublicKey.TryParse(text, out var key))
+        {
+            return key.Fingerprint;
+        }
+
+        if (text.StartsWith('@'))
+        {
+            // A certificate authority or a revoked key is not a key to trust: pinning either would turn its meaning around.
+            problem = "is a marked known_hosts line (@cert-authority or @revoked), which cannot be pinned";
+            return null;
+        }
+
+        var file = KnownHostsFile.Parse(text);
+        if (file.Entries is [{ Marker: KnownHostsMarker.None } entry] && file.InvalidLineCount == 0)
+        {
+            try
+            {
+                return entry.GetPublicKey().Fingerprint;
+            }
+            catch (FormatException)
+            {
+                // Not a key of a supported type: reported below as any other unreadable entry.
+            }
+        }
+
+        problem = Unreadable;
+        return null;
+    }
+
+    private static void ValidateServer(List<string> failures, string subject, string? host, string? userName, int port, string missingHost)
+    {
+        if (string.IsNullOrWhiteSpace(host))
+        {
+            failures.Add($"{subject}: {missingHost}");
+        }
+
+        if (string.IsNullOrEmpty(userName))
+        {
+            failures.Add($"{subject}: set UserName.");
+        }
+
+        if (port is < 1 or > 65535)
+        {
+            failures.Add($"{subject}: Port must be between 1 and 65535.");
+        }
+    }
+
+    private static void ValidateHostKeys(List<string> failures, string subject, IList<string> pins, IList<string> knownHostsFiles, bool acceptNew)
+    {
+        if (pins.Count == 0)
         {
             return;
         }
 
-        for (var i = 0; i < options.HostKeyFingerprints.Count; i++)
+        for (var i = 0; i < pins.Count; i++)
         {
-            if (options.HostKeyFingerprints[i] is not { } fingerprint || !IsSha256Fingerprint(fingerprint.Trim()))
+            if (ParsePin(pins[i], out var problem) is null)
             {
-                failures.Add($"SSH endpoint '{name}': HostKeyFingerprints[{i}] is not an OpenSSH SHA-256 fingerprint ('SHA256:' and 43 base64 " +
-                    "characters, as ssh-keygen -lf prints).");
+                failures.Add($"{subject}: HostKeyFingerprints[{i}] {problem}.");
             }
         }
 
-        // Pinned fingerprints replace known_hosts. Accepting a key either list allows would widen what is trusted to the larger of the two,
+        // Pinned keys replace known_hosts. Accepting a key either list allows would widen what is trusted to the larger of the two,
         // requiring both would bring back the file that pinning removes, and ignoring one silently would hide a mistake: so neither mixes.
-        if (options.KnownHostsFiles.Count > 0)
+        if (knownHostsFiles.Count > 0)
         {
-            failures.Add($"SSH endpoint '{name}': set HostKeyFingerprints or KnownHostsFiles, not both; pinned fingerprints replace known_hosts.");
+            failures.Add($"{subject}: set HostKeyFingerprints or KnownHostsFiles, not both; pinned fingerprints replace known_hosts.");
         }
 
-        if (options.AcceptNewHostKeys)
+        if (acceptNew)
         {
-            failures.Add($"SSH endpoint '{name}': AcceptNewHostKeys cannot be combined with HostKeyFingerprints, which trust only the pinned keys.");
+            failures.Add($"{subject}: AcceptNewHostKeys cannot be combined with HostKeyFingerprints, which trust only the pinned keys.");
         }
     }
 
-    private static void ValidatePrivateKeys(string name, SshEndpointOptions options, List<string> failures)
+    private static void ValidatePrivateKeys(List<string> failures, string subject, IList<SshEndpointPrivateKey> keys)
     {
-        for (var i = 0; i < options.PrivateKeys.Count; i++)
+        for (var i = 0; i < keys.Count; i++)
         {
-            if (options.PrivateKeys[i] is not { Key: { } text } entry || string.IsNullOrWhiteSpace(text))
+            if (keys[i] is not { Key: { } text } entry || string.IsNullOrWhiteSpace(text))
             {
-                failures.Add($"SSH endpoint '{name}': PrivateKeys[{i}] has no Key (the private key's text).");
+                failures.Add($"{subject}: PrivateKeys[{i}] has no Key (the private key's text).");
                 continue;
             }
 
@@ -298,7 +460,32 @@ internal sealed class SshEndpointOptionsValidator(SshEndpointRegistry registry) 
             }
             catch (FormatException ex)
             {
-                failures.Add($"SSH endpoint '{name}': PrivateKeys[{i}] could not be read: {ex.Message}");
+                failures.Add($"{subject}: PrivateKeys[{i}] could not be read: {ex.Message}");
+            }
+        }
+    }
+
+    /// <summary>Each hop as the endpoint itself is checked, and a hop behind a pinned endpoint must say how its own key is checked.</summary>
+    private static void ValidateJumpHosts(List<string> failures, string name, SshEndpointOptions options)
+    {
+        for (var i = 0; i < options.JumpHosts.Count; i++)
+        {
+            var subject = $"SSH endpoint '{name}': JumpHosts[{i}]";
+            if (options.JumpHosts[i] is not { } hop)
+            {
+                failures.Add($"{subject} is empty.");
+                continue;
+            }
+
+            ValidateServer(failures, subject, hop.Host, hop.UserName, hop.Port, "set Host.");
+            ValidateHostKeys(failures, subject, hop.HostKeyFingerprints, hop.KnownHostsFiles, hop.AcceptNewHostKeys);
+            ValidatePrivateKeys(failures, subject, hop.PrivateKeys);
+            if (options.HostKeyFingerprints.Count > 0 && hop.HostKeyFingerprints.Count == 0 && hop.KnownHostsFiles.Count == 0)
+            {
+                // The endpoint's pins are the destination's keys; the hop would otherwise fall back to known_hosts files a pinned
+                // deployment does not have.
+                failures.Add($"{subject}: set HostKeyFingerprints or KnownHostsFiles for the jump host; the endpoint's pinned fingerprints " +
+                    "are the destination's.");
             }
         }
     }

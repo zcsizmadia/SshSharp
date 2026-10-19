@@ -9,7 +9,7 @@ generates new keys, and signs with keys that never leave a TPM, smart card, HSM 
 |---|---|
 | A file (`~/.ssh/id_ed25519`, a `.pem`, a PuTTY `.ppk`) | `SshPrivateKey.LoadAsync` |
 | A secret store or CI variable | `SshPrivateKey.Parse` |
-| `ssh-agent`, the Windows OpenSSH agent, or Pageant (including FIDO security keys) | `SshAgent.FromEnvironment()` and `GetKeysAsync` |
+| `ssh-agent`, the Windows OpenSSH agent, or Pageant (including FIDO security keys) | `SshAgent.FromEnvironmentAsync()` and `GetKeysAsync` |
 | A Windows key store, the TPM, a smart card | `SshPrivateKey.FromRsa` / `FromECDsa` with `RSACng` / `ECDsaCng` |
 | A cloud KMS, an HSM, a signing service | `SshPrivateKey.FromSigner` with your `SshKeySigner` |
 | Any of these, served as an agent to forward (no `ssh-agent` running) | `SshAgent.FromKeys` |
@@ -30,6 +30,10 @@ Formats: OpenSSH (`BEGIN OPENSSH PRIVATE KEY`, encrypted too), PKCS#8 (encrypted
 ## Use the SSH agent
 
 [!code-csharp[](../snippets/Keys.cs#agent)]
+
+`FromEnvironmentAsync` finds the agent as `ssh` does without blocking a thread: on Windows that means listing the named pipes, which
+can be slow. `FromEnvironment()` does the same synchronously, for code that is not asynchronous. With dependency injection, set the
+endpoint's `UseAgent` instead; see [Dependency injection: the SSH agent](../dependency-injection.md#the-ssh-agent).
 
 Agent keys work wherever key files do, including with certificates and for [signing files](../signing.md). FIDO security keys
 (`sk-ssh-ed25519@openssh.com`, `sk-ecdsa-sha2-nistp256@openssh.com`) work through the agent: the agent and a touch of the key make
