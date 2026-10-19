@@ -50,7 +50,7 @@ builder.Services.AddSshClient("db", o => o.ConfigAlias = "prod-db"); // everythi
 | `KeepAliveInterval` | Keep-alives, so a dead connection is noticed. |
 | `ConnectTimeout` | How long one attempt may take, authentication included (default 30 s); then a `TimeoutException`. It is also the built `SshClientOptions.ConnectTimeout`, which `ConfigureClientOptions` may shorten but not extend. |
 | `ReconnectDelay`, `MaxReconnectDelay` | The shared connection's wait after a failed attempt (default 1 s, doubling up to 1 min). |
-| `ConfigureClientOptions` | A function from the services and the built `SshClientOptions` to the options to use: an agent, a custom host key verifier, keys held elsewhere (`SshPrivateKey.FromSigner`), a proxy. Not used with `ConfigAlias`. |
+| `ConfigureClientOptions` | A function from the services and the built `SshClientOptions` to the options to use: an agent, a custom host key verifier, keys held elsewhere (`SshPrivateKey.FromSigner`), a proxy (also a custom one, `SshProxy.FromConnector`), jump hosts (`JumpHosts`, see [Jump hosts](how-to/jump-hosts.md#in-an-aspnet-core-application)). Not used with `ConfigAlias`. |
 
 ## Containers and Kubernetes
 

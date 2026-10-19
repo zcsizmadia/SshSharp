@@ -27,6 +27,9 @@ apart. `null` (the default) sets no limit.
 With `ssh_config`, `ConnectTimeout` applies when connecting by alias, per hop, and fails the same way. There it starts before the
 identity files are loaded and covers the `ProxyJump` hops before the host, as `ssh`'s does.
 
+With `SshClientOptions.JumpHosts`, the destination's `ConnectTimeout` bounds the whole chain (every hop, every tunnel, and the
+destination's handshake and login), and a hop's own `ConnectTimeout` bounds that hop within it. Either fails the same way.
+
 A token gives the same bound without the option, with an exception of your choosing:
 
 [!code-csharp[](../snippets/Resilience.cs#connect-timeout-token)]

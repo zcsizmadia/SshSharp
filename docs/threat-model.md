@@ -9,7 +9,8 @@ proxies, remote dynamic and Unix-socket forwarding, destination-constrained agen
 
 ## Trusted
 
-- **The application** that uses the library, its options and callbacks (host key verifier, loggers, `Match exec` runner).
+- **The application** that uses the library, its options and callbacks (host key verifier, loggers, `Match exec` runner, a custom
+  proxy's connector).
 - **Signers** (`SshKeySigner`, `SshPrivateKey.FromSigner`, `FromRsa`, `FromECDsa`): application code, or a key service it trusts,
   that signs for a key SshSharp never sees. Each request says what it is for (`SshSignRequest.Purpose`: logging in, an SSH
   signature with its namespace, a certificate the key issues as a CA, or `Other`: data of another form that a program on a server asked a forwarded in-process agent to sign), so a signer can refuse by policy. What it signs includes the session identifier and the user name,
@@ -171,6 +172,28 @@ A man in the middle can read, change, drop and inject bytes. The server itself m
 - Proxy credentials (HTTP Basic, SOCKS 5 user name and password) are sent as the protocols define them, in clear text to the
   proxy; they never appear in exceptions or logs. Replies are bounded (HTTP headers to 16 KiB) and validated, and host names
   that a protocol cannot carry are refused rather than altered.
+- A custom proxy (`SshProxy.FromConnector`) is the application's own code, run in-process; it is given the host and port of the
+  first network hop and nothing else (no credentials, no host keys). The stream it returns is trusted no more than a TCP
+  connection: the host key is verified over it, so a transport that misbehaves can refuse, delay or break the connection but not
+  read or change it. Its exception messages are not copied into the library's own (they may name the host); the exception is kept
+  as the inner exception for the application.
+
+### Jump hosts
+
+A jump host (`SshClientOptions.JumpHosts`, or `ProxyJump` in `ssh_config`) relays the next hop's SSH connection through a
+`direct-tcpip` channel. It sees the next host's name and port and the encrypted traffic, and can refuse, delay or end the
+connection, but not read or change it: each host's key is verified end to end, by that host's own verifier.
+
+- Credentials go only to the host they belong to. With `JumpHosts`, each hop is offered only what its own `SshJumpHost.Options`
+  hold, and the destination's password, keys, keyboard-interactive handler and agent forwarding are never offered to a hop (nor
+  a hop's to the destination). With `ProxyJump`, see [Configuration input](#configuration-input).
+- A hop's options cannot carry a proxy, a local address or jump hosts of their own (`ArgumentException`), so which network
+  connection a setting applies to is never ambiguous: the destination's `Proxy`, `LocalEndPoint` and `AddressFamily` apply to
+  the first hop.
+- An application that passes the same `SshClientOptions` object to a hop and to the destination offers the same credentials to
+  both, by its own choice.
+- A connection that fails partway closes the hops already opened, and disposing the destination closes the whole chain, so no
+  authenticated hop is left open behind a failed or finished connection.
 
 ### SFTP
 

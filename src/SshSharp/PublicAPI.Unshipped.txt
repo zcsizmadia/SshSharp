@@ -193,3 +193,12 @@ SshSharp.SshPasswordPrompt.IsRetry.get -> bool
 SshSharp.SshPasswordPrompt.Method.get -> string!
 SshSharp.SshPasswordPrompt.Port.get -> int
 SshSharp.SshPasswordPrompt.UserName.get -> string!
+SshSharp.SshJumpHost
+SshSharp.SshJumpHost.Host.get -> string!
+SshSharp.SshJumpHost.Options.get -> SshSharp.SshClientOptions!
+SshSharp.SshJumpHost.Port.get -> int
+SshSharp.SshJumpHost.SshJumpHost(string! host, int port, SshSharp.SshClientOptions! options) -> void
+SshSharp.SshClientOptions.JumpHosts.get -> System.Collections.Generic.IReadOnlyList<SshSharp.SshJumpHost!>!
+SshSharp.SshClientOptions.JumpHosts.init -> void
+SshSharp.SshProxyType.Custom = 3 -> SshSharp.SshProxyType
+static SshSharp.SshProxy.FromConnector(System.Func<string!, int, System.Threading.CancellationToken, System.Threading.Tasks.ValueTask<System.IO.Stream!>>! connector) -> SshSharp.SshProxy!

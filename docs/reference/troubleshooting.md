@@ -7,7 +7,7 @@ and each authentication attempt, much as `ssh -vvv` does. Then find the symptom 
 
 ### `ConnectFailed`
 
-The TCP connection (or a proxy, `ProxyJump` hop or `ProxyCommand`) failed before SSH started.
+The TCP connection (or a proxy, `ProxyJump` or `JumpHosts` hop or `ProxyCommand`) failed before SSH started. A custom proxy (`SshProxy.FromConnector`) that threw has its exception as the `InnerException`.
 
 - Check the host name, port and firewall: does `ssh -p <port> <host>` connect from the same machine?
 - Through a proxy: the message says what the proxy answered (a 407 means proxy credentials are needed).

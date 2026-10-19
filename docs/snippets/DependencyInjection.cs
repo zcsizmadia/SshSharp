@@ -154,4 +154,46 @@ internal static class DependencyInjection
         });
         // </customize>
     }
+
+    /// <summary>The bastion's login key, registered once (loaded at startup, or held by a key store through <c>SshPrivateKey.FromSigner</c>).</summary>
+    public sealed class BastionCredentials(SshPrivateKey key)
+    {
+        public SshPrivateKey Key { get; } = key;
+    }
+
+    public static void JumpHost(IServiceCollection services)
+    {
+        // <jump-hosts>
+        services.AddSshClient("internal-app", o =>
+        {
+            o.Host = "app1.internal"; // resolved by the bastion
+            o.UserName = "deploy";
+            o.PrivateKeyFiles.Add("~/.ssh/deploy_ed25519");
+            o.KnownHostsFiles.Add("/etc/myapp/known_hosts"); // holds the bastion's key and the target's
+
+            o.ConfigureClientOptions = (provider, built) => new SshClientOptions
+            {
+                UserName = built.UserName,
+                Password = built.Password,
+                PrivateKeys = built.PrivateKeys,
+                HostKeyVerifier = built.HostKeyVerifier,
+                Proxy = built.Proxy, // if set, it now carries the connection to the bastion
+                KeepAliveInterval = built.KeepAliveInterval,
+                ConnectTimeout = built.ConnectTimeout, // bounds the whole chain
+                Logger = built.Logger,
+                // Added: the bastion, with its own user and key. The endpoint's password and keys are never offered to it.
+                JumpHosts =
+                [
+                    new SshJumpHost("bastion.example.com", 22, new SshClientOptions
+                    {
+                        UserName = "jump",
+                        PrivateKeys = [provider.GetRequiredService<BastionCredentials>().Key],
+                        HostKeyVerifier = built.HostKeyVerifier,
+                        KeepAliveInterval = built.KeepAliveInterval,
+                    }),
+                ],
+            };
+        });
+        // </jump-hosts>
+    }
 }

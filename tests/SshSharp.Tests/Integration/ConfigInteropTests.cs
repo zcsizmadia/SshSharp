@@ -67,6 +67,44 @@ public sealed class ConfigInteropTests : IDisposable
     }
 
     [Test]
+    public async Task TwoJumpHosts_ConfiguredInCode()
+    {
+        // The same chain as above, from SshClientOptions.JumpHosts: each hop with its own options and known_hosts check.
+        var user = Environment.GetEnvironmentVariable("SSHSHARP_TEST_USER");
+        if (RealServer.Endpoint is not var (host, port) || string.IsNullOrEmpty(user) || Key is not { } path || !File.Exists(path))
+        {
+            Skip.Test("SSHSHARP_TEST_SSHD, SSHSHARP_TEST_USER and SSHSHARP_TEST_KEYDIR are needed.");
+            return;
+        }
+
+        using var key = await SshPrivateKey.LoadAsync(path, cancellationToken: Timeout());
+        var knownHosts = Path.Combine(_dir, "known_hosts");
+        SshClientOptions Hop() => new()
+        {
+            UserName = user,
+            PrivateKeys = [key],
+            HostKeyVerifier = new KnownHostsVerifier([knownHosts]) { Policy = StrictHostKeyChecking.AcceptNew },
+            KeepAliveInterval = TimeSpan.FromSeconds(5),
+        };
+
+        var hop = Hop();
+        await using var client = await SshClient.ConnectAsync("localhost", port, new SshClientOptions
+        {
+            UserName = user,
+            PrivateKeys = [key],
+            HostKeyVerifier = hop.HostKeyVerifier,
+            ConnectTimeout = TimeSpan.FromSeconds(60),
+            JumpHosts = [new SshJumpHost(host, port, hop), new SshJumpHost(host, port, Hop())],
+        }, Timeout());
+        var result = await client.RunCommandAsync("echo through-two-jump-hosts", Timeout());
+        await Assert.That(result.StandardOutputText).IsEqualTo("through-two-jump-hosts\n");
+
+        // accept-new recorded the server's key under each name it was reached by.
+        var known = KnownHostsFile.Load(knownHosts);
+        await Assert.That(known.Entries.Count).IsGreaterThanOrEqualTo(2);
+    }
+
+    [Test]
     public async Task ProxyCommand_WithNetcat()
     {
         var netcat = new[] { "/usr/bin/nc", "/bin/nc" }.FirstOrDefault(File.Exists);

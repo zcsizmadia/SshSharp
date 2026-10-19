@@ -81,33 +81,19 @@ public sealed partial class SshClient
                 // Each hop owns the one before it, so disposing the destination tears down the whole chain (ProxyJump a,b: the client
                 // owns b, and b owns a).
                 Owned tunnel;
-                (stream, tunnel) = await TunnelAsync(via, hostConfig, ownsVia: true, token).ConfigureAwait(false);
+                (stream, tunnel) = await TunnelAsync(via, hostConfig.HostName, hostConfig.Port, ownsVia: true, token).ConfigureAwait(false);
                 owner.Add(tunnel);
             }
             else if (hostConfig.ProxyJump.Count > 0)
             {
-                // Each hop is reached through the one before; the first hop uses its own configuration.
-                SshClient? hop = null;
-                try
-                {
-                    foreach (var jump in hostConfig.ProxyJump)
-                    {
-                        var (jumpUser, jumpHost, jumpPort) = ParseDestination(jump);
-                        hop = await ConnectHopAsync(jumpHost, jumpUser, jumpPort, config, options, hop, depth + 1, token).ConfigureAwait(false);
-                    }
-                }
-                catch
-                {
-                    if (hop is not null)
-                    {
-                        await hop.DisposeAsync().ConfigureAwait(false);
-                    }
-
-                    throw;
-                }
-
+                // Each hop is reached through the one before; the first hop uses its own configuration. The chain is built as for
+                // SshClientOptions.JumpHosts; only how each hop is configured differs.
                 Owned tunnel;
-                (stream, tunnel) = await TunnelAsync(hop!, hostConfig, ownsVia: true, token).ConfigureAwait(false);
+                (stream, tunnel) = await ConnectChainAsync(hostConfig.ProxyJump.Count, (index, hop, hopToken) =>
+                {
+                    var (jumpUser, jumpHost, jumpPort) = ParseDestination(hostConfig.ProxyJump[index]);
+                    return ConnectHopAsync(jumpHost, jumpUser, jumpPort, config, options, hop, depth + 1, hopToken);
+                }, hostConfig.HostName, hostConfig.Port, token).ConfigureAwait(false);
                 owner.Add(tunnel);
             }
             else if (hostConfig.ProxyCommand is { } command)
@@ -214,32 +200,6 @@ public sealed partial class SshClient
             {
                 await owner.DisposeAsync().ConfigureAwait(false);
             }
-        }
-    }
-
-    /// <summary>Opens a <c>direct-tcpip</c> channel through <paramref name="via"/> to the host's HostName and Port, as a stream.</summary>
-    private static async Task<(Stream Stream, Owned Owner)> TunnelAsync(SshClient via, SshHostConfig hostConfig, bool ownsVia, CancellationToken cancellationToken)
-    {
-        try
-        {
-            var channel = await via.Connection.OpenDirectTcpIpAsync(hostConfig.HostName, hostConfig.Port, "127.0.0.1", 0, cancellationToken).ConfigureAwait(false);
-            var stream = new SshChannelStream(channel);
-            var owner = new Owned(stream);
-            if (ownsVia)
-            {
-                owner.Add(via);
-            }
-
-            return (stream, owner);
-        }
-        catch (SshException ex) when (ex is not SshProtocolException)
-        {
-            if (ownsVia)
-            {
-                await via.DisposeAsync().ConfigureAwait(false);
-            }
-
-            throw new SshException(SshFailureReason.ConnectFailed, "The jump host could not open a connection to the next host: " + ex.Message, ex);
         }
     }
 

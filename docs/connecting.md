@@ -90,6 +90,14 @@ directory, environment, local user), a `Password`, extra `PrivateKeys`, a `Passp
 authenticated with its own configuration. `ProxyCommand` runs a local command and speaks SSH over its standard input and
 output, as `ssh` does; set `AllowProxyCommand = false` to refuse configurations that name one.
 
+Without `ssh_config`, `SshClientOptions.JumpHosts` builds the same chain: a list of `SshJumpHost`, each with its own host, port and
+`SshClientOptions` (user, credentials, host key verifier). The destination's credentials are never offered to a hop, its
+`ConnectTimeout` bounds the whole chain, and disposing the client closes every hop:
+
+[!code-csharp[](snippets/Connecting.cs#jump-hosts)]
+
+See [Jump hosts](how-to/jump-hosts.md#in-code) for what applies where.
+
 ## From a chosen local address
 
 On a machine with several networks (a VPN, a management network), `LocalEndPoint` picks the address the connection comes from, as
@@ -136,6 +144,21 @@ With `ssh_config`, `SshConfigConnectOptions.Proxy` applies to the first network 
 
 Basic and SOCKS 5 credentials cross the network to the proxy unencrypted, as with every client of these protocols; the SSH
 connection inside is encrypted end to end as usual.
+
+### Your own transport
+
+For a transport that is neither TCP nor HTTP or SOCKS (a cloud provider's tunnel, a WebSocket, a named pipe), `SshProxy.FromConnector`
+takes a function that returns a connected stream for a host and port. Its `Type` is `SshProxyType.Custom`. It is used wherever a
+proxy is: `SshClientOptions.Proxy`, `SshConfigConnectOptions.Proxy`, and the first hop of `JumpHosts` or `ProxyJump`:
+
+[!code-csharp[](snippets/Connecting.cs#custom-proxy)]
+
+The connector's token ends with the caller's and with `ConnectTimeout`; there is no other time limit, and `LocalEndPoint` and
+`AddressFamily` do not apply. Anything it throws becomes an `SshException` with `Reason = ConnectFailed` and the original inside,
+except an `SshException` (passed as it is) and the caller's own cancellation. The stream belongs to the connection from then on.
+The transport is not trusted: the server's host key is verified over it as over TCP. Connecting over a stream you opened yourself
+(`SshClient.ConnectAsync(stream, ...)`) remains possible, but a custom proxy keeps the rest: `ConnectTimeout` covering the connection,
+jump hosts behind it, the DI package's endpoints and `ssh_config`.
 
 ## Tunnels and port forwarding
 
