@@ -17,7 +17,7 @@
     <PackageVersion Include="Microsoft.Extensions.Diagnostics.HealthChecks" Version="10.0.12" />
     <PackageVersion Include="TestableIO.System.IO.Abstractions" Version="22.3.0" />
     <!-- Tests only: a real consumer of SftpFileProvider. -->
-    <PackageVersion Include="Microsoft.Extensions.Configuration.Json" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration.Json" Version="10.0.13" />
     <PackageVersion Include="BenchmarkDotNet" Version="0.15.8" />
     <!-- Only the benchmark project references SSH.NET, for the comparison in docs/benchmarks.md. -->
     <PackageVersion Include="SSH.NET" Version="2026.0.0" />
