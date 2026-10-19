@@ -230,6 +230,9 @@ jobs:
           set -euo pipefail
           dotnet publish tests/SshSharp.AotSmoke -c Release -o "$RUNNER_TEMP/aot"
           "$RUNNER_TEMP/aot/SshSharp.AotSmoke"
+      - name: Native AOT sample publishes
+        # The sample tool must stay publishable with Native AOT (trim and AOT warnings are errors).
+        run: dotnet publish samples/SshSharp.Samples.Aot -c Release -o "$RUNNER_TEMP/aot-sample"
       - name: sshd log
         if: failure()
         run: |

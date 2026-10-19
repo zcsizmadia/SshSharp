@@ -72,6 +72,7 @@ sshd's `Subsystem`. The session's streams then carry that protocol byte for byte
 
 ## See also
 
+- [Terminal sample](https://github.com/zcsizmadia/SshSharp/tree/main/samples/SshSharp.Samples.Terminal): a terminal client with raw key input and window resizing
 - [Commands and shells](../sessions.md) (in-depth guide, including terminal modes, signals and BREAK)
 - [Migrate from SSH.NET: shells](../migrating-from-sshnet.md#shells)
 - <xref:SshSharp.SshExpect> and <xref:SshSharp.SshTerminalOptions> in the API reference

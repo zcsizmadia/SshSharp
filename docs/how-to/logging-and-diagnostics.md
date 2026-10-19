@@ -62,6 +62,7 @@ The BCL's listeners see the same data, for a quick look in a console tool or a t
 
 ## See also
 
+- [OpenTelemetry sample](https://github.com/zcsizmadia/SshSharp/tree/main/samples/SshSharp.Samples.OpenTelemetry): traces and metrics exported over OTLP
 - [Errors and diagnostics](../diagnostics.md) (in-depth: every tag and instrument)
 - [Troubleshooting](../reference/troubleshooting.md)
 - <xref:SshSharp.SshTelemetry> in the API reference

@@ -84,7 +84,7 @@ tests/sftp-servers/        # other SFTP servers for interop (a Go pkg/sftp serve
 tests/SshSharp.Fuzz/       # coverage-guided SharpFuzz harness, run nightly
 tests/SshSharp.Benchmarks/ # BenchmarkDotNet, the SSH.NET comparison, the constant-time check (--timing)
 tests/SshSharp.AotSmoke/   # Native AOT smoke test against a real server
-samples/                   # an ssh-like tool, ASP.NET Core and worker service samples, built with the solution
+samples/                   # an ssh-like tool, ASP.NET Core, worker, OpenTelemetry, terminal, jump host and Native AOT samples
 docs/                      # guides, design notes, the API reference site (DocFX)
 ```
 
