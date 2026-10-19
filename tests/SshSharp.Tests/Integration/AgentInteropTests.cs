@@ -220,7 +220,10 @@ public class AgentInteropTests
     }
 
     [Test]
-    [NotInParallel("authorized_keys")] // two tests editing the file at once could each drop the other's line
+    // Both keys: a method's NotInParallel replaces the class's, and this test's constrained key, while it is in the agent, is in the
+    // local key list but not in a forwarded agent's (TheForwardedAgent_IsUsableOnTheServer compares the two). Two tests editing
+    // authorized_keys at once could each drop the other's line.
+    [NotInParallel(["ssh-agent", "authorized_keys"])]
     public async Task ADestinationConstrainedKey_SignsInOnlyWhereItIsAllowed()
     {
         var user = Environment.GetEnvironmentVariable("SSHSHARP_TEST_USER");
