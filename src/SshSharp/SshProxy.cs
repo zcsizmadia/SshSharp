@@ -17,6 +17,11 @@ public enum SshProxyType
 
     /// <summary>SOCKS 5 (RFC 1928), with username and password authentication (RFC 1929) when credentials are given.</summary>
     Socks5,
+
+    /// <summary>
+    /// Your own connector (<see cref="SshProxy.FromConnector"/>): a tunnel, a WebSocket or anything else that returns a connected stream.
+    /// </summary>
+    Custom,
 }
 
 /// <summary>
@@ -27,11 +32,22 @@ public enum SshProxyType
 /// <remarks>
 /// Destination host names are sent to the proxy, which resolves them (as <c>curl --socks5-hostname</c> does), so names the proxy's
 /// network knows work, and local DNS does not see them. HTTP Basic and SOCKS 5 credentials cross the network to the proxy in the
-/// clear (as with every client of these protocols), so use them only with a proxy on a network you trust.
+/// clear (as with every client of these protocols), so use them only with a proxy on a network you trust. For a transport these
+/// protocols do not cover, <see cref="FromConnector"/> takes your own.
 /// </remarks>
 public sealed class SshProxy
 {
     private const int MaxHttpResponseHeader = 16 * 1024;
+
+    private readonly Func<string, int, CancellationToken, ValueTask<Stream>>? _connector;
+
+    private SshProxy(Func<string, int, CancellationToken, ValueTask<Stream>> connector)
+    {
+        ArgumentNullException.ThrowIfNull(connector);
+        Type = SshProxyType.Custom;
+        Host = string.Empty;
+        _connector = connector;
+    }
 
     private SshProxy(SshProxyType type, string host, int port, NetworkCredential? credentials)
     {
@@ -63,10 +79,10 @@ public sealed class SshProxy
     /// <summary>The kind of proxy.</summary>
     public SshProxyType Type { get; }
 
-    /// <summary>The proxy's host name or address.</summary>
+    /// <summary>The proxy's host name or address; empty for a <see cref="SshProxyType.Custom"/> one, which connects as it chooses.</summary>
     public string Host { get; }
 
-    /// <summary>The proxy's port.</summary>
+    /// <summary>The proxy's port; 0 for a <see cref="SshProxyType.Custom"/> one.</summary>
     public int Port { get; }
 
     /// <summary>The credentials sent to the proxy, if any (for SOCKS 4, just the user id).</summary>
@@ -125,14 +141,34 @@ public sealed class SshProxy
     }
 
     /// <summary>
+    /// A proxy that is your own code: <paramref name="connector"/> receives the host and port to reach (the SSH server, or the first
+    /// <see cref="SshClientOptions.JumpHosts"/> or <c>ProxyJump</c> host) and returns a connected, duplex stream to it, such as a
+    /// cloud provider's WebSocket tunnel, a named pipe or an in-memory transport. It goes wherever an <see cref="SshProxy"/> goes:
+    /// <see cref="SshClientOptions.Proxy"/>, <see cref="SshConfigConnectOptions.Proxy"/> and the DI package's client options.
+    /// </summary>
+    /// <param name="connector">Opens the connection. Its token ends with the caller's and with
+    /// <see cref="SshClientOptions.ConnectTimeout"/> (or ssh_config's <c>ConnectTimeout</c>); there is no other time limit. The stream it
+    /// returns belongs to the SSH connection from then on, which disposes it. It is called once per connection attempt, possibly from
+    /// several attempts at once. <see cref="SshClientOptions.LocalEndPoint"/> and <see cref="SshClientOptions.AddressFamily"/> do not
+    /// apply: the connector makes its own connection.</param>
+    /// <remarks>
+    /// An exception from the connector fails the connection with <see cref="SshFailureReason.ConnectFailed"/>, with the exception inside
+    /// (an <see cref="SshException"/> it throws passes as it is, and so does cancellation by the caller's token). The host name is not
+    /// part of that error's message.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="connector"/> is null.</exception>
+    public static SshProxy FromConnector(Func<string, int, CancellationToken, ValueTask<Stream>> connector) => new(connector);
+
+    /// <summary>
     /// Connects to the proxy and asks it for a connection to <paramref name="host"/>:<paramref name="port"/>. The returned stream carries
     /// that connection; disposing it closes the connection to the proxy.
     /// </summary>
     /// <exception cref="SshException">The proxy could not be reached, refused the connection or the credentials, or answered something
     /// that is not its protocol (<see cref="SshFailureReason.ConnectFailed"/>); or, once connected, did not complete its handshake within 30
-    /// seconds (<see cref="SshFailureReason.Timeout"/>).</exception>
+    /// seconds (<see cref="SshFailureReason.Timeout"/>). For a <see cref="SshProxyType.Custom"/> proxy: the connector failed
+    /// (<see cref="SshFailureReason.ConnectFailed"/>).</exception>
     /// <exception cref="ArgumentException"><paramref name="host"/> is not an ASCII host name or address (give an internationalized name in
-    /// its punycode form).</exception>
+    /// its punycode form); a <see cref="SshProxyType.Custom"/> proxy takes any name without spaces or control characters.</exception>
     public Task<Stream> ConnectAsync(string host, int port, CancellationToken cancellationToken = default) =>
         ConnectAsync(host, port, null, cancellationToken);
 
@@ -145,15 +181,19 @@ public sealed class SshProxy
             throw new ArgumentException("The host name must not contain spaces or control characters.", nameof(host));
         }
 
+        ArgumentOutOfRangeException.ThrowIfLessThan(port, 1);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(port, 65535);
+        if (_connector is { } connector)
+        {
+            return await ConnectCustomAsync(connector, host, port, cancellationToken).ConfigureAwait(false);
+        }
+
         // Every proxy protocol carries the name as ASCII; anything else would reach the proxy as '?' (another name). Internationalized
         // names go in their punycode form (System.Globalization.IdnMapping).
         if (host.Any(c => c > '~'))
         {
             throw new ArgumentException("A host name given to a proxy must be ASCII; use its punycode form.", nameof(host));
         }
-
-        ArgumentOutOfRangeException.ThrowIfLessThan(port, 1);
-        ArgumentOutOfRangeException.ThrowIfGreaterThan(port, 65535);
 
         var stream = await Protocol.TcpConnector.ConnectAsync(Host, Port, local, Config.SshAddressFamily.Any, "the proxy", cancellationToken).ConfigureAwait(false);
         try
@@ -396,6 +436,27 @@ public sealed class SshProxy
         return buffer;
     }
 
-    /// <summary>The proxy's address and kind; never the credentials.</summary>
-    public override string ToString() => $"{Type} proxy {Host}:{Port.ToString(CultureInfo.InvariantCulture)}";
+    // ---- Custom ----
+
+    private static async Task<Stream> ConnectCustomAsync(Func<string, int, CancellationToken, ValueTask<Stream>> connector, string host, int port,
+        CancellationToken cancellationToken)
+    {
+        Stream? stream;
+        try
+        {
+            stream = await connector(host, port, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not SshException && !(ex is OperationCanceledException && cancellationToken.IsCancellationRequested))
+        {
+            // A connection failure, as from the built-in proxies, whatever the transport throws. Its message is not repeated here: it may
+            // name the host, and the library keeps host names out of its own messages (the exception is inside for the caller).
+            throw new SshException(SshFailureReason.ConnectFailed, "The custom proxy could not open a connection.", ex);
+        }
+
+        return stream ?? throw new SshException(SshFailureReason.ConnectFailed, "The custom proxy's connector returned no stream.");
+    }
+
+    /// <summary>The proxy's address and kind (only the kind for a custom one); never the credentials.</summary>
+    public override string ToString() =>
+        Type == SshProxyType.Custom ? "Custom proxy" : $"{Type} proxy {Host}:{Port.ToString(CultureInfo.InvariantCulture)}";
 }

@@ -383,9 +383,37 @@ public sealed class SshClientOptions
 
     /// <summary>
     /// An HTTP or SOCKS proxy to reach the server through, for <see cref="SshClient.ConnectAsync(string, int, SshClientOptions, CancellationToken)"/>.
-    /// The server's host name is resolved by the proxy. Ignored when connecting over a stream you opened.
+    /// The server's host name is resolved by the proxy. With <see cref="JumpHosts"/>, it carries the connection to the first jump host
+    /// instead. Ignored when connecting over a stream you opened.
     /// </summary>
     public SshProxy? Proxy { get; init; }
+
+    /// <summary>
+    /// Jump hosts to reach the server through, first to last, as <c>ssh -J</c> and ssh_config's <c>ProxyJump</c>: the client connects
+    /// to the first, reaches each next one through the one before, and the server through the last. Each hop logs in and verifies its
+    /// host key with its own <see cref="SshJumpHost.Options"/>; these options (credentials, <see cref="HostKeyVerifier"/>) are the
+    /// destination's alone and never offered to a hop. <see cref="Proxy"/>, <see cref="LocalEndPoint"/> and <see cref="AddressFamily"/>
+    /// apply to the first network connection, which is the first hop's. <see cref="ConnectTimeout"/> bounds the whole chain. Disposing the
+    /// client closes every hop. Empty (the default) connects directly. Used by
+    /// <see cref="SshClient.ConnectAsync(string, int, SshClientOptions, CancellationToken)"/>; ignored when connecting over a stream you opened.
+    /// </summary>
+    /// <exception cref="ArgumentException">The list contains null.</exception>
+    public IReadOnlyList<SshJumpHost> JumpHosts
+    {
+        get => _jumpHosts;
+        init
+        {
+            ArgumentNullException.ThrowIfNull(value);
+            if (value.Any(hop => hop is null))
+            {
+                throw new ArgumentException("A jump host list cannot contain null.", nameof(value));
+            }
+
+            _jumpHosts = [.. value];
+        }
+    }
+
+    private readonly IReadOnlyList<SshJumpHost> _jumpHosts = [];
 
     /// <summary>
     /// The local address (and usually port 0) to connect from, as <c>ssh -b</c>, for machines on several networks; null lets the system

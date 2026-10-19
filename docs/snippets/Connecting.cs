@@ -85,6 +85,58 @@ internal static class Connecting
         _ = result;
     }
 
+    public static async Task JumpHostsAsync(SshPrivateKey bastionKey, SshPrivateKey deployKey, string bastionFingerprint, CancellationToken cancellationToken)
+    {
+        // <jump-hosts>
+        // The destination: its own user, key and host key check, which the bastion is never offered.
+        await using var client = await SshClient.ConnectAsync("app1.internal", 22, new SshClientOptions
+        {
+            UserName = "deploy",
+            PrivateKeys = [deployKey],
+            HostKeyVerifier = new KnownHostsVerifier([Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".ssh", "known_hosts")]),
+            ConnectTimeout = TimeSpan.FromSeconds(30), // the whole chain: every hop and the destination
+
+            // First to last: each hop logs in and is verified with its own options.
+            JumpHosts =
+            [
+                new SshJumpHost("bastion.example.com", 22, new SshClientOptions
+                {
+                    UserName = "jump",
+                    PrivateKeys = [bastionKey],
+                    HostKeyVerifier = SshHostKeyVerifier.Pinned(bastionFingerprint),
+                    HostKeyAlgorithms = SshAlgorithmList.Only("ssh-ed25519"), // any client option, for this hop alone
+                }),
+            ],
+        }, cancellationToken);
+
+        var result = await client.RunCommandAsync("hostname", cancellationToken);
+        // </jump-hosts>
+        _ = result;
+    }
+
+    /// <summary>A tunnel service the application already has, such as a cloud provider's (#237).</summary>
+    public interface ITunnelService
+    {
+        Task<Stream> OpenAsync(string host, int port, CancellationToken cancellationToken);
+    }
+
+    public static async Task CustomProxyAsync(ITunnelService tunnels, SshPrivateKey key, SshHostKeyVerifier verifier, CancellationToken cancellationToken)
+    {
+        // <custom-proxy>
+        // Any transport that returns a connected stream: it is asked for the first network hop (here, the server itself).
+        var proxy = SshProxy.FromConnector(async (host, port, ct) => await tunnels.OpenAsync(host, port, ct));
+
+        await using var client = await SshClient.ConnectAsync("app1.internal", 22, new SshClientOptions
+        {
+            UserName = "deploy",
+            PrivateKeys = [key],
+            HostKeyVerifier = verifier, // the tunnel is not trusted: the server's key is checked as always
+            Proxy = proxy,
+        }, cancellationToken);
+        // </custom-proxy>
+        _ = client;
+    }
+
     public static async Task ScanThroughJumpAsync(SshClient bastion, CancellationToken cancellationToken)
     {
         // <scan-jump>

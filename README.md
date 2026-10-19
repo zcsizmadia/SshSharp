@@ -34,7 +34,8 @@ Console.WriteLine(result.StandardOutputText);
   authority (`ssh-keygen -s`), with the CA key in an agent or a KMS if you like.
 - **Host verification:** `StrictHostKeyChecking` policies, host certificates, `UpdateHostKeys`, key pinning, or your own
   verifier. There is no "accept anything" default. Host key scanning, as `ssh-keyscan` does it.
-- **Connections:** ProxyJump chains, ProxyCommand, HTTP and SOCKS proxies, connect over any `Stream` or from a chosen local
+- **Connections:** ProxyJump chains (from `ssh_config` or typed `JumpHosts` with per-hop credentials), ProxyCommand, HTTP and SOCKS
+  proxies or your own transport (`SshProxy.FromConnector`), connect over any `Stream` or from a chosen local
   address (`BindAddress`, `BindInterface`), keep-alive and
   dead-connection detection; `HttpClient` through the SSH connection;
   TCP and Unix-socket tunnels; local, remote and dynamic (SOCKS) port forwarding (`ssh -L`, `-R`, `-D`) and remote dynamic and Unix-socket forwarding (`-R port`, `-R /socket:target`), remote forwarding to an in-process handler, also
@@ -73,7 +74,7 @@ Console.WriteLine(result.StandardOutputText);
 | Revoked host keys (`RevokedHostKeys`: OpenSSH KRLs from `ssh-keygen -k`, or key lists) | ✅ | ❌ |
 | `UpdateHostKeys` (key rotation) | ✅ | ❌ |
 | Host key scanning (`ssh-keyscan`) | ✅ | ❌ |
-| ProxyJump chains, ProxyCommand | ✅ | ❌ |
+| ProxyJump chains (ssh_config or in code), ProxyCommand | ✅ | ❌ |
 | HTTP and SOCKS 4/5 proxies | ✅ | ✅ |
 | Connect over any `Stream` (WebSocket, named pipe, your own tunnel) | ✅ | ❌ |
 | Connect from a chosen local address or interface (`BindAddress`, `BindInterface`) | ✅ | ❌ |

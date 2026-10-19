@@ -92,7 +92,8 @@ public sealed class SshEndpointOptions
     public TimeSpan MaxReconnectDelay { get; set; } = TimeSpan.FromMinutes(1);
 
     /// <summary>
-    /// Adjusts the client options built from these settings (an agent, a custom host key verifier, keys held elsewhere, a proxy, ...):
+    /// Adjusts the client options built from these settings (an agent, a custom host key verifier, keys held elsewhere, a proxy, jump
+    /// hosts through <see cref="SshClientOptions.JumpHosts"/>, ...):
     /// receives the services and the options built so far, and returns the options to use. Not used with <see cref="ConfigAlias"/>.
     /// </summary>
     public Func<IServiceProvider, SshClientOptions, SshClientOptions>? ConfigureClientOptions { get; set; }

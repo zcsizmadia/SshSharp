@@ -92,7 +92,8 @@ public sealed partial class SshClient : IAsyncDisposable
 
     /// <summary>
     /// Connects to <paramref name="host"/> over TCP, performs the handshake and authenticates. <see cref="SshClientOptions.ConnectTimeout"/>
-    /// bounds the whole attempt, and <see cref="SshClientOptions.AddressFamily"/> chooses which of the host's addresses are tried.
+    /// bounds the whole attempt, and <see cref="SshClientOptions.AddressFamily"/> chooses which of the host's addresses are tried. With
+    /// <see cref="SshClientOptions.JumpHosts"/>, the server is reached through them, and <paramref name="host"/> is resolved by the last one.
     /// </summary>
     /// <exception cref="SshException">The server could not be reached (<see cref="SshFailureReason.ConnectFailed"/>), the attempt took longer
     /// than <see cref="SshClientOptions.ConnectTimeout"/> (<see cref="SshFailureReason.Timeout"/>), or the handshake or authentication
@@ -105,20 +106,31 @@ public sealed partial class SshClient : IAsyncDisposable
         ArgumentOutOfRangeException.ThrowIfGreaterThan(port, 65535);
         ArgumentNullException.ThrowIfNull(options);
 
-        // Algorithm lists that leave nothing to offer fail here, before the network is touched.
+        // Algorithm lists that leave nothing to offer fail here, before the network is touched (the jump hosts' too).
         _ = options.AlgorithmPreferences ?? AlgorithmPreferences.FromOptions(options);
+        foreach (var jump in options.JumpHosts)
+        {
+            _ = jump.Options.AlgorithmPreferences ?? AlgorithmPreferences.FromOptions(jump.Options);
+        }
+
         IReadOnlyList<System.Net.IPEndPoint>? local = options.LocalEndPoint is { } bind ? [bind] : null;
         using var deadline = new ConnectDeadline(options.ConnectTimeout, cancellationToken);
-        using var measurement = new ConnectMeasurement(options.Proxy is null ? port : null);
+        using var measurement = new ConnectMeasurement(options.Proxy is null && options.JumpHosts.Count == 0 ? port : null);
         try
         {
             Stream stream;
+            Owned? owner = null;
             try
             {
                 // The host name stays out of error messages (exception text often ends up in logs); it is in the caller's hands already.
-                stream = options.Proxy is { } proxy
-                    ? await proxy.ConnectAsync(host, port, local, deadline.Token).ConfigureAwait(false)
-                    : await TcpConnector.ConnectAsync(host, port, local, options.AddressFamily, "the server", deadline.Token).ConfigureAwait(false);
+                if (options.JumpHosts.Count > 0)
+                {
+                    (stream, owner) = await ConnectThroughJumpHostsAsync(host, port, options, local, deadline.Token).ConfigureAwait(false);
+                }
+                else
+                {
+                    stream = await OpenStreamAsync(host, port, options, local, "the server", deadline.Token).ConfigureAwait(false);
+                }
             }
             catch (Exception ex) when (!deadline.Expired)
             {
@@ -126,7 +138,16 @@ public sealed partial class SshClient : IAsyncDisposable
                 throw;
             }
 
-            return await ConnectCoreAsync(stream, options, leaveOpen: false, owner: null, host, port, measurement, deadline.Token).ConfigureAwait(false);
+            try
+            {
+                return await ConnectCoreAsync(stream, options, leaveOpen: false, owner, host, port, measurement, deadline.Token).ConfigureAwait(false);
+            }
+            catch when (owner is not null)
+            {
+                // The chain of jump hosts goes with the connection that failed to start over it.
+                await owner.DisposeAsync().ConfigureAwait(false);
+                throw;
+            }
         }
         catch (OperationCanceledException) when (deadline.Expired)
         {

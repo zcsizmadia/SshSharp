@@ -143,7 +143,8 @@ for something that holds a session for the application's lifetime.
 
 ## Customize the client options
 
-`ConfigureClientOptions` adjusts the `SshClientOptions` the endpoint builds, for what the settings do not cover: a host key policy
+`ConfigureClientOptions` adjusts the `SshClientOptions` the endpoint builds, for what the settings do not cover: jump hosts
+([Jump hosts: in an ASP.NET Core application](jump-hosts.md#in-an-aspnet-core-application)), a host key policy
 of your own, keys held elsewhere (`SshPrivateKey.FromSigner`), an agent. Pinned fingerprints, keys as values and a proxy need no
 code: they are settings.
 

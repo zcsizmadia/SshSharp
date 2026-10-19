@@ -1,8 +1,8 @@
 # Jump hosts (ProxyJump)
 
 Servers inside a private network are often reachable only through a bastion (jump host). SshSharp follows `ssh_config`'s
-`ProxyJump` and `ProxyCommand` like `ssh` does, and the same thing can be done by hand: open a tunnel through one connection and
-run a second SSH connection over it.
+`ProxyJump` and `ProxyCommand` like `ssh` does. Without `ssh_config`, `SshClientOptions.JumpHosts` builds the same chain in code,
+and it can also be done by hand: open a tunnel through one connection and run a second SSH connection over it.
 
 ## When to use
 
@@ -54,9 +54,50 @@ The configuration can also ship with your application instead of living in `~/.s
 
 [!code-csharp[](../snippets/Connecting.cs#custom-config)]
 
+## In code
+
+`SshClientOptions.JumpHosts` lists the hops, first to last, as `ssh -J a,b` does. Each `SshJumpHost` names a host and port and
+carries its own `SshClientOptions`: user, keys or password, `HostKeyVerifier`, algorithms, keep-alives. The options you pass to
+`ConnectAsync` stay the destination's.
+
+[!code-csharp[](../snippets/Connecting.cs#jump-hosts)]
+
+What applies where:
+
+| Setting | Applies to |
+| --- | --- |
+| The destination's `UserName`, `Password`, `PrivateKeys`, `KeyboardInteractive`, `HostKeyVerifier` | The destination only. |
+| A hop's `UserName`, credentials, `HostKeyVerifier`, algorithm lists, `KeepAliveInterval`, `ForwardAgent` | That hop only. |
+| The destination's `ConnectTimeout` | The whole chain: every hop, every tunnel, and the destination's handshake and login. |
+| A hop's `ConnectTimeout` | That hop's connection, within the destination's limit. |
+| The destination's `Proxy`, `LocalEndPoint`, `AddressFamily` | The first network connection, which is the first hop's. |
+| A hop's `Proxy`, `LocalEndPoint`, `JumpHosts` | Not allowed: `SshJumpHost` throws `ArgumentException`. |
+
+The destination's host name is resolved by the last hop, and each hop's by the one before it, so names that exist only inside
+the private network work. A hop's host key is checked under the name and port given in its `SshJumpHost`, so a
+`KnownHostsVerifier` finds it in `known_hosts` as it would for a direct connection.
+
+### In an ASP.NET Core application
+
+The DI package has no jump host settings; add them in `ConfigureClientOptions`, keeping what the endpoint built:
+
+[!code-csharp[](../snippets/DependencyInjection.cs#jump-hosts)]
+
+## Through your own tunnel
+
+When the first hop is reached through something other than TCP, HTTP or SOCKS (a cloud provider's tunnel, a WebSocket, a named
+pipe), `SshProxy.FromConnector` makes it a proxy: the connector is asked for a stream to a host and port. It goes wherever a proxy
+goes, so it carries the first `JumpHosts` or `ProxyJump` host, or the server itself:
+
+[!code-csharp[](../snippets/Connecting.cs#custom-proxy)]
+
+The connector's token ends with the caller's and with `ConnectTimeout`; nothing else limits it. An exception it throws fails the
+connection with `ConnectFailed` (the exception is inside), and the stream it returns belongs to the connection, which disposes it.
+See [Connecting: your own transport](../connecting.md#your-own-transport).
+
 ## By hand
 
-Without `ssh_config`, open a tunnel through the bastion and connect over it with `SshClient.ConnectAsync(Stream, ...)`:
+Without `ssh_config` or `JumpHosts`, open a tunnel through the bastion and connect over it with `SshClient.ConnectAsync(Stream, ...)`:
 
 [!code-csharp[](../snippets/Connecting.cs#manual-jump)]
 
@@ -71,18 +112,21 @@ pinned key).
 
 - **Passwords go to the destination only.** When connecting by alias, `SshConfigConnectOptions.Password` and the
   keyboard-interactive handler are offered to the final host, never to a jump host. Hops log in with keys or the agent, as `ssh`
-  asks for each host's password separately.
-- **Disposal.** Disposing the destination client tears down the whole chain. When chaining by hand, dispose the target before the
-  bastion (the `await using` order above does that).
-- **ProxyCommand** runs a local program and speaks SSH over its standard input and output. It is allowed by default, as in `ssh`;
+  asks for each host's password separately. With `JumpHosts`, each host gets only what its own options hold: a hop may have a
+  password of its own, and the destination's is never offered to it.
+- **Reusing one options object** for a hop and the destination offers its credentials to both. Give each host its own options
+  unless they really share a login.
+- **Disposal.** Disposing the destination client tears down the whole chain, and a connection that fails partway closes the hops
+  it had opened. When chaining by hand, dispose the target before the bastion (the `await using` order above does that).- **ProxyCommand** runs a local program and speaks SSH over its standard input and output. It is allowed by default, as in `ssh`;
   set `SshConfigConnectOptions.AllowProxyCommand = false` when the configuration file is not under your control.
 - **Forwarding is the bastion's call.** sshd's `AllowTcpForwarding no` on the bastion refuses the tunnel, and the connection fails
   with `ConnectFailed` ("the jump host could not open a connection to the next host").
-- **A proxy for the first hop.** `SshConfigConnectOptions.Proxy` (HTTP or SOCKS) applies to the first network connection: the
-  destination, or the first `ProxyJump` host.
+- **A proxy for the first hop.** `SshConfigConnectOptions.Proxy` and `SshClientOptions.Proxy` (HTTP, SOCKS or your own connector)
+  apply to the first network connection: the destination, or the first `ProxyJump` or `JumpHosts` host.
 
 ## See also
 
 - [Connecting: jump hosts and proxy commands](../connecting.md#jump-hosts-and-proxy-commands)
+- [Threat model: jump hosts](../threat-model.md#jump-hosts)
 - [Use ssh_config and known_hosts](ssh-config-and-known-hosts.md)
 - [A database through a jump host](../scenarios/database-tunnel.md)
