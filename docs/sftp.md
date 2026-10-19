@@ -50,9 +50,10 @@ pipelined, though, and one that fails (a full disk, say) may be followed by late
 nearly its full size with a hole that a resume, taking the file's size for what was sent, would keep. So when a write landed past
 one that failed, the upload cuts the remote file back to the part it holds without a gap before it throws. If the server cannot
 cut a file, or a write went unanswered and may still land after the cut, the exception's
-`Data[SftpClient.UploadCleanupIncompleteKey]` is `true`: then do not resume that file; delete it or upload it again. After a
-cancellation the answers to the writes already sent are awaited for at most `OperationTimeout` (5 s when it is not set), so this is
-known. A segmented upload cleans up the same way, and deletes the file where it cannot be cut (see
+`Data[SftpClient.UploadCleanupIncompleteKey]` is `true`: then do not resume that file; delete it or upload it again. The same goes
+when the server refused a write and did not answer the writes after it, which may still land past the gap. After a cancellation
+the answers to the writes already sent are awaited for at most `OperationTimeout` (5 s when it is not set), so this is known, and
+closing the file after a failure or a cancellation waits no longer than that either. A segmented upload cleans up the same way, and deletes the file where it cannot be cut (see
 [Segmented transfers](#segmented-transfers)).
 
 ### Memory
@@ -414,8 +415,11 @@ It also bounds a request that cannot be sent. When the server's `sftp-server` st
 keep-alives), the channel's flow-control window fills and a write cannot go out; once the server has sent nothing for
 `OperationTimeout`, that send is cut off and the whole SFTP session is closed, since part of the request may have gone out and
 nothing could follow it. Every request waiting on the session then fails with `Timeout`, so uploads, the cleanup of a failed upload
-and disposing a write stream all end, and `SftpClient.IsConnected` is false: open a new session. Without `OperationTimeout`, a
-cancelled request stops waiting for a send that cannot finish, and the send goes on in the background until the session ends. See
+and disposing a write stream all end, and `SftpClient.IsConnected` is false: open a new session. This holds for a send whose caller
+cancelled too: the caller stops waiting at once, but the send goes on in the background, holding up the requests behind it, and
+`OperationTimeout` still bounds it, so the session cannot stay up with nothing able to get through. Without `OperationTimeout`, such
+a send goes on until the session ends. A send that fails (the session or the connection under it ended) also closes the session,
+before the failure is thrown, so `IsConnected` is already false when you catch it. See
 [Fail when the server stops answering](how-to/transfer-files-sftp.md#fail-when-the-server-stops-answering).
 
 The adapters above (`IFileProvider`, `IFileSystem`) have an `OperationTimeout` of their own, which they apply to each call with a
