@@ -1,7 +1,19 @@
 # Troubleshooting
 
-Start with a `Debug` log ([Logging and diagnostics](../how-to/logging-and-diagnostics.md)): it shows the key exchange, the host key,
-and each authentication attempt, much as `ssh -vvv` does. Then find the symptom below.
+Start with a `Debug` log (see [Get a verbose log](#get-a-verbose-log)): it shows the key exchange, the host key, and each
+authentication attempt, much as `ssh -vvv` does. Then find the symptom below.
+
+## Get a verbose log
+
+Give the client an `ILogger` at `Debug`: `SshClientOptions.Logger`, or `SshConfigConnectOptions.Logger` when connecting by alias (it
+covers every `ProxyJump` hop too). With dependency injection, set the `SshSharp` category to `Debug` in the logging configuration.
+
+[!code-csharp[](../snippets/Diagnostics.cs#logging)]
+
+At `Debug` the log has the algorithms each side offered and the ones chosen, the host key and how it was verified, each
+authentication method tried and its outcome, and channels as they open and close. It never has passwords, keys, command text, user
+names or host names, so it is safe to attach to an issue (check it anyway). See
+[Logging and diagnostics](../how-to/logging-and-diagnostics.md) for traces and metrics.
 
 ## Connecting
 
@@ -10,12 +22,21 @@ and each authentication attempt, much as `ssh -vvv` does. Then find the symptom 
 The TCP connection (or a proxy, `ProxyJump` or `JumpHosts` hop or `ProxyCommand`) failed before SSH started. A custom proxy (`SshProxy.FromConnector`) that threw has its exception as the `InnerException`.
 
 - Check the host name, port and firewall: does `ssh -p <port> <host>` connect from the same machine?
-- Through a proxy: the message says what the proxy answered (a 407 means proxy credentials are needed).
+- Through a proxy: the message says what the proxy answered (see [The proxy answers 407](#the-proxy-answers-407)).
 - With `BindAddress` or `LocalEndPoint`: an IPv4 bind address reaches only IPv4 destinations, and the reverse.
 - With `AddressFamily` (`SshClientOptions` or `ssh_config`): only addresses of that family are tried.
 - `RefuseConnection yes` in `ssh_config` refuses on purpose.
 - A server that is restarting refuses for a moment: `ConnectionAttempts` (`ssh_config`, or `SshConfigConnectOptions`) tries again,
   one second apart.
+
+### The proxy answers 407
+
+`ConnectFailed` with "The HTTP proxy requires authentication (407), or refused the credentials.": the HTTP proxy wants credentials,
+or did not accept the ones given. Give them with the proxy (`SshProxy.Http(host, port, new NetworkCredential(user, password))`, or
+`user:password@` in a proxy URI for `SshProxy.FromUri` and the DI package's `SshEndpointOptions.Proxy`), read from configuration or
+a secret store. SshSharp sends HTTP proxy credentials with Basic authentication only: a proxy that accepts only NTLM or Negotiate
+refuses them. Reach such a proxy with a connection of your own through `SshProxy.FromConnector`. Basic credentials are readable
+by anyone between you and the proxy, so prefer a proxy on a trusted network.
 
 ### `Timeout` while connecting
 
@@ -89,8 +110,9 @@ A connection over your own `Stream` has no host name. Set `SshClientOptions.Host
 
 ## Authentication
 
-### `AuthenticationFailed`
+### `AuthenticationFailed` ("Permission denied")
 
+What `ssh` reports as "Permission denied (publickey,password)" is an `SshAuthenticationException` here.
 `SshAuthenticationException.AllowedMethods` lists what the server would accept. Compare it with what you gave:
 
 | `AllowedMethods` has | But you gave | Then |
@@ -197,8 +219,18 @@ them differently: use SFTP, which OpenSSH for Windows provides by default.
 
 ### Forwarded connections are refused
 
-The server does not allow forwarding (`AllowTcpForwarding no`, `PermitOpen`, `AllowStreamLocalForwarding no`). For remote
-forwarding to an address other than loopback, the server needs `GatewayPorts`.
+The server decides what may be forwarded. How a refusal shows depends on the direction:
+
+| What you see | Cause |
+|---|---|
+| `OpenTcpTunnelAsync` or `OpenUnixSocketTunnelAsync` throws `SshException` (`ChannelClosed`), "The server refused to open the channel (reason AdministrativelyProhibited)" | The server does not allow it: `AllowTcpForwarding no`, a `PermitOpen` list without the destination, or `AllowStreamLocalForwarding no` for a Unix socket. |
+| The same, with reason `ConnectFailed` | Forwarding is allowed, but the server could not connect to the destination: nothing listens there, or the name does not resolve from the server. |
+| A local forwarding accepts a connection and closes it at once; the log has a `Warning` "A connection forwarded to remote port ... was refused" | The same two causes, for one connection at a time: the forwarder keeps listening. |
+| `ForwardRemotePortAsync` (or `ForwardRemoteUnixSocketAsync`) throws `SshException` (`ChannelClosed`), "The server refused to listen on port ..." | `AllowTcpForwarding` (or `AllowStreamLocalForwarding`) does not allow it, `PermitListen` does not list the port, the port is in use on the server, or (a port under 1024) the user may not bind it. |
+| A remote forwarding listens, but other machines cannot reach it | The server bound it to loopback: binding to another address needs `GatewayPorts yes` (or `clientspecified`) on the server. |
+| A remote dynamic forwarding refuses some destinations | The `allowDestination` filter (`PermitRemoteOpen` in `ssh_config`) does not allow them. |
+
+The server's log (`journalctl -u ssh`, `/var/log/auth.log`) says which rule refused it.
 
 ### "Address already in use"
 

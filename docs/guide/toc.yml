@@ -35,6 +35,8 @@
           href: ../how-to/jump-hosts.md
         - name: Tune and inspect a connection
           href: ../how-to/tune-and-inspect-connections.md
+        - name: Tune for throughput
+          href: ../how-to/performance-tuning.md
     - name: Configuration and trust
       items:
         - name: Use ssh_config and known_hosts

@@ -29,6 +29,7 @@ Every example on these pages is compiled with the library in CI, so it matches t
 | [Port forwarding and tunnels](port-forwarding.md) | Reach services behind the server (`ssh -L`, `-R`, `-D`), or give the server a way back. |
 | [Jump hosts (ProxyJump)](jump-hosts.md) | Reach hosts through one or more bastions. |
 | [Tune and inspect a connection](tune-and-inspect-connections.md) | Set socket options, identify your application to the server, raise the channel window for long links, read a connection's endpoints and traffic, and re-key on demand. |
+| [Tune for throughput](performance-tuning.md) | Find what limits a slow transfer, and set the channel window, SFTP concurrency, cipher and socket options for it. |
 
 ## Configuration and trust
 
