@@ -469,7 +469,7 @@ internal sealed class SshConfigCallbackAnswers
 
     private static string Key(string host, IReadOnlyList<string> domains) => host + "\0" + string.Join("\0", domains);
 
-    private static string LookupKey(string name, SshAddressFamily family) => name + "\0" + family.ToString();
+    private static string LookupKey(string name, SshAddressFamily family) => name + "\0" + ((int)family).ToString(CultureInfo.InvariantCulture);
 }
 
 /// <summary>
