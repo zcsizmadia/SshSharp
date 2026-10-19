@@ -9,6 +9,7 @@ updates:
       testing:
         patterns: ["TUnit*", "Microsoft.Testing.*"]
   - package-ecosystem: github-actions
-    directory: /
+    # The workflows, and the composite action they share.
+    directories: ["/", "/.github/actions/*"]
     schedule:
       interval: weekly

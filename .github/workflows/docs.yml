@@ -25,6 +25,7 @@ concurrency:
 # Actions are pinned by commit SHA (the tag in the comment is for humans and Dependabot).
 jobs:
   build:
+    name: docs (build)
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -32,10 +33,9 @@ jobs:
         with:
           fetch-depth: 0 # MinVer
           ref: ${{ inputs.ref || github.ref }}
-      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+      - uses: ./.github/actions/setup-dotnet
         with:
-          global-json-file: global.json
-          dotnet-version: 8.0.x
+          cache: false
       - run: dotnet tool restore
       - run: dotnet build src/SshSharp.FileProviders -c Release && dotnet build src/SshSharp.IO.Abstractions -c Release && dotnet build src/SshSharp.Extensions.DependencyInjection -c Release
       - run: dotnet docfx docs/docfx.json
@@ -50,6 +50,7 @@ jobs:
           path: docs/_site
 
   deploy:
+    name: docs (deploy)
     needs: build
     if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest

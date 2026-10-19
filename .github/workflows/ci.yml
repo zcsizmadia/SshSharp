@@ -15,8 +15,8 @@ concurrency:
 
 # Actions are pinned by commit SHA (the tag in the comment is for humans and Dependabot).
 jobs:
-  test:
-    name: test (${{ matrix.os }})
+  unit:
+    name: unit (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     strategy:
@@ -27,14 +27,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0 # MinVer computes the version from tags and history
-      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+      - uses: ./.github/actions/setup-dotnet
         with:
-          global-json-file: global.json
-          dotnet-version: 8.0.x
-          cache: true
-          cache-dependency-path: '**/Directory.Packages.props'
-      - run: dotnet restore
-      - run: dotnet build -c Release --no-restore
+          build: true
       - name: Test net8.0
         run: dotnet test --project tests/SshSharp.Tests -c Release -f net8.0 --no-build
       - name: Test net10.0 with coverage
@@ -65,8 +60,8 @@ jobs:
           path: TestResults/**
           if-no-files-found: ignore
 
-  interop:
-    name: interop (${{ matrix.os }})
+  interop-runner:
+    name: interop (OpenSSH, ${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     strategy:
@@ -77,12 +72,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0 # MinVer computes the version from tags and history
-      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
-        with:
-          global-json-file: global.json
-          dotnet-version: 8.0.x
-          cache: true
-          cache-dependency-path: '**/Directory.Packages.props'
       - name: Start OpenSSH with a throwaway account
         run: |
           set -euo pipefail
@@ -228,8 +217,9 @@ jobs:
           tests/docker/wait-for-ssh.sh 2224 > /dev/null || { echo "::error::the Kerberos sshd does not answer on port 2224"; exit 1; }
           echo "SSHSHARP_TEST_GSSAPI=1" >> "$GITHUB_ENV"
           echo "SSHSHARP_TEST_GSSAPI_SSHD=127.0.0.1:2224" >> "$GITHUB_ENV"
-      - run: dotnet restore
-      - run: dotnet build -c Release --no-restore
+      - uses: ./.github/actions/setup-dotnet
+        with:
+          build: true
       - name: Interop tests against the real server (net8.0)
         run: dotnet test --project tests/SshSharp.Tests -c Release -f net8.0 --no-build --treenode-filter "/*/*/*InteropTests/*"
       - name: Interop tests against the real server (net10.0)
@@ -250,7 +240,7 @@ jobs:
 
   # Older and other servers, each in a throwaway container: OpenSSH before strict KEX and from several eras, Dropbear and AsyncSSH.
   # Password-only: the tests that need keys, certificates or ProxyJump skip themselves here.
-  interop-matrix:
+  interop-container:
     name: interop (${{ matrix.name }})
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -317,43 +307,17 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
-        with:
-          global-json-file: global.json
-          dotnet-version: 8.0.x
-          cache: true
-          cache-dependency-path: '**/Directory.Packages.props'
       - name: Start the server container
-        run: |
-          set -euo pipefail
-          PASSWORD="$(openssl rand -hex 16)"
-          echo "::add-mask::$PASSWORD"
-          docker build -q -t sshsharp-interop --build-arg BASE="${{ matrix.image }}" --build-arg SERVER="${{ matrix.server }}" tests/docker
-          docker run -d --name server -p 127.0.0.1:2200:${{ matrix.port || '22' }} -e TEST_PASSWORD="$PASSWORD" sshsharp-interop
-          BANNER="$(tests/docker/wait-for-ssh.sh 2200)" || { echo "::error::the server does not answer"; docker logs server || true; exit 1; }
-          echo "Server: $BANNER"
-          echo "Server: \`$BANNER\`" >> "$GITHUB_STEP_SUMMARY"
-          {
-            echo "SSHSHARP_TEST_SSHD=127.0.0.1:2200"
-            echo "SSHSHARP_TEST_SSHD_INNER_PORT=${{ matrix.port || '22' }}"
-            echo "SSHSHARP_TEST_USER=sshsharp"
-            echo "SSHSHARP_TEST_PASSWORD=$PASSWORD"
-            echo "SSHSHARP_TEST_SERVER=${{ matrix.software }}"
-            echo "SSHSHARP_TEST_SERVER_STRICTKEX=${{ matrix.strict }}"
-          } >> "$GITHUB_ENV"
-          # OpenSSH (RekeyLimit) and AsyncSSH (rekey_bytes) re-key every 32 KiB. MINA keeps its default limit (see MinaServer.java).
-          if [ "${{ matrix.server }}" != "dropbear" ] && [ "${{ matrix.server }}" != "mina" ] && [ "${{ matrix.server }}" != "erlang" ]; then echo "SSHSHARP_TEST_SSHD_REKEY=1" >> "$GITHUB_ENV"; fi
-          # Dropbear serves the sftp subsystem by running OpenSSH's sftp-server from /usr/libexec (the image links it there). A missing
-          # binary fails the job: the SFTP tests would otherwise skip themselves and the job would pass without them.
-          if [ "${{ matrix.server }}" = "dropbear" ]; then
-            if ! docker exec server test -x /usr/libexec/sftp-server; then
-              echo "::error::the Dropbear image has no /usr/libexec/sftp-server"
-              exit 1
-            fi
-            echo "SSHSHARP_TEST_DROPBEAR_SFTP=1" >> "$GITHUB_ENV"
-          fi
-      - run: dotnet restore
-      - run: dotnet build -c Release --no-restore
+        env:
+          IMAGE: ${{ matrix.image }}
+          SERVER: ${{ matrix.server }}
+          SOFTWARE: ${{ matrix.software }}
+          STRICT: ${{ matrix.strict }}
+          INNER_PORT: ${{ matrix.port || '22' }}
+        run: tests/docker/start-server.sh "$IMAGE" "$SERVER" "$SOFTWARE" "$STRICT" "$INNER_PORT"
+      - uses: ./.github/actions/setup-dotnet
+        with:
+          build: true
       - name: Interop tests against the container
         # Few tests at a time: Dropbear limits unauthenticated connections per address (a compile-time setting).
         run: dotnet test --project tests/SshSharp.Tests -c Release -f net10.0 --no-build --treenode-filter "${{ matrix.filter || '/*/*/*InteropTests/*' }}" --maximum-parallel-tests 4
@@ -366,8 +330,8 @@ jobs:
   # SFTP against servers other than a plain OpenSSH: atmoz/sftp (OpenSSH in SFTP-only, chrooted mode, a popular container image)
   # and a server built on Go's pkg/sftp (the stack behind many Go-based SFTP products). Most SFTP bug reports against other .NET
   # clients are about such servers. Only the SFTP interop tests run: these servers have no shell.
-  sftp-servers:
-    name: sftp (${{ matrix.name }})
+  interop-sftp:
+    name: interop (${{ matrix.name }})
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
@@ -382,12 +346,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
-        with:
-          global-json-file: global.json
-          dotnet-version: 8.0.x
-          cache: true
-          cache-dependency-path: '**/Directory.Packages.props'
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         if: matrix.kind == 'pkgsftp'
         with:
@@ -423,8 +381,9 @@ jobs:
             echo "SSHSHARP_TEST_SFTP_ONLY=1"
             echo "SSHSHARP_TEST_SFTP_DIR=$DIR"
           } >> "$GITHUB_ENV"
-      - run: dotnet restore
-      - run: dotnet build -c Release --no-restore
+      - uses: ./.github/actions/setup-dotnet
+        with:
+          build: true
       - name: SFTP interop tests against the server
         run: dotnet test --project tests/SshSharp.Tests -c Release -f net10.0 --no-build --treenode-filter "/*/*/SftpInteropTests/*"
       - name: Server log
@@ -442,58 +401,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
-        with:
-          global-json-file: global.json
-          cache: true
-          cache-dependency-path: '**/Directory.Packages.props'
       - name: Start OpenSSH Server for Windows
         shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          if (-not (Get-Service sshd -ErrorAction SilentlyContinue)) {
-            Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0 | Out-Null
-          }
-
-          # A local, non-administrator account with a random password.
-          $password = -join ((1..24) | ForEach-Object { '{0:x}' -f (Get-Random -Maximum 16) }) + 'Aa1!'
-          Write-Output "::add-mask::$password"
-          New-LocalUser -Name sshsharp -Password (ConvertTo-SecureString $password -AsPlainText -Force) -PasswordNeverExpires | Out-Null
-          Add-LocalGroupMember -Group Users -Member sshsharp
-
-          New-ItemProperty -Path HKLM:\SOFTWARE\OpenSSH -Name DefaultShell -Value 'C:\Program Files\Git\bin\bash.exe' -PropertyType String -Force | Out-Null
-          Start-Service sshd # creates the default sshd_config and host keys
-          Stop-Service sshd
-          $config = "$env:ProgramData\ssh\sshd_config"
-          @(
-            'Port 2222'
-            'ListenAddress 127.0.0.1'
-            'ListenAddress ::1' # "localhost" resolves to ::1 first on Windows (the forwarding tests connect to it by name)
-            'PasswordAuthentication yes'
-            'MaxStartups 200:30:300'
-            'MaxSessions 64'
-            'AllowTcpForwarding yes'
-            'SyslogFacility LOCAL0' # log to a file (logs\sshd.log), not the event log
-            'LogLevel DEBUG2' # channel EOF and shutdown events (rcvd eof, chan_shutdown_write), for the intermittent stdin hang (#86)
-            'KexAlgorithms +diffie-hellman-group-exchange-sha256,diffie-hellman-group14-sha256,diffie-hellman-group16-sha512,diffie-hellman-group18-sha512'
-          ) + (Get-Content $config | Where-Object { $_ -notmatch '^\s*(Port|ListenAddress|PasswordAuthentication|Match|AuthorizedKeysFile|AllowGroups|AllowUsers|DenyGroups|DenyUsers)\b' -and $_ -notmatch '^\s+' }) |
-            Set-Content $config -Encoding ascii
-          & "$env:WINDIR\System32\OpenSSH\sshd.exe" -t
-          if ($LASTEXITCODE -ne 0) { throw "sshd_config is invalid" }
-          Start-Service sshd
-
-          $client = [System.Net.Sockets.TcpClient]::new('127.0.0.1', 2222)
-          $banner = [System.IO.StreamReader]::new($client.GetStream()).ReadLine()
-          $client.Dispose()
-          Write-Output "Server: $banner"
-          "Server: ``$banner``" >> $env:GITHUB_STEP_SUMMARY
-          @(
-            'SSHSHARP_TEST_SSHD=127.0.0.1:2222'
-            'SSHSHARP_TEST_USER=sshsharp'
-            "SSHSHARP_TEST_PASSWORD=$password"
-            'SSHSHARP_TEST_SERVER=OpenSSH'
-            'SSHSHARP_TEST_SERVER_OS=windows'
-          ) >> $env:GITHUB_ENV
+        run: tests/windows/start-sshd.ps1
       - name: PuTTY's Pageant, running with no keys (the test adds one)
         shell: pwsh
         run: |
@@ -512,8 +422,9 @@ jobs:
           if (-not $pipe) { throw "Pageant did not create its pipe" }
           Write-Output "Pageant 0.83 is listening"
           'SSHSHARP_TEST_PAGEANT=1' >> $env:GITHUB_ENV
-      - run: dotnet restore
-      - run: dotnet build -c Release --no-restore
+      - uses: ./.github/actions/setup-dotnet
+        with:
+          build: true
       - name: Interop tests against OpenSSH for Windows
         # Few tests at a time: under a burst of connections, OpenSSH for Windows' listener fails some accepts ("error: accept:
         # Connection reset" in its log) and leaves the connection unserved, so a test forwarding to the server's own sshd waits for an
@@ -544,26 +455,21 @@ jobs:
   # and rates them. tests/ssh-audit/check_client_audit.py fails the job on any rating it does not explain, a CVE, a missing strict
   # key exchange, a default list that does not start with a post-quantum hybrid, or a non-FIPS algorithm in FIPS mode. ssh-audit's own
   # exit code is not used: it fails on its opinion of the NIST curves alone.
-  ssh-audit:
-    name: ssh-audit (client)
+  audit:
+    name: audit (ssh-audit)
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
-        with:
-          global-json-file: global.json
-          dotnet-version: 8.0.x
-          cache: true
-          cache-dependency-path: '**/Directory.Packages.props'
       - name: Install ssh-audit (pinned by hash)
         run: |
           python3 -m venv "$RUNNER_TEMP/ssh-audit"
           "$RUNNER_TEMP/ssh-audit/bin/pip" install --quiet --require-hashes -r tests/ssh-audit/requirements.txt
-      - run: dotnet restore
-      - run: dotnet build -c Release --no-restore
+      - uses: ./.github/actions/setup-dotnet
+        with:
+          build: true
       - name: Audit the client
         run: |
           set -euo pipefail

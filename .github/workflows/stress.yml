@@ -39,14 +39,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+      - uses: ./.github/actions/setup-dotnet
         with:
-          global-json-file: global.json
-          dotnet-version: 8.0.x
-          cache: true
-          cache-dependency-path: '**/Directory.Packages.props'
-      - run: dotnet restore
-      - run: dotnet build -c Release --no-restore -p:SshSharpInstrument=true
+          build: true
+          build-args: -p:SshSharpInstrument=true
       - name: Loop
         shell: bash
         run: tests/stress/loop.sh "$ITERATIONS" "$RUNNER_TEMP/stress" net8.0,net10.0 "$UNIT_FILTER"
@@ -97,33 +93,18 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
-        with:
-          global-json-file: global.json
-          dotnet-version: 8.0.x
-          cache: true
-          cache-dependency-path: '**/Directory.Packages.props'
       - name: Start the server container
-        run: |
-          set -euo pipefail
-          PASSWORD="$(openssl rand -hex 16)"
-          echo "::add-mask::$PASSWORD"
-          docker build -q -t sshsharp-interop --build-arg BASE="${{ matrix.image }}" --build-arg SERVER="${{ matrix.server }}" tests/docker
-          docker run -d --name server -p 127.0.0.1:2200:${{ matrix.port || '22' }} -e TEST_PASSWORD="$PASSWORD" sshsharp-interop
-          tests/docker/wait-for-ssh.sh 2200 > /dev/null || { echo "::error::the server does not answer"; docker logs server || true; exit 1; }
-          {
-            echo "SSHSHARP_TEST_SSHD=127.0.0.1:2200"
-            echo "SSHSHARP_TEST_SSHD_INNER_PORT=${{ matrix.port || '22' }}"
-            echo "SSHSHARP_TEST_USER=sshsharp"
-            echo "SSHSHARP_TEST_PASSWORD=$PASSWORD"
-            echo "SSHSHARP_TEST_SERVER=${{ matrix.software }}"
-            echo "SSHSHARP_TEST_SERVER_STRICTKEX=${{ matrix.strict }}"
-          } >> "$GITHUB_ENV"
-          # OpenSSH (RekeyLimit) and AsyncSSH (rekey_bytes) re-key every 32 KiB; MINA keeps its default limit (see MinaServer.java).
-          if [ "${{ matrix.server }}" != "dropbear" ] && [ "${{ matrix.server }}" != "mina" ]; then echo "SSHSHARP_TEST_SSHD_REKEY=1" >> "$GITHUB_ENV"; fi
-          if [ "${{ matrix.server }}" = "dropbear" ]; then echo "SSHSHARP_TEST_DROPBEAR_SFTP=1" >> "$GITHUB_ENV"; fi
-      - run: dotnet restore
-      - run: dotnet build -c Release --no-restore -p:SshSharpInstrument=true
+        env:
+          IMAGE: ${{ matrix.image }}
+          SERVER: ${{ matrix.server }}
+          SOFTWARE: ${{ matrix.software }}
+          STRICT: ${{ matrix.strict }}
+          INNER_PORT: ${{ matrix.port || '22' }}
+        run: tests/docker/start-server.sh "$IMAGE" "$SERVER" "$SOFTWARE" "$STRICT" "$INNER_PORT"
+      - uses: ./.github/actions/setup-dotnet
+        with:
+          build: true
+          build-args: -p:SshSharpInstrument=true
       - name: Loop
         # Few tests at a time, as in CI: Dropbear limits unauthenticated connections per address.
         run: tests/stress/loop.sh "$ITERATIONS" "$RUNNER_TEMP/stress" net10.0,net8.0 "/*/*/*InteropTests/*" --maximum-parallel-tests 4
@@ -148,54 +129,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
-        with:
-          global-json-file: global.json
-          dotnet-version: 8.0.x
-          cache: true
-          cache-dependency-path: '**/Directory.Packages.props'
       - name: Start OpenSSH Server for Windows
         shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          if (-not (Get-Service sshd -ErrorAction SilentlyContinue)) {
-            Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0 | Out-Null
-          }
-
-          $password = -join ((1..24) | ForEach-Object { '{0:x}' -f (Get-Random -Maximum 16) }) + 'Aa1!'
-          Write-Output "::add-mask::$password"
-          New-LocalUser -Name sshsharp -Password (ConvertTo-SecureString $password -AsPlainText -Force) -PasswordNeverExpires | Out-Null
-          Add-LocalGroupMember -Group Users -Member sshsharp
-
-          New-ItemProperty -Path HKLM:\SOFTWARE\OpenSSH -Name DefaultShell -Value 'C:\Program Files\Git\bin\bash.exe' -PropertyType String -Force | Out-Null
-          Start-Service sshd
-          Stop-Service sshd
-          $config = "$env:ProgramData\ssh\sshd_config"
-          @(
-            'Port 2222'
-            'ListenAddress 127.0.0.1'
-            'ListenAddress ::1'
-            'PasswordAuthentication yes'
-            'MaxStartups 200:30:300'
-            'MaxSessions 64'
-            'AllowTcpForwarding yes'
-            'SyslogFacility LOCAL0'
-            'LogLevel DEBUG2'
-            'KexAlgorithms +diffie-hellman-group-exchange-sha256,diffie-hellman-group14-sha256,diffie-hellman-group16-sha512,diffie-hellman-group18-sha512'
-          ) + (Get-Content $config | Where-Object { $_ -notmatch '^\s*(Port|ListenAddress|PasswordAuthentication|Match|AuthorizedKeysFile|AllowGroups|AllowUsers|DenyGroups|DenyUsers)\b' -and $_ -notmatch '^\s+' }) |
-            Set-Content $config -Encoding ascii
-          & "$env:WINDIR\System32\OpenSSH\sshd.exe" -t
-          if ($LASTEXITCODE -ne 0) { throw "sshd_config is invalid" }
-          Start-Service sshd
-          @(
-            'SSHSHARP_TEST_SSHD=127.0.0.1:2222'
-            'SSHSHARP_TEST_USER=sshsharp'
-            "SSHSHARP_TEST_PASSWORD=$password"
-            'SSHSHARP_TEST_SERVER=OpenSSH'
-            'SSHSHARP_TEST_SERVER_OS=windows'
-          ) >> $env:GITHUB_ENV
-      - run: dotnet restore
-      - run: dotnet build -c Release --no-restore -p:SshSharpInstrument=true
+        run: tests/windows/start-sshd.ps1
+      - uses: ./.github/actions/setup-dotnet
+        with:
+          build: true
+          build-args: -p:SshSharpInstrument=true
       - name: Loop
         shell: bash
         # Few tests at a time, as in CI: OpenSSH for Windows fails some accepts under a burst of connections (#188).
