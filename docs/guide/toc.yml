@@ -5,6 +5,8 @@
       href: ../index.md
     - name: Getting started
       href: ../getting-started.md
+    - name: Features
+      href: ../features.md
     - name: "Tutorial: a server check tool"
       href: ../tutorial.md
 - name: How-to guides

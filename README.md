@@ -21,46 +21,29 @@ Console.WriteLine(result.StandardOutputText);
 
 ## Features
 
-- **Pure managed C#**, no native dependencies; .NET 8 and .NET 10, tested on Windows and Linux (x64 and Arm64) and macOS
-  (Arm64); trimming- and Native AOT-compatible, with an AOT-compiled smoke test against a real server in CI.
-- **Async all the way:** `CancellationToken` on every network operation, `IAsyncDisposable`, `System.IO.Pipelines` I/O with zero-copy
-  packet handling.
-- **OpenSSH configuration:** `ssh_config` (`Host`, `Match`, `Include`, tokens, host name canonicalization with DNS) and `known_hosts` (hashed hosts,
-  `@cert-authority`, `@revoked`), resolved like `ssh -G`.
-- **Authentication:** password (asked for only when keys fail, and changed when it has expired), public keys (OpenSSH, PKCS#8, PKCS#1/SEC1 and PuTTY `.ppk` formats, encrypted too),
-  OpenSSH user certificates, ssh-agent (Unix sockets, the Windows OpenSSH agent and PuTTY's Pageant), FIDO security keys
-  held by the agent, agent forwarding (also of an agent served in-process from your keys or KMS signers, with a filter on what the server may sign), keyboard-interactive (one-time codes, PAM), and multi-factor chains. Key generation, saved as `ssh-keygen` does, and export to PKCS#8 and PuTTY `.ppk`; signing and verifying
-  files and git commits with SSH keys (`ssh-keygen -Y`). Issuing and checking user and host certificates as a certificate
-  authority (`ssh-keygen -s`), with the CA key in an agent or a KMS if you like, and checking keys and certificates against a
-  revocation list (OpenSSH KRLs, `ssh-keygen -Q`).
-- **Host verification:** `StrictHostKeyChecking` policies, host certificates, `UpdateHostKeys`, key pinning, or your own
-  verifier. There is no "accept anything" default. Host key scanning, as `ssh-keyscan` does it.
-- **Connections:** ProxyJump chains (from `ssh_config` or typed `JumpHosts` with per-hop credentials), ProxyCommand, HTTP and SOCKS
-  proxies or your own transport (`SshProxy.FromConnector`), connect over any `Stream` or from a chosen local
-  address (`BindAddress`, `BindInterface`), keep-alive and
-  dead-connection detection; `HttpClient` through the SSH connection;
-  TCP and Unix-socket tunnels; local, remote and dynamic (SOCKS, optionally with a password) port forwarding (`ssh -L`, `-R`, `-D`), Unix sockets on either end of local forwarding (`-L /local.sock:/remote.sock`), and remote dynamic and Unix-socket forwarding (`-R port`, `-R /socket:target`), remote forwarding to an in-process handler, also
-  started from `ssh_config`.
-- **Sessions:** run commands, stream stdin/stdout/stderr, interactive shells with a pseudo-terminal, environment variables,
-  signals and window resizing; subsystems (`ssh -s`) such as `netconf`; `expect`-style scripting of shells.
-- **Modern algorithms:** post-quantum `mlkem768x25519-sha256`, and the FIPS-compatible `mlkem768nistp256-sha256` and `mlkem1024nistp384-sha384` (on .NET 10 where the platform has ML-KEM),
-  and `sntrup761x25519-sha512` (managed, on every platform), `curve25519-sha256`,
-  ECDH, and finite-field DH (group exchange, and groups 14, 16 and 18) key exchange; ChaCha20-Poly1305, AES-GCM and
-  AES-CTR with HMAC-SHA2 (ETM preferred, plain `hmac-sha2-256/512` for network equipment); Ed25519, ECDSA and RSA (SHA-2) keys; strict key exchange (Terrapin) always on; a FIPS mode;
-  OpenSSH's delayed compression (`zlib@openssh.com`, after authentication, Huffman-only as OpenSSH), off by default as in `ssh`.
-- **File transfer:** SFTP (version 3 with OpenSSH's extensions: pipelined uploads and downloads, seekable remote file
-  streams, directory transfers with several files at once, a filter and an rsync-style skip of unchanged files, pipelined
-  listings with patterns and recursion, pipelined recursive delete and `mkdir -p`, whole-file reads and writes, segmented
-  uploads and downloads, server-side file hashes (`check-file`), raw extended requests for vendor extensions, a timeout for a
-  server that stops answering, links and attributes), and SCP uploads and downloads of files,
-  streams and directories, with progress, kept times, and checks that stop a hostile server from writing outside the target.
-- **Files for the rest of .NET:** `SshSharp.IO.Abstractions` implements System.IO.Abstractions' `IFileSystem` over SFTP (code written
-  against `IFileSystem` reads and writes the server unchanged), and `SshSharp.FileProviders` serves a directory as an `IFileProvider`, for
-  ASP.NET Core static files, Razor views and configuration; nothing is mounted, so only your application sees the files.
-- **Dependency injection:** `SshSharp.Extensions.DependencyInjection` registers named endpoints from configuration (jump hosts and the
-  agent included), with a factory for new connections, a shared connection that is opened again when it drops (with notifications
-  when it does), keyed services by endpoint name, `HttpClient`s that connect through an endpoint, and a health check.
-- **Observability:** `ILogger` logging, `ActivitySource` tracing and `Meter` metrics, with no secrets recorded.
+- **Platform:** pure managed C#, no native dependencies; .NET 8 and .NET 10 on Windows, Linux and macOS; trimming and Native AOT.
+  Async all the way, with a `CancellationToken` on every network operation.
+- **Connecting:** `ssh_config` aliases (`Host`, `Match`, `Include`), ProxyJump chains (from `ssh_config` or in code),
+  ProxyCommand, HTTP and SOCKS proxies or your own transport, typed options for algorithms and timeouts, keep-alive.
+- **Host verification:** `known_hosts` with OpenSSH's policies, host certificates, revocation lists, `UpdateHostKeys`, pinning
+  or your own verifier; no "accept anything" default.
+- **Authentication and keys:** passwords (prompted and changed when expired), keys in OpenSSH, PKCS#1/#8, SEC1 and PuTTY
+  formats, key generation and export, ssh-agent and Pageant, an in-process agent, agent forwarding with a filter, FIDO keys,
+  KMS and HSM signers, certificates (also issued as a CA), revocation lists, keyboard-interactive, Kerberos, `ssh-keygen -Y`
+  signatures.
+- **Commands and shells:** run or stream commands, shells with a terminal, `expect`-style scripting, signals, subsystems.
+- **SFTP and SCP:** pipelined and segmented transfers, directory trees with filters and skipping of unchanged files, recursive
+  listings, server-side hashes, remote file streams, SCP for servers without SFTP.
+- **Forwarding:** local, remote and dynamic (SOCKS 5 with a password if you like), Unix sockets on either end, remote
+  forwarding to a handler in your code, `HttpClient` through the connection.
+- **Cryptography:** post-quantum key exchange, ChaCha20-Poly1305 and AES-GCM, strict key exchange, a FIPS mode, delayed
+  compression; no legacy algorithms.
+- **.NET integration:** dependency injection (named and keyed endpoints, a shared reconnecting connection, health checks),
+  SFTP as `IFileSystem` or `IFileProvider`.
+- **Observability:** `ILogger`, `ActivitySource` traces and `Meter` metrics, with no secrets recorded.
+
+Every feature, with its API and the page that shows how:
+**[Features](https://github.com/zcsizmadia/SshSharp/blob/main/docs/features.md)**.
 
 ## Why not SSH.NET?
 
