@@ -8,6 +8,9 @@ internal readonly record struct ForwardListen(string? Bind, int Port);
 /// <summary>Where a forwarding connects: a host and port.</summary>
 internal readonly record struct ForwardTarget(string Host, int Port);
 
+/// <summary>A <c>PermitRemoteOpen</c> entry: a host (<c>*</c> for any) and a port (null for any).</summary>
+internal readonly record struct PermitOpen(string Host, int? Port);
+
 /// <summary>
 /// Parses the <c>LocalForward</c>, <c>RemoteForward</c> and <c>DynamicForward</c> arguments of ssh_config: <c>[bind_address:]port</c>
 /// (an IPv6 bind address in brackets) and <c>host:hostport</c>. Unix-socket forms (a path) are not supported and parse as null.
@@ -94,6 +97,90 @@ internal static class ForwardSpec
         }
 
         return TryPort(port, allowZero: false) is { } number && !host.Any(char.IsControl) ? new ForwardTarget(host, number) : null;
+    }
+
+    /// <summary>
+    /// <c>PermitRemoteOpen</c>'s arguments: null for none given or <c>any</c> (everything allowed), empty for <c>none</c>, otherwise the
+    /// entries that parse (see <see cref="ParsePermitOpen"/>). <c>any</c> and <c>none</c> count only alone, as ssh refuses them among
+    /// other entries; here they are left out like any entry that does not parse, which allows less, never more.
+    /// </summary>
+    public static IReadOnlyList<string>? ParsePermitRemoteOpen(IReadOnlyList<string> arguments)
+    {
+        if (arguments.Count == 0 || (arguments.Count == 1 && arguments[0].Equals("any", StringComparison.OrdinalIgnoreCase)))
+        {
+            return null;
+        }
+
+        return [.. arguments.Where(a => ParsePermitOpen(a) is not null)];
+    }
+
+    /// <summary>
+    /// One <c>PermitRemoteOpen</c> entry: <c>host:port</c>, <c>[ipv6]:port</c>, with <c>*</c> for any host or any port (a null
+    /// <see cref="PermitOpen.Port"/>). Null when it is not one: an IPv6 address must be in brackets, as ssh splits at the first colon.
+    /// </summary>
+    public static PermitOpen? ParsePermitOpen(string text)
+    {
+        string host;
+        string port;
+        if (text.StartsWith('['))
+        {
+            var close = text.IndexOf(']', StringComparison.Ordinal);
+            if (close < 2 || close + 1 >= text.Length || text[close + 1] != ':')
+            {
+                return null;
+            }
+
+            host = text[1..close];
+            port = text[(close + 2)..];
+        }
+        else
+        {
+            var colon = text.IndexOf(':', StringComparison.Ordinal);
+            if (colon < 1)
+            {
+                return null;
+            }
+
+            host = text[..colon];
+            port = text[(colon + 1)..];
+        }
+
+        if (host.Any(c => char.IsControl(c) || char.IsWhiteSpace(c)))
+        {
+            return null;
+        }
+
+        return port == "*" ? new PermitOpen(host, null)
+            : TryPort(port, allowZero: false) is { } number ? new PermitOpen(host, number)
+            : null;
+    }
+
+    /// <summary>
+    /// The destination filter for <c>PermitRemoteOpen</c> entries: a host and port are allowed when an entry names both (or <c>*</c>).
+    /// As in ssh, there is no pattern matching beyond a whole <c>*</c>: a name matches the same name (ignoring case, as DNS does), an
+    /// address the same address in any spelling.
+    /// </summary>
+    public static Func<string, int, bool> PermitOpenFilter(IReadOnlyList<string> entries)
+    {
+        var permits = entries.Select(ParsePermitOpen).OfType<PermitOpen>().ToArray();
+        return (host, port) => permits.Any(p => (p.Port is null || p.Port == port) && HostMatches(p.Host, host));
+    }
+
+    private static bool HostMatches(string permitted, string requested)
+    {
+        if (permitted == "*")
+        {
+            return true;
+        }
+
+        var permittedAddress = SshRemotePortForwarder.ParseAddressLiteral(permitted);
+        var requestedAddress = SshRemotePortForwarder.ParseAddressLiteral(requested);
+        if (permittedAddress is not null || requestedAddress is not null)
+        {
+            return permittedAddress is not null && permittedAddress.Equals(requestedAddress);
+        }
+
+        return permitted.Equals(requested, StringComparison.OrdinalIgnoreCase);
     }
 
     private static int? TryPort(string text, bool allowZero) =>

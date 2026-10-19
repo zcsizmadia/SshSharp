@@ -35,6 +35,22 @@ internal static class Connecting
         // </alias-options>
     }
 
+    public static async Task AliasOverridesAsync(CancellationToken cancellationToken)
+    {
+        // <alias-overrides>
+        // ssh_config decides the rest; these win over what it says, as ssh -p and ssh -o do.
+        await using var client = await SshClient.ConnectAsync("prod-db", new SshConfigConnectOptions
+        {
+            Port = 2222,                                  // the destination's port (ssh -p); not a ProxyJump hop's
+            ConnectTimeout = TimeSpan.FromSeconds(15),    // per host, from loading keys through authentication
+            ConnectionAttempts = 3,                       // try an unreachable server again, one second apart
+            AddressFamily = SshAddressFamily.Inet,        // IPv4 only, for the connection this machine makes
+            KeepAliveInterval = TimeSpan.FromSeconds(30), // TimeSpan.Zero turns keep-alives off
+            KeepAliveCountMax = 4,
+        }, cancellationToken);
+        // </alias-overrides>
+    }
+
     public static async Task CustomConfigAsync(CancellationToken cancellationToken)
     {
         // <custom-config>

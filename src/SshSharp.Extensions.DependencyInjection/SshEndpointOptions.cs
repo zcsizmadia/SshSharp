@@ -79,6 +79,14 @@ public sealed class SshEndpointOptions
     public TimeSpan? KeepAliveInterval { get; set; }
 
     /// <summary>
+    /// Which of the server's addresses to try (<see cref="SshClientOptions.AddressFamily"/>): <c>Any</c>, <c>Inet</c> (IPv4 only) or
+    /// <c>Inet6</c> (IPv6 only), for example <c>Inet</c> where a host's IPv6 address is published but not reachable. With
+    /// <see cref="ConfigAlias"/>, it overrides ssh_config's <c>AddressFamily</c>. Null (the default) tries any address, or leaves it to
+    /// ssh_config.
+    /// </summary>
+    public Config.SshAddressFamily? AddressFamily { get; set; }
+
+    /// <summary>
     /// How long one connection attempt, handshake and authentication included, may take (default 30 seconds). It is also the
     /// <see cref="SshClientOptions.ConnectTimeout"/> of the client options built from these settings, which
     /// <see cref="ConfigureClientOptions"/> may shorten; it cannot extend the attempt past this limit.

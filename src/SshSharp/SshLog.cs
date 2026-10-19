@@ -136,4 +136,7 @@ internal static partial class SshLog
 
     [LoggerMessage(EventId = 52, Level = LogLevel.Information, Message = "Forwarding {LocalEndPoint} to a Unix socket on the server")]
     public static partial void ForwardingToSocketStarted(ILogger logger, string localEndPoint);
+
+    [LoggerMessage(EventId = 50, Level = LogLevel.Information, Message = "Connection attempt {Attempt} of {Attempts} failed ({Reason}); trying again in a second (ConnectionAttempts)")]
+    public static partial void ConnectionAttemptFailed(ILogger logger, int attempt, int attempts, System.Net.Sockets.SocketError reason);
 }

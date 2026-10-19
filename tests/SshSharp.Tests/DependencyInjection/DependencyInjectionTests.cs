@@ -202,6 +202,52 @@ public sealed class DependencyInjectionTests : IDisposable
     }
 
     [Test]
+    public async Task AddressFamily_BindsFromConfiguration_AndIsTheClientOptionsAddressFamily()
+    {
+        await using var server = new TcpFakeSshServer();
+        var configuration = new Microsoft.Extensions.Configuration.ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["Ssh:box:AddressFamily"] = "Inet" })
+            .Build();
+        SshSharp.Config.SshAddressFamily? seen = null;
+        var services = new ServiceCollection();
+        services.AddSingleton<Microsoft.Extensions.Configuration.IConfiguration>(configuration);
+        services.AddSshClient("box", Endpoint(server)).BindConfiguration("Ssh:box").Configure(o => o.ConfigureClientOptions = (_, options) =>
+        {
+            seen = options.AddressFamily;
+            return options;
+        });
+        await using var provider = services.BuildServiceProvider();
+
+        await using var client = await provider.GetRequiredService<ISshClientFactory>().ConnectAsync("box", Timeout());
+        await Assert.That(client.IsConnected).IsTrue();
+        await Assert.That(seen).IsEqualTo(SshSharp.Config.SshAddressFamily.Inet);
+
+        // IPv6 only cannot reach an IPv4 address: the setting reaches the connection.
+        var ipv6 = new ServiceCollection();
+        ipv6.AddSshClient("box", Endpoint(server)).Configure(o => o.AddressFamily = SshSharp.Config.SshAddressFamily.Inet6);
+        await using var ipv6Provider = ipv6.BuildServiceProvider();
+        var ex = await Assert.ThrowsAsync<SshException>(async () => await ipv6Provider.GetRequiredService<ISshClientFactory>().ConnectAsync("box", Timeout()));
+        await Assert.That(ex!.Reason).IsEqualTo(SshFailureReason.ConnectFailed);
+    }
+
+    [Test]
+    public async Task AddressFamily_IsAnyByDefault()
+    {
+        await using var server = new TcpFakeSshServer();
+        SshSharp.Config.SshAddressFamily? seen = null;
+        var services = new ServiceCollection();
+        services.AddSshClient("box", Endpoint(server)).Configure(o => o.ConfigureClientOptions = (_, options) =>
+        {
+            seen = options.AddressFamily;
+            return options;
+        });
+        await using var provider = services.BuildServiceProvider();
+
+        await using var client = await provider.GetRequiredService<ISshClientFactory>().ConnectAsync("box", Timeout());
+        await Assert.That(seen).IsEqualTo(SshSharp.Config.SshAddressFamily.Any);
+    }
+
+    [Test]
     public async Task ConnectTimeout_StopsAServerThatNeverAnswers_WithATimeoutException()
     {
         var listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);

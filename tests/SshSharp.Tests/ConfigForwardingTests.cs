@@ -173,6 +173,111 @@ public sealed class ConfigForwardingTests : IDisposable
         await Assert.That(error.Message).Contains("RemoteForward");
     }
 
+    /// <summary>A local service on IPv4 loopback that answers each connection with "OK" and counts them.</summary>
+    private sealed class OkService : IDisposable
+    {
+        private readonly Socket _listener = new(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+        private int _accepted;
+
+        public OkService()
+        {
+            _listener.Bind(new IPEndPoint(IPAddress.Loopback, 0));
+            _listener.Listen();
+            _ = Task.Run(async () =>
+            {
+                while (true)
+                {
+                    Socket socket;
+                    try
+                    {
+                        socket = await _listener.AcceptAsync();
+                    }
+                    catch (Exception)
+                    {
+                        return;
+                    }
+
+                    Interlocked.Increment(ref _accepted);
+                    using (socket)
+                    {
+                        await socket.SendAsync("OK"u8.ToArray(), SocketFlags.None);
+                        socket.Shutdown(SocketShutdown.Send);
+                    }
+                }
+            });
+        }
+
+        public int Port => ((IPEndPoint)_listener.LocalEndPoint!).Port;
+
+        public int Accepted => Volatile.Read(ref _accepted);
+
+        public void Dispose() => _listener.Dispose();
+    }
+
+    /// <summary>
+    /// Asks the remote dynamic forwarding for <paramref name="host"/>:<paramref name="port"/> (SOCKS 4a, by name); true when granted.
+    /// A grant is followed by reading the service's "OK": the grant comes once the TCP connection is made, which the kernel completes
+    /// from the listen backlog before the service has accepted (and counted) it, so only the service's own reply proves it was reached.
+    /// </summary>
+    private static async Task<bool> SocksConnectAsync(FakeSessionServer server, int remotePort, string host, int port)
+    {
+        await using var remote = (await server.ConnectForwardedAsync(remotePort))!;
+        byte[] request = [4, 1, (byte)(port >> 8), (byte)port, 0, 0, 0, 1, 0, .. Encoding.ASCII.GetBytes(host), 0];
+        await remote.WriteAsync(request, Timeout());
+        var reply = new byte[8];
+        await remote.ReadExactlyAsync(reply, Timeout());
+        if (reply[1] != 0x5A)
+        {
+            return false;
+        }
+
+        var ok = new byte[2];
+        await remote.ReadExactlyAsync(ok, Timeout());
+        await Assert.That(Encoding.ASCII.GetString(ok)).IsEqualTo("OK");
+        return true;
+    }
+
+    [Test]
+    public async Task PermitRemoteOpen_LimitsTheRemoteDynamicForwardingsDestinations()
+    {
+        using var service = new OkService();
+        var (server, client) = await ConnectAsync($" RemoteForward 0\n PermitRemoteOpen localhost:{service.Port} [2001:db8::1]:22\n");
+        await using (server)
+        await using (client)
+        {
+            var remotePort = client.RemoteForwardings.Single().RemotePort;
+
+            // Allowed by name, and connected to by name: the name is not looked up for the check (its addresses are not listed).
+            await Assert.That(await SocksConnectAsync(server, remotePort, "localhost", service.Port)).IsTrue();
+
+            // The same service by address, or another port: not listed, so refused without a connection.
+            await Assert.That(await SocksConnectAsync(server, remotePort, "127.0.0.1", service.Port)).IsFalse();
+            await Assert.That(await SocksConnectAsync(server, remotePort, "localhost", service.Port == 65535 ? 1 : service.Port + 1)).IsFalse();
+            await Assert.That(service.Accepted).IsEqualTo(1);
+        }
+    }
+
+    [Test]
+    public async Task PermitRemoteOpenNone_RefusesEverything_AndUnsetAllowsEverything()
+    {
+        using var service = new OkService();
+        var (server, client) = await ConnectAsync(" RemoteForward 0\n PermitRemoteOpen none\n");
+        await using (server)
+        await using (client)
+        {
+            await Assert.That(await SocksConnectAsync(server, client.RemoteForwardings.Single().RemotePort, "127.0.0.1", service.Port)).IsFalse();
+        }
+
+        var (open, openClient) = await ConnectAsync(" RemoteForward 0\n");
+        await using (open)
+        await using (openClient)
+        {
+            await Assert.That(await SocksConnectAsync(open, openClient.RemoteForwardings.Single().RemotePort, "127.0.0.1", service.Port)).IsTrue();
+        }
+
+        await Assert.That(service.Accepted).IsEqualTo(1);
+    }
+
     [Test]
     public async Task ClearAllForwardings_EmptiesTheLists()
     {

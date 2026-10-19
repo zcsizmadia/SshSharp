@@ -155,6 +155,13 @@ public sealed class SshHostConfig
     /// <summary>The connection timeout, or null.</summary>
     public TimeSpan? ConnectTimeout { get; init; }
 
+    /// <summary>
+    /// <c>ConnectionAttempts</c>: how many times to try the TCP connection, one second apart (default 1). Only failures to reach the
+    /// server are tried again (refused, unreachable, timed out), never a failed handshake or authentication; <c>ConnectTimeout</c> still
+    /// bounds all the attempts together. Values below 1, which ssh refuses, are left out.
+    /// </summary>
+    public int ConnectionAttempts { get; init; } = 1;
+
     /// <summary>The address family restriction.</summary>
     public SshAddressFamily AddressFamily { get; init; }
 
@@ -249,6 +256,13 @@ public sealed class SshHostConfig
     /// (typically a stale socket of an earlier run). Off by default, as in ssh: the forwarding then fails.
     /// </summary>
     public bool StreamLocalBindUnlink { get; init; }
+
+    /// <summary>
+    /// <c>PermitRemoteOpen</c>: the destinations a remote dynamic forwarding (<c>RemoteForward [bind:]port</c>) may connect to, as
+    /// <c>host:port</c> entries (an IPv6 address in brackets; <c>*</c> for any host or any port). Null when unset or <c>any</c>: every
+    /// destination is allowed, as in ssh. Empty for <c>none</c>. Entries that do not parse are left out, so they allow nothing.
+    /// </summary>
+    public IReadOnlyList<string>? PermitRemoteOpen { get; init; }
 
     /// <summary>Whether a forwarding that cannot be set up fails the connection (<c>ExitOnForwardFailure</c>).</summary>
     public bool ExitOnForwardFailure { get; init; }

@@ -56,8 +56,12 @@ internal sealed class SshClientFactory(
         try
         {
             return endpoint.ConfigAlias is { Length: > 0 } alias
-                ? await SshClient.ConnectAsync(alias, new SshConfigConnectOptions { Password = endpoint.Password, Logger = _logger }, timeout.Token)
-                    .ConfigureAwait(false)
+                ? await SshClient.ConnectAsync(alias, new SshConfigConnectOptions
+                {
+                    Password = endpoint.Password,
+                    Logger = _logger,
+                    AddressFamily = endpoint.AddressFamily,
+                }, timeout.Token).ConfigureAwait(false)
                 : await ConnectDirectAsync(name, endpoint, timeout.Token).ConfigureAwait(false);
         }
         catch (OperationCanceledException ex) when (timeout.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
@@ -92,6 +96,7 @@ internal sealed class SshClientFactory(
                 Proxy = endpoint.Proxy is { Length: > 0 } proxy ? SshEndpointOptionsValidator.ParseProxy(proxy) : null,
                 KeepAliveInterval = endpoint.KeepAliveInterval,
                 ConnectTimeout = endpoint.ConnectTimeout,
+                AddressFamily = endpoint.AddressFamily ?? SshAddressFamily.Any,
                 Logger = _logger,
             };
             if (endpoint.ConfigureClientOptions is { } configure)

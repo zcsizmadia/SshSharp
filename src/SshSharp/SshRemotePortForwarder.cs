@@ -52,14 +52,21 @@ public sealed class SshRemotePortForwarder : IAsyncDisposable
     /// <summary>Whether connections go to a handler in this process rather than to a host and port.</summary>
     internal bool IsHandler => _handlers is not null;
 
-    /// <summary>A remote dynamic forwarding: no fixed destination; each connection names its own through SOCKS.</summary>
+    /// <summary>
+    /// A remote dynamic forwarding: no fixed destination; each connection names its own through SOCKS. With
+    /// <paramref name="checkResolvedAddresses"/> false (ssh_config's <c>PermitRemoteOpen</c>), a requested name is checked as given
+    /// only, and connected to by name: ssh_config(5) makes no address lookups for that check.
+    /// </summary>
     internal SshRemotePortForwarder(string bindAddress, int port, Func<string, int, bool>? allowDestination, ILogger logger,
-        Func<SshRemotePortForwarder, CancellationToken, Task> cancel, CancellationToken connectionClosed)
+        Func<SshRemotePortForwarder, CancellationToken, Task> cancel, CancellationToken connectionClosed, bool checkResolvedAddresses = true)
         : this(bindAddress, port, string.Empty, 0, logger, cancel, connectionClosed)
     {
         IsDynamic = true;
         _allowDestination = allowDestination;
+        _checkResolvedAddresses = checkResolvedAddresses;
     }
+
+    private readonly bool _checkResolvedAddresses = true;
 
     /// <summary>
     /// Whether this is a remote dynamic forwarding (<c>ssh -R port</c>): each forwarded connection is a SOCKS request answered here, and
@@ -320,6 +327,11 @@ public sealed class SshRemotePortForwarder : IAsyncDisposable
         if (!Allowed(target.Host))
         {
             return (null, "the destination is not allowed");
+        }
+
+        if (!_checkResolvedAddresses)
+        {
+            return (null, null); // allowed by its name, and connected to by name
         }
 
         IPAddress[] resolved;

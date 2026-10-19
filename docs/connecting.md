@@ -72,17 +72,18 @@ What is taken from the configuration: `HostName`, `Port`, `User`, `IdentityFile`
 `IdentitiesOnly`, `UserKnownHostsFile`, `GlobalKnownHostsFile`, `RevokedHostKeys`, `StrictHostKeyChecking`, `HashKnownHosts`,
 `UpdateHostKeys`, `HostKeyAlias`, `KexAlgorithms`, `HostKeyAlgorithms`, `Ciphers`, `MACs`, `PubkeyAcceptedAlgorithms`,
 `PreferredAuthentications`, `PubkeyAuthentication`, `PasswordAuthentication`, `KbdInteractiveAuthentication`, `BatchMode`,
-`ProxyJump`, `ProxyCommand`, `ServerAliveInterval`, `ServerAliveCountMax`, `ConnectTimeout`, `AddressFamily`,
+`ProxyJump`, `ProxyCommand`, `ServerAliveInterval`, `ServerAliveCountMax`, `ConnectTimeout`, `ConnectionAttempts`, `AddressFamily`,
 `BindAddress`, `BindInterface`, `ForwardAgent`, `AddKeysToAgent`, `GSSAPIAuthentication`, `GSSAPIDelegateCredentials`,
 `ChannelTimeout`, `ObscureKeystrokeTiming`, `RefuseConnection` and `KnownHostsCommand` (with `AllowKnownHostsCommand`); with `StartForwardings`, also `LocalForward`, `RemoteForward`,
-`DynamicForward`, `GatewayPorts`, `ExitOnForwardFailure` and `ClearAllForwardings`.
+`DynamicForward`, `PermitRemoteOpen`, `GatewayPorts`, `ExitOnForwardFailure` and `ClearAllForwardings`.
 `Match` (including `Match exec`, which needs an opt-in) and `Include` work as in OpenSSH.
 
 `SshConfigConnectOptions` also takes a `Config` (default: the user's and the system's files), `ResolveOptions` (home
 directory, environment, local user), a `Password`, extra `PrivateKeys`, a `PassphraseProvider` for encrypted identity files,
 `KeyboardInteractive`, a `HostKeyVerifier` that replaces the configured one, `AskHostKey` and `ConfirmHostKeyUpdate`,
 `UseAgent`/`Agent`, `AllowProxyCommand`, `AllowKnownHostsCommand`, a `Proxy` (HTTP or SOCKS), `StartForwardings`, `AuthenticationBanner` and a
-`Logger`.
+`Logger`. `Port`, `ConnectTimeout`, `ConnectionAttempts`, `AddressFamily`, `KeepAliveInterval` and `KeepAliveCountMax` override what the
+configuration says (see [Override what the configuration says](how-to/ssh-config-and-known-hosts.md#override-what-the-configuration-says)).
 
 ### Jump hosts and proxy commands
 
@@ -325,7 +326,8 @@ refuses the request, and the call throws an `SshException`.
 `LocalForward`, `RemoteForward` and `DynamicForward` are started when connecting by alias with
 `SshConfigConnectOptions.StartForwardings = true` (off by default: they open listening ports). They are disposed with the
 client, and `client.LocalForwardings`, `RemoteForwardings` and `DynamicForwardings` list them. `RemoteForward` with just a
-port (`RemoteForward 1080`) is remote dynamic forwarding, with every destination allowed, as in ssh. `RemoteForward` with a
+port (`RemoteForward 1080`) is remote dynamic forwarding, with every destination allowed, as in ssh, unless `PermitRemoteOpen` lists
+the ones allowed (`host:port` entries, `*` for any host or port, or `none`; names are compared as given, without lookups). `RemoteForward` with a
 socket path (`RemoteForward /run/app.sock 127.0.0.1:3000` or `RemoteForward /remote.sock /local.sock`) is remote Unix-socket
 forwarding, listed in `client.RemoteSocketForwardings`; as in ssh, a target with a `/` in it is a socket path. `LocalForward` takes
 socket paths on either side: `LocalForward /tmp/docker.sock /var/run/docker.sock`, `LocalForward 15432 /run/postgresql/.s.PGSQL.5432`

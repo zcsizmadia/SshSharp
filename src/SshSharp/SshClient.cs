@@ -12,6 +12,9 @@ public sealed partial class SshClient : IAsyncDisposable
 {
     private readonly SshConnection _connection;
     private readonly SshClientOptions _options;
+
+    /// <summary>The options this client was connected with (for tests of what ssh_config resolution passes on).</summary>
+    internal SshClientOptions Options => _options;
     private readonly Stream _stream;
     private readonly bool _leaveOpen;
     private readonly IAsyncDisposable? _owner;

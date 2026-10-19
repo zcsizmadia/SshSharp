@@ -103,7 +103,11 @@ A man in the middle can read, change, drop and inject bytes. The server itself m
   destination in a SOCKS request, so anyone who can reach the forwarded port on the server can use this machine's network.
   As with `ssh`, every destination is allowed unless the application passes `allowDestination`. The filter sees canonical
   forms: an IP literal in any spelling (`127.1`, `::ffff:127.0.0.1`) as its canonical address, and a host name both as
-  given and as each address it resolves to here, and the connection goes only to an address that passed.
+  given and as each address it resolves to here, and the connection goes only to an address that passed. A forwarding started
+  from `ssh_config` (`RemoteForward port`) is filtered by `PermitRemoteOpen` instead, with `ssh`'s rules: an IP literal is still
+  compared in canonical form, but a host name is compared only as given and then resolved and connected to here, so an entry
+  that names a host trusts this machine's resolver for it. Unset, `PermitRemoteOpen` allows everything, as in `ssh`; an entry
+  that does not parse allows nothing.
 - The client does not check the address a `forwarded-tcpip` channel names, only the port. The server picks which forwarding
   to use anyway.
 - **Remote forwarding to a handler** (`ForwardRemotePortAsync` and `ForwardRemoteUnixSocketAsync` with a handler) runs the

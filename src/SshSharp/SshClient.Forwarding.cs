@@ -285,6 +285,20 @@ public sealed partial class SshClient
     }
 
     /// <summary>
+    /// Remote dynamic forwarding from ssh_config, under its <c>PermitRemoteOpen</c> (null for any destination): as in ssh, a requested
+    /// name is checked as given and not looked up for the check, unlike the filter of the public overload.
+    /// </summary>
+    private Task<SshRemotePortForwarder> ForwardConfiguredRemoteDynamicPortAsync(string bindAddress, int remotePort, IReadOnlyList<string>? permitRemoteOpen,
+        CancellationToken cancellationToken)
+    {
+        ValidateRemoteListen(bindAddress, remotePort);
+        var allow = permitRemoteOpen is null ? null : ForwardSpec.PermitOpenFilter(permitRemoteOpen);
+        return StartRemoteForwardAsync(bindAddress, remotePort,
+            port => new SshRemotePortForwarder(bindAddress, port, allow, _logger, CancelRemoteForwardAsync, _connection.Closed, checkResolvedAddresses: false),
+            cancellationToken);
+    }
+
+    /// <summary>
     /// Remote port forwarding to a handler in this process (what Go's <c>ssh.Client.Listen</c> gives): asks the server to listen on
     /// <paramref name="bindAddress"/>:<paramref name="remotePort"/> and passes every connection made to it to <paramref name="handler"/>,
     /// as a <see cref="SshForwardedConnection"/> with a duplex <see cref="SshForwardedConnection.Stream"/>. Nothing listens on this
@@ -786,7 +800,7 @@ public sealed partial class SshClient
                 var bind = listen.Bind switch { null => "localhost", "*" => "", var given => given };
                 _remoteForwardings.Add(forward is { Target: var target }
                     ? await ForwardRemotePortAsync(bind, listen.Port, target.Host, target.Port, cancellationToken).ConfigureAwait(false)
-                    : await ForwardRemoteDynamicPortAsync(bind, listen.Port, cancellationToken: cancellationToken).ConfigureAwait(false));
+                    : await ForwardConfiguredRemoteDynamicPortAsync(bind, listen.Port, hostConfig.PermitRemoteOpen, cancellationToken).ConfigureAwait(false));
             }).ConfigureAwait(false);
         }
 

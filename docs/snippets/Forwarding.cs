@@ -1,5 +1,6 @@
 using System.Net;
 using SshSharp;
+using SshSharp.Config;
 
 namespace SshSharp.Docs.Snippets;
 
@@ -133,5 +134,26 @@ internal static class Forwarding
         await using var socks = await client.ForwardRemoteDynamicPortAsync("localhost", 1080,
             allowDestination: (host, port) => host == "mirror.internal" && port == 443, cancellationToken);
         // </remote-dynamic>
+    }
+
+    public static async Task RemoteDynamicFromConfigAsync(CancellationToken cancellationToken)
+    {
+        // <remote-dynamic-config>
+        // RemoteForward with only a port is remote dynamic forwarding; PermitRemoteOpen lists where it may connect.
+        var config = SshConfig.Parse("""
+            Host build
+              HostName build.example.com
+              User deploy
+              RemoteForward 1080
+              PermitRemoteOpen mirror.example.com:443 192.0.2.10:*
+              ExitOnForwardFailure yes
+            """);
+
+        await using var client = await SshClient.ConnectAsync("build", new SshConfigConnectOptions
+        {
+            Config = config,
+            StartForwardings = true,
+        }, cancellationToken);
+        // </remote-dynamic-config>
     }
 }
