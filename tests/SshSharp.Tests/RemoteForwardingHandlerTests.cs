@@ -1,5 +1,6 @@
 using System.Text;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Time.Testing;
 using SshSharp.Tests.Protocol;
 
 namespace SshSharp.Tests;
@@ -14,7 +15,7 @@ public class RemoteForwardingHandlerTests
 
     private static CancellationToken Timeout() => new CancellationTokenSource(TimeSpan.FromSeconds(60)).Token;
 
-    private static async Task<SshClient> ConnectAsync(FakeSessionServer server, ILogger? logger = null)
+    private static async Task<SshClient> ConnectAsync(FakeSessionServer server, ILogger? logger = null, TimeProvider? time = null)
     {
         _ = server.StartAsync();
         return await SshClient.ConnectAsync(server.ClientStream, new SshClientOptions
@@ -23,6 +24,7 @@ public class RemoteForwardingHandlerTests
             Password = "secret",
             HostKeyVerifier = SshHostKeyVerifier.FromDelegate((_, _) => ValueTask.FromResult(true)),
             Logger = logger,
+            TimeProvider = time ?? TimeProvider.System,
         }, leaveOpen: true, Timeout());
     }
 
@@ -34,6 +36,26 @@ public class RemoteForwardingHandlerTests
         public SshRemoteSocketForwarder? Socket { get; } = socket;
 
         public int ActiveConnections => Port?.ActiveConnections ?? Socket!.ActiveConnections;
+
+        public bool IsHandler => Port?.IsHandler ?? Socket!.IsHandler;
+
+        public int MaxConnections => Port?.MaxConnections ?? Socket!.MaxConnections;
+
+        public TimeSpan HandlerShutdownTimeout
+        {
+            get => Port?.HandlerShutdownTimeout ?? Socket!.HandlerShutdownTimeout;
+            set
+            {
+                if (Port is not null)
+                {
+                    Port.HandlerShutdownTimeout = value;
+                }
+                else
+                {
+                    Socket!.HandlerShutdownTimeout = value;
+                }
+            }
+        }
 
         public ValueTask DisposeAsync() => Port is not null ? Port.DisposeAsync() : Socket!.DisposeAsync();
     }
@@ -372,6 +394,213 @@ public class RemoteForwardingHandlerTests
         await started.Task.WaitAsync(Timeout());
         await forwarding.DisposeAsync().AsTask().WaitAsync(Timeout());
         await finished.Task.WaitAsync(Timeout());
+        await Assert.That(await ReadToEndAsync(remote)).IsEqualTo(string.Empty);
+    }
+
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
+    public async Task TheGracePeriod_IsConfigurable_AndRunsOnTheConnectionsClock(bool unix)
+    {
+        var time = new FakeTimeProvider();
+        var cancelled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var finished = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var server = new FakeSessionServer();
+        await using var client = await ConnectAsync(server, time: time);
+        var forwarding = await ForwardAsync(client, unix, async (connection, ct) =>
+        {
+            // Sees its token cancelled, but reads on without it: only the connection closing ends this.
+            await using var registration = ct.Register(() => cancelled.TrySetResult());
+            var buffer = new byte[1024];
+            try
+            {
+                while (await connection.Stream.ReadAsync(buffer, CancellationToken.None) > 0)
+                {
+                }
+            }
+            catch (ObjectDisposedException)
+            {
+                // Closed under it.
+            }
+
+            finished.SetResult();
+        });
+
+        var grace = TimeSpan.FromSeconds(30);
+        await Assert.That(forwarding.HandlerShutdownTimeout).IsEqualTo(TimeSpan.FromSeconds(5)); // the default
+        forwarding.HandlerShutdownTimeout = grace;
+        await Assert.That(forwarding.HandlerShutdownTimeout).IsEqualTo(grace);
+
+        await using var remote = (await ConnectRemoteAsync(server, forwarding))!;
+        var disposing = forwarding.DisposeAsync().AsTask();
+        await cancelled.Task.WaitAsync(Timeout());
+
+        // The wall clock does not end the grace period, only the connection's clock does: advance it a step at a time until disposal
+        // has closed the connection. It cannot finish before the whole grace period has passed on that clock (it may need a step or
+        // two more, when the wait started after the first step).
+        var step = grace / 10;
+        var advanced = TimeSpan.Zero;
+        while (!disposing.IsCompleted)
+        {
+            await Assert.That(advanced).IsLessThan(grace * 10).Because("disposal should have finished");
+            time.Advance(step);
+            advanced += step;
+            await Task.WhenAny(disposing, Task.Delay(20));
+        }
+
+        await disposing;
+        await Assert.That(advanced).IsGreaterThanOrEqualTo(grace);
+        await finished.Task.WaitAsync(Timeout());
+        await Assert.That(await ReadToEndAsync(remote)).IsEqualTo(string.Empty);
+    }
+
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
+    public async Task AZeroGracePeriod_ClosesStuckHandlersAtOnce(bool unix)
+    {
+        // The connection's clock never moves: a wait for any time at all would never end.
+        var time = new FakeTimeProvider();
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var finished = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var server = new FakeSessionServer();
+        await using var client = await ConnectAsync(server, time: time);
+        var forwarding = await ForwardAsync(client, unix, async (connection, _) =>
+        {
+            started.SetResult();
+            try
+            {
+                while (await connection.Stream.ReadAsync(new byte[16], CancellationToken.None) > 0)
+                {
+                }
+            }
+            catch (ObjectDisposedException)
+            {
+                // Closed under it.
+            }
+
+            finished.SetResult();
+        });
+
+        forwarding.HandlerShutdownTimeout = TimeSpan.Zero;
+        await using var remote = (await ConnectRemoteAsync(server, forwarding))!;
+        await started.Task.WaitAsync(Timeout());
+        await forwarding.DisposeAsync().AsTask().WaitAsync(Timeout());
+        await finished.Task.WaitAsync(Timeout());
+    }
+
+    [Test]
+    public async Task TheGracePeriod_RefusesNegativeAndOverlongValues()
+    {
+        await using var server = new FakeSessionServer();
+        await using var client = await ConnectAsync(server);
+        await using var forwarding = await ForwardAsync(client, unix: false, (_, _) => Task.CompletedTask);
+
+        forwarding.HandlerShutdownTimeout = System.Threading.Timeout.InfiniteTimeSpan;
+        await Assert.That(forwarding.HandlerShutdownTimeout).IsEqualTo(System.Threading.Timeout.InfiniteTimeSpan);
+        forwarding.HandlerShutdownTimeout = TimeSpan.FromMilliseconds(int.MaxValue);
+        await Assert.That(() => forwarding.HandlerShutdownTimeout = TimeSpan.FromSeconds(-2)).Throws<ArgumentOutOfRangeException>();
+        await Assert.That(() => forwarding.HandlerShutdownTimeout = TimeSpan.FromMilliseconds(int.MaxValue + 1L)).Throws<ArgumentOutOfRangeException>();
+        await Assert.That(forwarding.HandlerShutdownTimeout).IsEqualTo(TimeSpan.FromMilliseconds(int.MaxValue)); // unchanged by a refusal
+
+        // A forwarding without handlers takes the setting (there is nothing to wait for) and still checks it.
+        await using var plain = await client.ForwardRemotePortAsync("localhost", 0, "127.0.0.1", 9, Timeout());
+        plain.HandlerShutdownTimeout = TimeSpan.FromSeconds(1);
+        await Assert.That(plain.HandlerShutdownTimeout).IsEqualTo(TimeSpan.FromSeconds(1));
+        await Assert.That(() => plain.HandlerShutdownTimeout = TimeSpan.FromSeconds(-1)).Throws<ArgumentOutOfRangeException>();
+    }
+
+    [Test]
+    public async Task IsHandler_AndMaxConnections_DescribeTheForwarding()
+    {
+        await using var server = new FakeSessionServer();
+        await using var client = await ConnectAsync(server);
+        Func<SshForwardedConnection, CancellationToken, Task> handler = (_, _) => Task.CompletedTask;
+
+        await using var toPortHandler = await ForwardAsync(client, unix: false, handler, maxConnections: 7);
+        await using var toSocketHandler = await ForwardAsync(client, unix: true, handler);
+        await Assert.That((toPortHandler.IsHandler, toPortHandler.MaxConnections)).IsEqualTo((true, 7));
+        await Assert.That((toSocketHandler.IsHandler, toSocketHandler.MaxConnections)).IsEqualTo((true, 100));
+
+        // The other kinds have no limit of their own (MaxForwardedConnections still applies to all of them).
+        await using var toPort = await client.ForwardRemotePortAsync("localhost", 0, "127.0.0.1", 9, Timeout());
+        await using var dynamic = await client.ForwardRemoteDynamicPortAsync("localhost", 0, cancellationToken: Timeout());
+        await using var socketToPort = await client.ForwardRemoteUnixSocketAsync("/run/app/plain.sock", "127.0.0.1", 9, Timeout());
+        await Assert.That((toPort.IsHandler, toPort.MaxConnections)).IsEqualTo((false, int.MaxValue));
+        await Assert.That((dynamic.IsHandler, dynamic.MaxConnections, dynamic.IsDynamic)).IsEqualTo((false, int.MaxValue, true));
+        await Assert.That((socketToPort.IsHandler, socketToPort.MaxConnections)).IsEqualTo((false, int.MaxValue));
+    }
+
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
+    public async Task ShutdownSend_SendsEof_AndTheHandlerKeepsReading(bool unix)
+    {
+        var rest = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var afterShutdown = new TaskCompletionSource<Exception?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var server = new FakeSessionServer();
+        await using var client = await ConnectAsync(server);
+        await using var forwarding = await ForwardAsync(client, unix, async (connection, ct) =>
+        {
+            // A greeting, then end-of-file: the remote program reads it to its end while the connection stays open.
+            await connection.Stream.WriteAsync("greeting"u8.ToArray(), ct);
+            await connection.ShutdownSendAsync(ct);
+            await connection.ShutdownSendAsync(ct); // once only: a second call does nothing
+            Exception? writeError = null;
+            try
+            {
+                await connection.Stream.WriteAsync("late"u8.ToArray(), ct);
+            }
+            catch (InvalidOperationException ex)
+            {
+                writeError = ex;
+            }
+
+            afterShutdown.SetResult(connection.Stream.CanWrite ? null : writeError);
+
+            using var received = new MemoryStream();
+            await connection.Stream.CopyToAsync(received, ct);
+            rest.SetResult(Encoding.ASCII.GetString(received.ToArray()));
+        });
+
+        await using var remote = (await ConnectRemoteAsync(server, forwarding))!;
+        await Assert.That(await ReadToEndAsync(remote)).IsEqualTo("greeting");
+        await Assert.That(await afterShutdown.Task.WaitAsync(Timeout())).IsTypeOf<InvalidOperationException>();
+
+        // The channel is still open, and the handler still reads what the remote program sends after the end of the greeting.
+        var channel = server.LastChannelToClient!;
+        await Assert.That(channel.EofReceived).IsTrue();
+        await Assert.That(channel.CloseReceived).IsFalse();
+        await Assert.That(await ExchangeAsync(remote, "and the reply")).IsEqualTo(string.Empty);
+        await Assert.That(await rest.Task.WaitAsync(Timeout())).IsEqualTo("and the reply");
+
+        // Disposing the stream when the handler returned closed the channel without a second EOF.
+        await WaitUntilAsync(() => forwarding.ActiveConnections == 0 && channel.CloseReceived);
+        await Assert.That(Volatile.Read(ref channel.EofCount)).IsEqualTo(1);
+    }
+
+    [Test]
+    public async Task ShutdownSend_AfterTheStreamIsDisposed_Throws()
+    {
+        var done = new TaskCompletionSource<Exception?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var server = new FakeSessionServer();
+        await using var client = await ConnectAsync(server);
+        await using var forwarding = await ForwardAsync(client, unix: false, async (connection, ct) =>
+        {
+            await connection.Stream.DisposeAsync();
+            try
+            {
+                await connection.ShutdownSendAsync(ct);
+                done.SetResult(null);
+            }
+            catch (ObjectDisposedException ex)
+            {
+                done.SetResult(ex);
+            }
+        });
+
+        await using var remote = (await ConnectRemoteAsync(server, forwarding))!;
+        await Assert.That(await done.Task.WaitAsync(Timeout())).IsTypeOf<ObjectDisposedException>();
         await Assert.That(await ReadToEndAsync(remote)).IsEqualTo(string.Empty);
     }
 

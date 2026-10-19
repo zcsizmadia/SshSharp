@@ -78,8 +78,9 @@ Received data is copied as little as possible on its way to your code:
 ## Closing
 
 A channel closes when either side closes it: your code disposes the session or stream, the program on the server exits, or the
-connection ends. Half-close is supported: `CloseInputAsync` sends end-of-file on your side while output keeps coming, and forwarded
-connections pass a half-close through as TCP does.
+connection ends. Half-close is supported: `CloseInputAsync` sends end-of-file on your side while output keeps coming, forwarded
+connections pass a half-close through as TCP does, and a remote forwarding's handler ends its side with
+`SshForwardedConnection.ShutdownSendAsync` while it keeps reading.
 
 ## See also
 

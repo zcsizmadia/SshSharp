@@ -109,6 +109,9 @@ internal sealed class FakeSessionServer : IAsyncDisposable
 
         public volatile bool EofReceived;
 
+        /// <summary>How many CHANNEL_EOF messages the client sent (RFC 4254 allows one).</summary>
+        public int EofCount;
+
         /// <summary>For a channel the server opened: completes with whether the client accepted it.</summary>
         public TaskCompletionSource<bool>? Opened { get; init; }
 
@@ -1164,6 +1167,7 @@ internal sealed class FakeSessionServer : IAsyncDisposable
             {
                 var channel = Find(reader.ReadUInt32());
                 channel.Input.Writer.TryComplete();
+                Interlocked.Increment(ref channel.EofCount);
                 channel.EofReceived = true;
                 if (channel.Tunnel is { } tunnel)
                 {

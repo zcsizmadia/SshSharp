@@ -13,6 +13,9 @@ internal sealed class SshChannelStream(SshChannel channel) : Stream
     private bool _eof;
     private int _disposed;
 
+    // 1 once our EOF is sent (ShutdownSendAsync): no data may follow it (RFC 4254 section 5.3), and disposal does not send another.
+    private int _sendShutdown;
+
     // 1 while a read is in progress, which owns _current then: as in SshChannelReadStream, disposal leaves the chunk to that read.
     private int _reading;
 
@@ -20,7 +23,7 @@ internal sealed class SshChannelStream(SshChannel channel) : Stream
 
     public override bool CanRead => true;
 
-    public override bool CanWrite => true;
+    public override bool CanWrite => Volatile.Read(ref _sendShutdown) == 0;
 
     public override bool CanSeek => false;
 
@@ -134,7 +137,34 @@ internal sealed class SshChannelStream(SshChannel channel) : Stream
     public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(_disposed != 0, this);
+        if (Volatile.Read(ref _sendShutdown) != 0)
+        {
+            throw new InvalidOperationException("The stream's sending side was shut down; no more data can be sent.");
+        }
+
         return Channel.SendDataAsync(buffer, cancellationToken);
+    }
+
+    /// <summary>
+    /// Sends EOF without closing the channel, as <c>shutdown(SHUT_WR)</c> on a socket: the peer reads to the end of what was written, and
+    /// this stream can still read what the peer sends. Once only; later writes throw. Not to be called while a write is in progress.
+    /// </summary>
+    public async ValueTask ShutdownSendAsync(CancellationToken cancellationToken)
+    {
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
+        if (Interlocked.Exchange(ref _sendShutdown, 1) != 0)
+        {
+            return;
+        }
+
+        try
+        {
+            await Channel.SendEofAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is SshException or ObjectDisposedException or IOException)
+        {
+            // The channel or connection is already gone: there is nothing left to end.
+        }
     }
 
     public override Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) =>
@@ -167,7 +197,10 @@ internal sealed class SshChannelStream(SshChannel channel) : Stream
         ReleaseUnlessReading();
         try
         {
-            await Channel.SendEofAsync(CancellationToken.None).ConfigureAwait(false);
+            if (Interlocked.Exchange(ref _sendShutdown, 1) == 0)
+            {
+                await Channel.SendEofAsync(CancellationToken.None).ConfigureAwait(false);
+            }
         }
         catch (Exception ex) when (ex is SshException or ObjectDisposedException or IOException or InvalidOperationException)
         {
