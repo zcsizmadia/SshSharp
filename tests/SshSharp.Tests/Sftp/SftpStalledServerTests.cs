@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Text;
 using Microsoft.Extensions.Time.Testing;
 using SshSharp.Sftp;
 using SshSharp.Tests.Protocol;
@@ -62,12 +63,15 @@ public sealed class SftpStalledServerTests : IDisposable
         }
 
         /// <summary>Moves the clock a second at a time until <paramref name="work"/> ends (at most a minute of fake time).</summary>
-        public async Task AdvanceUntilDoneAsync(Task work)
+        public Task AdvanceUntilDoneAsync(Task work) => AdvanceUntilAsync(() => work.IsCompleted);
+
+        /// <summary>Moves the clock a second at a time until <paramref name="done"/> holds (at most a minute of fake time).</summary>
+        public async Task AdvanceUntilAsync(Func<bool> done)
         {
-            for (var i = 0; i < 60 && !work.IsCompleted; i++)
+            for (var i = 0; i < 60 && !done(); i++)
             {
                 Time.Advance(TimeSpan.FromSeconds(1));
-                for (var j = 0; j < 50 && !work.IsCompleted; j++)
+                for (var j = 0; j < 50 && !done(); j++)
                 {
                     await Task.Delay(10); // what the clock released is on its way
                 }
@@ -77,6 +81,7 @@ public sealed class SftpStalledServerTests : IDisposable
         public async ValueTask DisposeAsync()
         {
             Files.ReadingResumed.TrySetResult(); // a stopped session reads again, and can end
+            Files.Released.TrySetResult(); // and a held one answers
             await Sftp.DisposeAsync();
             await Client.DisposeAsync();
             await Ssh.DisposeAsync();
@@ -156,13 +161,45 @@ public sealed class SftpStalledServerTests : IDisposable
         using var source = new MemoryStream(RandomNumberGenerator.GetBytes(4 * 1024 * 1024));
         using var cancel = new CancellationTokenSource();
 
+        var started = rig.Time.GetUtcNow();
         var upload = rig.Sftp.UploadAsync(source, "big.bin", cancellationToken: cancel.Token);
         await rig.StoppedAsync();
         await cancel.CancelAsync();
-        await rig.AdvanceUntilDoneAsync(upload); // the answers to the writes sent are waited for 5 s, then given up
+
+        // The answers to the writes sent are waited for 5 s, then given up; closing the file, whose CLOSE waits behind the write that
+        // cannot be sent, waits 5 s more (not the 30 s a close otherwise gets).
+        await rig.AdvanceUntilDoneAsync(upload);
 
         await Assert.That(upload.IsCompleted).IsTrue();
         await Assert.That(async () => await upload).Throws<OperationCanceledException>();
+        await Assert.That(rig.Time.GetUtcNow() - started).IsLessThanOrEqualTo(TimeSpan.FromSeconds(11));
+    }
+
+    [Test]
+    public async Task ACancelledRequest_WhoseSendIsStuck_StillClosesTheSessionAfterTheOperationTimeout()
+    {
+        // The server answers one request, then stops reading. A request too large for the channel's window cannot be sent; its caller
+        // cancels, and the send goes on in the background, holding the session's send lock: the timeout still bounds it.
+        await using var rig = await Rig.StartAsync(f => f.StopReading = packet => packet[0] == 17 && Encoding.UTF8.GetString(packet).Contains("stop-here", StringComparison.Ordinal));
+        rig.Sftp.OperationTimeout = TimeSpan.FromSeconds(10);
+        await Assert.That(async () => await rig.Sftp.GetAttributesAsync("stop-here", cancellationToken: Timeout())).Throws<SftpException>();
+        await rig.StoppedAsync();
+        var silent = rig.Time.GetUtcNow(); // the server's last reply
+
+        using var cancel = new CancellationTokenSource();
+        var stuck = rig.Sftp.GetAttributesAsync(new string('a', 600_000), cancellationToken: cancel.Token);
+        rig.Time.Advance(TimeSpan.FromSeconds(2));
+        await cancel.CancelAsync();
+        await Assert.That(async () => await stuck).Throws<OperationCanceledException>();
+        await Assert.That(rig.Sftp.IsConnected).IsTrue(); // the server has been silent for 2 s only
+
+        await rig.AdvanceUntilAsync(() => !rig.Sftp.IsConnected);
+
+        await Assert.That(rig.Sftp.IsConnected).IsFalse().Because("nobody waits for the send any more, but it is still bounded");
+        await Assert.That(rig.Time.GetUtcNow() - silent).IsLessThanOrEqualTo(TimeSpan.FromSeconds(11));
+        var error = await Assert.That(async () => await rig.Sftp.GetAttributesAsync("x", cancellationToken: Timeout())).Throws<SshException>();
+        await Assert.That(error!.Reason).IsEqualTo(SshFailureReason.Timeout);
+        await Assert.That(rig.Client.IsConnected).IsTrue(); // only the SFTP session is gone
     }
 
     [Test]
@@ -206,6 +243,28 @@ public sealed class SftpStalledServerTests : IDisposable
         rig.Files.FailWriteAt = null;
         await rig.Sftp.UploadAsync(new MemoryStream(data), "big.bin", new SftpTransferOptions { Resume = true }, Timeout());
         await Assert.That(rig.Files.FileData(Home + "/big.bin")!.AsSpan().SequenceEqual(data)).IsTrue();
+    }
+
+    [Test]
+    public async Task AFailedUpload_WhoseLaterWritesGoUnanswered_SaysTheCleanupDidNotFinish()
+    {
+        // A write in the middle is refused, and the server answers nothing after it: the writes in flight behind the refused one may
+        // still land, past the gap it left.
+        var data = RandomNumberGenerator.GetBytes(2 * 1024 * 1024);
+        await using var rig = await Rig.StartAsync(f =>
+        {
+            f.FailWriteAt = offset => offset == 1024 * 1024;
+            f.Hold = packet => FakeSftpServer.WriteOffset(packet) > 1024 * 1024;
+        }, window: 2 * 1024 * 1024);
+        rig.Sftp.OperationTimeout = TimeSpan.FromSeconds(10);
+
+        var upload = rig.Sftp.UploadAsync(new MemoryStream(data), "big.bin", cancellationToken: Timeout());
+        await rig.AdvanceUntilDoneAsync(upload);
+
+        await Assert.That(upload.IsCompleted).IsTrue();
+        var error = await Assert.That(async () => await upload).Throws<SftpException>();
+        await Assert.That(error!.Data[SftpClient.UploadCleanupIncompleteKey] is true).IsTrue().Because("a write past the refused one may land yet");
+        await Assert.That(rig.Files.Held).IsGreaterThan(0).Because("writes after the refused one were in flight");
     }
 
     [Test]

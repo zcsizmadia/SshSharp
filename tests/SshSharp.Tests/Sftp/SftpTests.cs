@@ -617,6 +617,53 @@ public sealed class SftpTests : IDisposable
     }
 
     [Test]
+    public async Task ARequestWhoseSendFails_ClosesTheSession_BeforeItThrows()
+    {
+        // The session's input is shut under the SFTP client while the server goes on (its replies would still be read): the send fails,
+        // and nothing else would tell the client that the session is unusable.
+        await using var rig = await Rig.StartAsync();
+        await using var session = await rig.Client.StartSubsystemAsync("sftp", cancellationToken: Timeout());
+        await using var sftp = await SftpClient.StartAsync(session, serverSoftware: null, Timeout());
+        await Assert.That(await sftp.ExistsAsync(".", Timeout())).IsTrue();
+
+        await session.CloseInputAsync(Timeout());
+
+        var error = await Assert.That(async () => await sftp.GetAttributesAsync(".", cancellationToken: Timeout())).Throws<SshException>();
+        await Assert.That(error!.Reason).IsEqualTo(SshFailureReason.ChannelClosed);
+        await Assert.That(sftp.IsConnected).IsFalse();
+        await Assert.That(rig.Client.IsConnected).IsTrue();
+    }
+
+    [Test]
+    public async Task ARequestOnADroppedConnection_FindsTheSessionClosed_WhenItFails()
+    {
+        // What the adapters rely on to replace a session: once a request has failed because the connection dropped, IsConnected is
+        // false already, not only once the session's read loop has noticed the end too.
+        var password = Convert.ToHexString(RandomNumberGenerator.GetBytes(16));
+        var server = new FakeSessionServer { Password = password };
+        new FakeSftpServer().Install(server);
+        _ = server.StartAsync();
+        await using var client = await SshClient.ConnectAsync(server.ClientStream, new SshClientOptions
+        {
+            UserName = "tester",
+            Password = password,
+            HostKeyVerifier = SshHostKeyVerifier.FromDelegate((_, _) => ValueTask.FromResult(true)),
+        }, leaveOpen: true, Timeout());
+        await using var sftp = await client.OpenSftpAsync(Timeout());
+        await Assert.That(await sftp.ExistsAsync(".", Timeout())).IsTrue();
+
+        await server.DisposeAsync();
+        for (var i = 0; i < 500 && client.IsConnected; i++)
+        {
+            await Task.Delay(10);
+        }
+
+        await Assert.That(client.IsConnected).IsFalse();
+        await Assert.That(async () => await sftp.GetAttributesAsync(".", cancellationToken: Timeout())).Throws<SshException>();
+        await Assert.That(sftp.IsConnected).IsFalse();
+    }
+
+    [Test]
     public async Task InvalidArguments_AreRejected()
     {
         await using var rig = await Rig.StartAsync();

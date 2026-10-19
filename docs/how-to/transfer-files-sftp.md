@@ -359,7 +359,9 @@ drops packets without closing the connection) then hangs your code too. Set `Ope
 - **Sends are bounded too.** When `sftp-server` stops reading while sshd stays up, the channel's window fills and an upload's
   next write cannot go out. Once the server has sent nothing for `OperationTimeout`, that send is cut off and the SFTP session is
   closed (half a request may be on its way, and nothing could follow it): every waiting request fails with `Timeout`, so the
-  upload, its cleanup and a write stream's `DisposeAsync` all return, and `sftp.IsConnected` is false. Open a new session.
+  upload, its cleanup and a write stream's `DisposeAsync` all return, and `sftp.IsConnected` is false. Open a new session. This
+  holds even when you cancelled the request whose send was stuck: cancelling returns at once, and the send left behind is still
+  bounded.
 - It applies to every request of the `SftpClient`, including those of streams, listings and transfers, and to the extra sessions
   of a segmented download or upload. Change it at any time.
 - [Keep-alives](keepalive-and-reconnect.md) (`KeepAliveInterval`) detect a dead connection; `OperationTimeout` also catches a

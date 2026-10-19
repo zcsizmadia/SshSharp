@@ -8,8 +8,8 @@ public sealed partial class SftpClient
     /// <summary>
     /// The key in <see cref="Exception.Data"/> set to <see langword="true"/> on the exception of an upload that failed or was cancelled
     /// without finishing its cleanup: a segmented upload (<see cref="SftpTransferOptions.Segments"/>) whose file could not be cut to its
-    /// unbroken start (or deleted), or a sequential one where a write landed past one that failed and the file could not be cut back
-    /// (see <see cref="SftpTransferOptions.Resume"/>). The remote file may have gaps, so it must not be resumed with
+    /// unbroken start (or deleted), or a sequential one where a write landed past one that failed and the file could not be cut back, or
+    /// where writes past a refused one went unanswered and may still land (see <see cref="SftpTransferOptions.Resume"/>). The remote file may have gaps, so it must not be resumed with
     /// <see cref="SftpTransferOptions.Resume"/>. Delete it, or upload it again without <see cref="SftpTransferOptions.Resume"/>.
     /// </summary>
     public const string UploadCleanupIncompleteKey = "SshSharp.Sftp.UploadCleanupIncomplete";

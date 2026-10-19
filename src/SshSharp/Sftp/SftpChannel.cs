@@ -142,7 +142,8 @@ internal sealed class SftpChannel : IAsyncDisposable
 
     /// <summary>
     /// Whether the channel has failed or been disposed: the session or the connection under it ended, the server broke the protocol, or
-    /// a request could not be sent within <see cref="OperationTimeout"/>. Every request fails from then on.
+    /// a request could not be sent within <see cref="OperationTimeout"/> (also one whose caller stopped waiting), or a send failed. Every
+    /// request fails from then on.
     /// </summary>
     public bool IsClosed => Volatile.Read(ref _failure) is not null;
 
@@ -359,7 +360,8 @@ internal sealed class SftpChannel : IAsyncDisposable
         }
 
         // A send waits here while another is held up by the channel's flow-control window, which only a server that reads opens again.
-        // The send holding the lock is bounded by FinishSendAsync; the requests behind it give up here.
+        // The send holding the lock is bounded by its guard (GuardAsync), whether or not its caller still waits for it: once the server
+        // has been silent for the timeout, the guard fails the channel. The requests behind it give up here at the same point.
         var wait = timeout;
         while (true)
         {
@@ -380,14 +382,14 @@ internal sealed class SftpChannel : IAsyncDisposable
     /// <summary>Writes one whole frame (length included) to the session and waits for it.</summary>
     private async Task SendAsync(ReadOnlyMemory<byte> frame, CancellationToken cancellationToken)
     {
-        var write = await StartSendAsync(frame, owner: null, cancellationToken).ConfigureAwait(false);
-        await FinishSendAsync(write, cancellationToken).ConfigureAwait(false);
+        var send = await StartSendAsync(frame, owner: null, cancellationToken).ConfigureAwait(false);
+        await FinishSendAsync(send, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
-    /// Takes the send lock and starts writing <paramref name="frame"/>. The write releases the lock, and disposes
-    /// <paramref name="owner"/> (the frame's buffer), when it ends, whether or not anybody still waits for it; when the lock is not taken,
-    /// <paramref name="owner"/> is disposed here.
+    /// Takes the send lock and starts writing <paramref name="frame"/>, under its guard (see <see cref="GuardAsync"/>). The write releases
+    /// the lock, and disposes <paramref name="owner"/> (the frame's buffer), when it ends, whether or not anybody still waits for it; when
+    /// the lock is not taken, <paramref name="owner"/> is disposed here.
     /// </summary>
     private async Task<Task> StartSendAsync(ReadOnlyMemory<byte> frame, SftpRequestFrame? owner, CancellationToken cancellationToken)
     {
@@ -401,77 +403,87 @@ internal sealed class SftpChannel : IAsyncDisposable
             throw;
         }
 
-        return WriteLockedAsync(frame, owner);
+        var write = WriteLockedAsync(frame, owner);
+        var timeout = OperationTimeout;
+        return write.IsCompleted || timeout < TimeSpan.Zero ? write : GuardAsync(write, timeout);
     }
 
     /// <summary>
-    /// Waits for a write <see cref="StartSendAsync"/> started. A packet is written whole: stopping halfway would leave the server reading
+    /// Waits for a send <see cref="StartSendAsync"/> started. A packet is written whole: stopping halfway would leave the server reading
     /// a broken stream. So a caller who cancels stops waiting, and the write goes on in the background, holding the send lock until the
-    /// channel's window lets it finish. A write held up while the server sends nothing for <see cref="OperationTimeout"/> (an
-    /// <c>sftp-server</c> that stopped reading, while sshd still answers keep-alives) is cut off instead, and the whole channel fails with
-    /// it: part of the packet may be on its way, after which nothing more can be sent, and failing the channel completes every request
-    /// waiting on it.
+    /// channel's window lets it finish, or until its guard cuts it off (see <see cref="GuardAsync"/>).
     /// </summary>
-    private async Task FinishSendAsync(Task write, CancellationToken cancellationToken)
+    private static async Task FinishSendAsync(Task send, CancellationToken cancellationToken)
     {
         try
         {
-            var timeout = OperationTimeout;
-            if (timeout < TimeSpan.Zero)
-            {
-                await write.WaitAsync(cancellationToken).ConfigureAwait(false);
-                return;
-            }
-
-            var wait = timeout;
-            while (true)
-            {
-                try
-                {
-                    await write.WaitAsync(wait, Clock, cancellationToken).ConfigureAwait(false);
-                    return;
-                }
-                catch (TimeoutException ex)
-                {
-                    if (write.IsCompleted)
-                    {
-                        await write.ConfigureAwait(false); // it ended as the wait ran out
-                        return;
-                    }
-
-                    if (Remaining(timeout) is { } more)
-                    {
-                        wait = more;
-                        continue;
-                    }
-
-                    var error = new SshException(SshFailureReason.Timeout,
-                        $"The SFTP server took no more of a request and sent nothing for OperationTimeout ({timeout.TotalSeconds.ToString("0.###", CultureInfo.InvariantCulture)} s); the SFTP session is closed.",
-                        ex);
-                    Fail(error);
-                    try
-                    {
-                        await _stop.CancelAsync().ConfigureAwait(false); // cuts the write off and stops the read loop: the channel is done
-                    }
-                    catch (ObjectDisposedException)
-                    {
-                        // Disposed meanwhile, which cut the write off already.
-                    }
-
-                    throw error;
-                }
-            }
+            await send.WaitAsync(cancellationToken).ConfigureAwait(false);
         }
-        catch when (!write.IsCompleted)
+        catch when (!send.IsCompleted)
         {
-            // Nobody waits for the write any more: its failure, if it fails (the channel closing), is observed here.
-            _ = write.ContinueWith(static done => _ = done.Exception, CancellationToken.None,
+            // Nobody waits for the send any more: its failure, if it fails (the channel closing), is observed here.
+            _ = send.ContinueWith(static done => _ = done.Exception, CancellationToken.None,
                 TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
             throw;
         }
     }
 
-    /// <summary>Writes one whole frame (length included) under the send lock, then releases the lock and disposes <paramref name="owner"/>.</summary>
+    /// <summary>
+    /// Bounds a write in progress by <paramref name="timeout"/> of the server's silence, whether or not its caller still waits for it: a
+    /// caller who cancelled leaves the write holding the send lock. A write held up while the server sends nothing for that long (an
+    /// <c>sftp-server</c> that stopped reading, while sshd still answers keep-alives) is cut off, and the whole channel fails with it:
+    /// part of the packet may be on its way, after which nothing more can be sent, and failing the channel completes every request
+    /// waiting on it. So a stuck write can never leave the channel holding its send lock while it still reports itself open.
+    /// </summary>
+    private async Task GuardAsync(Task write, TimeSpan timeout)
+    {
+        var wait = timeout;
+        while (true)
+        {
+            try
+            {
+                await write.WaitAsync(wait, Clock, CancellationToken.None).ConfigureAwait(false);
+                return;
+            }
+            catch (TimeoutException ex)
+            {
+                if (write.IsCompleted)
+                {
+                    await write.ConfigureAwait(false); // it ended as the wait ran out
+                    return;
+                }
+
+                if (Remaining(timeout) is { } more)
+                {
+                    wait = more;
+                    continue;
+                }
+
+                var error = new SshException(SshFailureReason.Timeout,
+                    $"The SFTP server took no more of a request and sent nothing for OperationTimeout ({timeout.TotalSeconds.ToString("0.###", CultureInfo.InvariantCulture)} s); the SFTP session is closed.",
+                    ex);
+                Fail(error);
+                try
+                {
+                    await _stop.CancelAsync().ConfigureAwait(false); // cuts the write off and stops the read loop: the channel is done
+                }
+                catch (ObjectDisposedException)
+                {
+                    // Disposed meanwhile, which cut the write off already.
+                }
+
+                // The write, cut off, fails with this error; nobody waits for it but this guard.
+                _ = write.ContinueWith(static done => _ = done.Exception, CancellationToken.None,
+                    TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+                throw error;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Writes one whole frame (length included) under the send lock, then releases the lock and disposes <paramref name="owner"/>. A write
+    /// that fails fails the channel, before its caller hears of it: part of the frame may have gone out, so nothing can follow it.
+    /// </summary>
     private async Task WriteLockedAsync(ReadOnlyMemory<byte> frame, SftpRequestFrame? owner)
     {
         // Disposed last, after the lock is released below.
@@ -485,13 +497,17 @@ internal sealed class SftpChannel : IAsyncDisposable
                     throw Ended(failed);
                 }
 
-                // Only the channel ending stops a write (see FinishSendAsync); the caller's token does not.
+                // Only the channel ending stops a write (see GuardAsync); the caller's token does not.
                 var stop = _stop.Token;
                 await _session.StandardInput.WriteAsync(frame, stop).ConfigureAwait(false);
                 await _session.StandardInput.FlushAsync(stop).ConfigureAwait(false);
             }
-            catch (Exception ex) when (ex is IOException or ObjectDisposedException or OperationCanceledException)
+            catch (Exception ex) when (ex is not OutOfMemoryException)
             {
+                // The session or the connection under it ended (an SshException), the stream failed or was shut, or the channel was
+                // stopped. The channel fails here, not only once the read loop notices the end too: until then a caller could see its
+                // request fail while IsConnected still said the session was up, and an adapter would not replace it.
+                Fail(ex);
                 throw Ended(Volatile.Read(ref _failure) ?? ex);
             }
             finally
