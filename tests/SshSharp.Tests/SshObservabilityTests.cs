@@ -57,6 +57,28 @@ public class SshObservabilityTests
     }
 
     [Test]
+    public async Task AgentFailures_AreLogged_WithoutTheAgentsPath()
+    {
+        // An agent's socket or pipe path can hold the user's name (Pageant's pipe does); a system error's message can quote it.
+        const string Path = @"\\.\pipe\pageant.alice.0123456789";
+        var logger = new TestLogger();
+        SshLog.AgentUnavailable(logger, new(new IOException($"Could not open '{Path}'.")));
+        SshLog.AgentUnavailable(logger, new(new System.Net.Sockets.SocketException((int)System.Net.Sockets.SocketError.ConnectionRefused)));
+        SshLog.AgentUnavailable(logger, new(new UnauthorizedAccessException($"Access to the path '{Path}' is denied.")));
+        SshLog.AgentKeySkipped(logger, "SHA256:x", new(new SshException(SshFailureReason.AgentFailed, "The agent refused to sign.")));
+
+        var messages = logger.Entries.Select(e => e.Message).ToArray();
+        await Assert.That(messages.Any(m => m.Contains("alice", StringComparison.Ordinal))).IsFalse();
+        await Assert.That(messages).IsEquivalentTo(new[]
+        {
+            "The SSH agent was not used: IOException",
+            "The SSH agent was not used: socket error ConnectionRefused",
+            "The SSH agent was not used: UnauthorizedAccessException",
+            "Agent key SHA256:x was skipped: The agent refused to sign.",
+        });
+    }
+
+    [Test]
     public async Task LogsTheLifecycle_ButNeverASecret()
     {
         const string command = "deploy --token=top-secret-xyz";

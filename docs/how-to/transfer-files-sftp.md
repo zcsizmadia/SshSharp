@@ -314,6 +314,10 @@ flowchart LR
 - **Links are never followed.** A symbolic link in the tree is removed itself, even when it points to a directory; every
   subdirectory is checked with `LSTAT` before it is entered, so a server that describes a link as a directory in its listing
   cannot lead the delete out of the tree. A `path` that is itself a link removes only the link.
+- **The checks are not atomic.** SFTP has no `O_NOFOLLOW` or `openat`: every request names a path that the server resolves again.
+  Someone else who can write inside the tree on the server can replace a directory with a link after its `LSTAT` and before the
+  requests that follow, and the delete then removes files where the link leads, as far as your login may delete. Delete
+  recursively only trees no one else can change while it runs ([threat model](../threat-model.md#sftp)).
 - **The first failure stops it.** No more requests are sent, the ones in flight finish, and that failure is thrown (for example
   `SftpException` with `PermissionDenied` and the `Path` it could not delete). What was deleted stays deleted; once the cause is
   fixed, calling again finishes the job. Cancelling stops it the same way.

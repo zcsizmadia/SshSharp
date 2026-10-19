@@ -252,6 +252,14 @@ public sealed class AgentTests : IDisposable
         await Assert.That(error!.Reason).IsEqualTo(SshFailureReason.AgentFailed);
         await Assert.That(started.Elapsed).IsLessThan(TimeSpan.FromSeconds(2));
 
+        // The messages, which the client logs, never name the socket or pipe: its path can hold the user's name (Pageant's does).
+        foreach (var agent in new[] { missing, tooLong, pipe })
+        {
+            error = await Assert.ThrowsAsync<SshException>(() => agent.GetKeysAsync(Timeout()));
+            await Assert.That(error!.Message).DoesNotContain(Path.GetFileName(agent.Path));
+            await Assert.That(error.Message).DoesNotContain(_dir);
+        }
+
         byte[][] brokenReplies =
         [
             [0, 0, 0, 1, 5], // SSH_AGENT_FAILURE to the listing

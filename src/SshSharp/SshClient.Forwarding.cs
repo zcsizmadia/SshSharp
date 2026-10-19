@@ -725,7 +725,7 @@ public sealed partial class SshClient
         }
         catch (Exception ex) when (ex is SshException or OperationCanceledException or ObjectDisposedException)
         {
-            SshLog.AgentUnavailable(_logger, ex.Message);
+            SshLog.AgentUnavailable(_logger, new(ex));
             await channel.CloseAsync(CancellationToken.None).ConfigureAwait(false);
             channel.DiscardUnread();
             return;
@@ -743,7 +743,7 @@ public sealed partial class SshClient
                 }
                 catch (Exception ex) when (ex is IOException or SshException or OperationCanceledException)
                 {
-                    SshLog.AgentUnavailable(_logger, ex.Message);
+                    SshLog.AgentUnavailable(_logger, new(ex));
                     await channel.CloseAsync(CancellationToken.None).ConfigureAwait(false);
                     channel.DiscardUnread();
                     return;

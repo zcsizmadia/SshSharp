@@ -234,8 +234,11 @@ internal sealed class RevokedKeyList
 
     /// <summary>
     /// A list of public keys (sshkey_in_file): <c>type base64 [comment]</c> per line; blank lines, comments and lines that do not parse
-    /// are skipped. A certificate line revokes the key it certifies (ssh compares the keys, not the certificates).
+    /// are skipped. A certificate line revokes the key it certifies (ssh compares the keys, not the certificates), FIDO security-key
+    /// certificates included. A certificate line whose key cannot be read refuses the whole list: skipping it would leave a key the list
+    /// means to revoke accepted.
     /// </summary>
+    /// <exception cref="FormatException">A certificate line's certified key cannot be read.</exception>
     private static RevokedKeyList ParseKeyList(string text)
     {
         var list = new RevokedKeyList(isKrl: false);
@@ -261,15 +264,22 @@ internal sealed class RevokedKeyList
                 {
                     continue;
                 }
-
-                if (SshCertificate.IsCertificateAlgorithm(fields[0]))
-                {
-                    blob = SshCertificate.FromBlob(blob).PublicKey.ToArray();
-                }
             }
             catch (Exception ex) when (ex is FormatException or SshProtocolException)
             {
                 continue;
+            }
+
+            if (SshCertificate.IsCertificateAlgorithm(fields[0]))
+            {
+                try
+                {
+                    blob = SshCertificate.ReadCertifiedKey(blob);
+                }
+                catch (Exception ex) when (ex is FormatException or SshProtocolException)
+                {
+                    throw new FormatException("A certificate in the revoked keys list cannot be read, so the list is refused.", ex);
+                }
             }
 
             list._keys.Add(Convert.ToHexString(blob));

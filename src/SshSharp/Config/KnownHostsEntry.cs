@@ -25,13 +25,32 @@ public sealed class KnownHostsEntry
     private static readonly System.Buffers.SearchValues<char> PatternCharacters = System.Buffers.SearchValues.Create(",*?!");
 
     /// <summary>Refuses a host field that would add fields or lines to known_hosts (white space, a newline, control characters).</summary>
-    internal static void RequireSingleField(string host)
+    internal static void RequireSingleField(string host) => RequireField(host, nameof(host));
+
+    /// <summary>Refuses a field (host patterns, a key type) that would add fields or lines to known_hosts.</summary>
+    private static void RequireField(string field, string parameterName)
     {
-        if (host.Any(char.IsWhiteSpace) || host.Any(char.IsControl))
+        if (field.Any(char.IsWhiteSpace) || field.Any(char.IsControl))
         {
-            throw new ArgumentException("A known_hosts host must not contain white space or control characters.", nameof(host));
+            throw new ArgumentException("A known_hosts field must not contain white space or control characters.", parameterName);
         }
     }
+
+    /// <summary>
+    /// Refuses a comment that would end the line (CR, LF) or carries other control characters. Spaces and tabs are allowed: the comment
+    /// is the rest of the line, and OpenSSH keeps them in it.
+    /// </summary>
+    private static void RequireComment(string? comment)
+    {
+        if (comment is not null && comment.Any(c => char.IsControl(c) && c != '\t'))
+        {
+            throw new ArgumentException("A known_hosts comment must not contain control characters other than a tab.", nameof(comment));
+        }
+    }
+
+    /// <summary>Creates an entry from a parsed line's fields, as they are (see the private constructor).</summary>
+    internal static KnownHostsEntry FromParsedFields(string hostPatterns, string keyType, ReadOnlyMemory<byte> publicKey,
+        KnownHostsMarker marker, string? comment) => new(hostPatterns, keyType, publicKey, marker, comment, validate: false);
 
     /// <summary>
     /// Whether a host name would be recorded as exactly that host: besides what <see cref="RequireSingleField"/> refuses, a comma would add
@@ -46,11 +65,31 @@ public sealed class KnownHostsEntry
     /// <param name="publicKey">The public key blob (the decoded base64 field).</param>
     /// <param name="marker">The optional marker.</param>
     /// <param name="comment">The optional trailing comment.</param>
+    /// <exception cref="ArgumentException"><paramref name="hostPatterns"/> or <paramref name="keyType"/> is empty or contains white space or
+    /// control characters, or <paramref name="comment"/> contains control characters other than a tab. Any of them would let
+    /// <see cref="ToLine"/> write extra fields or extra lines (a <c>@cert-authority</c> line, say) into <c>known_hosts</c>.</exception>
     public KnownHostsEntry(string hostPatterns, string keyType, ReadOnlyMemory<byte> publicKey,
         KnownHostsMarker marker = KnownHostsMarker.None, string? comment = null)
+        : this(hostPatterns, keyType, publicKey, marker, comment, validate: true)
+    {
+    }
+
+    /// <summary>
+    /// Creates an entry. The parser passes <paramref name="validate"/> false: its fields come from one line already split at spaces and
+    /// tabs, so they cannot add a line, and an odd character in a file being read must not make the file unreadable.
+    /// </summary>
+    private KnownHostsEntry(string hostPatterns, string keyType, ReadOnlyMemory<byte> publicKey, KnownHostsMarker marker, string? comment,
+        bool validate)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(hostPatterns);
         ArgumentException.ThrowIfNullOrWhiteSpace(keyType);
+        if (validate)
+        {
+            RequireField(hostPatterns, nameof(hostPatterns));
+            RequireField(keyType, nameof(keyType));
+            RequireComment(comment);
+        }
+
         HostPatterns = hostPatterns;
         KeyType = keyType;
         PublicKey = publicKey;
@@ -81,7 +120,8 @@ public sealed class KnownHostsEntry
     /// <param name="hash">Whether to store the host hashed.</param>
     /// <param name="comment">An optional comment.</param>
     /// <param name="marker">An optional marker.</param>
-    /// <exception cref="ArgumentException"><paramref name="host"/> contains white space or control characters.</exception>
+    /// <exception cref="ArgumentException"><paramref name="host"/> contains white space or control characters, or <paramref name="comment"/>
+    /// contains control characters other than a tab.</exception>
     public static KnownHostsEntry ForHost(string host, int port, SshPublicKey key, bool hash = false, string? comment = null,
         KnownHostsMarker marker = KnownHostsMarker.None)
     {
@@ -177,7 +217,7 @@ public sealed class KnownHostsEntry
     }
 
     /// <summary>Returns a copy with different host patterns.</summary>
-    internal KnownHostsEntry WithHostPatterns(string hostPatterns) => new(hostPatterns, KeyType, PublicKey, Marker, Comment);
+    internal KnownHostsEntry WithHostPatterns(string hostPatterns) => new(hostPatterns, KeyType, PublicKey, Marker, Comment, validate: false);
 
     /// <summary>Formats the entry as a <c>known_hosts</c> line (no line terminator).</summary>
     public string ToLine()

@@ -71,7 +71,8 @@ var verifier = new KnownHostsVerifier([knownHostsPath]) { RevokedHostKeys = "/et
 ```
 
 The file is an OpenSSH Key Revocation List, the binary file `ssh-keygen -k` writes, or a list of public keys, one per line as
-in `authorized_keys` (as with ssh, lines that do not parse are skipped). A KRL can revoke:
+in `authorized_keys` (as with ssh, lines that do not parse are skipped, except a certificate line whose key cannot be read, which
+refuses the file; a certificate line revokes the key it certifies). A KRL can revoke:
 
 - plain keys, by the key itself or by its SHA-1 or SHA-256 fingerprint;
 - host certificates, by serial number (single, range or bitmap) or key id, for one certificate authority or for any.

@@ -444,7 +444,7 @@ public sealed partial class SshClient
             }
             catch (Exception ex) when (ex is SshException { Reason: SshFailureReason.AgentFailed } or NotSupportedException)
             {
-                SshLog.AgentUnavailable(logger, ex.Message);
+                SshLog.AgentUnavailable(logger, new(ex));
             }
         }
     }
@@ -463,7 +463,7 @@ public sealed partial class SshClient
         }
         catch (SshException ex) when (ex.Reason == SshFailureReason.AgentFailed)
         {
-            SshLog.AgentUnavailable(logger, ex.Message); // like ssh: no agent is not an error
+            SshLog.AgentUnavailable(logger, new(ex)); // like ssh: no agent is not an error
             return [];
         }
     }

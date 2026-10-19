@@ -31,6 +31,43 @@ public class KnownHostsFileTests
     }
 
     [Test]
+    public async Task AddAndAppendAsync_RefuseACommentOrKeyTypeThatWouldWriteAnotherLine()
+    {
+        using var hostKey = SshPrivateKey.Generate(SshKeyType.Ed25519);
+        var key = hostKey.GetPublicKey();
+        const string Injected = "ok\n@cert-authority * ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIA==";
+        var file = new KnownHostsFile();
+        await Assert.That(() => file.Add("srv.example.com", 22, key, comment: Injected)).Throws<ArgumentException>();
+        await Assert.That(() => file.Add("srv.example.com", 22, "ssh-ed25519\n@revoked", KeyA)).Throws<ArgumentException>();
+        await Assert.That(() => file.Add("srv.example.com", 22, "ssh-ed25519", KeyA, comment: "ok\r")).Throws<ArgumentException>();
+        await Assert.That(() => KnownHostsEntry.ForHost("srv.example.com", 22, key, comment: Injected)).Throws<ArgumentException>();
+        await Assert.That(file.ToString()).IsEqualTo("");
+
+        var path = Path.Combine(Directory.CreateTempSubdirectory("kh").FullName, "known_hosts");
+        try
+        {
+            await Assert.ThrowsAsync<ArgumentException>(() => KnownHostsFile.AppendAsync(path, "srv.example.com", 22, key, comment: Injected));
+            await Assert.ThrowsAsync<ArgumentException>(() =>
+                KnownHostsFile.AppendAsync(path, "srv.example.com", 22, "ssh-ed25519", KeyA, hash: false, Injected, KnownHostsMarker.None));
+            await Assert.ThrowsAsync<ArgumentException>(() => KnownHostsFile.AppendAsync(path, "srv.example.com", 22, "ssh-ed25519 x", KeyA));
+            await Assert.That(File.Exists(path)).IsFalse();
+        }
+        finally
+        {
+            Directory.Delete(Path.GetDirectoryName(path)!, recursive: true);
+        }
+    }
+
+    [Test]
+    public async Task Parse_StillReadsALineWithAControlCharacterInItsComment()
+    {
+        // Validation is for values an application writes; a file being read keeps working.
+        var file = KnownHostsFile.Parse($"example.com ssh-ed25519 {KeyAText} odd\u0001comment\n");
+        await Assert.That(file.Entries.Single().Comment).IsEqualTo("odd\u0001comment");
+        await Assert.That(file.Remove("example.com")).IsEqualTo(1);
+    }
+
+    [Test]
     public async Task AppendAsync_WithAnSshPublicKey_RoundTripsThroughTheParser_PlainAndHashed()
     {
         using var hostKey = SshPrivateKey.Generate(SshKeyType.Ed25519, "host-comment");

@@ -122,6 +122,11 @@ public sealed class DnsCanonicalizerTests
         await Assert.That(async () => await ResolveAsync(Canonicalize + "CanonicalizeFallbackLocal no\n", "web", dns)).Throws<InvalidOperationException>();
         await Assert.That(async () => await ResolveAsync("CanonicalizeHostname yes\nCanonicalizeFallbackLocal no\n", "web.example.org.", dns))
             .Throws<InvalidOperationException>();
+
+        // The message does not name the host: exception messages end up in logs.
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await ResolveAsync(Canonicalize + "CanonicalizeFallbackLocal no\n", "secret-web", dns));
+        await Assert.That(error!.Message).DoesNotContain("secret-web");
     }
 
     [Test]

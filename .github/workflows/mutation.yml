@@ -61,7 +61,7 @@ jobs:
             tests: Keys/*Tests.cs;Crypto/WycheproofTests.cs;Fuzz/ParserRobustnessTests.cs
           - scope: certificates
             mutate: -m "**/SshCertificate.cs" -m "**/SshCertificateBuilder.cs"
-            tests: CertificateTests.cs;Keys/SshCertificate*Tests.cs;Keys/ExternalKeyTests.cs;Keys/SshSignatureTests.cs;KnownHostsVerifierTests.cs;Fuzz/ParserRobustnessTests.cs
+            tests: CertificateTests.cs;Keys/SshCertificate*Tests.cs;Keys/SshKeyRevocationListTests.cs;Keys/ExternalKeyTests.cs;Keys/SshSignatureTests.cs;KnownHostsVerifierTests.cs;Fuzz/ParserRobustnessTests.cs
           - scope: signatures
             mutate: -m "**/Keys/SshSignature.cs" -m "**/Keys/SshAllowedSigners.cs"
             tests: Keys/SshSignatureTests.cs;Keys/ExternalKeyTests.cs;Fuzz/ParserRobustnessTests.cs

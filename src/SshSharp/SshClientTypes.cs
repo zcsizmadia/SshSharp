@@ -135,6 +135,7 @@ public sealed class SshClientOptions
     /// for exactly one hidden input. With a <see cref="PasswordProvider"/> too, this password is tried first, and the provider is asked
     /// only if the server refuses it.
     /// </summary>
+    [System.Diagnostics.DebuggerBrowsable(System.Diagnostics.DebuggerBrowsableState.Never)]
     public string? Password { get; init; }
 
     /// <summary>
