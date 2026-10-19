@@ -54,7 +54,7 @@ internal static class Attributes
         var wanted = (attributes & FileAttributes.ReadOnly) != 0 ? mode & ~WriteBits : mode | UnixFileMode.UserWrite;
         if (wanted != mode)
         {
-            fileSystem.Run(full, false, ct => fileSystem.Sftp.SetAttributesAsync(full, new SftpFileAttributes { Permissions = wanted }, ct));
+            fileSystem.Run(full, false, (sftp, ct) => sftp.SetAttributesAsync(full, new SftpFileAttributes { Permissions = wanted }, ct));
         }
     }
 }
@@ -79,7 +79,7 @@ internal static class Times
         var attributes = write
             ? new SftpFileAttributes { LastWriteTime = time, LastAccessTime = current.LastAccessTime ?? time }
             : new SftpFileAttributes { LastAccessTime = time, LastWriteTime = current.LastWriteTime ?? time };
-        fileSystem.Run(full, false, ct => fileSystem.Sftp.SetAttributesAsync(full, attributes, ct));
+        fileSystem.Run(full, false, (sftp, ct) => sftp.SetAttributesAsync(full, attributes, ct));
     }
 }
 
@@ -106,11 +106,11 @@ internal static class Links
         if (returnFinalTarget)
         {
             // The server resolves every link in the chain.
-            target = fileSystem.Run(full, directory, ct => fileSystem.Sftp.GetFullPathAsync(full, ct));
+            target = fileSystem.Run(full, directory, (sftp, ct) => sftp.GetFullPathAsync(full, ct), retry: true);
         }
         else
         {
-            var stored = fileSystem.Run(full, directory, ct => fileSystem.Sftp.ReadSymbolicLinkAsync(full, ct));
+            var stored = fileSystem.Run(full, directory, (sftp, ct) => sftp.ReadSymbolicLinkAsync(full, ct), retry: true);
             var parent = RemotePath.DirectoryName(full, out _).ToString();
             target = RemotePath.IsRooted(stored) ? stored : RemotePath.Normalize(RemotePath.Join(parent, stored));
         }

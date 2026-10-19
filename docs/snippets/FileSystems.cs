@@ -1,7 +1,9 @@
 using System.IO.Abstractions;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using SshSharp;
+using SshSharp.Extensions.DependencyInjection;
 using SshSharp.FileProviders;
 using SshSharp.IO.Abstractions;
 using SshSharp.Sftp;
@@ -42,6 +44,21 @@ internal static class FileSystems
         // </file-system>
     }
 
+    public static async Task FollowTheConnectionAsync(CancellationToken cancellationToken)
+    {
+        // <file-system-reconnecting>
+        // One connection, opened again when it drops (the wrapper from "Keep-alive and reconnecting").
+        await using var connection = new Resilience.ReconnectingClient(ct => SshClient.ConnectAsync("files.example.com", cancellationToken: ct));
+
+        // The file system opens a session on first use, and a new one after the session or its connection fails. It owns the sessions
+        // it opens and disposes them with itself; the connection stays the wrapper's.
+        await using var remote = new SftpFileSystem(async ct => await (await connection.GetAsync(ct)).OpenSftpAsync(ct));
+
+        var writer = new ReportWriter(remote);
+        await writer.WriteAsync("reports/2026", "summary.txt", "All green.", cancellationToken);
+        // </file-system-reconnecting>
+    }
+
     public static async Task CopyBetweenAsync(SshClient client, CancellationToken cancellationToken)
     {
         // <copy-between>
@@ -55,21 +72,37 @@ internal static class FileSystems
         // </copy-between>
     }
 
-    public static async Task StaticFilesAsync(WebApplication app)
+    public static void StaticFiles(WebApplication app)
     {
         // <file-provider>
-        // Static files served from /srv/www on the server. The provider keeps one SFTP session for the application's lifetime.
+        // Static files served from /srv/www on the server, over the shared connection of the "content" endpoint
+        // (builder.Services.AddSshClient("content")). The provider opens an SFTP session on the first request, and a new one after the
+        // connection drops (the shared connection is opened again too). It owns those sessions: dispose it when the application stops.
+        var connections = app.Services.GetRequiredService<ISshConnectionProvider>();
+        var provider = new SftpFileProvider(ct => connections.OpenSftpAsync("content", ct), "/srv/www",
+            new SftpFileProviderOptions { CacheDuration = TimeSpan.FromSeconds(30) });
+
+        app.UseStaticFiles(new StaticFileOptions { FileProvider = provider, RequestPath = "/content" });
+        app.Lifetime.ApplicationStopped.Register(provider.Dispose);
+        // </file-provider>
+    }
+
+    public static async Task StaticFilesOneSessionAsync(WebApplication app)
+    {
+        // <file-provider-session>
+        // One SFTP session for the application's lifetime, on a connection of its own. Once that connection drops, every lookup fails:
+        // prefer a session factory (above) for anything long-lived.
         var ssh = await SshClient.ConnectAsync(app.Configuration["Ssh:Alias"] ?? "web-content");
         var sftp = await ssh.OpenSftpAsync();
-        var provider = new SftpFileProvider(sftp, "/srv/www", new SftpFileProviderOptions { CacheDuration = TimeSpan.FromSeconds(30) });
+        var provider = new SftpFileProvider(sftp, "/srv/www");
 
         app.UseStaticFiles(new StaticFileOptions { FileProvider = provider, RequestPath = "/content" });
         app.Lifetime.ApplicationStopped.Register(() =>
         {
-            sftp.DisposeAsync().AsTask().GetAwaiter().GetResult();   // the provider does not own the session
+            sftp.DisposeAsync().AsTask().GetAwaiter().GetResult();   // the provider does not own a session it was given
             ssh.DisposeAsync().AsTask().GetAwaiter().GetResult();
         });
-        // </file-provider>
+        // </file-provider-session>
     }
 
     public static void Configuration(SftpClient sftp, IConfigurationBuilder configuration)

@@ -50,16 +50,16 @@ internal static class Search
         List<SftpFileInfo> listing;
         try
         {
-            listing = fileSystem.Run(full, true, async ct =>
+            listing = fileSystem.Run(full, true, async (sftp, ct) =>
             {
                 var entries = new List<SftpFileInfo>();
-                await foreach (var entry in fileSystem.Sftp.ListDirectoryAsync(full, ct).ConfigureAwait(false))
+                await foreach (var entry in sftp.ListDirectoryAsync(full, ct).ConfigureAwait(false))
                 {
                     entries.Add(entry);
                 }
 
                 return entries;
-            });
+            }, retry: true);
         }
         catch (UnauthorizedAccessException) when (options.IgnoreInaccessible && depth > 0)
         {

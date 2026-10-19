@@ -18,13 +18,13 @@ internal sealed class SftpFile(SftpFileSystem fileSystem) : IFile
     public byte[] ReadAllBytes(string path)
     {
         var full = fileSystem.Full(path);
-        return fileSystem.RunTransfer(full, false, (ct, progress) => DownloadAsync(full, progress, ct));
+        return fileSystem.RunTransfer(full, false, (sftp, ct, progress) => DownloadAsync(sftp, full, progress, ct), retry: true);
     }
 
     public Task<byte[]> ReadAllBytesAsync(string path, CancellationToken cancellationToken = default)
     {
         var full = fileSystem.Full(path);
-        return fileSystem.RunTransferAsync(full, false, (ct, progress) => DownloadAsync(full, progress, ct), cancellationToken);
+        return fileSystem.RunTransferAsync(full, false, (sftp, ct, progress) => DownloadAsync(sftp, full, progress, ct), cancellationToken, retry: true);
     }
 
     public string ReadAllText(string path) => Decode(ReadAllBytes(path), Encoding.UTF8);
@@ -74,10 +74,11 @@ internal sealed class SftpFile(SftpFileSystem fileSystem) : IFile
     {
         ArgumentNullException.ThrowIfNull(encoding);
         var full = fileSystem.Full(path);
-        var remote = await fileSystem.RunAsync(full, false, ct => fileSystem.Sftp.OpenReadAsync(full, ct), cancellationToken).ConfigureAwait(false);
+        var (sftp, remote) = await fileSystem.RunAsync(full, false, async (sftp, ct) => (sftp, await sftp.OpenReadAsync(full, ct).ConfigureAwait(false)),
+            cancellationToken, retry: true).ConfigureAwait(false);
 
         // Through the file system's stream, so errors while reading are System.IO exceptions too.
-        using var reader = new StreamReader(SftpFileSystemStream.Wrap(fileSystem, remote, full, 4096), encoding, detectEncodingFromByteOrderMarks: true);
+        using var reader = new StreamReader(SftpFileSystemStream.Wrap(fileSystem, sftp, remote, full, 4096), encoding, detectEncodingFromByteOrderMarks: true);
         while (await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false) is { } line)
         {
             yield return line;
@@ -248,17 +249,17 @@ internal sealed class SftpFile(SftpFileSystem fileSystem) : IFile
             throw new IOException($"The source '{sourceFileName}' and destination '{destFileName}' are the same file.");
         }
 
-        if (fileSystem.Sftp.Extensions.ContainsKey("copy-data"))
+        if (fileSystem.Run(null, false, (sftp, _) => Task.FromResult(sftp.Extensions.ContainsKey("copy-data")), retry: true))
         {
             // One request the server works on for as long as the file needs: no progress to time, so no time limit.
-            fileSystem.RunTransfer(destination, true, (ct, _) => fileSystem.Sftp.CopyFileAsync(source, destination, overwrite, ct), limited: false);
+            fileSystem.RunTransfer(destination, true, (sftp, ct, _) => sftp.CopyFileAsync(source, destination, overwrite, ct), limited: false);
             return;
         }
 
-        fileSystem.RunTransfer(destination, true, async (ct, progress) =>
+        fileSystem.RunTransfer(destination, true, async (sftp, ct, progress) =>
         {
-            await using var reader = await fileSystem.Sftp.OpenReadAsync(source, ct).ConfigureAwait(false);
-            await fileSystem.Sftp.UploadAsync(reader, destination, new SftpTransferOptions { Overwrite = overwrite, Progress = progress }, ct).ConfigureAwait(false);
+            await using var reader = await sftp.OpenReadAsync(source, ct).ConfigureAwait(false);
+            await sftp.UploadAsync(reader, destination, new SftpTransferOptions { Overwrite = overwrite, Progress = progress }, ct).ConfigureAwait(false);
         });
     }
 
@@ -267,8 +268,8 @@ internal sealed class SftpFile(SftpFileSystem fileSystem) : IFile
     {
         try
         {
-            var a = fileSystem.Run(first, false, ct => fileSystem.Sftp.GetFullPathAsync(first, ct));
-            var b = fileSystem.Run(second, false, ct => fileSystem.Sftp.GetFullPathAsync(second, ct));
+            var a = fileSystem.Run(first, false, (sftp, ct) => sftp.GetFullPathAsync(first, ct), retry: true);
+            var b = fileSystem.Run(second, false, (sftp, ct) => sftp.GetFullPathAsync(second, ct), retry: true);
             return a == b;
         }
         catch (IOException)
@@ -299,7 +300,7 @@ internal sealed class SftpFile(SftpFileSystem fileSystem) : IFile
         }
 
         // A plain rename when nothing is there to replace, so servers without posix-rename can move too.
-        fileSystem.Run(destination, true, ct => fileSystem.Sftp.RenameAsync(source, destination, overwrite: existing is not null, ct));
+        fileSystem.Run(destination, true, (sftp, ct) => sftp.RenameAsync(source, destination, overwrite: existing is not null, ct));
     }
 
     /// <summary>Deletes a file; a file that does not exist is not an error (but a missing directory is), as <c>File.Delete</c>.</summary>
@@ -308,7 +309,7 @@ internal sealed class SftpFile(SftpFileSystem fileSystem) : IFile
         var full = fileSystem.Full(path);
         try
         {
-            fileSystem.Run(full, false, ct => fileSystem.Sftp.DeleteFileAsync(full, ct));
+            fileSystem.Run(full, false, (sftp, ct) => sftp.DeleteFileAsync(full, ct));
         }
         catch (FileNotFoundException)
         {
@@ -324,7 +325,7 @@ internal sealed class SftpFile(SftpFileSystem fileSystem) : IFile
     {
         ArgumentException.ThrowIfNullOrEmpty(pathToTarget);
         var full = fileSystem.Full(path);
-        fileSystem.Run(full, true, ct => fileSystem.Sftp.CreateSymbolicLinkAsync(full, pathToTarget, ct));
+        fileSystem.Run(full, true, (sftp, ct) => sftp.CreateSymbolicLinkAsync(full, pathToTarget, ct));
         return fileSystem.FileInfo.New(path);
     }
 
@@ -371,7 +372,7 @@ internal sealed class SftpFile(SftpFileSystem fileSystem) : IFile
     public void SetUnixFileMode(string path, UnixFileMode mode)
     {
         var full = fileSystem.Full(path);
-        fileSystem.Run(full, false, ct => fileSystem.Sftp.SetAttributesAsync(full, new SftpFileAttributes { Permissions = mode }, ct));
+        fileSystem.Run(full, false, (sftp, ct) => sftp.SetAttributesAsync(full, new SftpFileAttributes { Permissions = mode }, ct));
     }
 
     // ---- not supported over SFTP ----
@@ -421,37 +422,37 @@ internal sealed class SftpFile(SftpFileSystem fileSystem) : IFile
 
     // ---- helpers ----
 
-    private async Task<byte[]> DownloadAsync(string full, IProgress<SftpTransferProgress> progress, CancellationToken cancellationToken)
+    private static async Task<byte[]> DownloadAsync(SftpClient sftp, string full, IProgress<SftpTransferProgress> progress, CancellationToken cancellationToken)
     {
         var buffer = new MemoryStream();
-        await fileSystem.Sftp.DownloadAsync(full, buffer, new SftpTransferOptions { Progress = progress }, cancellationToken).ConfigureAwait(false);
+        await sftp.DownloadAsync(full, buffer, new SftpTransferOptions { Progress = progress }, cancellationToken).ConfigureAwait(false);
         return buffer.ToArray();
     }
 
     private void Write(string path, ReadOnlyMemory<byte> data, bool append)
     {
         var full = fileSystem.Full(path);
-        fileSystem.RunTransfer(full, true, (ct, progress) => WriteCoreAsync(full, data, append, progress, ct));
+        fileSystem.RunTransfer(full, true, (sftp, ct, progress) => WriteCoreAsync(sftp, full, data, append, progress, ct));
     }
 
     private Task WriteAsync(string path, ReadOnlyMemory<byte> data, bool append, CancellationToken cancellationToken)
     {
         var full = fileSystem.Full(path);
-        return fileSystem.RunTransferAsync(full, true, (ct, progress) => WriteCoreAsync(full, data, append, progress, ct), cancellationToken);
+        return fileSystem.RunTransferAsync(full, true, (sftp, ct, progress) => WriteCoreAsync(sftp, full, data, append, progress, ct), cancellationToken);
     }
 
-    private async Task WriteCoreAsync(string full, ReadOnlyMemory<byte> data, bool append, IProgress<SftpTransferProgress> progress, CancellationToken cancellationToken)
+    private static async Task WriteCoreAsync(SftpClient sftp, string full, ReadOnlyMemory<byte> data, bool append, IProgress<SftpTransferProgress> progress, CancellationToken cancellationToken)
     {
         if (!append)
         {
             var options = new SftpTransferOptions { Overwrite = true, Progress = progress };
-            await fileSystem.Sftp.UploadAsync(new MemoryStream(data.ToArray(), writable: false), full, options, cancellationToken).ConfigureAwait(false);
+            await sftp.UploadAsync(new MemoryStream(data.ToArray(), writable: false), full, options, cancellationToken).ConfigureAwait(false);
             return;
         }
 
         // In chunks, each one progress, so the time limit applies to each rather than to the whole append.
         const int chunk = 256 * 1024;
-        await using var stream = await fileSystem.Sftp.OpenAsync(full, FileMode.Append, FileAccess.Write, cancellationToken).ConfigureAwait(false);
+        await using var stream = await sftp.OpenAsync(full, FileMode.Append, FileAccess.Write, cancellationToken).ConfigureAwait(false);
         for (var offset = 0; offset < data.Length; offset += chunk)
         {
             var part = data.Slice(offset, Math.Min(chunk, data.Length - offset));

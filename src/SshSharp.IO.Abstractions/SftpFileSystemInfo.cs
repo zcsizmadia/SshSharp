@@ -113,7 +113,7 @@ internal abstract class SftpFileSystemInfo : IFileSystemInfo
         {
             Load();
             _error?.Throw();
-            return _own is { IsSymbolicLink: true } ? Fs.Run(FullName, false, ct => Fs.Sftp.ReadSymbolicLinkAsync(FullName, ct)) : null;
+            return _own is { IsSymbolicLink: true } ? Fs.Run(FullName, false, (sftp, ct) => sftp.ReadSymbolicLinkAsync(FullName, ct), retry: true) : null;
         }
     }
 
@@ -122,7 +122,7 @@ internal abstract class SftpFileSystemInfo : IFileSystemInfo
         get => Current?.Permissions ?? (UnixFileMode)(-1);
         set
         {
-            Fs.Run(FullName, false, ct => Fs.Sftp.SetAttributesAsync(FullName, new SftpFileAttributes { Permissions = value }, ct));
+            Fs.Run(FullName, false, (sftp, ct) => sftp.SetAttributesAsync(FullName, new SftpFileAttributes { Permissions = value }, ct));
             Refresh();
         }
     }

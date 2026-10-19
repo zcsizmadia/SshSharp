@@ -34,6 +34,9 @@ internal sealed class TcpFakeSshServer : IAsyncDisposable
     /// </summary>
     public List<byte[]> AuthorizedKeys { get; init; } = [];
 
+    /// <summary>Sets up each connection's server before it starts, for example to install an SFTP subsystem.</summary>
+    public Action<FakeSessionServer>? Configure { get; init; }
+
     /// <summary>How many TCP connections were accepted, refused ones included.</summary>
     public int Connections => Volatile.Read(ref _connections);
 
@@ -85,6 +88,7 @@ internal sealed class TcpFakeSshServer : IAsyncDisposable
             var server = AuthorizedKeys.Count > 0
                 ? new FakeSessionServer(_options) { AdvertisedMethods = ["publickey"], AuthorizedKeys = AuthorizedKeys }
                 : new FakeSessionServer(_options);
+            Configure?.Invoke(server);
             _ = server.StartAsync();
             lock (_live)
             {

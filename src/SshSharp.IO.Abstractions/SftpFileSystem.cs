@@ -1,4 +1,5 @@
 using System.IO.Abstractions;
+using SshSharp.Adapters;
 using SshSharp.Sftp;
 
 namespace SshSharp.IO.Abstractions;
@@ -25,18 +26,56 @@ namespace SshSharp.IO.Abstractions;
 /// notifications, drives, version information, encryption or handles: <see cref="FileSystemWatcher"/>, <see cref="DriveInfo"/>,
 /// <see cref="FileVersionInfo"/>, <see cref="RandomAccess"/> and the <c>SafeFileHandle</c> overloads throw <see cref="NotSupportedException"/>.
 /// </para>
+/// <para>
+/// Built from a session factory (<see cref="SftpFileSystem(Func{CancellationToken, Task{SftpClient}}, SftpFileSystemOptions?)"/>),
+/// the file system follows a connection that drops and comes back: it keeps one session while it works, and opens a new one after the
+/// session or its connection fails. Built from one <see cref="SftpClient"/>, it uses that session for its lifetime, and fails once it
+/// fails.
+/// </para>
 /// </remarks>
-public sealed class SftpFileSystem : IFileSystem
+public sealed class SftpFileSystem : IFileSystem, IDisposable, IAsyncDisposable
 {
+    private readonly SftpSessions _sessions;
     private string? _currentDirectory;
 
     /// <summary>A file system over <paramref name="sftp"/>.</summary>
     /// <param name="sftp">The SFTP session to use; it stays the caller's to dispose, after the file system is no longer used.</param>
     /// <param name="options">Timeouts.</param>
     public SftpFileSystem(SftpClient sftp, SftpFileSystemOptions? options = null)
+        : this(new SftpSessions(sftp ?? throw new ArgumentNullException(nameof(sftp))), options)
     {
-        ArgumentNullException.ThrowIfNull(sftp);
-        Sftp = sftp;
+    }
+
+    /// <summary>
+    /// A file system over sessions from <paramref name="sessionFactory"/>: one is opened on the first call and shared by every call
+    /// after it, and a new one is opened when the session or its connection fails. The file system owns the sessions it opens and
+    /// disposes them (dispose the file system when it is no longer used).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Only a failed session or connection is replaced; an SFTP error (a missing file, a denied request) is not a failure. Calls that
+    /// find no session share one call to the factory, so a dropped connection is followed by one reconnect, not one per caller. The
+    /// call that meets the dropped connection fails with an <see cref="IOException"/>, unless it only reads (an attribute lookup, a
+    /// listing, a whole-file read, opening a file to read): those are tried once more on a new session. A call that writes is not, since
+    /// the server may have done it before the connection dropped. If the factory fails, the call fails with an <see cref="IOException"/>
+    /// and the next one calls the factory again. Opening a session counts against <see cref="SftpFileSystemOptions.OperationTimeout"/>.
+    /// </para>
+    /// <para>
+    /// The factory opens a session on a connection it manages: the file system disposes the <see cref="SftpClient"/>, never the
+    /// connection under it. With the dependency injection package, <c>ct =&gt; connections.OpenSftpAsync("name", ct)</c> opens it on the
+    /// shared connection, which is itself opened again when it drops. Streams already open on a failed session fail; open them again.
+    /// </para>
+    /// </remarks>
+    /// <param name="sessionFactory">Opens a new SFTP session; called on first use and after a failure, never concurrently.</param>
+    /// <param name="options">Timeouts.</param>
+    public SftpFileSystem(Func<CancellationToken, Task<SftpClient>> sessionFactory, SftpFileSystemOptions? options = null)
+        : this(new SftpSessions(sessionFactory ?? throw new ArgumentNullException(nameof(sessionFactory)), (options ?? new SftpFileSystemOptions()).OperationTimeout), options)
+    {
+    }
+
+    private SftpFileSystem(SftpSessions sessions, SftpFileSystemOptions? options)
+    {
+        _sessions = sessions;
         Options = options ?? new SftpFileSystemOptions();
         File = new SftpFile(this);
         Directory = new SftpDirectory(this);
@@ -80,16 +119,24 @@ public sealed class SftpFileSystem : IFileSystem
     /// <summary>Not supported: it works on OS file handles, which remote files do not have.</summary>
     public IRandomAccess RandomAccess { get; }
 
-    internal SftpClient Sftp { get; }
-
     internal SftpFileSystemOptions Options { get; }
+
+    /// <summary>
+    /// Disposes the SFTP sessions the file system opened from its session factory; later calls throw <see cref="ObjectDisposedException"/>.
+    /// A file system built from one <see cref="SftpClient"/> leaves that session alone: it stays the caller's, and this does nothing.
+    /// </summary>
+    public ValueTask DisposeAsync() => _sessions.DisposeAsync();
+
+    /// <summary>Disposes the file system as <see cref="DisposeAsync"/> does, waiting for it (on the thread pool, as synchronous calls do).</summary>
+    public void Dispose() =>
+        Task.Run(() => _sessions.DisposeAsync().AsTask(), CancellationToken.None).GetAwaiter().GetResult();
 
     /// <summary>The directory relative paths start from: the login directory until <see cref="IDirectory.SetCurrentDirectory"/>.</summary>
     internal string CurrentDirectory
     {
         // Where the server resolves relative paths, as sftp starts. Not the home-directory extension: OpenSSH answers it with the
         // passwd home even in a ChrootDirectory session, where that path does not exist.
-        get => _currentDirectory ??= Run(null, false, ct => Sftp.GetFullPathAsync(".", ct));
+        get => _currentDirectory ??= Run(null, false, (sftp, ct) => sftp.GetFullPathAsync(".", ct), retry: true);
         set => _currentDirectory = value;
     }
 
@@ -111,7 +158,7 @@ public sealed class SftpFileSystem : IFileSystem
     {
         try
         {
-            return Run(fullPath, false, ct => Sftp.GetAttributesAsync(fullPath, follow, ct));
+            return Run(fullPath, false, (sftp, ct) => sftp.GetAttributesAsync(fullPath, follow, ct), retry: true);
         }
         catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
         {
@@ -143,15 +190,17 @@ public sealed class SftpFileSystem : IFileSystem
     /// <summary>
     /// Runs an SFTP operation to completion for a synchronous caller, on the thread pool (so a synchronization context cannot deadlock
     /// it), bounded by the timeout, with SFTP errors turned into <c>System.IO</c> exceptions about <paramref name="path"/>. The calling
-    /// thread waits, so many concurrent synchronous calls hold as many threads; the asynchronous methods do not.
+    /// thread waits, so many concurrent synchronous calls hold as many threads; the asynchronous methods do not. The operation runs on
+    /// the current session; <paramref name="retry"/> (only for operations that change nothing on the server) tries it once more on a new
+    /// session when the connection dropped under it.
     /// </summary>
-    internal T Run<T>(string? path, bool directory, Func<CancellationToken, Task<T>> operation) =>
-        RunTransfer(path, directory, (ct, _) => operation(ct));
+    internal T Run<T>(string? path, bool directory, Func<SftpClient, CancellationToken, Task<T>> operation, bool retry = false) =>
+        RunTransfer(path, directory, (sftp, ct, _) => operation(sftp, ct), retry: retry);
 
-    internal void Run(string? path, bool directory, Func<CancellationToken, Task> operation) =>
-        Run<bool>(path, directory, async ct =>
+    internal void Run(string? path, bool directory, Func<SftpClient, CancellationToken, Task> operation) =>
+        Run<bool>(path, directory, async (sftp, ct) =>
         {
-            await operation(ct).ConfigureAwait(false);
+            await operation(sftp, ct).ConfigureAwait(false);
             return true;
         });
 
@@ -159,7 +208,8 @@ public sealed class SftpFileSystem : IFileSystem
     /// Like <see cref="Run{T}"/> for a transfer of any length: the timeout limits how long it may go without progress (the operation
     /// reports progress to the <see cref="IProgress{T}"/> it is given), not how long it takes.
     /// </summary>
-    internal T RunTransfer<T>(string? path, bool directory, Func<CancellationToken, IProgress<SftpTransferProgress>, Task<T>> operation, bool limited = true)
+    internal T RunTransfer<T>(string? path, bool directory, Func<SftpClient, CancellationToken, IProgress<SftpTransferProgress>, Task<T>> operation,
+        bool limited = true, bool retry = false)
     {
         // The deadline starts when the work does, on the thread pool: started before queueing it, a busy pool's delay would count
         // against the server, and the operation could find its time used up before it began.
@@ -170,7 +220,7 @@ public sealed class SftpFileSystem : IFileSystem
             {
                 using var started = new Deadline(limited ? Options.OperationTimeout : Timeout.InfiniteTimeSpan, CancellationToken.None);
                 deadline = started;
-                return await operation(started.Token, started).ConfigureAwait(false);
+                return await _sessions.RunAsync((sftp, ct) => operation(sftp, ct, started), retry, started.Token).ConfigureAwait(false);
             }, CancellationToken.None).GetAwaiter().GetResult();
         }
         catch (Exception ex) when (Translate(ex, path, directory, deadline?.TimedOut == true) is { } translated)
@@ -179,24 +229,25 @@ public sealed class SftpFileSystem : IFileSystem
         }
     }
 
-    internal void RunTransfer(string? path, bool directory, Func<CancellationToken, IProgress<SftpTransferProgress>, Task> operation, bool limited = true) =>
-        RunTransfer<bool>(path, directory, async (ct, progress) =>
+    internal void RunTransfer(string? path, bool directory, Func<SftpClient, CancellationToken, IProgress<SftpTransferProgress>, Task> operation, bool limited = true) =>
+        RunTransfer<bool>(path, directory, async (sftp, ct, progress) =>
         {
-            await operation(ct, progress).ConfigureAwait(false);
+            await operation(sftp, ct, progress).ConfigureAwait(false);
             return true;
         }, limited);
 
     /// <summary>Runs an asynchronous operation for an asynchronous caller, with the same exceptions as <see cref="Run{T}"/>.</summary>
-    internal Task<T> RunAsync<T>(string? path, bool directory, Func<CancellationToken, Task<T>> operation, CancellationToken cancellationToken) =>
-        RunTransferAsync(path, directory, (ct, _) => operation(ct), cancellationToken);
+    internal Task<T> RunAsync<T>(string? path, bool directory, Func<SftpClient, CancellationToken, Task<T>> operation, CancellationToken cancellationToken, bool retry = false) =>
+        RunTransferAsync(path, directory, (sftp, ct, _) => operation(sftp, ct), cancellationToken, retry);
 
     /// <summary>The asynchronous <see cref="RunTransfer{T}"/>: the timeout limits time without progress.</summary>
-    internal async Task<T> RunTransferAsync<T>(string? path, bool directory, Func<CancellationToken, IProgress<SftpTransferProgress>, Task<T>> operation, CancellationToken cancellationToken)
+    internal async Task<T> RunTransferAsync<T>(string? path, bool directory, Func<SftpClient, CancellationToken, IProgress<SftpTransferProgress>, Task<T>> operation,
+        CancellationToken cancellationToken, bool retry = false)
     {
         using var deadline = new Deadline(Options.OperationTimeout, cancellationToken);
         try
         {
-            return await operation(deadline.Token, deadline).ConfigureAwait(false);
+            return await _sessions.RunAsync((sftp, ct) => operation(sftp, ct, deadline), retry, deadline.Token).ConfigureAwait(false);
         }
         catch (Exception ex) when (Translate(ex, path, directory, deadline.TimedOut) is { } translated)
         {
@@ -204,10 +255,10 @@ public sealed class SftpFileSystem : IFileSystem
         }
     }
 
-    internal Task RunTransferAsync(string? path, bool directory, Func<CancellationToken, IProgress<SftpTransferProgress>, Task> operation, CancellationToken cancellationToken) =>
-        RunTransferAsync<bool>(path, directory, async (ct, progress) =>
+    internal Task RunTransferAsync(string? path, bool directory, Func<SftpClient, CancellationToken, IProgress<SftpTransferProgress>, Task> operation, CancellationToken cancellationToken) =>
+        RunTransferAsync<bool>(path, directory, async (sftp, ct, progress) =>
         {
-            await operation(ct, progress).ConfigureAwait(false);
+            await operation(sftp, ct, progress).ConfigureAwait(false);
             return true;
         }, cancellationToken);
 

@@ -1,1 +1,4 @@
 #nullable enable
+SshSharp.IO.Abstractions.SftpFileSystem.Dispose() -> void
+SshSharp.IO.Abstractions.SftpFileSystem.DisposeAsync() -> System.Threading.Tasks.ValueTask
+SshSharp.IO.Abstractions.SftpFileSystem.SftpFileSystem(System.Func<System.Threading.CancellationToken, System.Threading.Tasks.Task<SshSharp.Sftp.SftpClient!>!>! sessionFactory, SshSharp.IO.Abstractions.SftpFileSystemOptions? options = null) -> void

@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Primitives;
+using SshSharp.Adapters;
 using SshSharp.Sftp;
 
 namespace SshSharp.FileProviders;
@@ -20,10 +21,16 @@ namespace SshSharp.FileProviders;
 /// Paths cannot leave <see cref="Root"/>: any <c>..</c> segment gives a file that does not exist. Symbolic links are followed (on the
 /// server, which decides where they lead). <see cref="Watch"/> never signals: SFTP has no change notifications.
 /// </para>
+/// <para>
+/// Built from a session factory (<see cref="SftpFileProvider(Func{CancellationToken, Task{SftpClient}}, string, SftpFileProviderOptions?)"/>),
+/// the provider follows a connection that drops and comes back: it keeps one session while it works, and opens a new one after the
+/// session or its connection fails, trying the failed lookup once more on it. Built from one <see cref="SftpClient"/>, it uses that
+/// session for its lifetime, and fails once it fails.
+/// </para>
 /// </remarks>
-public sealed class SftpFileProvider : IFileProvider
+public sealed class SftpFileProvider : IFileProvider, IDisposable, IAsyncDisposable
 {
-    private readonly SftpClient _sftp;
+    private readonly SftpSessions _sessions;
     private readonly SftpFileProviderOptions _options;
     private readonly ConcurrentDictionary<string, (long Expires, SftpFileAttributes? Attributes)> _attributes = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, (long Expires, List<IFileInfo>? Entries)> _listings = new(StringComparer.Ordinal);
@@ -36,9 +43,40 @@ public sealed class SftpFileProvider : IFileProvider
     {
         ArgumentNullException.ThrowIfNull(sftp);
         ArgumentException.ThrowIfNullOrEmpty(root);
-        _sftp = sftp;
-        Root = root.Length > 1 ? root.TrimEnd('/') : root;
         _options = options ?? new SftpFileProviderOptions();
+        _sessions = new SftpSessions(sftp);
+        Root = root.Length > 1 ? root.TrimEnd('/') : root;
+    }
+
+    /// <summary>
+    /// Serves the files under <paramref name="root"/> on the server, through sessions from <paramref name="sessionFactory"/>: one is
+    /// opened on the first lookup and shared by every lookup after it, and a new one is opened when the session or its connection
+    /// fails. The provider owns the sessions it opens and disposes them (dispose the provider when it is no longer used).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Only a failed session or connection is replaced; a missing or unreadable file is not a failure. Lookups that find no session
+    /// share one call to the factory, so a dropped connection is followed by one reconnect, not one per request; a lookup that fails
+    /// because the connection dropped is tried once more on a new session. If the factory fails, the lookup fails with an
+    /// <see cref="SshException"/> and the next one calls the factory again. Opening a session counts against
+    /// <see cref="SftpFileProviderOptions.OperationTimeout"/>.
+    /// </para>
+    /// <para>
+    /// The factory opens a session on a connection it manages: the provider disposes the <see cref="SftpClient"/>, never the connection
+    /// under it. With the dependency injection package, <c>ct =&gt; connections.OpenSftpAsync("name", ct)</c> opens it on the shared
+    /// connection, which is itself opened again when it drops. Streams already open on a failed session fail; open them again.
+    /// </para>
+    /// </remarks>
+    /// <param name="sessionFactory">Opens a new SFTP session; called on the first lookup and after a failure, never concurrently.</param>
+    /// <param name="root">The directory on the server, absolute or relative to the login directory (<c>.</c> for the login directory itself).</param>
+    /// <param name="options">Caching and timeouts.</param>
+    public SftpFileProvider(Func<CancellationToken, Task<SftpClient>> sessionFactory, string root, SftpFileProviderOptions? options = null)
+    {
+        ArgumentNullException.ThrowIfNull(sessionFactory);
+        ArgumentException.ThrowIfNullOrEmpty(root);
+        _options = options ?? new SftpFileProviderOptions();
+        _sessions = new SftpSessions(sessionFactory, _options.OperationTimeout);
+        Root = root.Length > 1 ? root.TrimEnd('/') : root;
     }
 
     /// <summary>The directory on the server that the provider serves.</summary>
@@ -156,7 +194,7 @@ public sealed class SftpFileProvider : IFileProvider
         SftpFileAttributes? attributes;
         try
         {
-            attributes = Run(ct => _sftp.GetAttributesAsync(path, followSymbolicLinks: true, ct));
+            attributes = Run((sftp, ct) => sftp.GetAttributesAsync(path, followSymbolicLinks: true, ct));
         }
         catch (SftpException)
         {
@@ -171,10 +209,10 @@ public sealed class SftpFileProvider : IFileProvider
     {
         try
         {
-            return Run(async ct =>
+            return Run(async (sftp, ct) =>
             {
                 var entries = new List<IFileInfo>();
-                await foreach (var entry in _sftp.ListDirectoryAsync(path, ct).ConfigureAwait(false))
+                await foreach (var entry in sftp.ListDirectoryAsync(path, ct).ConfigureAwait(false))
                 {
                     var attributes = entry.Attributes;
                     if (attributes.IsSymbolicLink)
@@ -182,7 +220,7 @@ public sealed class SftpFileProvider : IFileProvider
                         // A listing describes a link itself; serve what it points to, and leave out links that lead nowhere.
                         try
                         {
-                            attributes = await _sftp.GetAttributesAsync(entry.FullPath, followSymbolicLinks: true, ct).ConfigureAwait(false);
+                            attributes = await sftp.GetAttributesAsync(entry.FullPath, followSymbolicLinks: true, ct).ConfigureAwait(false);
                         }
                         catch (SftpException)
                         {
@@ -203,16 +241,28 @@ public sealed class SftpFileProvider : IFileProvider
     }
 
     internal Stream OpenRead(string path, long length) =>
-        new BlockingReadStream(Run(ct => _sftp.OpenReadAsync(path, ct)), length, _options.OperationTimeout);
+        new BlockingReadStream(Run((sftp, ct) => sftp.OpenReadAsync(path, ct)), length, _options.OperationTimeout);
 
     /// <summary>
     /// Runs an SFTP operation to completion for a synchronous caller, bounded by <see cref="SftpFileProviderOptions.OperationTimeout"/>.
     /// It runs on the thread pool, so a caller with a synchronization context (a UI thread) cannot deadlock it; the calling thread waits
-    /// meanwhile, which is why lookups are cached.
+    /// meanwhile, which is why lookups are cached. Every operation only reads, so one that fails because the connection dropped is
+    /// tried once more on a new session, when the provider has a session factory.
     /// </summary>
-    internal T Run<T>(Func<CancellationToken, Task<T>> operation) => Run(_options.OperationTimeout, operation);
+    internal T Run<T>(Func<SftpClient, CancellationToken, Task<T>> operation) =>
+        Run(_options.OperationTimeout, ct => _sessions.RunAsync(operation, retry: true, ct));
 
-    /// <summary>Runs <paramref name="operation"/> as <see cref="Run{T}(Func{CancellationToken, Task{T}})"/> does, with the given timeout; a timeout is an <see cref="SshException"/> (<see cref="SshFailureReason.Timeout"/>).</summary>
+    /// <summary>
+    /// Disposes the SFTP sessions the provider opened from its session factory; later lookups throw <see cref="ObjectDisposedException"/>.
+    /// A provider built from one <see cref="SftpClient"/> leaves that session alone: it stays the caller's, and this does nothing.
+    /// </summary>
+    public ValueTask DisposeAsync() => _sessions.DisposeAsync();
+
+    /// <summary>Disposes the provider as <see cref="DisposeAsync"/> does, waiting for it (on the thread pool, as lookups do).</summary>
+    public void Dispose() =>
+        Task.Run(() => _sessions.DisposeAsync().AsTask(), CancellationToken.None).GetAwaiter().GetResult();
+
+    /// <summary>Runs <paramref name="operation"/> as <see cref="Run{T}(Func{SftpClient, CancellationToken, Task{T}})"/> does, with the given timeout; a timeout is an <see cref="SshException"/> (<see cref="SshFailureReason.Timeout"/>).</summary>
     internal static T Run<T>(TimeSpan timeout, Func<CancellationToken, Task<T>> operation)
     {
         // The timeout starts when the work does, on the thread pool: started before queueing it, a busy pool's delay would count

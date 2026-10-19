@@ -230,7 +230,9 @@ public class SftpFileProviderTests
     {
         await using var rig = await Rig.StartAsync();
 
-        await Assert.That(() => new SftpFileProvider(null!, "site")).Throws<ArgumentNullException>();
+        await Assert.That(() => new SftpFileProvider((SftpClient)null!, "site")).Throws<ArgumentNullException>();
+        await Assert.That(() => new SftpFileProvider((Func<CancellationToken, Task<SftpClient>>)null!, "site")).Throws<ArgumentNullException>();
+        await Assert.That(() => new SftpFileProvider(_ => Task.FromResult(rig.Sftp), "")).Throws<ArgumentException>();
         await Assert.That(() => new SftpFileProvider(rig.Sftp, "")).Throws<ArgumentException>();
         await Assert.That(() => new SftpFileProviderOptions { CacheDuration = TimeSpan.FromSeconds(-1) }).Throws<ArgumentOutOfRangeException>();
         await Assert.That(() => new SftpFileProviderOptions { OperationTimeout = TimeSpan.Zero }).Throws<ArgumentOutOfRangeException>();

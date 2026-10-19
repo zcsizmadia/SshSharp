@@ -12,6 +12,9 @@ await using var client = await clientFactory.ConnectAsync("deploy", cancellation
 
 // The shared one, which the provider owns and reconnects:
 var shared = await connections.GetClientAsync("deploy", cancellationToken);
+
+// An SFTP session on the shared connection, which the caller owns (also the session factory of SftpFileProvider and SftpFileSystem):
+await using var sftp = await connections.OpenSftpAsync("deploy", cancellationToken);
 ```
 
 Unknown hosts fail by default (`AcceptNewHostKeys` opts in to recording them). In containers, pin the server's host key with

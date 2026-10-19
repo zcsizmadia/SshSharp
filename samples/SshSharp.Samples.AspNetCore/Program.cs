@@ -45,8 +45,7 @@ app.MapGet("/files/{**path}", async (string path, ISshConnectionProvider connect
         return Results.BadRequest();
     }
 
-    var client = await connections.GetClientAsync("server", cancellationToken);
-    await using var sftp = await client.OpenSftpAsync(cancellationToken); // a session per request; the connection is shared
+    await using var sftp = await connections.OpenSftpAsync("server", cancellationToken); // a session per request; the connection is shared
     try
     {
         await using var file = await sftp.OpenReadAsync($"{filesRoot}/{path}", cancellationToken);
@@ -61,17 +60,14 @@ app.MapGet("/files/{**path}", async (string path, ISshConnectionProvider connect
 });
 
 // Static files from a directory on the server: an IFileProvider over SFTP, so UseStaticFiles serves them as if they were local.
-// The provider keeps one SFTP session for the application's lifetime, so it uses a connection of its own from the factory.
+// The provider gets its SFTP session from the shared connection, and opens a new one there after the connection drops. It owns that
+// session, so it is disposed when the application stops; the connection stays the provider's.
 if (app.Configuration["Ssh:StaticRoot"] is { Length: > 0 } staticRoot)
 {
-    var ssh = await app.Services.GetRequiredService<ISshClientFactory>().ConnectAsync("server");
-    var sftp = await ssh.OpenSftpAsync();
-    app.UseStaticFiles(new StaticFileOptions { FileProvider = new SftpFileProvider(sftp, staticRoot), RequestPath = "/static" });
-    app.Lifetime.ApplicationStopped.Register(() =>
-    {
-        sftp.DisposeAsync().AsTask().GetAwaiter().GetResult();
-        ssh.DisposeAsync().AsTask().GetAwaiter().GetResult();
-    });
+    var connections = app.Services.GetRequiredService<ISshConnectionProvider>();
+    var files = new SftpFileProvider(ct => connections.OpenSftpAsync("server", ct), staticRoot);
+    app.UseStaticFiles(new StaticFileOptions { FileProvider = files, RequestPath = "/static" });
+    app.Lifetime.ApplicationStopped.Register(files.Dispose);
 }
 
 app.MapHealthChecks("/healthz");

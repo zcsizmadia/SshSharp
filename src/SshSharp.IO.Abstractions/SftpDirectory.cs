@@ -32,7 +32,7 @@ internal sealed class SftpDirectory(SftpFileSystem fileSystem) : IDirectory
                     var target = current;
                     try
                     {
-                        fileSystem.Run(target, true, ct => fileSystem.Sftp.CreateDirectoryAsync(target, mode, ct));
+                        fileSystem.Run(target, true, (sftp, ct) => sftp.CreateDirectoryAsync(target, mode, ct));
                     }
                     catch (IOException) when (fileSystem.Stat(target) is { IsDirectory: true })
                     {
@@ -49,7 +49,7 @@ internal sealed class SftpDirectory(SftpFileSystem fileSystem) : IDirectory
     public IDirectoryInfo CreateTempSubdirectory(string? prefix = null)
     {
         var path = "/tmp/" + (prefix ?? string.Empty) + fileSystem.Path.GetRandomFileName().Replace(".", string.Empty, StringComparison.Ordinal);
-        fileSystem.Run(path, true, ct => fileSystem.Sftp.CreateDirectoryAsync(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute, ct));
+        fileSystem.Run(path, true, (sftp, ct) => sftp.CreateDirectoryAsync(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute, ct));
         return fileSystem.DirectoryInfo.New(path);
     }
 
@@ -70,22 +70,22 @@ internal sealed class SftpDirectory(SftpFileSystem fileSystem) : IDirectory
         }
         else
         {
-            fileSystem.Run(full, true, ct => fileSystem.Sftp.DeleteDirectoryAsync(full, ct));
+            fileSystem.Run(full, true, (sftp, ct) => sftp.DeleteDirectoryAsync(full, ct));
         }
     }
 
     private void DeleteTree(string full)
     {
-        var entries = fileSystem.Run(full, true, async ct =>
+        var entries = fileSystem.Run(full, true, async (sftp, ct) =>
         {
             var list = new List<SftpFileInfo>();
-            await foreach (var entry in fileSystem.Sftp.ListDirectoryAsync(full, ct).ConfigureAwait(false))
+            await foreach (var entry in sftp.ListDirectoryAsync(full, ct).ConfigureAwait(false))
             {
                 list.Add(entry);
             }
 
             return list;
-        });
+        }, retry: true);
         foreach (var entry in entries)
         {
             var child = RemotePath.Join(full, entry.Name);
@@ -95,11 +95,11 @@ internal sealed class SftpDirectory(SftpFileSystem fileSystem) : IDirectory
             }
             else
             {
-                fileSystem.Run(child, false, ct => fileSystem.Sftp.DeleteFileAsync(child, ct));
+                fileSystem.Run(child, false, (sftp, ct) => sftp.DeleteFileAsync(child, ct));
             }
         }
 
-        fileSystem.Run(full, true, ct => fileSystem.Sftp.DeleteDirectoryAsync(full, ct));
+        fileSystem.Run(full, true, (sftp, ct) => sftp.DeleteDirectoryAsync(full, ct));
     }
 
     public void Move(string sourceDirName, string destDirName)
@@ -116,7 +116,7 @@ internal sealed class SftpDirectory(SftpFileSystem fileSystem) : IDirectory
             throw new IOException($"Cannot create '{destDirName}' because a file or directory with the same name already exists.");
         }
 
-        fileSystem.Run(destination, true, ct => fileSystem.Sftp.RenameAsync(source, destination, overwrite: false, ct));
+        fileSystem.Run(destination, true, (sftp, ct) => sftp.RenameAsync(source, destination, overwrite: false, ct));
     }
 
     /// <summary>Whether a directory exists; never throws (an invalid path, a denied lookup or a failed session reads as false).</summary>
@@ -239,7 +239,7 @@ internal sealed class SftpDirectory(SftpFileSystem fileSystem) : IDirectory
     {
         ArgumentException.ThrowIfNullOrEmpty(pathToTarget);
         var full = fileSystem.Full(path);
-        fileSystem.Run(full, true, ct => fileSystem.Sftp.CreateSymbolicLinkAsync(full, pathToTarget, ct));
+        fileSystem.Run(full, true, (sftp, ct) => sftp.CreateSymbolicLinkAsync(full, pathToTarget, ct));
         return fileSystem.DirectoryInfo.New(path);
     }
 
