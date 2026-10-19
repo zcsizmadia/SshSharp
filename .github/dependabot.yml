@@ -11,5 +11,9 @@ updates:
   - package-ecosystem: github-actions
     # The workflows, and the composite action they share.
     directories: ["/", "/.github/actions/*"]
+    groups:
+      # init and analyze must run the same version: one PR for both, or neither PR passes on its own.
+      codeql:
+        patterns: ["github/codeql-action*"]
     schedule:
       interval: weekly
