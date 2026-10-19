@@ -235,6 +235,38 @@ internal sealed class FakeSftpServer
         }
     }
 
+    /// <summary>Answers OPENDIR of the paths this matches with PERMISSION_DENIED (a directory the user may not read).</summary>
+    public Func<string, bool>? DenyOpenDir { get; set; }
+
+    /// <summary>Answers a READDIR after the one that said EOF with Failure, instead of EOF again.</summary>
+    public bool FailReaddirAfterEof { get; set; }
+
+    private readonly HashSet<string> _listedToEnd = new(StringComparer.Ordinal);
+
+    /// <summary>The most directory handles open at once, across sessions.</summary>
+    public int MaxOpenDirectoryHandles { get; private set; }
+
+    /// <summary>While set and not completed, the first READDIR (and every request behind it) waits for it before being answered.</summary>
+    public TaskCompletionSource? HoldListings { get; set; }
+
+    /// <summary>READDIR requests in flight now, and the most at once, across sessions: from their arrival until their reply goes out.</summary>
+    public int ListingRequestsInFlight => Volatile.Read(ref _listingInFlight);
+
+    /// <inheritdoc cref="ListingRequestsInFlight"/>
+    public int MaxListingRequestsInFlight => Volatile.Read(ref _maxListingInFlight);
+
+    private int _listingInFlight;
+    private int _maxListingInFlight;
+
+    private void ListingRequestArrived()
+    {
+        var now = Interlocked.Increment(ref _listingInFlight);
+        int seen;
+        while (now > (seen = Volatile.Read(ref _maxListingInFlight)) && Interlocked.CompareExchange(ref _maxListingInFlight, now, seen) != seen)
+        {
+        }
+    }
+
     /// <summary>How many OPEN or MKDIR requests named a path whose parent directory did not exist (yet).</summary>
     public int MissingParents { get; private set; }
 
@@ -331,6 +363,10 @@ internal sealed class FakeSftpServer
                     {
                         DataRequestArrived();
                     }
+                    else if (packet[0] is 12)
+                    {
+                        ListingRequestArrived();
+                    }
 
                     var now = Interlocked.Increment(ref unanswered);
                     lock (_requests)
@@ -383,6 +419,10 @@ internal sealed class FakeSftpServer
             {
                 Interlocked.Decrement(ref _dataInFlight);
             }
+            else if (type is 12)
+            {
+                Interlocked.Decrement(ref _listingInFlight);
+            }
         }
 
         await foreach (var packet in queue.Reader.ReadAllAsync())
@@ -401,6 +441,11 @@ internal sealed class FakeSftpServer
             if (packet[0] is 6 && HoldWrites is { } holdWrites)
             {
                 await holdWrites.Task;
+            }
+
+            if (packet[0] is 12 && HoldListings is { } holdListings)
+            {
+                await holdListings.Task;
             }
 
             var reply = HandleLocked(packet, opened);
@@ -813,8 +858,14 @@ internal sealed class FakeSftpServer
                     return Status(id, 2, "No such file");
                 }
 
+                if (DenyOpenDir?.Invoke(path) == true)
+                {
+                    return Status(id, 3, "Permission denied");
+                }
+
                 var handle = "d" + _nextHandle++;
-                _handles[handle] = (path, 0);
+                _handles[handle] = (Canonical(path), 0); // a link to a directory lists the directory
+                MaxOpenDirectoryHandles = Math.Max(MaxOpenDirectoryHandles, _handles.Keys.Count(k => k[0] == 'd'));
                 return Build(w => { w.WriteByte(102); w.WriteUInt32(id); w.WriteString(handle); });
             }
 
@@ -861,7 +912,8 @@ internal sealed class FakeSftpServer
                 var batch = entries.Skip(open.Position).Take(ListingBatch).ToList();
                 if (batch.Count == 0)
                 {
-                    return Status(id, 1, "EOF");
+                    // A server may answer a READDIR after the end with an error rather than EOF again.
+                    return FailReaddirAfterEof && !_listedToEnd.Add(handle) ? Status(id, 4, "Failure") : Status(id, 1, "EOF");
                 }
 
                 _handles[handle] = (open.Path, open.Position + batch.Count);

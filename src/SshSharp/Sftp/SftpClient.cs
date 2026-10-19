@@ -23,6 +23,9 @@ public sealed partial class SftpClient : IAsyncDisposable
     /// <summary>The most empty NAME replies in a row a listing accepts before the server is taken to be looping.</summary>
     internal const int MaxEmptyBatches = 1_000;
 
+    /// <summary>The most READDIR requests a listing keeps in flight on its handle.</summary>
+    internal const int ListingRequestsInFlight = 8;
+
     private readonly SftpChannel _channel;
 
     private SftpClient(SftpChannel channel, SftpLimits limits, bool symlinkInDraftOrder)
@@ -226,34 +229,59 @@ public sealed partial class SftpClient : IAsyncDisposable
     // ---- directories ----
 
     /// <summary>
-    /// Lists a directory, without <c>.</c> and <c>..</c>. Entries arrive in batches as the server sends them; names that cannot be
-    /// file names in one directory (empty, or with a <c>/</c>) are left out.
+    /// Lists a directory, without <c>.</c> and <c>..</c>. Entries arrive in batches as the server sends them, in the server's order;
+    /// names that cannot be file names in one directory (empty, or with a <c>/</c>) are left out. Up to 8 batches are asked for at once
+    /// (see the remarks). To list only names that match a pattern, or a whole tree, use
+    /// <see cref="ListDirectoryAsync(string, SftpListOptions, CancellationToken)"/>.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Names are UTF-8 in SFTP version 3 as OpenSSH uses it; a name that is not valid UTF-8 (a legacy encoding on the server) is listed with
     /// U+FFFD in place of the bytes it cannot decode, so <see cref="SftpFileInfo.FullPath"/> cannot open it. A listing stops with an error
     /// (<see cref="SshFailureReason.ProtocolError"/>) after 1,000,000 entries or 1,000 empty batches in a row, so a hostile server cannot make it
     /// run forever.
+    /// </para>
+    /// <para>
+    /// The batches are pipelined: two READDIR requests go out at once, and twice as many after each batch, up to 8, so a large directory
+    /// costs a round trip per 8 batches rather than per batch, and a small one (a batch and the end) a single round trip. The server
+    /// handles the requests on one handle in the order they were sent (the protocol requires it), and each batch is taken in the order
+    /// of its request, however the replies arrive, so the entries come in the same order as one request at a time would give them. Requests still in flight at the end of the listing are answered and dropped before the handle is closed.
+    /// </para>
     /// </remarks>
     public async IAsyncEnumerable<SftpFileInfo> ListDirectoryAsync(string path, [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         CheckPath(path);
         var opened = await _channel.RequestAsync(SftpProtocol.OpenDir, w => w.WriteString(path), cancellationToken, CloseOrphanedHandle).ConfigureAwait(false);
         var handle = ExpectHandle(opened, "Listing", path);
+
+        // Batches are taken in the order their requests went out, whatever order the replies arrive in: the draft has the server handle
+        // the requests on one handle in order, so each reply is the batch after the one before it.
+        var inFlight = new Queue<Task<SftpResponse>>();
         try
         {
             var prefix = path.EndsWith('/') ? path : path + "/";
             var total = 0L;
             var emptyBatches = 0;
+            var window = Math.Min(2, ListingRequestsInFlight);
             while (true)
             {
-                var reply = await _channel.RequestAsync(SftpProtocol.ReadDir, w => w.WriteString(handle), cancellationToken).ConfigureAwait(false);
-                if (IsEndOfFile(reply))
+                while (inFlight.Count < window)
                 {
-                    yield break;
+                    inFlight.Enqueue(_channel.RequestAsync(SftpProtocol.ReadDir, w => w.WriteString(handle), cancellationToken));
                 }
 
-                var names = ExpectNames(reply, "Listing", path);
+                List<(string Name, string LongName, SftpFileAttributes Attributes)> names;
+                using (var reply = await inFlight.Dequeue().ConfigureAwait(false))
+                {
+                    if (IsEndOfFile(reply))
+                    {
+                        yield break;
+                    }
+
+                    names = ExpectNames(reply, "Listing", path);
+                }
+
+                window = Math.Min(window * 2, ListingRequestsInFlight);
                 total += names.Count;
                 emptyBatches = names.Count == 0 ? emptyBatches + 1 : 0;
                 if (total > MaxListingEntries || emptyBatches > MaxEmptyBatches)
@@ -275,6 +303,20 @@ public sealed partial class SftpClient : IAsyncDisposable
         }
         finally
         {
+            // The requests past the end (answered EOF, or by some servers an error) or left by a caller that stopped early: their replies
+            // are awaited and dropped, so none arrives after the handle is closed.
+            foreach (var pending in inFlight)
+            {
+                try
+                {
+                    (await pending.ConfigureAwait(false)).Dispose();
+                }
+                catch (Exception ex) when (ex is SshException or OperationCanceledException or ObjectDisposedException)
+                {
+                    // The listing ended already; a failure here changes nothing.
+                }
+            }
+
             await CloseHandleAsync(handle).ConfigureAwait(false);
         }
     }
@@ -1377,7 +1419,7 @@ public sealed partial class SftpClient : IAsyncDisposable
 /// <param name="MaxOpenHandles">How many files may be open at once, if the server says.</param>
 public sealed record SftpLimits(int MaxReadLength, int MaxWriteLength, int? MaxOpenHandles);
 
-/// <summary>A directory entry from <see cref="SftpClient.ListDirectoryAsync"/>.</summary>
+/// <summary>A directory entry from <see cref="SftpClient.ListDirectoryAsync(string, CancellationToken)"/>.</summary>
 /// <param name="Name">The entry's name.</param>
 /// <param name="FullPath">The directory's path joined with the name.</param>
 /// <param name="LongName">The server's <c>ls -l</c> style line for the entry (informational; its format is not standard).</param>
@@ -1495,6 +1537,53 @@ public sealed class SftpTransferOptions
     } = 1;
 
     /// <summary>
+    /// Chooses what <see cref="SftpClient.UploadDirectoryAsync"/> and <see cref="SftpClient.DownloadDirectoryAsync"/> transfer: called for
+    /// each file and directory of the source tree with its path relative to the top directory and its attributes, it returns false to
+    /// leave the entry out. A directory left out is neither created nor entered, so nothing below it is transferred (or passed to the
+    /// filter). Null (the default) transfers everything. The single-file methods ignore it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// It sees regular files and directories only: symbolic links, special files and names this system cannot hold are skipped before
+    /// it is asked, as without a filter. What it leaves out is counted in <see cref="SftpTransferSummary.Excluded"/>; nothing is deleted
+    /// at the destination.
+    /// </para>
+    /// <para>
+    /// It is called for one entry at a time, never concurrently, before the entry is transferred; with
+    /// <see cref="MaxConcurrentFiles"/> above 1, an upload asks it about the whole tree first, and a download as the tree is listed, while
+    /// files are in flight. An exception it throws fails the transfer. To match names with a wildcard pattern, see
+    /// <see cref="System.IO.Enumeration.FileSystemName.MatchesSimpleExpression(ReadOnlySpan{char}, ReadOnlySpan{char}, bool)"/>.
+    /// </para>
+    /// </remarks>
+    public Func<SftpTransferEntry, bool>? Filter { get; init; }
+
+    /// <summary>
+    /// In <see cref="SftpClient.UploadDirectoryAsync"/> and <see cref="SftpClient.DownloadDirectoryAsync"/>, leave a file alone when the
+    /// destination already has a regular file of that name with the same size and modification time, as rsync's quick check does
+    /// (default false). The single-file methods ignore it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The modification times are compared to the second: SFTP version 3 carries whole seconds, so the local time's fraction is dropped
+    /// first. A time or size the server does not send counts as a difference, and the file is transferred. It is not a check of the
+    /// contents: a file changed without changing its size, whose time was then set back (or that was changed within the same second),
+    /// is taken as unchanged. On a file system that keeps coarser times (FAT's 2 seconds) the times may never match, and every file is
+    /// transferred, as without this option.
+    /// </para>
+    /// <para>
+    /// The times only match when the earlier transfer copied them: set <see cref="Preserve"/> on every transfer of the tree, otherwise
+    /// each copy carries the time it was written, and every file is transferred again. Files left alone are counted in
+    /// <see cref="SftpTransferSummary.Unchanged"/>, report no <see cref="Progress"/>, and keep their attributes as they are.
+    /// </para>
+    /// <para>
+    /// A download compares with the local files, at no extra cost: the remote sizes and times come from the listings. An upload lists
+    /// each remote directory that already existed once, when its first file is reached (a directory the transfer creates holds nothing
+    /// to compare with), and compares with the listing.
+    /// </para>
+    /// </remarks>
+    public bool SkipUnchanged { get; init; }
+
+    /// <summary>
     /// The slots a directory transfer's files share for their reads and writes (<see cref="MaxRequestsInFlight"/> in all), or null in a
     /// transfer of one file: a read or write holds one until its data is written out or acknowledged.
     /// </summary>
@@ -1510,6 +1599,8 @@ public sealed class SftpTransferOptions
         MaxRequestsInFlight = MaxRequestsInFlight,
         Segments = Segments,
         MaxConcurrentFiles = MaxConcurrentFiles,
+        Filter = Filter,
+        SkipUnchanged = SkipUnchanged,
         RequestBudget = budget,
     };
 }

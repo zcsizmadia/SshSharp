@@ -723,6 +723,145 @@ public class SftpInteropTests
         }
     }
 
+    [Test]
+    public async Task PipelinedPatternAndRecursiveListings_AndFilteredTransfers_WorkOnARealServer()
+    {
+        if (RealServer.Endpoint is not var (host, port) || await RealServer.OptionsAsync() is not { } options)
+        {
+            Skip.Test("SSHSHARP_TEST_SSHD and SSHSHARP_TEST_USER with a password or key are needed.");
+            return;
+        }
+
+        if (!RealServer.HasSftp)
+        {
+            Skip.Test("This server has no sftp-server.");
+            return;
+        }
+
+        var local = Directory.CreateTempSubdirectory("sshsharp-listing-");
+        await using var client = await SshClient.ConnectAsync(host, port, options, Timeout());
+        await using var sftp = await client.OpenSftpAsync(Timeout());
+        var name = ".sshsharp-list-" + Guid.NewGuid().ToString("N")[..12];
+        var root = RealServer.SftpPath(name);
+        var outside = RealServer.SftpPath(name + "-outside");
+        try
+        {
+            // 300 names in one directory: several READDIR batches on every server (OpenSSH sends at most 100 a batch), pipelined.
+            await sftp.CreateDirectoryAsync(root + "/many", createParents: true, cancellationToken: Timeout());
+            for (var i = 0; i < 300; i++)
+            {
+                await sftp.WriteAllBytesAsync($"{root}/many/f{i:D3}.{(i % 3 == 0 ? "log" : "txt")}", new[] { (byte)i }, Timeout());
+            }
+
+            await sftp.CreateDirectoryAsync(root + "/a/b", createParents: true, cancellationToken: Timeout());
+            await sftp.WriteAllTextAsync(root + "/a/top.log", "top", cancellationToken: Timeout());
+            await sftp.WriteAllTextAsync(root + "/a/b/deep.log", "deep", cancellationToken: Timeout());
+            await sftp.WriteAllTextAsync(root + "/a/b/skip.tmp", "tmp", cancellationToken: Timeout());
+
+            var all = new List<string>();
+            await foreach (var entry in sftp.ListDirectoryAsync(root + "/many", Timeout()))
+            {
+                all.Add(entry.Name);
+            }
+
+            // The server's order is its own; every name once.
+            await Assert.That(all.Order(StringComparer.Ordinal)).IsEquivalentTo(Enumerable.Range(0, 300).Select(i => $"f{i:D3}.{(i % 3 == 0 ? "log" : "txt")}"));
+
+            var logs = new List<string>();
+            await foreach (var entry in sftp.ListDirectoryAsync(root, new SftpListOptions { Pattern = "*.log", Recursive = true }, Timeout()))
+            {
+                logs.Add(entry.FullPath[(root.Length + 1)..]);
+            }
+
+            await Assert.That(logs.Count).IsEqualTo(102);
+            await Assert.That(logs).Contains("a/top.log");
+            await Assert.That(logs).Contains("a/b/deep.log");
+            await Assert.That(logs.IndexOf("a/top.log")).IsLessThan(logs.IndexOf("a/b/deep.log")); // depth first, a's entries before b's
+
+            // A link to a directory outside the tree: listed, and entered only when links are followed.
+            if (!RealServer.IsWindows)
+            {
+                await sftp.CreateDirectoryAsync(outside, cancellationToken: Timeout());
+                await sftp.WriteAllTextAsync(outside + "/linked.log", "linked", cancellationToken: Timeout());
+                var linked = false;
+                try
+                {
+                    // Relative, so it resolves the same on servers that store a relative target under their working directory.
+                    await sftp.CreateSymbolicLinkAsync(root + "/a/out", "../../" + name + "-outside", Timeout());
+                    linked = true;
+                }
+                catch (SftpException) when (RealServer.IsMsys)
+                {
+                    // An MSYS2 or Cygwin server without the privilege to create links.
+                }
+
+                // Only a real link that leads to the directory: Go's pkg/sftp stores a relative target under its working directory (the
+                // link leads nowhere), and MSYS2 or Cygwin may make a copy instead.
+                if (linked
+                    && (await sftp.GetAttributesAsync(root + "/a/out", followSymbolicLinks: false, Timeout())).IsSymbolicLink
+                    && await sftp.ExistsAsync(root + "/a/out/linked.log", Timeout()))
+                {
+                    var plain = new List<string>();
+                    await foreach (var entry in sftp.ListDirectoryAsync(root + "/a", new SftpListOptions { Recursive = true }, Timeout()))
+                    {
+                        plain.Add(entry.Name);
+                    }
+
+                    var followed = new List<string>();
+                    await foreach (var entry in sftp.ListDirectoryAsync(root + "/a", new SftpListOptions { Recursive = true, FollowSymbolicLinks = true, MaxDepth = 4 }, Timeout()))
+                    {
+                        followed.Add(entry.Name);
+                    }
+
+                    await Assert.That(plain).Contains("out");
+                    await Assert.That(plain).DoesNotContain("linked.log");
+                    await Assert.That(followed).Contains("linked.log");
+                }
+            }
+
+            // A download that leaves out *.tmp, then again with SkipUnchanged: the files kept their times (Preserve), so none moves.
+            var down = Path.Combine(local.FullName, "down");
+            var keepLogs = new SftpTransferOptions { Preserve = true, Filter = e => !e.Name.EndsWith(".tmp", StringComparison.Ordinal) && e.Name != "out", MaxConcurrentFiles = 4 };
+            var first = await sftp.DownloadDirectoryAsync(root + "/a", down, keepLogs, Timeout());
+            await Assert.That(first.Files).IsEqualTo(2);
+            await Assert.That(File.Exists(Path.Combine(down, "b", "skip.tmp"))).IsFalse();
+
+            var again = await sftp.DownloadDirectoryAsync(root + "/a", down, new SftpTransferOptions
+            {
+                Preserve = true,
+                SkipUnchanged = true,
+                Filter = keepLogs.Filter,
+            }, Timeout());
+            await Assert.That(again.Files).IsEqualTo(0);
+            await Assert.That(again.Unchanged).IsEqualTo(2);
+
+            // Uploaded back with Preserve, then again with SkipUnchanged: unchanged where the server kept the times it was given.
+            var up = root + "/up";
+            await sftp.UploadDirectoryAsync(down, up, new SftpTransferOptions { Preserve = true }, Timeout());
+            var kept = (await sftp.GetAttributesAsync(up + "/top.log", cancellationToken: Timeout())).LastWriteTime
+                == DateTimeOffset.FromUnixTimeSeconds(new DateTimeOffset(File.GetLastWriteTimeUtc(Path.Combine(down, "top.log"))).ToUnixTimeSeconds());
+            var reupload = await sftp.UploadDirectoryAsync(down, up, new SftpTransferOptions { Preserve = true, SkipUnchanged = true, MaxConcurrentFiles = 4 }, Timeout());
+            await Assert.That(reupload.Unchanged).IsEqualTo(kept ? 2 : 0);
+            await Assert.That(reupload.Files).IsEqualTo(kept ? 0 : 2);
+        }
+        finally
+        {
+            foreach (var path in new[] { root, outside })
+            {
+                try
+                {
+                    await sftp.DeleteDirectoryAsync(path, recursive: true, Timeout());
+                }
+                catch (SftpException)
+                {
+                    // Not there (never created).
+                }
+            }
+
+            local.Delete(recursive: true);
+        }
+    }
+
     private sealed class SynchronousProgress(Action<long> report) : IProgress<SftpTransferProgress>
     {
         public void Report(SftpTransferProgress value) => report(value.BytesTransferred);

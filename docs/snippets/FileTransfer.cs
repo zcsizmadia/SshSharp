@@ -95,6 +95,59 @@ internal static class FileTransfer
         // </sftp-concurrent-files>
     }
 
+    public static async Task FilteredTransfersAsync(SftpClient sftp, CancellationToken cancellationToken)
+    {
+        // <sftp-filter>
+        // Publish a build without its temporary files and its cache directory. The filter sees each file and directory with its path
+        // relative to the top ('/'-separated) and its attributes; a directory it declines is not entered.
+        var options = new SftpTransferOptions
+        {
+            Filter = entry => !entry.Name.EndsWith(".tmp", StringComparison.Ordinal) && entry.RelativePath != "cache",
+        };
+        var summary = await sftp.UploadDirectoryAsync("publish", "/srv/www/app", options, cancellationToken);
+        Console.WriteLine($"{summary.Files} files uploaded, {summary.Excluded} left out");
+        // </sftp-filter>
+    }
+
+    public static async Task SkipUnchangedAsync(SftpClient sftp, CancellationToken cancellationToken)
+    {
+        // <sftp-skip-unchanged>
+        // Mirror a remote log directory: files whose size and modification time already match are left alone, as rsync's quick check
+        // does. Preserve makes the copies carry the server's times, so the next run can compare them.
+        var options = new SftpTransferOptions { Preserve = true, SkipUnchanged = true, MaxConcurrentFiles = 8 };
+        var summary = await sftp.DownloadDirectoryAsync("/var/log/app", "logs", options, cancellationToken);
+        Console.WriteLine($"{summary.Files} files fetched, {summary.Unchanged} unchanged");
+        // </sftp-skip-unchanged>
+    }
+
+    public static async Task ListPatternAsync(SftpClient sftp, CancellationToken cancellationToken)
+    {
+        // <sftp-list-pattern>
+        // Only the names that match: *, ? and [...] sets, as a shell (case-sensitive; * also matches names starting with a dot).
+        await foreach (var entry in sftp.ListDirectoryAsync("/var/log/app", new SftpListOptions { Pattern = "app-2026-10-[0-9][0-9].log" }, cancellationToken))
+        {
+            Console.WriteLine($"{entry.Name} {entry.Attributes.Size:N0}");
+        }
+        // </sftp-list-pattern>
+    }
+
+    public static async Task ListRecursiveAsync(SftpClient sftp, CancellationToken cancellationToken)
+    {
+        // <sftp-list-recursive>
+        // Every *.log below /var/log, depth first; subdirectories are read a few at a time ahead of the loop. Links are listed but not
+        // entered (FollowSymbolicLinks = true enters them).
+        var options = new SftpListOptions { Pattern = "*.log", Recursive = true };
+        long total = 0;
+        await foreach (var entry in sftp.ListDirectoryAsync("/var/log", options, cancellationToken))
+        {
+            total += entry.Attributes.Size ?? 0;
+            Console.WriteLine(entry.FullPath);
+        }
+
+        Console.WriteLine($"{total:N0} bytes of logs");
+        // </sftp-list-recursive>
+    }
+
     public static async Task BrowseAsync(SftpClient sftp, CancellationToken cancellationToken)
     {
         // <sftp-browse>

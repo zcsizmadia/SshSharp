@@ -239,6 +239,17 @@ connection, but not read or change it: each host's key is verified end to end, b
 - A recursive delete (`DeleteDirectoryAsync(path, recursive: true)`) removes symbolic links without following them, and checks
   every subdirectory with `LSTAT` before entering it, so a listing that describes a link as a directory cannot lead it outside the
   tree. It is bounded like a directory download (64 levels; each listing bounded) and touches only the server's files.
+- A listing keeps up to 8 READDIR requests in flight on its handle and takes the batches in the order it asked for them; the
+  replies to requests past the end (EOF, or an error from some servers) are read and dropped before the handle is closed. A
+  recursive listing (`SftpListOptions.Recursive`) only reads: it goes at most `MaxDepth` levels down (64 by default, 1024 at most),
+  enters each name a directory lists once, and holds at most `MaxConcurrentDirectories` handles. It does not enter links unless
+  `FollowSymbolicLinks` is set; then a link may lead anywhere the server lets the user see, and a loop is recognized by the path the
+  server's `REALPATH` resolves (a server that does not resolve links leaves it to `MaxDepth`). The server decides what a listing
+  contains, so a hostile one can make a recursive listing as large as `MaxDepth` allows; stop or cancel it to bound the work.
+- `SftpTransferOptions.SkipUnchanged` trusts the sizes and modification times the server reports (in a download's listing, or of
+  the remote files an upload would replace): a server can make a transfer leave files it should have replaced. It cannot make
+  anything be written that it did not send. `SftpTransferOptions.Filter` is the caller's code, run locally for each entry; in a
+  download it sees the server's names and attributes, already checked as above.
 - A server that stops answering holds a request until the session ends, unless `SftpClient.OperationTimeout` is set; it then
   fails the request (`Timeout`) once the server has been silent that long.
 - `SshSharp.FileProviders` treats backslashes as separators and refuses `..` and NUL in subpaths, so a web request cannot leave
