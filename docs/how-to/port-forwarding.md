@@ -196,7 +196,8 @@ How the handler runs:
 - **Stopping.** The handler's token is cancelled when the forwarder is disposed or the SSH connection ends. Disposing the forwarder
   sends the cancel request to the server, so it stops listening; it then cancels the handlers and waits up to
   `HandlerShutdownTimeout` (5 seconds by default) for them to return. The connections of any still running then are closed under
-  them, and disposal returns without waiting further.
+  them, and disposal returns without waiting further. A connection the server forwarded just before the cancel, but that reaches
+  the client only once disposal has taken the connections it waits for, is closed without being passed to the handler.
 
 The forwarder is the usual `SshRemotePortForwarder` (or `SshRemoteSocketForwarder`), with `RemotePort` set when port 0 was
 requested; its `LocalHost` is empty and `LocalPort` 0. `IsHandler` is true for a forwarding to a handler, and `MaxConnections` is
