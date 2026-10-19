@@ -80,6 +80,10 @@ internal static class SshAlgorithms
         ? [MlKem768X25519Sha256, MlKem768Nistp256Sha256, MlKem1024Nistp384Sha384, Sntrup761X25519Sha512, Sntrup761X25519Sha512OpenSsh, .. ClassicKex]
         : [Sntrup761X25519Sha512, Sntrup761X25519Sha512OpenSsh, .. ClassicKex];
 
+    /// <summary>Every key exchange method SshSharp implements, also the ML-KEM ones this platform may lack (see <see cref="HasMlKem"/>).</summary>
+    public static IReadOnlyList<string> AllKex { get; } =
+        [MlKem768X25519Sha256, MlKem768Nistp256Sha256, MlKem1024Nistp384Sha384, Sntrup761X25519Sha512, Sntrup761X25519Sha512OpenSsh, .. ClassicKex];
+
 #if NET10_0_OR_GREATER
     internal static bool HasMlKem => System.Security.Cryptography.MLKem.IsSupported;
 #else
@@ -149,6 +153,12 @@ internal static class SshAlgorithms
     {
         EcdsaNistp256, EcdsaNistp384, EcdsaNistp521, RsaSha2_512, RsaSha2_256,
     };
+
+    /// <summary>The ciphers SshSharp implements.</summary>
+    public static IReadOnlyList<string> CipherNames => [.. Ciphers.Keys];
+
+    /// <summary>The MACs SshSharp implements.</summary>
+    public static IReadOnlyList<string> MacNames => [.. Macs.Keys];
 
     public static bool TryGetCipher(string name, out CipherInfo cipher) => Ciphers.TryGetValue(name, out cipher!);
 

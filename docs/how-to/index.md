@@ -35,6 +35,7 @@ Every example on these pages is compiled with the library in CI, so it matches t
 |---|---|
 | [Use ssh_config and known_hosts](ssh-config-and-known-hosts.md) | Connect by alias, ship your own configuration, read `known_hosts`. |
 | [Verify host keys](verify-host-keys.md) | Choose a host key policy: `known_hosts`, pinning, certificates, or your own source of truth. |
+| [Choose algorithms and authentication methods](algorithms-and-authentication-order.md) | Restrict or reorder ciphers, key exchanges, MACs and host key algorithms; choose the authentication methods; require larger RSA host keys. |
 
 ## Authentication
 

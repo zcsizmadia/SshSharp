@@ -86,7 +86,14 @@ A server that offers nothing else fails the connection with `SshFailureReason.Ke
 
 - **With `ssh_config`:** `KexAlgorithms`, `HostKeyAlgorithms`, `Ciphers`, `MACs` and `PubkeyAcceptedAlgorithms`, with OpenSSH's
   `+`, `-` and `^` forms, applied to these defaults. Names SshSharp does not implement are ignored.
-- **In code:** `SshClientOptions.FipsMode` restricts every list to the FIPS column; see [FIPS mode](../how-to/fips-mode.md).
+- **In code:** `SshClientOptions.KexAlgorithms`, `HostKeyAlgorithms`, `Ciphers` and `Macs` take an `SshAlgorithmList` in the same
+  four forms (`Only`, `Append`, `Prepend`, `Remove`, or `SshAlgorithmList.Parse` for the text form). Unlike in `ssh_config`, a name
+  SshSharp does not implement throws `ArgumentException`. See
+  [Choose algorithms and authentication methods](../how-to/algorithms-and-authentication-order.md).
+- **FIPS mode:** `SshClientOptions.FipsMode` restricts every list, yours included, to the FIPS column; see
+  [FIPS mode](../how-to/fips-mode.md).
+- **RSA host key size:** `SshClientOptions.RequiredRsaSize` (`RequiredRSASize` in `ssh_config`), 2048 bits by default, 1024 at
+  the least.
 - **Rekeying:** `RekeyAfterBytes` (1 GiB) and `RekeyAfterTime` (1 hour).
 
 ## See also

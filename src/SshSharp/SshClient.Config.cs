@@ -142,7 +142,7 @@ public sealed partial class SshClient
                 PrivateKeys = hostConfig.PubkeyAuthentication ? [.. options.PrivateKeys, .. keys] : [],
                 KeyboardInteractive = destination && !hostConfig.BatchMode ? options.KeyboardInteractive : null,
                 AuthenticationBanner = options.AuthenticationBanner,
-                AuthenticationOrder = AuthenticationOrder(hostConfig),
+                PreferredAuthentications = AuthenticationOrder(hostConfig),
                 ForwardAgent = hostConfig.ForwardAgent ? agent : null,
                 ForwardAgentFilter = options.ForwardAgentFilter,
                 Gssapi = hostConfig.GssapiAuthentication
@@ -162,7 +162,7 @@ public sealed partial class SshClient
                 ChannelTimeouts = hostConfig.ChannelTimeouts,
                 ObscureKeystrokeTiming = hostConfig.ObscureKeystrokeTiming,
                 AlgorithmPreferences = AlgorithmPreferences.FromConfig(hostConfig),
-                MinimumRsaBits = hostConfig.RequiredRsaSize ?? SshClientOptions.DefaultMinimumRsaBits,
+                RequiredRsaSize = hostConfig.RequiredRsaSize ?? SshClientOptions.DefaultMinimumRsaBits,
                 Logger = options.Logger,
                 TimeProvider = options.TimeProvider,
             };

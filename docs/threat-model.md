@@ -40,6 +40,11 @@ A man in the middle can read, change, drop and inject bytes. The server itself m
   still offered first and sign only for a server that accepts them.
 - **Downgrade and prefix attacks:** only modern algorithms are offered (no SHA-1 KEX or MACs, no CBC, no `ssh-rsa`
   SHA-1 signatures, RSA ≥ 2048 bits). Strict KEX (Terrapin, CVE-2023-48795) is negotiated whenever the server supports it.
+  The application can narrow or reorder the algorithm lists (`SshClientOptions.KexAlgorithms`, `HostKeyAlgorithms`, `Ciphers`,
+  `Macs`, or the `ssh_config` directives), but only among the algorithms SshSharp implements, so no list brings a legacy one back,
+  and `FipsMode` still applies on top. The one setting that lowers the bar is the smallest RSA host key
+  (`SshClientOptions.RequiredRsaSize`, `RequiredRSASize` in `ssh_config`): an application may accept down to 1024 bits for an old
+  device, as `ssh` allows, and never less.
 - **Malformed input:** every parser treats its input as hostile, rejecting it with a protocol error, never with an
   unexpected exception (mutation-fuzzed in every test run). Peer public keys are validated: points on the curve,
   no small-order Ed25519 keys, an RSA exponent ≥ 3. Public keys the application reads itself (`SshPublicKey.Parse` and

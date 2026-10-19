@@ -104,6 +104,9 @@ public sealed partial class SshClient : IAsyncDisposable
         ArgumentOutOfRangeException.ThrowIfLessThan(port, 1);
         ArgumentOutOfRangeException.ThrowIfGreaterThan(port, 65535);
         ArgumentNullException.ThrowIfNull(options);
+
+        // Algorithm lists that leave nothing to offer fail here, before the network is touched.
+        _ = options.AlgorithmPreferences ?? AlgorithmPreferences.FromOptions(options);
         IReadOnlyList<System.Net.IPEndPoint>? local = options.LocalEndPoint is { } bind ? [bind] : null;
         using var deadline = new ConnectDeadline(options.ConnectTimeout, cancellationToken);
         using var measurement = new ConnectMeasurement(options.Proxy is null ? port : null);
@@ -550,7 +553,7 @@ public sealed partial class SshClient : IAsyncDisposable
     /// <summary>The transport's settings: algorithm preferences (certificate host keys first when an authority is trusted) and host key checks.</summary>
     private static async Task<SshTransportOptions> TransportOptionsAsync(SshClientOptions options, string? host, int port, ILogger logger, CancellationToken cancellationToken)
     {
-        var preferences = options.AlgorithmPreferences ?? (options.FipsMode ? AlgorithmPreferences.Fips() : new AlgorithmPreferences());
+        var preferences = options.AlgorithmPreferences ?? AlgorithmPreferences.FromOptions(options);
         bool prefersCertificates;
         try
         {
@@ -570,7 +573,7 @@ public sealed partial class SshClient : IAsyncDisposable
         return new SshTransportOptions
         {
             Preferences = preferences,
-            MinimumRsaBits = options.MinimumRsaBits,
+            MinimumRsaBits = options.RequiredRsaSize,
             RekeyBytes = Math.Min(options.RekeyAfterBytes, SshClientOptions.MaxRekeyAfterBytes),
             RekeyInterval = options.RekeyAfterTime,
             Logger = logger,
@@ -662,7 +665,7 @@ public sealed partial class SshClient : IAsyncDisposable
             return;
         }
 
-        var order = options.AuthenticationOrder ?? DefaultAuthenticationOrder;
+        var order = options.PreferredAuthentications ?? DefaultAuthenticationOrder;
         var methods = outcome.RemainingMethods;
         var passes = 0;
         bool progressed;

@@ -31,8 +31,13 @@ SshSharp has the SHA-2 finite-field methods such equipment often offers alone: `
 OpenSSH since 6.5 has `curve25519-sha256`, `aes*-ctr` and `hmac-sha2-*`). With `FipsMode`, a server that has only an Ed25519 host
 key fails the same way. See [Algorithms](algorithms.md).
 
-**"No matching key exchange algorithm".** The message lists what each side offered. A `KexAlgorithms` line in `ssh_config` that
-removes the finite-field methods (`-diffie-hellman-*`) leaves nothing in common with a server that offers only those.
+**"No matching key exchange algorithm".** The message lists what each side offered. A `KexAlgorithms` line in `ssh_config` (or
+`SshClientOptions.KexAlgorithms = SshAlgorithmList.Remove("diffie-hellman-*")`) that removes the finite-field methods leaves
+nothing in common with a server that offers only those. The same goes for the other lists.
+
+**`ArgumentException` naming `SshClientOptions.Ciphers` (or another list).** The list leaves no algorithm SshSharp can use here:
+`FipsMode` removed everything in it, or it names only `mlkem*` methods on a platform without ML-KEM. It is thrown before anything
+is sent. See [Choose algorithms and authentication methods](../how-to/algorithms-and-authentication-order.md).
 
 **The server's group is refused.** With `diffie-hellman-group-exchange-sha256`, a group outside 2048 to 8192 bits, or one that fails
 the primality and shape checks, fails with `KeyExchangeFailed` and a message naming the check (for example "The server's group
