@@ -229,7 +229,10 @@ public sealed class SshHostConfig
     /// <summary>Environment variables to set on the server (<c>SetEnv</c>); the first definition of a name wins.</summary>
     public IReadOnlyDictionary<string, string> SetEnv { get; init; } = new Dictionary<string, string>();
 
-    /// <summary><c>LocalForward</c> specifications, as written (<c>[bind:]port host:hostport</c>).</summary>
+    /// <summary>
+    /// <c>LocalForward</c> specifications, as written: <c>[bind:]port host:hostport</c>, or with a Unix socket path on either side
+    /// (<c>/local/socket host:hostport</c>, <c>[bind:]port /remote/socket</c>, <c>/local/socket /remote/socket</c>).
+    /// </summary>
     public IReadOnlyList<string> LocalForwards { get; init; } = [];
 
     /// <summary><c>RemoteForward</c> specifications, as written.</summary>
@@ -240,6 +243,12 @@ public sealed class SshHostConfig
 
     /// <summary>Whether local forwardings may listen on every address, not only loopback, when the bind address says so (<c>GatewayPorts</c>).</summary>
     public bool GatewayPorts { get; init; }
+
+    /// <summary>
+    /// <c>StreamLocalBindUnlink</c>: whether an existing file where a <c>LocalForward</c> creates its Unix socket is removed first
+    /// (typically a stale socket of an earlier run). Off by default, as in ssh: the forwarding then fails.
+    /// </summary>
+    public bool StreamLocalBindUnlink { get; init; }
 
     /// <summary>Whether a forwarding that cannot be set up fails the connection (<c>ExitOnForwardFailure</c>).</summary>
     public bool ExitOnForwardFailure { get; init; }

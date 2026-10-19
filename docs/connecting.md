@@ -195,6 +195,21 @@ await using var forwarder = await client.ForwardLocalPortAsync(
 Console.WriteLine($"Connect to {forwarder.LocalEndPoint}");
 ```
 
+Either end can be a Unix socket, as with `ssh -L`:
+
+```csharp
+// ssh -L 15432:/run/postgresql/.s.PGSQL.5432: a port here, a Unix socket on the server (direct-streamlocal@openssh.com).
+await using var postgres = await client.ForwardLocalPortAsync(new IPEndPoint(IPAddress.Loopback, 15432), "/run/postgresql/.s.PGSQL.5432");
+
+// ssh -L /tmp/docker.sock:/var/run/docker.sock and -L /tmp/db.sock:db.internal:5432: a Unix socket here.
+await using var docker = await client.ForwardLocalUnixSocketAsync("/tmp/docker.sock", "/var/run/docker.sock");
+await using var db = await client.ForwardLocalUnixSocketAsync("/tmp/db.sock", "db.internal", 5432);
+```
+
+A socket created here is owner-only (mode 0600, or an ACL with only the current user on Windows), is not created over an existing
+file, and is removed when the forwarder is disposed. As `ssh` does, a connection to it is announced to the server as coming from
+`127.0.0.1` port 65535, since a Unix socket has no address.
+
 Each forwarded connection gets its own channel, and a half-close travels both ways as it does with `ssh`. Bind to a loopback
 address unless other machines should use the tunnel. Forwarding stops when the forwarder or the client is disposed, or the
 connection ends. A server that does not allow forwarding (sshd's `AllowTcpForwarding no`) refuses each connection, and
@@ -312,7 +327,11 @@ refuses the request, and the call throws an `SshException`.
 client, and `client.LocalForwardings`, `RemoteForwardings` and `DynamicForwardings` list them. `RemoteForward` with just a
 port (`RemoteForward 1080`) is remote dynamic forwarding, with every destination allowed, as in ssh. `RemoteForward` with a
 socket path (`RemoteForward /run/app.sock 127.0.0.1:3000` or `RemoteForward /remote.sock /local.sock`) is remote Unix-socket
-forwarding, listed in `client.RemoteSocketForwardings`; as in ssh, a target with a `/` in it is a socket path.
+forwarding, listed in `client.RemoteSocketForwardings`; as in ssh, a target with a `/` in it is a socket path. `LocalForward` takes
+socket paths on either side: `LocalForward /tmp/docker.sock /var/run/docker.sock`, `LocalForward 15432 /run/postgresql/.s.PGSQL.5432`
+or `LocalForward ~/db.sock db.internal:5432`. Those that listen on a socket here are listed in `client.LocalSocketForwardings`. Their paths
+take `ssh_config`'s tokens (`%d`, `%h`, `%C` and the rest), `~` and `${VAR}`, as `ssh` expands them; a local path may also be
+written with `\` on Windows. `StreamLocalBindUnlink yes` replaces a stale socket file instead of failing.
 
 ```
 Host db-tunnel
@@ -323,8 +342,8 @@ Host db-tunnel
 ```
 
 Bind addresses follow ssh: none means loopback (every address with `GatewayPorts yes`), `localhost` loopback, `*` every
-address. A forwarding that cannot be set up (a port in use, refused by the server, or a Unix-socket form of `LocalForward`,
-which is not supported yet) is logged and skipped, or fails the connection with `ExitOnForwardFailure yes`. `ClearAllForwardings yes` starts none.
+address. A forwarding that cannot be set up (a port or socket file in use, refused by the server) is logged and skipped, or fails
+the connection with `ExitOnForwardFailure yes`. `ClearAllForwardings yes` starts none.
 
 ## Keep-alive and connection state
 

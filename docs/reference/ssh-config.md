@@ -83,10 +83,11 @@ Applied only with `SshConfigConnectOptions.StartForwardings = true`, since they 
 
 | Directive | Property | Notes |
 |---|---|---|
-| `LocalForward` | `LocalForwards` | TCP; the Unix-socket form is not supported yet (logged and skipped). |
+| `LocalForward` | `LocalForwards` | TCP, and Unix sockets on either side: `/local.sock host:port`, `[bind:]port /remote.sock`, `/local.sock /remote.sock` (a field with a `/` is a path, as in `ssh`; a local one may use `\` on Windows). Paths take tokens, `~` and `${VAR}`. The local socket is created owner-only and removed when the forwarding stops. |
 | `RemoteForward` | `RemoteForwards` | TCP, remote dynamic (port only), and Unix-socket forms. |
 | `DynamicForward` | `DynamicForwards` | SOCKS 4/4a/5. |
 | `GatewayPorts` | `GatewayPorts` | Default bind address for forwardings without one. |
+| `StreamLocalBindUnlink` | `StreamLocalBindUnlink` | `yes` removes an existing file where `LocalForward` creates its Unix socket (a stale socket); without it, that forwarding fails, as in `ssh`. `StreamLocalBindMask` is not read: the socket is always owner-only (`ssh`'s default `0177`). |
 | `ExitOnForwardFailure` | `ExitOnForwardFailure` | A forwarding that cannot start fails the connection. |
 | `ClearAllForwardings` | (in `Options`) | Starts none. |
 

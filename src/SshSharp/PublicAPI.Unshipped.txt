@@ -217,3 +217,17 @@ SshSharp.SshClient.LocalEndPoint.get -> System.Net.EndPoint?
 SshSharp.SshClient.BytesSent.get -> long
 SshSharp.SshClient.BytesReceived.get -> long
 SshSharp.SshClient.RekeyAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+SshSharp.Config.SshHostConfig.StreamLocalBindUnlink.get -> bool
+SshSharp.Config.SshHostConfig.StreamLocalBindUnlink.init -> void
+SshSharp.SshClient.ForwardLocalPortAsync(System.Net.IPEndPoint! localEndPoint, string! remoteSocketPath, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SshSharp.SshLocalPortForwarder!>!
+SshSharp.SshClient.ForwardLocalUnixSocketAsync(string! localSocketPath, string! remoteHost, int remotePort, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SshSharp.SshLocalSocketForwarder!>!
+SshSharp.SshClient.ForwardLocalUnixSocketAsync(string! localSocketPath, string! remoteSocketPath, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SshSharp.SshLocalSocketForwarder!>!
+SshSharp.SshClient.LocalSocketForwardings.get -> System.Collections.Generic.IReadOnlyList<SshSharp.SshLocalSocketForwarder!>!
+SshSharp.SshLocalPortForwarder.RemoteSocketPath.get -> string?
+SshSharp.SshLocalSocketForwarder
+SshSharp.SshLocalSocketForwarder.ActiveConnections.get -> int
+SshSharp.SshLocalSocketForwarder.DisposeAsync() -> System.Threading.Tasks.ValueTask
+SshSharp.SshLocalSocketForwarder.LocalSocketPath.get -> string!
+SshSharp.SshLocalSocketForwarder.RemoteHost.get -> string?
+SshSharp.SshLocalSocketForwarder.RemotePort.get -> int
+SshSharp.SshLocalSocketForwarder.RemoteSocketPath.get -> string?

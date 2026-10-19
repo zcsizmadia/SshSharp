@@ -129,4 +129,11 @@ internal static partial class SshLog
     // The exception's type only, as for forwarding handlers: its message is the application's.
     [LoggerMessage(EventId = 46, Level = LogLevel.Warning, Message = "ForwardAgentFilter failed with {ExceptionType}; the forwarded agent request was refused")]
     public static partial void AgentFilterFailed(ILogger logger, string exceptionType);
+
+    // The socket path stays out: paths often contain the user name.
+    [LoggerMessage(EventId = 51, Level = LogLevel.Information, Message = "Forwarding a local Unix socket to remote port {RemotePort} (0 for a Unix socket on the server)")]
+    public static partial void LocalSocketForwardingStarted(ILogger logger, int remotePort);
+
+    [LoggerMessage(EventId = 52, Level = LogLevel.Information, Message = "Forwarding {LocalEndPoint} to a Unix socket on the server")]
+    public static partial void ForwardingToSocketStarted(ILogger logger, string localEndPoint);
 }
