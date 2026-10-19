@@ -52,13 +52,15 @@ memory indices that depend on secret data; then a statistical timing test.
 slowest 10% of samples dropped): `dotnet run -c Release --project tests/SshSharp.Benchmarks -f net10.0 -- --timing 15000`.
 It does not run in CI, because shared runners are too noisy for a statistical timing test.
 
-| Check (15,000 samples per class) | t | Verdict |
-|---|---|---|
-| Ed25519.Sign: all-zero seed vs random seeds | -0.45 | no evidence of a leak |
-| X25519: scalar with one bit set vs random scalars | 0.92 | no evidence of a leak |
+| Check (15,000 samples per class) | t, .NET 10 | t, .NET 8 | Verdict |
+|---|---|---|---|
+| Ed25519.Sign: all-zero seed vs random seeds | 2.23 | 1.08 | no evidence of a leak |
+| X25519: scalar with one bit set vs random scalars | -0.32 | 0.44 | no evidence of a leak |
 
-Measured with the 51-bit field on an Intel Core i7-12800H, Windows 11, .NET 10, x64 (the 16-bit field it replaced measured 0.90 and
--0.77). |t| below 4.5 means no evidence; it is not a proof.
+Re-run for 1.1.0 on the code after "Optimized at the first call" below (the kernels compiled fully optimized at their first call, and
+`Ed25519.Sign` with the key's own public key), on an Intel Core i7-12800H, Windows 11, x64. The same run's ChaCha20, Poly1305 (both
+limb sizes) and sntrup761 checks were all between -1.4 and 1.5. Before that change, with the 51-bit field, the two checks measured
+-0.45 and 0.92 (and the 16-bit field before it 0.90 and -0.77). |t| below 4.5 means no evidence; it is not a proof.
 
 ## Ed25519 signing with the key's own public key
 
@@ -95,7 +97,8 @@ first call:
 **Effect on constant time.** None intended: the code is the same and is now compiled by the same optimizing compiler that compiled
 it before once it was hot, minus profile-guided optimization. The tier-0 code it replaces had the same structure (no branches on
 secrets) but was never the code reviewed above, which is the optimized output. The cost is one optimizing compile per method and no
-dynamic PGO for them, which straight-line arithmetic does not need. The timing test above should be re-run on this code.
+dynamic PGO for them, which straight-line arithmetic does not need. The timing test above was re-run on this code for 1.1.0, on
+.NET 10 and .NET 8, with no evidence of a leak.
 
 ## Constant-time review of sntrup761
 
