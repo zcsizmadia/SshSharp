@@ -86,6 +86,25 @@ internal static class FileTransfer
         // </sftp-segments-upload>
     }
 
+    public static async Task SegmentedUploadRetryAsync(SftpClient sftp, CancellationToken cancellationToken)
+    {
+        // <sftp-segments-upload-cleanup>
+        var options = new SftpTransferOptions { Segments = 4 };
+        try
+        {
+            await sftp.UploadFileAsync("backups/db.tar.zst", "incoming/db.tar.zst", options, cancellationToken);
+        }
+        catch (SshException ex) when (ex.Reason is not SshFailureReason.ChannelClosed and not SshFailureReason.ConnectionClosed)
+        {
+            // Resume only a file whose cleanup finished: then it holds an unbroken start of the upload, and no gaps. Otherwise start
+            // over (Resume off truncates the file).
+            var mayHaveGaps = ex.Data[SftpClient.UploadCleanupIncompleteKey] is true;
+            var retry = new SftpTransferOptions { Resume = !mayHaveGaps };
+            await sftp.UploadFileAsync("backups/db.tar.zst", "incoming/db.tar.zst", retry, cancellationToken);
+        }
+        // </sftp-segments-upload-cleanup>
+    }
+
     public static async Task VerifyWithHashAsync(SftpClient sftp, CancellationToken cancellationToken)
     {
         // <sftp-verify-hash>

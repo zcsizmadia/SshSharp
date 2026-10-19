@@ -165,6 +165,32 @@ internal sealed class FakeSftpServer
     /// <summary>Extended requests answered with OP_UNSUPPORTED although the server handles them otherwise (announced or not).</summary>
     public HashSet<string> UnsupportedRequests { get; } = new(StringComparer.Ordinal);
 
+    /// <summary>
+    /// Requests (the raw packet, type first) this matches are answered only once <see cref="Released"/> completes, and so is every
+    /// later request of the same session: a server that stops answering on one session.
+    /// </summary>
+    public Func<byte[], bool>? Hold { get; set; }
+
+    /// <summary>Completed to answer the requests <see cref="Hold"/> holds.</summary>
+    public TaskCompletionSource Released { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    /// <summary>How many requests <see cref="Hold"/> has held.</summary>
+    public int Held => Volatile.Read(ref _held);
+
+    private int _held;
+
+    /// <summary>The offset of a WRITE request (the raw packet), or null for another request.</summary>
+    public static long? WriteOffset(byte[] packet)
+    {
+        if (packet[0] != 6)
+        {
+            return null;
+        }
+
+        var handleLength = BinaryPrimitives.ReadInt32BigEndian(packet.AsSpan(5));
+        return (long)BinaryPrimitives.ReadUInt64BigEndian(packet.AsSpan(9 + handleLength));
+    }
+
     private readonly Dictionary<string, uint> _openFlags = new(StringComparer.Ordinal);
 
     public void AddDirectory(string path) => _nodes[path] = new Node { IsDirectory = true, Mode = 0x1ED };
@@ -424,6 +450,12 @@ internal sealed class FakeSftpServer
             if (packet[0] is 6 && HoldWrites is { } holdWrites)
             {
                 await holdWrites.Task;
+            }
+
+            if (Hold?.Invoke(packet) == true)
+            {
+                Interlocked.Increment(ref _held);
+                await Released.Task;
             }
 
             var reply = HandleLocked(packet, opened);

@@ -243,7 +243,9 @@ connection, but not read or change it: each host's key is verified end to end, b
   fails the request (`Timeout`) once the server has been silent that long.
 - Segmented transfers (`Segments`) open more SFTP sessions as channels of the same connection: nothing new is authenticated or sent
   anywhere else. A segmented upload that fails cuts the remote file it created or truncated to its unbroken start, or deletes that
-  file where the server cannot cut it, so a later resume cannot keep a gap; it never touches another path.
+  file where the server cannot cut it, so a later resume cannot keep a gap; it never touches another path. A server that stops
+  answering can only delay this by `OperationTimeout` (or 5 s) per step; a cleanup that did not finish is marked on the exception
+  (`SftpClient.UploadCleanupIncompleteKey`), so the application knows not to resume a file that may have gaps.
 - A file hash (`GetFileHashAsync`, `check-file` or `md5-hash`) is computed by the server, so a match is only as good as the server:
   it detects a truncated or damaged file, not a server that lies. Only SHA-2 is accepted unless the application names `md5`,
   `sha1` or `crc32`, which detect accidental damage only. The reply must name an algorithm that was asked for and carry a digest

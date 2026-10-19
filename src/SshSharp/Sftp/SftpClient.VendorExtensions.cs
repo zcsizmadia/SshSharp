@@ -7,6 +7,9 @@ public sealed partial class SftpClient
     /// <summary>What <see cref="GetFileHashAsync"/> asks for when the caller names no algorithms: SHA-2 only, the most common first.</summary>
     private static readonly string[] DefaultHashAlgorithms = ["sha256", "sha512", "sha384", "sha224"];
 
+    /// <summary>The names under which a server announces check-file: the extension, or its two requests.</summary>
+    private static readonly string[] CheckFileNames = [SftpProtocol.CheckFileExtension, SftpProtocol.CheckFileNameRequest, SftpProtocol.CheckFileHandleRequest];
+
     /// <summary>The largest payload <see cref="SendExtendedRequestAsync"/> sends, so the request fits the 256 KiB packet OpenSSH accepts.</summary>
     internal const int MaxExtendedPayload = 255 * 1024;
 
@@ -127,7 +130,7 @@ public sealed partial class SftpClient
     /// <summary>The algorithms the server lists with its check-file announcement, if it lists them.</summary>
     private IReadOnlyList<string>? AnnouncedHashAlgorithms()
     {
-        foreach (var name in (ReadOnlySpan<string>)[SftpProtocol.CheckFileExtension, SftpProtocol.CheckFileNameRequest, SftpProtocol.CheckFileHandleRequest])
+        foreach (var name in CheckFileNames)
         {
             if (Extensions.TryGetValue(name, out var data) && SftpExtensionReplies.AnnouncedAlgorithms(data) is { } announced)
             {
@@ -205,8 +208,13 @@ public sealed partial class SftpClient
     /// <paramref name="data"/> is the request's fields after its name, encoded as the extension defines them (SSH strings are a big-endian
     /// <c>uint32</c> length and the bytes). The reply is usually <c>SSH_FXP_EXTENDED_REPLY</c> (<see cref="SftpExtendedReply.IsExtendedReply"/>,
     /// with the extension's fields in <see cref="SftpExtendedReply.Data"/>) or <c>SSH_FXP_STATUS</c> (<see cref="SftpExtendedReply.Status"/>);
-    /// a server answers <see cref="SftpStatusCode.OperationUnsupported"/> to a request it does not know. A server error is returned, not
-    /// thrown: call <see cref="SftpExtendedReply.EnsureSuccess"/> to throw it.
+    /// most servers answer <see cref="SftpStatusCode.OperationUnsupported"/> to a request they do not know. A server error is returned,
+    /// not thrown: call <see cref="SftpExtendedReply.EnsureSuccess"/> to throw it.
+    /// </para>
+    /// <para>
+    /// Some servers end the whole SFTP session on a request they do not know instead (Erlang/OTP's <c>ssh_sftpd</c> does), which fails
+    /// this call and every other request on the session with an <see cref="SshException"/> (<see cref="SshFailureReason.ChannelClosed"/>).
+    /// Send only extensions the server announces in <see cref="Extensions"/>.
     /// </para>
     /// <para>
     /// The request goes to the server as given: an extension that changes files does so, and one that opens a handle leaves it to the

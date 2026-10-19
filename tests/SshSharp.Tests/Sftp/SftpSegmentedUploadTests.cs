@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using Microsoft.Extensions.Time.Testing;
 using SshSharp.Sftp;
 using SshSharp.Tests.Protocol;
 
@@ -25,7 +26,7 @@ public sealed class SftpSegmentedUploadTests : IDisposable
 
         public SftpClient Sftp { get; private set; } = null!;
 
-        public static async Task<Rig> StartAsync(Action<FakeSftpServer>? setup = null)
+        public static async Task<Rig> StartAsync(Action<FakeSftpServer>? setup = null, TimeProvider? time = null)
         {
             var rig = new Rig();
             setup?.Invoke(rig.Files);
@@ -36,6 +37,7 @@ public sealed class SftpSegmentedUploadTests : IDisposable
                 UserName = "tester",
                 Password = "secret",
                 HostKeyVerifier = SshHostKeyVerifier.FromDelegate((_, _) => ValueTask.FromResult(true)),
+                TimeProvider = time ?? TimeProvider.System,
             }, leaveOpen: true, Timeout());
             rig.Sftp = await rig.Client.OpenSftpAsync(Timeout());
             return rig;
@@ -43,6 +45,7 @@ public sealed class SftpSegmentedUploadTests : IDisposable
 
         public async ValueTask DisposeAsync()
         {
+            Files.Released.TrySetResult(); // a held session answers, and can end
             await Sftp.DisposeAsync();
             await Client.DisposeAsync();
             await Ssh.DisposeAsync();
@@ -197,6 +200,7 @@ public sealed class SftpSegmentedUploadTests : IDisposable
             await rig.Sftp.UploadFileAsync(local, "big.bin", new SftpTransferOptions { Segments = 4 }, Timeout())).Throws<SftpException>();
 
         await Assert.That(error!.Status).IsEqualTo(SftpStatusCode.Failure);
+        await Assert.That(error.Data.Contains(SftpClient.UploadCleanupIncompleteKey)).IsFalse().Because("the cleanup finished");
         var remote = rig.Files.FileData(Home + "/big.bin");
         await Assert.That(IsPrefixOf(remote, data)).IsTrue().Because("the file keeps only the start the server holds without a gap");
         await Assert.That(remote!.Length).IsLessThanOrEqualTo(failAt);
@@ -245,9 +249,89 @@ public sealed class SftpSegmentedUploadTests : IDisposable
         await cancel.CancelAsync();
         firstWrites.SetResult();
 
-        await Assert.That(async () => await upload).Throws<OperationCanceledException>();
+        var cancelled = await Assert.That(async () => await upload).Throws<OperationCanceledException>();
+        await Assert.That(cancelled!.Data.Contains(SftpClient.UploadCleanupIncompleteKey)).IsFalse().Because("every answer came, and the file was cut");
         await Assert.That(IsPrefixOf(rig.Files.FileData(Home + "/big.bin"), data)).IsTrue();
         await Assert.That(rig.Files.OpenHandles).IsEqualTo(0);
+    }
+
+    /// <summary>Moves the fake clock a second at a time until <paramref name="upload"/> ends (at most a minute of fake time).</summary>
+    private static async Task AdvanceUntilDoneAsync(FakeTimeProvider time, Task upload)
+    {
+        for (var i = 0; i < 60 && !upload.IsCompleted; i++)
+        {
+            time.Advance(TimeSpan.FromSeconds(1));
+            for (var j = 0; j < 50 && !upload.IsCompleted; j++)
+            {
+                await Task.Delay(10); // what the clock released is on its way
+            }
+        }
+    }
+
+    [Test]
+    public async Task ACancelledUpload_WhoseWritesGoUnanswered_GivesUpAfterTheBound_AndSaysTheCleanupDidNotFinish()
+    {
+        var (local, _) = await LocalFileAsync(4 * 1024 * 1024);
+        var time = new FakeTimeProvider();
+
+        // The fourth range's session stops answering at its first write: those writes may still land later, after any cut.
+        await using var rig = await Rig.StartAsync(f => f.Hold = packet => FakeSftpServer.WriteOffset(packet) == 3 * 1024 * 1024, time);
+        using var cancel = new CancellationTokenSource();
+        var upload = rig.Sftp.UploadFileAsync(local, "big.bin", new SftpTransferOptions { Segments = 4 }, cancel.Token);
+        while (rig.Files.Held == 0)
+        {
+            await Task.Delay(5);
+        }
+
+        await cancel.CancelAsync();
+
+        // Without the clock moving, the answers are still awaited: the upload cannot have ended.
+        await Task.Delay(200);
+        await Assert.That(upload.IsCompleted).IsFalse();
+        time.Advance(TimeSpan.FromSeconds(4));
+        await Task.Delay(200);
+        await Assert.That(upload.IsCompleted).IsFalse().Because("the bound is 5 s when OperationTimeout is not set");
+
+        await AdvanceUntilDoneAsync(time, upload);
+
+        var error = await Assert.That(async () => await upload).Throws<OperationCanceledException>();
+        await Assert.That(error!.Data[SftpClient.UploadCleanupIncompleteKey] is true).IsTrue();
+    }
+
+    [Test]
+    public async Task AFailedUpload_WhoseCutGoesUnanswered_ThrowsItsOwnFailure_AndSaysTheCleanupDidNotFinish()
+    {
+        var (local, _) = await LocalFileAsync(4 * 1024 * 1024);
+        var time = new FakeTimeProvider();
+        await using var rig = await Rig.StartAsync(f =>
+        {
+            f.FailWriteAt = offset => offset == (2 * 1024 * 1024) + (64 * 1024 * 2);
+            f.Hold = packet => packet[0] == 10; // FSETSTAT: the cut is never answered
+        }, time);
+
+        var upload = rig.Sftp.UploadFileAsync(local, "big.bin", new SftpTransferOptions { Segments = 4 }, Timeout());
+        while (rig.Files.Held == 0)
+        {
+            await Task.Delay(5);
+        }
+
+        await AdvanceUntilDoneAsync(time, upload);
+
+        var error = await Assert.That(async () => await upload).Throws<SftpException>();
+        await Assert.That(error!.Status).IsEqualTo(SftpStatusCode.Failure);
+        await Assert.That(error.Data[SftpClient.UploadCleanupIncompleteKey] is true).IsTrue();
+    }
+
+    [Test]
+    public async Task TheCleanupBound_IsTheOperationTimeout_WhenItIsSet()
+    {
+        await using var rig = await Rig.StartAsync();
+
+        await Assert.That(rig.Sftp.CleanupWait).IsEqualTo(TimeSpan.FromSeconds(5));
+        rig.Sftp.OperationTimeout = TimeSpan.FromSeconds(2);
+        await Assert.That(rig.Sftp.CleanupWait).IsEqualTo(TimeSpan.FromSeconds(2));
+        rig.Sftp.OperationTimeout = TimeSpan.FromMinutes(3);
+        await Assert.That(rig.Sftp.CleanupWait).IsEqualTo(TimeSpan.FromMinutes(3));
     }
 
     [Test]

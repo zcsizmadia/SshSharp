@@ -94,7 +94,10 @@ Uploads work the same way, each session writing its range of the same remote fil
   one that takes writes in order only (object storage behind SFTP) gets the rest of the file in order over the first session. The
   upload succeeds either way, without the speed-up; use `Segments = 1` for such servers.
 - **A failed upload** stops every range and cuts the remote file to the part the server holds without a gap, so `Resume` can
-  continue it; a server that cannot cut a file has it deleted. Until an upload ends, the parts still on their way read as zeros:
+  continue it; a server that cannot cut a file has it deleted. This cleanup waits at most `OperationTimeout` (or 5 s when it is not
+  set) for each step. If it could not finish, the exception's `Data[SftpClient.UploadCleanupIncompleteKey]` is `true`: do not
+  resume that file, delete it or upload it again (see [Segmented transfers](../sftp.md#segmented-transfers) for an example).
+- **Readers meanwhile.** Until an upload ends, the parts still on their way read as zeros:
   upload to a temporary name and rename it (below) if others read the file meanwhile.
 - **Verify** a large transfer with a hash from the server where it has one (see [Verify a transfer with a hash from the
   server](#verify-a-transfer-with-a-hash-from-the-server)).
@@ -303,8 +306,9 @@ bytes), and parse the reply's `Data` the same way:
 
 [!code-csharp[](../snippets/FileTransfer.cs#sftp-extended-request)]
 
-- `sftp.Extensions` lists what the server announces, with each extension's data (often a version). A server answers
-  `OperationUnsupported` to a request it does not know.
+- `sftp.Extensions` lists what the server announces, with each extension's data (often a version). Call only those: most servers
+  answer `OperationUnsupported` to a request they do not know, but some (Erlang/OTP's `ssh_sftpd`) end the whole SFTP session,
+  failing every request on it.
 - A server error comes back as `Status`, not as an exception; `EnsureSuccess()` throws it as an `SftpException`.
 - The reply is the server's: parse it defensively. Avoid extensions that open handles, which only this library's own methods
   close.

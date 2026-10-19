@@ -863,19 +863,32 @@ public class SftpInteropTests
         await using var client = await SshClient.ConnectAsync(host, port, options, Timeout());
         await using var sftp = await client.OpenSftpAsync(Timeout());
 
-        // An extension no server has: a status that is not OK, never a broken session.
-        var unknown = await sftp.SendExtendedRequestAsync("sshsharp-test-unknown@example.com", "\0\0\0\0"u8.ToArray(), Timeout());
-        await Assert.That(unknown.Status).IsNotNull();
-        await Assert.That(unknown.Status).IsNotEqualTo(SftpStatusCode.Ok);
-        await Assert.That(() => unknown.EnsureSuccess()).Throws<SftpException>();
-
         // limits@openssh.com where the server has it: four uint64 values.
-        if (sftp.Extensions.ContainsKey("limits@openssh.com"))
+        var advertised = sftp.Extensions.ContainsKey("limits@openssh.com");
+        if (advertised)
         {
             var limits = await sftp.SendExtendedRequestAsync("limits@openssh.com", cancellationToken: Timeout());
             await Assert.That(limits.IsExtendedReply).IsTrue();
             await Assert.That(limits.Data.Length).IsEqualTo(32);
         }
+
+        // An extension no server has: a status that is not OK, never a broken session. Erlang/OTP's ssh_sftpd ends the session on a
+        // request it does not know instead of answering OP_UNSUPPORTED (seen in CI), which is why the docs say to call only extensions
+        // the server announces.
+        if (RealServer.IsErlang)
+        {
+            if (!advertised)
+            {
+                Skip.Test("Erlang/OTP's SFTP server ends the session on an unknown extended request, and announces no extension to call instead.");
+            }
+
+            return;
+        }
+
+        var unknown = await sftp.SendExtendedRequestAsync("sshsharp-test-unknown@example.com", "\0\0\0\0"u8.ToArray(), Timeout());
+        await Assert.That(unknown.Status).IsNotNull();
+        await Assert.That(unknown.Status).IsNotEqualTo(SftpStatusCode.Ok);
+        await Assert.That(() => unknown.EnsureSuccess()).Throws<SftpException>();
 
         // The session still works.
         await Assert.That(await sftp.ExistsAsync(".", Timeout())).IsTrue();

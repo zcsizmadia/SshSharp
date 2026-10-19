@@ -94,6 +94,9 @@ public sealed partial class SftpClient : IAsyncDisposable
     /// <summary>Opens another SFTP session on the same connection (for <see cref="SftpTransferOptions.Segments"/>); null when unknown.</summary>
     internal Func<CancellationToken, Task<SftpClient>>? OpenSibling { get; set; }
 
+    /// <summary>The connection's clock (<c>SshClientOptions.TimeProvider</c>), for the bounds on closing handles and on cleaning up after a segmented upload.</summary>
+    internal TimeProvider Clock { get; set; } = TimeProvider.System;
+
     internal static async Task<SftpClient> StartAsync(SshSession session, string? serverSoftware, CancellationToken cancellationToken)
     {
         var channel = await SftpChannel.OpenAsync(session, cancellationToken).ConfigureAwait(false);
@@ -150,14 +153,16 @@ public sealed partial class SftpClient : IAsyncDisposable
                 break;
             case SftpProtocol.ExtendedReply:
                 // Every parser of an extended reply sees the input: one rejecting it (as an SshException) must not hide another.
-                foreach (var parse in (Action<SftpResponse>[])
+                Action<SftpResponse>[] parsers =
                 [
                     r => ParseLimits(r),
                     r => ParseStatVfs(r),
                     r => Parse(r, (ref SshReader x) => SftpExtensionReplies.ParseCheckFile(ref x, DefaultHashAlgorithms)),
                     r => Parse(r, (ref SshReader x) => SftpExtensionReplies.ParseCheckFile(ref x, ["md5", "sha1", "crc32", "vendor@example.com"])),
                     r => Parse(r, static (ref SshReader x) => SftpExtensionReplies.ParseMd5Hash(ref x)),
-                ])
+                ];
+
+                foreach (var parse in parsers)
                 {
                     try
                     {
@@ -966,11 +971,12 @@ public sealed partial class SftpClient : IAsyncDisposable
 
     internal static void ExpectWritten(SftpResponse reply, string path) => ExpectOk(reply, "Writing", path);
 
-    internal async Task CloseHandleAsync(byte[] handle)
+    /// <summary>Closes a handle, waiting at most <paramref name="limit"/> (30 s by default) for the answer; a failure is ignored.</summary>
+    internal async Task CloseHandleAsync(byte[] handle, TimeSpan? limit = null)
     {
         try
         {
-            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            using var timeout = new CancellationTokenSource(limit ?? TimeSpan.FromSeconds(30), Clock);
             var reply = await _channel.RequestAsync(SftpProtocol.Close, w => w.WriteString(handle), timeout.Token).ConfigureAwait(false);
             ExpectOk(reply, "Closing", null);
         }
@@ -1154,14 +1160,14 @@ public sealed partial class SftpClient : IAsyncDisposable
     /// Writes to <paramref name="handle"/> from <paramref name="start"/> up to <paramref name="stop"/>, or with no stop until
     /// <paramref name="read"/> fills less than it was given (the end of the source); returns the bytes written. <paramref name="read"/>
     /// fills a buffer with the source's bytes for a file offset, as many as it can. <paramref name="acknowledged"/> hears of each write
-    /// the server acknowledges, in offset order. <paramref name="confirmed"/>, when given, ends up as the bytes from
+    /// the server acknowledges, in offset order. <paramref name="confirmed"/>, when given, ends up with the bytes from
     /// <paramref name="start"/> the server is known to hold without a gap, even when the range fails: the writes in flight when it
-    /// does are counted while each one, in order, succeeded. Writes are sent and their replies awaited with <paramref name="repliesToken"/>
+    /// does are counted while each one, in order, succeeded; and whether a write went unanswered. Writes are sent and their replies awaited with <paramref name="repliesToken"/>
     /// when given (else <paramref name="cancellationToken"/>): a caller that must know which writes landed after it cancels passes one
     /// that outlasts the cancellation.
     /// </summary>
     private async Task<long> WriteRangeAsync(byte[] handle, string path, long start, long? stop,
-        Func<Memory<byte>, long, CancellationToken, ValueTask<int>> read, Action<int>? acknowledged, StrongBox<long>? confirmed,
+        Func<Memory<byte>, long, CancellationToken, ValueTask<int>> read, Action<int>? acknowledged, WriteRangeState? confirmed,
         SftpTransferOptions options, CancellationToken cancellationToken, CancellationToken? repliesToken = null)
     {
         // A window of writes in flight; progress counts what the server has acknowledged. In a directory transfer with several files at
@@ -1182,7 +1188,8 @@ public sealed partial class SftpClient : IAsyncDisposable
                 }
 
                 // The request is built in one pooled buffer, and the source is read straight into its data: no buffer of its own, no copy.
-                // This method owns the frame until RequestAsync takes it over, which returns it once it is sent.
+                // This method owns the frame until RequestAsync takes it over, which returns it once it is sent. Not `using`: ownership passes to
+                // RequestAsync, so the frame is disposed here (below) only when it was never handed over.
                 var requested = stop is { } last ? (int)Math.Min(chunk, last - offset) : chunk;
                 var frame = StartWrite(handle, offset, requested);
                 var handedOver = false;
@@ -1248,12 +1255,16 @@ public sealed partial class SftpClient : IAsyncDisposable
                     unbroken &= landed;
                     if (unbroken && confirmed is not null)
                     {
-                        confirmed.Value += length;
+                        confirmed.Confirmed += length;
                     }
                 }
                 catch (Exception ex) when (ex is SshException or OperationCanceledException or ObjectDisposedException)
                 {
-                    unbroken = false; // already failing
+                    unbroken = false; // already failing; what became of this write is not known
+                    if (confirmed is not null)
+                    {
+                        confirmed.Unsettled = true;
+                    }
                 }
                 finally
                 {
@@ -1265,15 +1276,22 @@ public sealed partial class SftpClient : IAsyncDisposable
         async Task AcknowledgeAsync()
         {
             var (reply, length) = inFlight.Dequeue();
+            var answered = false;
             try
             {
                 var response = await reply.ConfigureAwait(false);
+                answered = true;
                 unbroken = IsOkStatus(response);
                 ExpectWritten(response, path);
             }
             catch
             {
                 unbroken = false;
+                if (!answered && confirmed is not null)
+                {
+                    confirmed.Unsettled = true; // no answer: what became of this write is not known
+                }
+
                 throw;
             }
             finally
@@ -1283,7 +1301,7 @@ public sealed partial class SftpClient : IAsyncDisposable
 
             if (confirmed is not null)
             {
-                confirmed.Value += length;
+                confirmed.Confirmed += length;
             }
 
             acknowledged?.Invoke(length);
@@ -1302,6 +1320,16 @@ public sealed partial class SftpClient : IAsyncDisposable
                 await AcknowledgeAsync().ConfigureAwait(false); // frees a slot of this file's own
             }
         }
+    }
+
+    /// <summary>What <see cref="WriteRangeAsync"/> learned of a range's writes, also when it failed.</summary>
+    private sealed class WriteRangeState
+    {
+        /// <summary>The bytes from the range's start the server is known to hold without a gap.</summary>
+        public long Confirmed { get; set; }
+
+        /// <summary>Whether a write was sent whose answer never came (the wait gave up, or the session ended): the server may still apply it.</summary>
+        public bool Unsettled { get; set; }
     }
 
     /// <summary>Whether a reply is a well-formed status of OK.</summary>
@@ -1534,8 +1562,16 @@ public sealed class SftpTransferOptions
     /// truncating it; the ranges are written at their offsets, and nothing is allocated in advance (a range past the current end extends
     /// the file). A server that will not open a file for a second writer gets fewer sessions, down to one; a server that refuses a write
     /// out of order (one that stores files as objects, written from the start) has the rest of the file written in order over the first
-    /// session, from as far as it holds the file without a gap. A failed or cancelled upload cuts the remote file to that unbroken start,
-    /// so <see cref="Resume"/> can continue it; a server that cannot cut a file has it deleted instead.
+    /// session, from as far as it holds the file without a gap.
+    /// </para>
+    /// <para>
+    /// A failed or cancelled upload cleans up: it waits for the answers to the writes already sent, then cuts the remote file to its
+    /// unbroken start, so <see cref="Resume"/> can continue it; a server that cannot cut a file has it deleted instead. Each of those waits
+    /// lasts at most <see cref="SftpClient.OperationTimeout"/> when it is set, otherwise 5 s. When the cleanup cannot finish in that time
+    /// (the server stopped answering, or the session ended), the upload still throws its own exception (a cancellation stays an
+    /// <see cref="OperationCanceledException"/>), with <see cref="SftpClient.UploadCleanupIncompleteKey"/> set to <see langword="true"/> in
+    /// its <see cref="Exception.Data"/>: the remote file may then have gaps, so do not continue it with <see cref="Resume"/>; delete it or
+    /// upload it again.
     /// </para>
     /// </remarks>
     public int Segments

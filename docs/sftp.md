@@ -110,10 +110,19 @@ flowchart TD
 - **A server that takes writes in order only** (one that stores files as objects, written from the start) refuses the first write
   of a later range: the rest of the file is then written in order over the first session, from as far as the server holds it
   without a gap, so nothing is sent twice that the server already has.
-- **A failure or cancellation** stops the other ranges; the replies to writes already sent are awaited (for up to 30 s), then the
-  remote file is cut to the start the server holds without a gap. A resumed upload (`Resume`) then continues it correctly. A server
-  that cannot cut a file has it deleted instead, since a file with gaps must not be taken for a partial upload. If the session
-  itself is gone, nothing can be done: delete the file, or upload it again without `Resume`.
+- **A failure or cancellation** stops the other ranges; the replies to writes already sent are awaited, then the remote file is
+  cut to the start the server holds without a gap. A resumed upload (`Resume`) then continues it correctly. A server that cannot
+  cut a file has it deleted instead, since a file with gaps must not be taken for a partial upload.
+- **The cleanup is bounded.** Each of its waits (the replies, then the cut or the delete) lasts at most `OperationTimeout` when it
+  is set, otherwise 5 s, so a cancelled upload returns promptly even from a server that stopped answering. The upload always throws
+  its own exception (a cancellation stays an `OperationCanceledException`). When the cleanup could not finish, that exception's
+  `Data[SftpClient.UploadCleanupIncompleteKey]` is `true`, and the remote file may have gaps.
+
+> [!WARNING]
+> Do not continue with `Resume` a segmented upload whose exception has `SftpClient.UploadCleanupIncompleteKey` set: the remote
+> file may hold gaps of zeros that a resume would keep. Delete it, or upload it again without `Resume`.
+
+[!code-csharp[](snippets/FileTransfer.cs#sftp-segments-upload-cleanup)]
 
 ### Directories
 
@@ -275,8 +284,9 @@ Some servers hash a file where it is, so a transfer can be checked without readi
 For a vendor extension this library has no method for, `SendExtendedRequestAsync(name, data)` sends `SSH_FXP_EXTENDED` with the
 request's fields (encoded as the extension defines them) and returns the reply as it came: an `SftpExtendedReply` with its
 `PacketType`, its fields (`Data`), and for a status its `Status` and `StatusMessage`. A server error is returned, not thrown;
-`EnsureSuccess()` throws it as an `SftpException`. A server answers `OperationUnsupported` to a request it does not know, and
-`Extensions` lists what it announces. See [Call a vendor extension](how-to/transfer-files-sftp.md#call-a-vendor-extension).
+`EnsureSuccess()` throws it as an `SftpException`. Most servers answer `OperationUnsupported` to a request they do not know, but
+some end the whole SFTP session instead (Erlang/OTP's `ssh_sftpd` does), failing every request on it with `ChannelClosed`: send only
+extensions the server announces in `Extensions`. See [Call a vendor extension](how-to/transfer-files-sftp.md#call-a-vendor-extension).
 
 ## Serving files with `IFileProvider`
 
