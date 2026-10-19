@@ -347,7 +347,9 @@ identity file's key to the agent once the server has accepted it, so the next co
 matched to the agent's key through its `.pub` file: when one sits next to it, the next connection does not read the private key
 file (or ask for its passphrase) again; without one, the private key file is still read to learn its public key, and an encrypted
 one still needs its passphrase. Keys you pass in `SshConfigConnectOptions.PrivateKeys` are yours to manage and are never
-added. `ask` is treated as `no`: it needs a prompt this library does not show.
+added. `AddKeysToAgent ask` asks `SshConfigConnectOptions.ConfirmAddKeyToAgent` for each key first, as `ssh` asks through
+`SSH_ASKPASS`; without it, or in `BatchMode`, nothing is added. See
+[From ssh_config: AddKeysToAgent](how-to/agent-and-keys.md#from-ssh_config-addkeystoagent).
 
 ## Keyboard-interactive
 

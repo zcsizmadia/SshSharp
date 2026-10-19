@@ -106,11 +106,27 @@ public sealed partial class SshClient
     /// </summary>
     /// <exception cref="SocketException">The socket could not be created: a file exists at the path, or its directory does not.</exception>
     /// <exception cref="ArgumentException">The path is longer than the platform allows for a socket (about 104 to 108 bytes).</exception>
-    public Task<SshLocalSocketForwarder> ForwardLocalUnixSocketAsync(string localSocketPath, string remoteHost, int remotePort, CancellationToken cancellationToken = default)
+    public Task<SshLocalSocketForwarder> ForwardLocalUnixSocketAsync(string localSocketPath, string remoteHost, int remotePort, CancellationToken cancellationToken = default) =>
+        ForwardLocalUnixSocketAsync(localSocketPath, remoteHost, remotePort, OwnerOnly, cancellationToken);
+
+    /// <summary>
+    /// Local forwarding from a Unix socket to <paramref name="remoteHost"/>:<paramref name="remotePort"/>, as
+    /// <see cref="ForwardLocalUnixSocketAsync(string, string, int, CancellationToken)"/>, with the socket file's permissions given, as
+    /// ssh_config's <c>StreamLocalBindMask</c> sets them: for example
+    /// <c>UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead | UnixFileMode.GroupWrite</c> (0660) lets the owner's
+    /// group connect too. Connecting to a Unix socket takes write permission. The mode is set before the socket accepts connections. On
+    /// Windows the socket file is always restricted to the current user, whatever the mode.
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="socketMode"/> has bits other than the nine permission bits (0777).</exception>
+    /// <exception cref="SocketException">The socket could not be created: a file exists at the path, or its directory does not.</exception>
+    /// <exception cref="ArgumentException">The path is longer than the platform allows for a socket (about 104 to 108 bytes).</exception>
+    public Task<SshLocalSocketForwarder> ForwardLocalUnixSocketAsync(string localSocketPath, string remoteHost, int remotePort, UnixFileMode socketMode,
+        CancellationToken cancellationToken = default)
     {
         ValidateSocketPath(localSocketPath, nameof(localSocketPath));
         ValidateDestination(remoteHost, remotePort);
-        return StartLocalSocketForwardAsync(localSocketPath, unlinkExisting: false, remoteHost, remotePort, remoteSocketPath: null, cancellationToken);
+        ValidateSocketMode(socketMode);
+        return StartLocalSocketForwardAsync(localSocketPath, unlinkExisting: false, socketMode, remoteHost, remotePort, remoteSocketPath: null, cancellationToken);
     }
 
     /// <summary>
@@ -120,20 +136,44 @@ public sealed partial class SshClient
     /// </summary>
     /// <exception cref="SocketException">The socket could not be created: a file exists at the path, or its directory does not.</exception>
     /// <exception cref="ArgumentException">The path is longer than the platform allows for a socket (about 104 to 108 bytes).</exception>
-    public Task<SshLocalSocketForwarder> ForwardLocalUnixSocketAsync(string localSocketPath, string remoteSocketPath, CancellationToken cancellationToken = default)
+    public Task<SshLocalSocketForwarder> ForwardLocalUnixSocketAsync(string localSocketPath, string remoteSocketPath, CancellationToken cancellationToken = default) =>
+        ForwardLocalUnixSocketAsync(localSocketPath, remoteSocketPath, OwnerOnly, cancellationToken);
+
+    /// <summary>
+    /// Local forwarding from a Unix socket to a Unix socket on the server, as
+    /// <see cref="ForwardLocalUnixSocketAsync(string, string, CancellationToken)"/>, with the socket file's permissions given (see
+    /// <see cref="ForwardLocalUnixSocketAsync(string, string, int, UnixFileMode, CancellationToken)"/>).
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="socketMode"/> has bits other than the nine permission bits (0777).</exception>
+    /// <exception cref="SocketException">The socket could not be created: a file exists at the path, or its directory does not.</exception>
+    /// <exception cref="ArgumentException">The path is longer than the platform allows for a socket (about 104 to 108 bytes).</exception>
+    public Task<SshLocalSocketForwarder> ForwardLocalUnixSocketAsync(string localSocketPath, string remoteSocketPath, UnixFileMode socketMode,
+        CancellationToken cancellationToken = default)
     {
         ValidateSocketPath(localSocketPath, nameof(localSocketPath));
         ValidateSocketPath(remoteSocketPath, nameof(remoteSocketPath));
-        return StartLocalSocketForwardAsync(localSocketPath, unlinkExisting: false, null, 0, remoteSocketPath, cancellationToken);
+        ValidateSocketMode(socketMode);
+        return StartLocalSocketForwardAsync(localSocketPath, unlinkExisting: false, socketMode, null, 0, remoteSocketPath, cancellationToken);
     }
 
-    private Task<SshLocalSocketForwarder> StartLocalSocketForwardAsync(string localSocketPath, bool unlinkExisting, string? remoteHost, int remotePort,
-        string? remoteSocketPath, CancellationToken cancellationToken)
+    /// <summary>The mode of a local socket file unless told otherwise: 0600, what ssh's default <c>StreamLocalBindMask 0177</c> gives.</summary>
+    private const UnixFileMode OwnerOnly = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+
+    private static void ValidateSocketMode(UnixFileMode socketMode)
+    {
+        if (((int)socketMode & ~0x1FF) != 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(socketMode), socketMode, "A socket's mode has only the nine permission bits (0777).");
+        }
+    }
+
+    private Task<SshLocalSocketForwarder> StartLocalSocketForwardAsync(string localSocketPath, bool unlinkExisting, UnixFileMode socketMode, string? remoteHost,
+        int remotePort, string? remoteSocketPath, CancellationToken cancellationToken)
     {
         ObjectDisposedException.ThrowIf(_disposed != 0, this);
         cancellationToken.ThrowIfCancellationRequested();
         ThrowIfConnectionFailed();
-        var listener = LocalListener.StartUnix(localSocketPath, unlinkExisting,
+        var listener = LocalListener.StartUnix(localSocketPath, unlinkExisting, socketMode,
             remoteSocketPath is null
                 ? (socket, ct) => OpenForwardedAsync(socket, remoteHost!, remotePort, ct)
                 : (_, ct) => OpenForwardedSocketAsync(remoteSocketPath, ct),
@@ -161,16 +201,37 @@ public sealed partial class SshClient
     /// Dynamic port forwarding (<c>ssh -D</c>): runs a SOCKS proxy on <paramref name="localEndPoint"/> (SOCKS 4, 4a and 5, CONNECT,
     /// no authentication). Each application connection names its destination, and the server makes the connection, so host names are
     /// resolved on the server's side. Use a loopback address: the proxy has no authentication, so anyone who can reach it can use the
-    /// server's network.
+    /// server's network. To listen beyond loopback, require a password with
+    /// <see cref="ForwardDynamicPortAsync(IPEndPoint, NetworkCredential?, CancellationToken)"/>.
     /// </summary>
     /// <exception cref="SocketException">The local endpoint could not be bound (for example the port is in use).</exception>
-    public Task<SshDynamicPortForwarder> ForwardDynamicPortAsync(IPEndPoint localEndPoint, CancellationToken cancellationToken = default)
+    public Task<SshDynamicPortForwarder> ForwardDynamicPortAsync(IPEndPoint localEndPoint, CancellationToken cancellationToken = default) =>
+        ForwardDynamicPortAsync(localEndPoint, credentials: null, cancellationToken);
+
+    /// <summary>
+    /// Dynamic port forwarding (<c>ssh -D</c>) with a SOCKS proxy that requires a user name and password: SOCKS 5 username/password
+    /// authentication (RFC 1929). Applications must give <paramref name="credentials"/>; SOCKS 4 and 4a, which have no passwords, and SOCKS
+    /// 5 clients that do not authenticate, are refused. Use it when the proxy must listen beyond loopback (for a container, a VM or other
+    /// machines). The credentials only keep out those who do not know them: RFC 1929 sends them in clear text, and the application's
+    /// traffic to the proxy is not encrypted either (only the hop from the server on is), so anyone who can watch the local network can
+    /// read and reuse them. Prefer a loopback address whenever the applications run on this machine. Without credentials (null), the same
+    /// as <see cref="ForwardDynamicPortAsync(IPEndPoint, CancellationToken)"/>.
+    /// </summary>
+    /// <param name="localEndPoint">Where the proxy listens.</param>
+    /// <param name="credentials">The user name and password applications must give (<see cref="NetworkCredential.Domain"/> is not used),
+    /// each 1 to 255 bytes in UTF-8; null for no authentication. Only keyed digests of them are kept, and attempts are compared in
+    /// constant time.</param>
+    /// <param name="cancellationToken">Cancels starting the forwarder.</param>
+    /// <exception cref="ArgumentException">The user name or password is empty or longer than 255 bytes in UTF-8.</exception>
+    /// <exception cref="SocketException">The local endpoint could not be bound (for example the port is in use).</exception>
+    public Task<SshDynamicPortForwarder> ForwardDynamicPortAsync(IPEndPoint localEndPoint, NetworkCredential? credentials, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(localEndPoint);
+        var required = credentials is null ? null : new SocksCredentials(credentials, nameof(credentials));
         ObjectDisposedException.ThrowIf(_disposed != 0, this);
         cancellationToken.ThrowIfCancellationRequested();
         ThrowIfConnectionFailed();
-        var listener = LocalListener.Start(localEndPoint, OpenSocksAsync, _connection.Closed);
+        var listener = LocalListener.Start(localEndPoint, (socket, ct) => OpenSocksAsync(socket, required, ct), _connection.Closed);
         var bound = listener.LocalEndPoint.ToString();
         SshLog.ForwardingStarted(_logger, bound, 0);
         return Task.FromResult(new SshDynamicPortForwarder(listener));
@@ -205,8 +266,8 @@ public sealed partial class SshClient
         }
     }
 
-    /// <summary>Reads a SOCKS request, opens the channel it names, and answers the application.</summary>
-    private async Task<SshChannel?> OpenSocksAsync(Socket socket, CancellationToken cancellationToken)
+    /// <summary>Reads a SOCKS request (after checking the credentials, when <paramref name="credentials"/> requires them), opens the channel it names, and answers the application.</summary>
+    private async Task<SshChannel?> OpenSocksAsync(Socket socket, SocksCredentials? credentials, CancellationToken cancellationToken)
     {
         // Only for the handshake: it does not own the socket, which the listener relays once the channel is open.
         await using var stream = new NetworkStream(socket, ownsSocket: false);
@@ -214,7 +275,16 @@ public sealed partial class SshClient
         using (var handshake = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
         {
             handshake.CancelAfter(SocksHandshakeTimeout); // an application that connects and says nothing does not hold a slot forever
-            request = await SocksHandshake.ReadRequestAsync(stream, handshake.Token).ConfigureAwait(false);
+            try
+            {
+                request = await SocksHandshake.ReadRequestAsync(stream, credentials, handshake.Token).ConfigureAwait(false);
+            }
+            catch (SocksAuthenticationException ex)
+            {
+                // Which proxy, not which client: the client's address stays out of the logs, as host names do.
+                SshLog.SocksAuthenticationFailed(_logger, socket.LocalEndPoint?.ToString() ?? "?", ex.Message);
+                return null;
+            }
         }
 
         if (request is not { } target)
@@ -735,6 +805,9 @@ public sealed partial class SshClient
     private static string ExpandSocketPath(string path, SshHostConfig hostConfig) =>
         hostConfig.Tokens is { } tokens ? tokens.ExpandPath(tokens.ExpandTokens(path)) : path;
 
+    /// <summary>The mode a socket file gets under <c>StreamLocalBindMask</c>: the permissions the mask does not clear, as ssh's umask leaves them.</summary>
+    internal static UnixFileMode SocketModeFromMask(UnixFileMode mask) => (UnixFileMode)(0x1FF & ~(int)mask);
+
     /// <summary>
     /// Starts the forwardings ssh_config names for this host. One that cannot be set up (a port or socket path in use, refused by the
     /// server, a form this library does not support) is logged and skipped, or fails the connection with <c>ExitOnForwardFailure</c>.
@@ -761,7 +834,8 @@ public sealed partial class SshClient
                         var localSocket = ExpandSocketPath(parts[0], hostConfig);
                         ValidateSocketPath(localSocket, nameof(spec));
                         _localSocketForwardings.Add(await StartLocalSocketForwardAsync(localSocket, hostConfig.StreamLocalBindUnlink,
-                            remoteSocket is null ? socketTarget.Host : null, socketTarget.Port, remoteSocket, cancellationToken).ConfigureAwait(false));
+                            SocketModeFromMask(hostConfig.StreamLocalBindMask), remoteSocket is null ? socketTarget.Host : null, socketTarget.Port, remoteSocket,
+                            cancellationToken).ConfigureAwait(false));
                     }
                     else
                     {
@@ -783,14 +857,17 @@ public sealed partial class SshClient
             await TryForwardAsync("RemoteForward", spec, async () =>
             {
                 // /remote/socket host:hostport or /remote/socket /local/socket: a Unix socket on the server. As in ssh, a field
-                // with a '/' in it is a socket path (so C:/run/agent.sock is one on Windows).
+                // with a '/' in it is a socket path (so C:/run/agent.sock is one on Windows). Both paths take ssh_config's tokens and
+                // ${VAR}, expanded here as ssh does (%d and %u are this machine's, %r the remote user); only the local one takes ~,
+                // which on the server's side would name this machine's home directory.
                 var parts = spec.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
-                if (parts.Length == 2 && parts[0].StartsWith('/'))
+                if (parts.Length == 2 && parts[0].Contains('/'))
                 {
+                    var remoteSocket = hostConfig.Tokens is { } tokens ? tokens.ExpandTokensAndVariables(parts[0]) : parts[0];
                     _remoteSocketForwardings.Add(parts[1].Contains('/')
-                        ? await ForwardRemoteUnixSocketAsync(parts[0], parts[1], cancellationToken).ConfigureAwait(false)
+                        ? await ForwardRemoteUnixSocketAsync(remoteSocket, ExpandSocketPath(parts[1], hostConfig), cancellationToken).ConfigureAwait(false)
                         : ForwardSpec.ParseTarget(parts[1]) is { } socketTarget
-                            ? await ForwardRemoteUnixSocketAsync(parts[0], socketTarget.Host, socketTarget.Port, cancellationToken).ConfigureAwait(false)
+                            ? await ForwardRemoteUnixSocketAsync(remoteSocket, socketTarget.Host, socketTarget.Port, cancellationToken).ConfigureAwait(false)
                             : throw new FormatException("the target must be host:hostport or a socket path"));
                     return;
                 }

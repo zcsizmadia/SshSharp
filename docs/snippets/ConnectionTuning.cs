@@ -1,5 +1,6 @@
 using System.Net.Sockets;
 using SshSharp;
+using SshSharp.Config;
 using SshSharp.Sftp;
 
 namespace SshSharp.Docs.Snippets;
@@ -28,6 +29,44 @@ internal static class ConnectionTuning
             },
         }, cancellationToken);
         // </configure-socket>
+    }
+
+    public static async Task ConfigureSocketFromConfigAsync(CancellationToken cancellationToken)
+    {
+        // <configure-socket-config>
+        // ssh_config's TCPKeepAlive (on unless it says no) and IPQoS are applied first; ConfigureSocket runs after them and wins.
+        var config = SshConfig.Parse("""
+            Host backup
+              HostName backup.example.com
+              User backup
+              IPQoS af21 cs1
+            """);
+        await using var client = await SshClient.ConnectAsync("backup", new SshConfigConnectOptions
+        {
+            Config = config,
+            ConfigureSocket = socket =>
+            {
+                // Probe an idle connection after 60 s instead of the system's two hours.
+                socket.SetSocketOption(SocketOptionLevel.Tcp, SocketOptionName.TcpKeepAliveTime, 60);
+                socket.ReceiveBufferSize = 4 * 1024 * 1024;
+            },
+        }, cancellationToken);
+        // </configure-socket-config>
+    }
+
+    public static async Task ConnectionAttemptsAsync(SshHostKeyVerifier verifier, CancellationToken cancellationToken)
+    {
+        // <connection-attempts>
+        // A server that is restarting refuses for a moment: try up to 5 times, a second apart, all within 30 seconds.
+        await using var client = await SshClient.ConnectAsync("example.com", 22, new SshClientOptions
+        {
+            UserName = "deploy",
+            Password = Environment.GetEnvironmentVariable("DEPLOY_PASSWORD"),
+            HostKeyVerifier = verifier,
+            ConnectionAttempts = 5,
+            ConnectTimeout = TimeSpan.FromSeconds(30),
+        }, cancellationToken);
+        // </connection-attempts>
     }
 
     public static async Task VersionAddendumAsync(SshHostKeyVerifier verifier, CancellationToken cancellationToken)

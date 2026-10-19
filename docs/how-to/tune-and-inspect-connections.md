@@ -36,7 +36,27 @@ It applies only to the TCP connection that `SshClient.ConnectAsync(host, port, o
 - **Through a `Proxy`** (HTTP or SOCKS) it is not called. The socket goes to the proxy, not the server.
 - **Over a stream you opened** (`ConnectAsync(stream, options)`) there is no socket for SshSharp to configure: set the options on
   your own socket before you pass its stream.
-- **By `ssh_config` alias** it is not available yet. `SshConfigConnectOptions` has no such option.
+- **By `ssh_config` alias**, `SshConfigConnectOptions.ConfigureSocket` does the same, for the connection to the destination or to
+  its first `ProxyJump` hop (not with a `ProxyCommand` or a `Proxy`).
+
+### `TCPKeepAlive` and `IPQoS` from `ssh_config`
+
+When connecting by alias, two directives set socket options before your `ConfigureSocket` runs, so what it sets wins:
+
+[!code-csharp[](../snippets/ConnectionTuning.cs#configure-socket-config)]
+
+- **`TCPKeepAlive`** turns on the operating system's TCP keep-alive (`SO_KEEPALIVE`). It is on unless the configuration says
+  `TCPKeepAlive no`, as in `ssh`: connecting by alias promises to do what `ssh` does with the same file, and an idle connection to a
+  machine that has gone away is then noticed eventually, even without `ServerAliveInterval`. The system's idle time before the first
+  probe is long (two hours by default on Linux and Windows); shorten it with `ConfigureSocket` as above, or use `ServerAliveInterval`,
+  which works at the SSH level and keeps NAT and firewall state alive too. `SshClientOptions` does not turn it on: there, you choose.
+- **`IPQoS`** sets the type of service (DSCP): a name such as `af21`, `cs1`, `ef` or `le`, or a number from 0 to 255; `none` leaves
+  the system's. `ssh` uses the first value for interactive sessions and the second for other traffic; SshSharp sets the second (or
+  the only one) when it connects, since a connection's use is not known then and is mostly commands, transfers and tunnels. Set
+  `IPQoS ef` (one value) to mark everything as interactive. Unlike `ssh`, nothing is marked when `IPQoS` is not set. `ssh`'s own
+  default has changed between versions, and marking traffic is a choice for the network's owner. Both directives are best effort, as
+  in `ssh`: a platform that refuses an option logs it at debug level and connects without it. Windows ignores the type of service
+  unless a system policy allows applications to set it.
 
 ## Identify your application to the server
 

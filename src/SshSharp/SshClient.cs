@@ -164,7 +164,9 @@ public sealed partial class SshClient : IAsyncDisposable
         }
 
         IReadOnlyList<System.Net.IPEndPoint>? local = options.LocalEndPoint is { } bind ? [bind] : null;
-        using var deadline = new ConnectDeadline(options.ConnectTimeout, cancellationToken);
+
+        // On the clock that times the waits between ConnectionAttempts, so the two are measured alike.
+        using var deadline = new ConnectDeadline(options.ConnectTimeout, cancellationToken, options.TimeProvider);
         using var measurement = new ConnectMeasurement(options.Proxy is null && options.JumpHosts.Count == 0 ? port : null);
         try
         {

@@ -171,6 +171,28 @@ public sealed class SshHostConfig
     /// <summary>The network interface to connect from (<c>BindInterface</c>, <c>ssh -B</c>), or null; <see cref="BindAddress"/> wins.</summary>
     public string? BindInterface { get; init; }
 
+    /// <summary>
+    /// <c>TCPKeepAlive</c>: whether the TCP connection has the operating system's keep-alive turned on (<c>SO_KEEPALIVE</c>), which
+    /// notices a peer that has gone away after the system's idle time (about two hours by default on Linux and Windows). On by default,
+    /// as in ssh. It is not the SSH-level keep-alive (<see cref="ServerAliveInterval"/>), which an attacker cannot spoof and which also
+    /// keeps idle NAT and firewall state alive.
+    /// </summary>
+    public bool TcpKeepAlive { get; init; } = true;
+
+    /// <summary>
+    /// <c>IPQoS</c>: the type-of-service byte (DSCP in its upper six bits) for interactive sessions, from a name such as <c>af21</c>,
+    /// <c>cs1</c>, <c>ef</c>, <c>le</c>, <c>lowdelay</c>, or a number from 0 to 255. Null when unset, <c>none</c>, or not valid.
+    /// </summary>
+    public int? IPQoSInteractive { get; init; }
+
+    /// <summary>
+    /// <c>IPQoS</c>: the type-of-service byte for non-interactive traffic (the second value, or the only one). This is the one
+    /// <see cref="SshClient.ConnectAsync(string, SshConfigConnectOptions?, CancellationToken)"/> sets on the socket: a connection
+    /// is made before it is known what it will carry, and a library's connections are mostly commands, file transfers and tunnels.
+    /// Null when unset, <c>none</c>, or not valid; the system's default then applies.
+    /// </summary>
+    public int? IPQoSBulk { get; init; }
+
     /// <summary>Whether agent forwarding is requested.</summary>
     public bool ForwardAgent { get; init; }
 
@@ -183,9 +205,16 @@ public sealed class SshHostConfig
     /// <summary>
     /// <c>AddKeysToAgent</c>: when not null, a key loaded from an identity file that the server accepts is added to the agent with these
     /// constraints (<c>yes</c>; <c>confirm</c> asks for each use; a time interval sets the lifetime). Null for <c>no</c> (the default) and
-    /// for <c>ask</c>, which needs a prompt this library does not show.
+    /// for <c>ask</c>, which <see cref="AddKeysToAgentAsk"/> reports.
     /// </summary>
     public SshAgentKeyConstraints? AddKeysToAgent { get; init; }
+
+    /// <summary>
+    /// <c>AddKeysToAgent ask</c>: such a key goes to the agent (with no constraints) only once
+    /// <see cref="SshConfigConnectOptions.ConfirmAddKeyToAgent"/> confirms it, as ssh asks through <c>SSH_ASKPASS</c>. Without that
+    /// callback, or in <c>BatchMode</c>, the key is not added.
+    /// </summary>
+    public bool AddKeysToAgentAsk { get; init; }
 
     /// <summary>
     /// <c>ChannelTimeout type=interval ...</c>: idle timeouts by channel type, in the order given (the first matching type applies). Empty
@@ -256,6 +285,18 @@ public sealed class SshHostConfig
     /// (typically a stale socket of an earlier run). Off by default, as in ssh: the forwarding then fails.
     /// </summary>
     public bool StreamLocalBindUnlink { get; init; }
+
+    /// <summary>
+    /// <c>StreamLocalBindMask</c>: the permission bits cleared from a Unix socket a <c>LocalForward</c> creates here, written in octal
+    /// as a umask (<c>0177</c>, the default, gives mode 0600: only the owner can connect; <c>0117</c> lets the owner's group in too).
+    /// On Windows the socket file is always restricted to the current user, whatever the mask. Values that do not parse as an octal
+    /// number up to <c>0777</c> are left out.
+    /// </summary>
+    public UnixFileMode StreamLocalBindMask { get; init; } = DefaultStreamLocalBindMask;
+
+    /// <summary>ssh's default <c>StreamLocalBindMask</c>, <c>0177</c>: owner read and write only.</summary>
+    internal const UnixFileMode DefaultStreamLocalBindMask = UnixFileMode.UserExecute | UnixFileMode.GroupRead | UnixFileMode.GroupWrite | UnixFileMode.GroupExecute
+        | UnixFileMode.OtherRead | UnixFileMode.OtherWrite | UnixFileMode.OtherExecute;
 
     /// <summary>
     /// <c>PermitRemoteOpen</c>: the destinations a remote dynamic forwarding (<c>RemoteForward [bind:]port</c>) may connect to, as

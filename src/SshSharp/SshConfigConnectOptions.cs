@@ -54,6 +54,15 @@ public sealed class SshConfigConnectOptions
     /// </summary>
     public Func<string, CancellationToken, ValueTask<string?>>? PassphraseProvider { get; init; }
 
+    /// <summary>
+    /// Answers <c>AddKeysToAgent ask</c>: called for each identity-file key the server accepted, before it goes to the agent, as ssh
+    /// asks through <c>SSH_ASKPASS</c> ("Add key ... to agent?"). Complete with true to add it (with no lifetime or confirmation
+    /// constraint, as ssh adds it), false to leave it out. Without it, or in <c>BatchMode</c>, <c>ask</c> adds nothing, as ssh does when
+    /// it cannot ask. Called after the connection is made; the caller's token, not <c>ConnectTimeout</c>, bounds it. What it throws
+    /// closes the new connection and is thrown from <c>ConnectAsync</c>.
+    /// </summary>
+    public Func<SshAddKeyToAgentPrompt, CancellationToken, ValueTask<bool>>? ConfirmAddKeyToAgent { get; init; }
+
     /// <summary>Keys to offer before the configured <c>IdentityFile</c>s. The client does not dispose them.</summary>
     public IReadOnlyList<SshPrivateKey> PrivateKeys { get; init; } = [];
 
@@ -190,6 +199,15 @@ public sealed class SshConfigConnectOptions
     /// Null (the default) leaves it to ssh_config.
     /// </summary>
     public SshAddressFamily? AddressFamily { get; init; }
+
+    /// <summary>
+    /// Sets socket options on the TCP connection this machine makes: to the destination, or to the first ProxyJump hop (see
+    /// <see cref="SshClientOptions.ConfigureSocket"/>). It runs after the settings ssh_config gives the socket (<c>TCPKeepAlive</c>,
+    /// on unless the configuration says <c>no</c>, and <c>IPQoS</c>), so what it sets wins. Not called with a <c>ProxyCommand</c> or a
+    /// <see cref="Proxy"/>, which make the connection; hosts reached through a ProxyJump hop are tunnels, with no socket of their own.
+    /// What it throws ends the attempt and is thrown from <c>ConnectAsync</c> as it is.
+    /// </summary>
+    public Action<System.Net.Sockets.Socket>? ConfigureSocket { get; init; }
 
     /// <summary>
     /// Overrides ssh_config's <c>ServerAliveInterval</c> for the destination and every ProxyJump hop (see

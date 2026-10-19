@@ -147,6 +147,30 @@ that come through agent forwarding; this client's own authentication through an 
 
 [!code-csharp[](../snippets/Keys.cs#agent-add)]
 
+### From `ssh_config`: `AddKeysToAgent`
+
+When connecting by alias, `AddKeysToAgent` adds an identity file's key to the agent once the server has accepted it, so the next
+connection signs with the agent and does not read the file (or ask for its passphrase) again:
+
+| Value | What happens |
+|---|---|
+| `no` (the default) | Nothing is added. |
+| `yes`, or a lifetime (`1h`) | The key is added, for that long when a lifetime is given (`ssh-add -t`). |
+| `confirm`, or `confirm 1h` | The key is added with confirmation required for each use (`ssh-add -c`), and the lifetime if given. |
+| `ask` | `SshConfigConnectOptions.ConfirmAddKeyToAgent` is asked first, for each key; the key is added (with no constraints, as `ssh` adds it) only when it says yes. |
+
+With `ask`, `ssh` shows a dialog through `SSH_ASKPASS`; your application shows its own prompt:
+
+[!code-csharp[](../snippets/Keys.cs#add-keys-to-agent-ask)]
+
+- **Without a way to ask, nothing is added.** With no `ConfirmAddKeyToAgent`, or in `BatchMode`, `ask` adds no key, as `ssh` does
+  when it cannot ask.
+- **The prompt** carries the identity file's path, the key's fingerprint and comment, and the host that accepted it. It is asked
+  after the connection is made: your `CancellationToken` bounds it, not `ConnectTimeout`. What it throws closes the new connection
+  and is thrown from `ConnectAsync`.
+- **Only identity-file keys.** Keys you pass in `SshConfigConnectOptions.PrivateKeys`, and keys the agent already holds, are never
+  added, and an agent that is not running is logged and skipped. A `ProxyJump` hop applies its own `AddKeysToAgent`.
+
 ## Generate a key
 
 [!code-csharp[](../snippets/Keys.cs#generate)]

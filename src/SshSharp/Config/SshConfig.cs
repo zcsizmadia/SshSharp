@@ -262,6 +262,7 @@ public sealed class SshConfig
         // The resolver keeps only whichever of ProxyJump and ProxyCommand came first, as OpenSSH does.
         var proxyCommand = values.TryGetValue("proxycommand", out var pc) && pc.Count > 0 && !pc[0].Equals("none", StringComparison.OrdinalIgnoreCase)
             ? ctx.ExpandTokens(pc[0]) : null;
+        var ipQos = ParseIPQoS(All("ipqos"));
 
         return new SshHostConfig
         {
@@ -301,10 +302,14 @@ public sealed class SshConfig
             AddressFamily = ParseFamily(First("addressfamily")),
             BindAddress = First("bindaddress") is { Length: > 0 } bindAddress ? bindAddress : null,
             BindInterface = First("bindinterface") is { Length: > 0 } bindInterface ? bindInterface : null,
+            TcpKeepAlive = Bool(First("tcpkeepalive"), true),
+            IPQoSInteractive = ipQos.Interactive,
+            IPQoSBulk = ipQos.Bulk,
             ForwardAgent = First("forwardagent") is { } fa && !IsNo(fa),
             GssapiAuthentication = Bool(First("gssapiauthentication"), false),
             GssapiDelegateCredentials = Bool(First("gssapidelegatecredentials"), false),
             AddKeysToAgent = ParseAddKeysToAgent(All("addkeystoagent") is { Count: > 0 } addKeys ? string.Join(' ', addKeys) : null),
+            AddKeysToAgentAsk = All("addkeystoagent") is [var addKeysMode] && addKeysMode.Equals("ask", StringComparison.OrdinalIgnoreCase),
             ChannelTimeouts = ParseChannelTimeouts(All("channeltimeout")),
             ObscureKeystrokeTiming = ParseObscureKeystrokeTiming(First("obscurekeystroketiming")),
             RequiredRsaSize = int.TryParse(First("requiredrsasize"), NumberStyles.None, CultureInfo.InvariantCulture, out var rsaBits) && rsaBits >= SshClientOptions.LowestRequiredRsaSize
@@ -329,6 +334,7 @@ public sealed class SshConfig
             PermitRemoteOpen = ForwardSpec.ParsePermitRemoteOpen(All("permitremoteopen")),
             ExitOnForwardFailure = Bool(First("exitonforwardfailure"), false),
             StreamLocalBindUnlink = Bool(First("streamlocalbindunlink"), false),
+            StreamLocalBindMask = ParseBindMask(First("streamlocalbindmask")) ?? SshHostConfig.DefaultStreamLocalBindMask,
             Options = values.ToDictionary(kv => kv.Key, kv => (IReadOnlyList<string>)kv.Value, StringComparer.OrdinalIgnoreCase),
         };
     }
@@ -431,8 +437,100 @@ public sealed class SshConfig
     }
 
     /// <summary>
-    /// <c>AddKeysToAgent yes|confirm|ask|no [time]</c>, or just a time (meaning yes), as ssh_config(5) has it. <c>ask</c>, and anything
-    /// malformed, mean no.
+    /// <c>IPQoS interactive [bulk]</c>: each a name (<c>af11</c> to <c>af43</c>, <c>cs0</c> to <c>cs7</c>, <c>ef</c>, <c>le</c>,
+    /// <c>lowdelay</c>, <c>throughput</c>, <c>reliability</c>, case-insensitive), a decimal number from 0 to 255, or <c>none</c>; one
+    /// value is used for both, as in ssh. A line ssh would reject (an unknown value, more than two) gives neither.
+    /// </summary>
+    internal static (int? Interactive, int? Bulk) ParseIPQoS(IReadOnlyList<string> arguments)
+    {
+        if (arguments.Count is 0 or > 2 || !TryParseIPQoS(arguments[0], out var interactive))
+        {
+            return (null, null);
+        }
+
+        if (arguments.Count == 1)
+        {
+            return (interactive, interactive);
+        }
+
+        return TryParseIPQoS(arguments[1], out var bulk) ? (interactive, bulk) : (null, null);
+    }
+
+    /// <summary>One <c>IPQoS</c> value: true with the type-of-service byte, or true with null for <c>none</c>; false when it is not valid.</summary>
+    private static bool TryParseIPQoS(string value, out int? typeOfService)
+    {
+        if (value.Equals("none", StringComparison.OrdinalIgnoreCase))
+        {
+            typeOfService = null;
+            return true;
+        }
+
+        typeOfService = IPQoSNames.TryGetValue(value, out var named) ? named
+            : int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var number) && number <= 255 ? number
+            : null;
+        return typeOfService is not null;
+    }
+
+    /// <summary>ssh's <c>IPQoS</c> names and their type-of-service bytes: a DSCP code point shifted left by two, or an RFC 1349 bit.</summary>
+    private static readonly Dictionary<string, int> IPQoSNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["af11"] = 0x28,
+        ["af12"] = 0x30,
+        ["af13"] = 0x38,
+        ["af21"] = 0x48,
+        ["af22"] = 0x50,
+        ["af23"] = 0x58,
+        ["af31"] = 0x68,
+        ["af32"] = 0x70,
+        ["af33"] = 0x78,
+        ["af41"] = 0x88,
+        ["af42"] = 0x90,
+        ["af43"] = 0x98,
+        ["cs0"] = 0x00,
+        ["cs1"] = 0x20,
+        ["cs2"] = 0x40,
+        ["cs3"] = 0x60,
+        ["cs4"] = 0x80,
+        ["cs5"] = 0xa0,
+        ["cs6"] = 0xc0,
+        ["cs7"] = 0xe0,
+        ["ef"] = 0xb8,
+        ["le"] = 0x04,
+        ["lowdelay"] = 0x10,
+        ["throughput"] = 0x08,
+        ["reliability"] = 0x04,
+    };
+
+    /// <summary><c>StreamLocalBindMask</c>: an octal umask up to <c>0777</c>, or null when absent or not one.</summary>
+    internal static UnixFileMode? ParseBindMask(string? value)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            return null;
+        }
+
+        var mask = 0;
+        foreach (var digit in value)
+        {
+            if (digit is < '0' or > '7')
+            {
+                return null;
+            }
+
+            // Stops at the first value past 0777, so any number of digits cannot overflow.
+            mask = (mask * 8) + (digit - '0');
+            if (mask > 0x1FF)
+            {
+                return null;
+            }
+        }
+
+        return (UnixFileMode)mask;
+    }
+
+    /// <summary>
+    /// <c>AddKeysToAgent yes|confirm|ask|no [time]</c>, or just a time (meaning yes), as ssh_config(5) has it. <c>ask</c> (see
+    /// <see cref="SshHostConfig.AddKeysToAgentAsk"/>), and anything malformed, give null.
     /// </summary>
     internal static SshAgentKeyConstraints? ParseAddKeysToAgent(string? value)
     {

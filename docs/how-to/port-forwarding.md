@@ -12,6 +12,7 @@ a tunnel as a plain `Stream` or plugs it into `HttpClient`.
 | Reach a Unix socket on the server (Docker, PostgreSQL), or offer a Unix socket here | [Local forwarding with Unix sockets](#local-forwarding-with-unix-sockets) |
 | Reach it from your own code, without opening a port | [A tunnel stream](#tunnels-without-a-local-port) or [`HttpClient`](#httpclient-through-the-server) |
 | Let programs reach many destinations through the server | [Dynamic forwarding](#dynamic-forwarding-a-socks-proxy-ssh--d), `ssh -D` |
+| Let other machines or containers use that proxy | [Dynamic forwarding with a password](#with-a-password-beyond-loopback) |
 | Let the server reach a service on your side | [Remote forwarding](#remote-forwarding-ssh--r), `ssh -R` |
 | Serve a port (or Unix socket) on the server from your own code, without a local port | [Serving a remote port from your app](#serving-a-remote-port-from-your-app) |
 
@@ -56,6 +57,12 @@ socket here to a host and port (`-L /local.sock:host:port`), or a socket to a so
 
 - **The socket file here is owner-only**: mode 0600 on Linux and macOS, as `ssh`'s default `StreamLocalBindMask 0177` gives, and on
   Windows an ACL with only the current user. It is set before the socket accepts connections, so nobody else gets in first.
+- **A wider mode, when another account must connect.** The overloads that take a `UnixFileMode` set it instead, as
+  `StreamLocalBindMask` does in `ssh_config` (`0117` gives 0660). Connecting takes write permission. On Windows the socket stays
+  the current user's whatever the mode:
+
+  [!code-csharp[](../snippets/Forwarding.cs#local-unix-socket-mode)]
+
 - **An existing file is not replaced**: `ForwardLocalUnixSocketAsync` throws a `SocketException`, as `ssh` fails without
   `StreamLocalBindUnlink yes`. The forwarder removes its socket file when it is disposed.
 - **The server decides** with sshd's `AllowStreamLocalForwarding`; a refused connection is closed, and the forwarding goes on.
@@ -83,6 +90,38 @@ The same handler works with `IHttpClientFactory` (`ConfigurePrimaryHttpMessageHa
 ## Dynamic forwarding: a SOCKS proxy (`ssh -D`)
 
 [!code-csharp[](../snippets/Forwarding.cs#dynamic)]
+
+### With a password, beyond loopback
+
+Like `ssh -D`, the proxy has no authentication: anyone who can reach its port can use the server's network. When other machines,
+containers or VMs must use it, pass credentials. The proxy then takes SOCKS 5 with username/password authentication (RFC 1929)
+only, and turns away SOCKS 4 and 4a, which have no passwords, and SOCKS 5 clients that do not authenticate:
+
+[!code-csharp[](../snippets/Forwarding.cs#dynamic-auth)]
+
+A password keeps out those who do not know it. It does not protect the traffic to the proxy:
+
+```mermaid
+flowchart LR
+    app["Application on another machine"] -- "SOCKS 5: user name and password,<br/>then the traffic, in clear text" --> proxy["SOCKS proxy (this machine)"]
+    proxy == "SSH: encrypted" ==> sshd["sshd"]
+    sshd -- "TCP" --> dest["Destination"]
+```
+
+- **Clear text on the local network.** RFC 1929 sends the user name and password unencrypted, and the application's connection to
+  the proxy is plain TCP: anyone who can watch that network can read the password and the traffic, and reuse the password. Only
+  the hop from this machine to the server is encrypted. Use TLS end to end (HTTPS) for anything sensitive.
+- **Prefer loopback.** When the applications run on this machine, bind to `IPAddress.Loopback` (with or without a password):
+  nothing then crosses a network. Beyond loopback, bind to the one address the clients use (not `IPAddress.Any`), and restrict
+  the port with a firewall too.
+- **Use a long random password**, from a secret store or the environment, never written in code or configuration files. Failed
+  attempts are logged (at warning level, without the client's address), but not rate limited.
+- **How they are checked.** The forwarder keeps keyed digests of the user name and password, not the password itself, and compares
+  each attempt in constant time, so the time to answer does not reveal how close a guess was. Each is 1 to 255 bytes in UTF-8;
+  `NetworkCredential.Domain` is not used.
+- **Clients.** `curl --proxy socks5h://user:password@host:port`, `HttpClient` with
+  `new WebProxy("socks5://host:port") { Credentials = new NetworkCredential(...) }`, and SshSharp's own
+  `SshProxy.Socks5(host, port, credentials)` all speak it.
 
 ## Remote forwarding (`ssh -R`)
 
@@ -204,8 +243,9 @@ before disposing; forwardings to a host and port, or dynamic ones, close their c
 
 ## Notes and pitfalls
 
-- **Bind to loopback.** A local forwarder or SOCKS proxy has no authentication: anyone who can reach its port can use the server's
-  network. Use `IPAddress.Loopback` unless other machines should use it.
+- **Bind to loopback.** A local forwarder has no authentication, nor does a SOCKS proxy started without credentials: anyone who can
+  reach its port can use the server's network. Use `IPAddress.Loopback` unless other machines should use it, and then give the SOCKS
+  proxy [a password](#with-a-password-beyond-loopback).
 - **Server policy.** sshd's `AllowTcpForwarding no` refuses tunnels: each forwarded connection is closed, and `OpenTcpTunnelAsync`
   throws `SshException` with `ChannelClosed`. A bind address other than loopback for remote forwarding needs `GatewayPorts`.
 - **Lifetime.** Forwarding runs until the forwarder is disposed, the client is disposed, or the connection ends. Watch
@@ -217,6 +257,8 @@ before disposing; forwardings to a host and port, or dynamic ones, close their c
   forwarding to a handler at most its `maxConnections`.
 - **From `ssh_config`.** `LocalForward`, `RemoteForward` and `DynamicForward` start with the connection when
   `SshConfigConnectOptions.StartForwardings` is true, Unix-socket forms included (`LocalForward /tmp/docker.sock /var/run/docker.sock`).
+  Socket paths take `ssh_config`'s `%` tokens and `${VAR}` on both sides (`RemoteForward /home/%r/app.sock /run/app.sock`), and the
+  local one `~` too; `StreamLocalBindMask` sets the mode of a local socket.
 
 ## See also
 

@@ -58,8 +58,14 @@ No. Within a process, one `SshClient` already multiplexes any number of channels
 Yes: `SshClientOptions.Proxy = SshProxy.Http(...)`, `SshProxy.Socks5(...)` or `SshProxy.FromUri(...)`.
 
 **Can I set socket options, such as TCP keep-alive or buffer sizes?**
-Yes, with `SshClientOptions.ConfigureSocket`, called with the socket before it connects. See
+Yes, with `SshClientOptions.ConfigureSocket` (or `SshConfigConnectOptions.ConfigureSocket` when connecting by alias), called with
+the socket before it connects. By alias, `ssh_config`'s `TCPKeepAlive` (on by default, as in `ssh`) and `IPQoS` apply first. See
 [Tune and inspect a connection](../how-to/tune-and-inspect-connections.md#set-socket-options).
+
+**Can the SOCKS proxy (`ForwardDynamicPortAsync`) require a password?**
+Yes: pass a `NetworkCredential`, and the proxy takes only SOCKS 5 with username/password authentication (RFC 1929). The password
+crosses the local network in clear text, so keep the proxy on loopback when the applications run on the same machine. See
+[Dynamic forwarding with a password](../how-to/port-forwarding.md#with-a-password-beyond-loopback).
 
 **Can I force a key re-exchange?**
 Yes: `client.RekeyAsync()`, as ssh's `~R` escape. Keys are also renewed on their own after `RekeyAfterBytes` or `RekeyAfterTime`.

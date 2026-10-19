@@ -459,6 +459,26 @@ public sealed class SshClientOptions
     public Config.SshAddressFamily AddressFamily { get; init; }
 
     /// <summary>
+    /// How many times to try the network connection, one second apart, as ssh_config's <c>ConnectionAttempts</c>: the TCP connection to
+    /// the server, or to the first of the <see cref="JumpHosts"/>, or to the <see cref="Proxy"/>. Only failures to reach it are tried
+    /// again (refused, unreachable, timed out), never a name that does not resolve, a proxy's refusal, a failed handshake or
+    /// authentication, and <see cref="ConnectTimeout"/> bounds all the attempts together. Default 1. Used by
+    /// <see cref="SshClient.ConnectAsync(string, int, SshClientOptions, CancellationToken)"/>; ignored when connecting over a stream you opened.
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException">The value is less than 1.</exception>
+    public int ConnectionAttempts
+    {
+        get => _connectionAttempts;
+        init
+        {
+            ArgumentOutOfRangeException.ThrowIfLessThan(value, 1);
+            _connectionAttempts = value;
+        }
+    }
+
+    private readonly int _connectionAttempts = 1;
+
+    /// <summary>
     /// Sets socket options on the TCP connection to the server: TCP keep-alive, buffer sizes, the type of service (DSCP), and so on. It is
     /// called with the new socket before it connects (after it is bound to <see cref="LocalEndPoint"/>, if set), so options that must be
     /// set before the handshake, such as the receive buffer size that TCP window scaling depends on, take effect. Null (the default)

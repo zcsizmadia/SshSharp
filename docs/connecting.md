@@ -73,15 +73,17 @@ What is taken from the configuration: `HostName`, `Port`, `User`, `IdentityFile`
 `UpdateHostKeys`, `HostKeyAlias`, `KexAlgorithms`, `HostKeyAlgorithms`, `Ciphers`, `MACs`, `PubkeyAcceptedAlgorithms`,
 `PreferredAuthentications`, `PubkeyAuthentication`, `PasswordAuthentication`, `KbdInteractiveAuthentication`, `BatchMode`,
 `ProxyJump`, `ProxyCommand`, `ServerAliveInterval`, `ServerAliveCountMax`, `ConnectTimeout`, `ConnectionAttempts`, `AddressFamily`,
-`BindAddress`, `BindInterface`, `ForwardAgent`, `AddKeysToAgent`, `GSSAPIAuthentication`, `GSSAPIDelegateCredentials`,
-`ChannelTimeout`, `ObscureKeystrokeTiming`, `RefuseConnection` and `KnownHostsCommand` (with `AllowKnownHostsCommand`); with `StartForwardings`, also `LocalForward`, `RemoteForward`,
-`DynamicForward`, `PermitRemoteOpen`, `GatewayPorts`, `ExitOnForwardFailure` and `ClearAllForwardings`.
-`Match` (including `Match exec`, which needs an opt-in) and `Include` work as in OpenSSH.
+`BindAddress`, `BindInterface`, `TCPKeepAlive`, `IPQoS`, `ForwardAgent`, `AddKeysToAgent` (`ask` with `ConfirmAddKeyToAgent`),
+`GSSAPIAuthentication`, `GSSAPIDelegateCredentials`, `ChannelTimeout`, `ObscureKeystrokeTiming`, `RefuseConnection` and
+`KnownHostsCommand` (with `AllowKnownHostsCommand`); with `StartForwardings`, also `LocalForward`, `RemoteForward`,
+`DynamicForward`, `PermitRemoteOpen`, `GatewayPorts`, `StreamLocalBindMask`, `StreamLocalBindUnlink`, `ExitOnForwardFailure` and
+`ClearAllForwardings`. `Match` (including `Match exec`, which needs an opt-in) and `Include` work as in OpenSSH.
 
 `SshConfigConnectOptions` also takes a `Config` (default: the user's and the system's files), `ResolveOptions` (home
 directory, environment, local user), a `Password`, extra `PrivateKeys`, a `PassphraseProvider` for encrypted identity files,
 `KeyboardInteractive`, a `HostKeyVerifier` that replaces the configured one, `AskHostKey` and `ConfirmHostKeyUpdate`,
-`UseAgent`/`Agent`, `AllowProxyCommand`, `AllowKnownHostsCommand`, a `Proxy` (HTTP or SOCKS), `StartForwardings`, `AuthenticationBanner` and a
+`ConfirmAddKeyToAgent` (for `AddKeysToAgent ask`), `UseAgent`/`Agent`, `AllowProxyCommand`, `AllowKnownHostsCommand`, a `Proxy`
+(HTTP or SOCKS), `ConfigureSocket` (run after `TCPKeepAlive` and `IPQoS`), `StartForwardings`, `AuthenticationBanner` and a
 `Logger`. `Port`, `ConnectTimeout`, `ConnectionAttempts`, `AddressFamily`, `KeepAliveInterval` and `KeepAliveCountMax` override what the
 configuration says (see [Override what the configuration says](how-to/ssh-config-and-known-hosts.md#override-what-the-configuration-says)).
 
@@ -162,11 +164,14 @@ The transport is not trusted: the server's host key is verified over it as over 
 jump hosts behind it, the DI package's endpoints and `ssh_config`.
 ## Socket options, identification and channel sizes
 
-Three options shape the connection itself. [Tune and inspect a connection](how-to/tune-and-inspect-connections.md) has the details.
+These options shape the connection itself. [Tune and inspect a connection](how-to/tune-and-inspect-connections.md) has the details.
 
 - **`ConfigureSocket`** is called with the TCP socket before it connects, to set TCP keep-alive, buffer sizes or the type of
   service. It applies to the TCP connection SshSharp opens, to the server or to the first of `JumpHosts`: not through a `Proxy`,
-  and not over a stream you opened.
+  and not over a stream you opened. `SshConfigConnectOptions.ConfigureSocket` does the same when connecting by alias, after
+  `ssh_config`'s `TCPKeepAlive` (on unless it says `no`, as in `ssh`) and `IPQoS` have been applied, so what it sets wins.
+- **`ConnectionAttempts`** tries a server that could not be reached again, one second apart, as `ssh_config`'s directive does
+  (default 1). `ConnectTimeout` bounds all the attempts together.
 - **`VersionAddendum`** adds a comment to the client's identification line (`SSH-2.0-SshSharp_1.2.0 inventory-sync/3.4`), which
   servers log. It is sent unencrypted, so it must not hold anything secret or personal.
 - **`ChannelWindowSize`** (default 2 MiB) and **`ChannelMaxPacketSize`** (default 32 KiB) set how much the server may send on
@@ -241,7 +246,10 @@ await using var proxy = await client.ForwardDynamicPortAsync(new IPEndPoint(IPAd
 // for example: curl --socks5-hostname 127.0.0.1:1080 http://intranet.internal/
 ```
 
-The proxy has no authentication, so anyone who can reach it can use the server's network: keep it on a loopback address.
+The proxy has no authentication, so anyone who can reach it can use the server's network: keep it on a loopback address. When
+other machines must use it, pass a `NetworkCredential`: the proxy then takes only SOCKS 5 with username/password authentication
+(RFC 1929). The password and the traffic to the proxy cross the local network in clear text, so loopback stays the better choice
+where it will do; see [Dynamic forwarding with a password](how-to/port-forwarding.md#with-a-password-beyond-loopback).
 
 Remote port forwarding (`ssh -R 8080:localhost:3000`) is the other direction: the server listens, and each connection made
 to it is relayed to a host and port reached from this machine.
@@ -335,7 +343,10 @@ forwarding, listed in `client.RemoteSocketForwardings`; as in ssh, a target with
 socket paths on either side: `LocalForward /tmp/docker.sock /var/run/docker.sock`, `LocalForward 15432 /run/postgresql/.s.PGSQL.5432`
 or `LocalForward ~/db.sock db.internal:5432`. Those that listen on a socket here are listed in `client.LocalSocketForwardings`. Their paths
 take `ssh_config`'s tokens (`%d`, `%h`, `%C` and the rest), `~` and `${VAR}`, as `ssh` expands them; a local path may also be
-written with `\` on Windows. `StreamLocalBindUnlink yes` replaces a stale socket file instead of failing.
+written with `\` on Windows. `StreamLocalBindUnlink yes` replaces a stale socket file instead of failing, and `StreamLocalBindMask`
+sets the socket file's permissions (`0177`, owner-only, by default; `0117` lets the owner's group connect). `RemoteForward` socket
+paths take the tokens and `${VAR}` too, expanded on this machine as `ssh` does (`RemoteForward /home/%r/app.sock /run/app.sock`:
+`%r` is the remote user); `~` only in the local one, since on the server's side it would name this machine's home directory.
 
 ```
 Host db-tunnel

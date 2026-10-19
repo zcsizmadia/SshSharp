@@ -139,4 +139,13 @@ internal static partial class SshLog
 
     [LoggerMessage(EventId = 50, Level = LogLevel.Information, Message = "Connection attempt {Attempt} of {Attempts} failed ({Reason}); trying again in a second (ConnectionAttempts)")]
     public static partial void ConnectionAttemptFailed(ILogger logger, int attempt, int attempts, System.Net.Sockets.SocketError reason);
+
+    [LoggerMessage(EventId = 53, Level = LogLevel.Debug, Message = "The socket option {Option} could not be set ({Reason}); connecting without it")]
+    public static partial void SocketOptionNotSet(ILogger logger, string option, System.Net.Sockets.SocketError reason);
+
+    [LoggerMessage(EventId = 54, Level = LogLevel.Information, Message = "Key {Fingerprint} was not added to the agent: AddKeysToAgent ask, and it was not confirmed (declined, no ConfirmAddKeyToAgent, or BatchMode)")]
+    public static partial void KeyNotAddedToAgent(ILogger logger, string fingerprint);
+
+    [LoggerMessage(EventId = 55, Level = LogLevel.Warning, Message = "A client of the SOCKS proxy on {LocalEndPoint} failed to authenticate ({Reason}); its connection was closed")]
+    public static partial void SocksAuthenticationFailed(ILogger logger, string localEndPoint, string reason);
 }

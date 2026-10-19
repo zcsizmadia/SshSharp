@@ -163,6 +163,23 @@ internal static class Keys
         // </agent-add>
     }
 
+    public static async Task AddKeysToAgentAskAsync(CancellationToken cancellationToken)
+    {
+        // <add-keys-to-agent-ask>
+        // ~/.ssh/config:  Host *
+        //                   AddKeysToAgent ask
+        // Once a server has accepted a key from an identity file, ask before it goes to the agent, as ssh asks with ssh-askpass.
+        await using var client = await SshClient.ConnectAsync("deploy@build", new SshConfigConnectOptions
+        {
+            ConfirmAddKeyToAgent = (prompt, ct) =>
+            {
+                Console.Write($"Add key {prompt.IdentityFile} ({prompt.Comment ?? prompt.Fingerprint}) to the agent? [y/N] ");
+                return ValueTask.FromResult(Console.ReadLine()?.Trim() is "y" or "Y");
+            },
+        }, cancellationToken);
+        // </add-keys-to-agent-ask>
+    }
+
     public static async Task GenerateAsync(CancellationToken cancellationToken)
     {
         // <generate>

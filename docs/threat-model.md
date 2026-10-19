@@ -10,7 +10,7 @@ proxies, remote dynamic and Unix-socket forwarding, destination-constrained agen
 ## Trusted
 
 - **The application** that uses the library, its options and callbacks (host key verifier, loggers, `Match exec` runner, a custom
-  proxy's connector, `ConfigureSocket`, which gets the TCP socket before it connects).
+  proxy's connector, `ConfigureSocket`, which gets the TCP socket before it connects, and `ConfirmAddKeyToAgent`).
 - **Signers** (`SshKeySigner`, `SshPrivateKey.FromSigner`, `FromRsa`, `FromECDsa`): application code, or a key service it trusts,
   that signs for a key SshSharp never sees. Each request says what it is for (`SshSignRequest.Purpose`: logging in, an SSH
   signature with its namespace, a certificate the key issues as a CA, or `Other`: data of another form that a program on a server asked a forwarded in-process agent to sign), so a signer can refuse by policy. What it signs includes the session identifier and the user name,
@@ -162,8 +162,11 @@ A man in the middle can read, change, drop and inject bytes. The server itself m
   every process on the machine computes alike). SshSharp therefore uses an agent pipe only when its owner is the current user,
   SYSTEM or the Administrators group, as PuTTY checks Pageant's pipe; otherwise no signing request or key is sent to it.
 - **Adding keys** (`AddKeyAsync`, `AddKeysToAgent`): the private key goes to the agent the application named. `AddKeysToAgent`
-  adds only identity-file keys the server accepted, never keys the application passed in `PrivateKeys`. The lock passphrase
-  (`LockAsync`) is a managed string and cannot be wiped.
+  adds only identity-file keys the server accepted, never keys the application passed in `PrivateKeys`. With `AddKeysToAgent ask`,
+  a key goes only after the application's `ConfirmAddKeyToAgent` says yes; without that callback, or in `BatchMode`, none goes,
+  so a configuration cannot put keys into the agent unasked. The prompt it gets carries the identity file's path and the key's
+  comment, which can name the user; they are given to the application, not logged. The lock passphrase (`LockAsync`) is a managed
+  string and cannot be wiped.
 - **An in-process agent** (`SshAgent.FromKeys`) is trusted like the keys it holds: it is the application's own code and keys, reached
   through no socket or pipe, so no other local user can pose as it or connect to it. It refuses to add, remove or lock keys, so
   `AddKeysToAgent` and `AddKeyAsync` cannot put keys into it.
@@ -172,13 +175,24 @@ A man in the middle can read, change, drop and inject bytes. The server itself m
 
 - `ForwardLocalPortAsync` and `ForwardDynamicPortAsync` bind where the application says. Forwardings from `ssh_config` bind
   to loopback unless the configuration names an address or sets `GatewayPorts`, as with `ssh`.
-- `ForwardLocalUnixSocketAsync` (and `LocalForward /path ...`) listens on a Unix socket file it creates, owner-only: mode 0600 on
-  Unix (`ssh`'s default `StreamLocalBindMask 0177`), an ACL with only the current user on Windows. The permission is set between
-  `bind` and `listen`, while the socket refuses connections, so no other local user can connect in between. It never replaces an
-  existing file unless `ssh_config` says `StreamLocalBindUnlink yes` (then whatever file is at that path is deleted, as `ssh` does),
-  and it removes its socket file when it stops. The paths come from the application or the configuration; they are not logged.
-- The SOCKS proxy has no authentication (like `ssh -D`) and supports only CONNECT (SOCKS 4, 4a and 5). Anyone who can reach
-  its address can use the SSH connection, so it should listen on loopback.
+- `ForwardLocalUnixSocketAsync` (and `LocalForward /path ...`) listens on a Unix socket file it creates, owner-only by default: mode
+  0600 on Unix (`ssh`'s default `StreamLocalBindMask 0177`), an ACL with only the current user on Windows. The application (a
+  `socketMode`) or the configuration (`StreamLocalBindMask`) can widen it on Unix, for example to the owner's group; everyone the
+  mode lets connect can then use the SSH connection. Windows keeps the current-user ACL whatever the mode: a Unix mode has no
+  faithful ACL counterpart, and the library narrows rather than guesses. The permission is set between `bind` and `listen`, while
+  the socket refuses connections, so no one the mode leaves out can connect in between. It never replaces an existing file unless
+  `ssh_config` says `StreamLocalBindUnlink yes` (then whatever file is at that path is deleted, as `ssh` does), and it removes its
+  socket file when it stops. The paths come from the application or the configuration; they are not logged.
+- The SOCKS proxy supports only CONNECT (SOCKS 4, 4a and 5). Started without credentials it has no authentication (like `ssh -D`):
+  anyone who can reach its address can use the SSH connection, so it should listen on loopback. Started with a `NetworkCredential`,
+  it takes only SOCKS 5 with username/password authentication (RFC 1929) and refuses SOCKS 4 and clients that do not authenticate,
+  so it can listen beyond loopback. That protects against those who cannot see the traffic, not against those who can: RFC 1929
+  sends the credentials in clear text, and the application's traffic to the proxy is plain TCP (only the hop from this machine to
+  the server is encrypted), so anyone on that network path can read the password and reuse it, and read or change the traffic.
+  Loopback stays the safer choice where it will do. The forwarder keeps only HMAC-SHA256 digests of the user name and password, under
+  a random key made for it, and compares each attempt's digests in constant time (both fields, without stopping at the first that
+  differs), so response timing reveals nothing about the expected values or their lengths. Failed attempts are logged without the
+  client's address and are not rate limited: the password must be long and random.
 - Remote forwarding to a handler opens no listener on this machine: its connections reach the application's code only through
   the SSH connection (see [Channels the server opens](#channels-the-server-opens) for what that code must expect).
 
@@ -318,6 +332,12 @@ connection, but not read or change it: each host's key is verified end to end, b
   contain white space either, which would split `%h` into extra arguments. User names may (Windows account names can).
 - The config file itself is trusted to the same degree OpenSSH trusts it: whoever can edit it can run commands as the user.
   Values it sets (`HostName`, `User`) are used as written.
+- Socket paths in `LocalForward` and `RemoteForward` take `%` tokens and `${VAR}`, as in `ssh`. A `RemoteForward` path is expanded
+  on this machine and sent to the server as one string (no shell is involved on either side), so a caller-supplied host or user
+  name in `%h` or `%r` can only change which path is asked for; the server's own `StreamLocalBindMask` and permissions apply there.
+  `StreamLocalBindMask` can widen a local socket's permissions (see [Local listeners](#local-listeners-port-forwarding-and-socks)).
+- `TCPKeepAlive` and `IPQoS` set socket options only: keep-alive probes and the type-of-service mark are visible on the network
+  path, as with `ssh`, and say nothing the connection's existence does not.
 
 ### Dependency injection
 

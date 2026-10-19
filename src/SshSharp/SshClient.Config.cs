@@ -74,7 +74,8 @@ public sealed partial class SshClient
         {
             // Resolved once per host: finding the environment's agent on Windows lists the named pipes.
             var agent = await ResolveAgentAsync(hostConfig, options).ConfigureAwait(false);
-            var keys = await LoadIdentitiesAsync(hostConfig, options, agent, logger, token).ConfigureAwait(false);
+            var keyFiles = new Dictionary<SshPrivateKey, string>(ReferenceEqualityComparer.Instance);
+            var keys = await LoadIdentitiesAsync(hostConfig, options, agent, keyFiles, logger, token).ConfigureAwait(false);
             owner.Add(keys);
 
             Stream stream;
@@ -112,7 +113,9 @@ public sealed partial class SshClient
             else
             {
                 var local = TcpConnector.FromConfig(hostConfig.BindAddress, hostConfig.BindInterface);
-                var connector = options.TcpConnector ?? (options.Proxy is { } proxy ? ProxyConnector(proxy, local) : DirectConnector(local));
+                var connector = options.TcpConnector ?? (options.Proxy is { } proxy
+                    ? ProxyConnector(proxy, local)
+                    : DirectConnector(local, TcpConnector.Configure(hostConfig.TcpKeepAlive, hostConfig.IPQoSBulk, options.ConfigureSocket, logger)));
                 var family = options.AddressFamily ?? hostConfig.AddressFamily;
                 var attempts = options.ConnectionAttempts ?? hostConfig.ConnectionAttempts;
                 var (tcpStream, tcpOwner) = await WithConnectionAttemptsAsync(
@@ -169,9 +172,16 @@ public sealed partial class SshClient
             try
             {
                 // After the connect, so ConnectTimeout no longer applies: the caller's token does.
-                if (hostConfig.AddKeysToAgent is { } constraints && agent is { } keyAgent)
+                if (agent is { } keyAgent && (hostConfig.AddKeysToAgent is not null || hostConfig.AddKeysToAgentAsk))
                 {
-                    await AddAcceptedKeysToAgentAsync(client, keys, keyAgent, constraints, logger, cancellationToken).ConfigureAwait(false);
+                    // ask: each key only once the caller confirms it, as ssh asks; without a way to ask (or in batch mode), none.
+                    var confirm = hostConfig.AddKeysToAgentAsk
+                        ? hostConfig.BatchMode || options.ConfirmAddKeyToAgent is not { } ask
+                            ? (_, _) => ValueTask.FromResult(false)
+                            : ask
+                        : null;
+                    await AddAcceptedKeysToAgentAsync(client, keys, keyFiles, keyAgent, hostConfig.AddKeysToAgent ?? new SshAgentKeyConstraints(), confirm,
+                        hostConfig.HostName, logger, cancellationToken).ConfigureAwait(false);
                 }
 
                 if (depth == 0 && options.StartForwardings)
@@ -243,22 +253,28 @@ public sealed partial class SshClient
     private static Func<string, int, SshAddressFamily, CancellationToken, ValueTask<(Stream Stream, IAsyncDisposable? Owner)>> ProxyConnector(SshProxy proxy, IReadOnlyList<IPEndPoint>? local) =>
         async (host, port, _, cancellationToken) => (await proxy.ConnectAsync(host, port, local, cancellationToken).ConfigureAwait(false), null);
 
-    /// <summary>Opens the first hop over TCP, from the configured BindAddress or BindInterface when there is one; the stream owns the socket.</summary>
-    private static Func<string, int, SshAddressFamily, CancellationToken, ValueTask<(Stream Stream, IAsyncDisposable? Owner)>> DirectConnector(IReadOnlyList<IPEndPoint>? local) =>
-        async (host, port, family, cancellationToken) => (await TcpConnector.ConnectAsync(host, port, local, family, "the server", cancellationToken).ConfigureAwait(false), null);
+    /// <summary>
+    /// Opens the first hop over TCP, from the configured BindAddress or BindInterface when there is one, with the socket options of
+    /// <paramref name="configure"/>; the stream owns the socket.
+    /// </summary>
+    private static Func<string, int, SshAddressFamily, CancellationToken, ValueTask<(Stream Stream, IAsyncDisposable? Owner)>> DirectConnector(IReadOnlyList<IPEndPoint>? local,
+        Action<System.Net.Sockets.Socket>? configure) =>
+        async (host, port, family, cancellationToken) =>
+            (await TcpConnector.ConnectAsync(host, port, local, family, "the server", configure, cancellationToken).ConfigureAwait(false), null);
 
     /// <summary>
     /// The keys to offer, in ssh's order: identity files the agent holds (signed by the agent, so an encrypted file needs no passphrase),
     /// the agent's other keys (not with <c>IdentitiesOnly</c>), then the remaining identity files that exist (encrypted ones only when a
-    /// passphrase is provided; missing files are skipped, as ssh does). Keys with a certificate come first, paired with it.
+    /// passphrase is provided; missing files are skipped, as ssh does). Keys with a certificate come first, paired with it. Each key
+    /// loaded from a file, and its certified form, is recorded in <paramref name="keyFiles"/> with the file's path.
     /// </summary>
-    private static async Task<List<SshPrivateKey>> LoadIdentitiesAsync(SshHostConfig hostConfig, SshConfigConnectOptions options, SshAgent? agent, ILogger logger,
-        CancellationToken cancellationToken)
+    private static async Task<List<SshPrivateKey>> LoadIdentitiesAsync(SshHostConfig hostConfig, SshConfigConnectOptions options, SshAgent? agent,
+        Dictionary<SshPrivateKey, string> keyFiles, ILogger logger, CancellationToken cancellationToken)
     {
         var keys = new List<SshPrivateKey>();
         try
         {
-            return await LoadIdentitiesAsync(keys, hostConfig, options, agent, logger, cancellationToken).ConfigureAwait(false);
+            return await LoadIdentitiesAsync(keys, hostConfig, options, agent, keyFiles, logger, cancellationToken).ConfigureAwait(false);
         }
         catch
         {
@@ -273,7 +289,7 @@ public sealed partial class SshClient
     }
 
     private static async Task<List<SshPrivateKey>> LoadIdentitiesAsync(List<SshPrivateKey> keys, SshHostConfig hostConfig, SshConfigConnectOptions options,
-        SshAgent? agent, ILogger logger, CancellationToken cancellationToken)
+        SshAgent? agent, Dictionary<SshPrivateKey, string> keyFiles, ILogger logger, CancellationToken cancellationToken)
     {
         var paths = new List<string>();
         if (!hostConfig.PubkeyAuthentication)
@@ -316,7 +332,9 @@ public sealed partial class SshClient
 
             try
             {
-                keys.Add(SshPrivateKey.Parse(text));
+                var key = SshPrivateKey.Parse(text);
+                keys.Add(key);
+                keyFiles[key] = path;
                 paths.Add(path);
                 continue;
             }
@@ -339,7 +357,9 @@ public sealed partial class SshClient
 
             try
             {
-                keys.Add(SshPrivateKey.Parse(text, passphrase));
+                var key = SshPrivateKey.Parse(text, passphrase);
+                keys.Add(key);
+                keyFiles[key] = path;
                 paths.Add(path);
             }
             catch (FormatException ex)
@@ -382,9 +402,15 @@ public sealed partial class SshClient
         var certified = new List<SshPrivateKey>();
         foreach (var key in plain.Where(k => k.Certificate is null))
         {
-            certified.AddRange(certificates
-                .Where(c => c.Type == SshCertificateType.User && c.PublicKey.Span.SequenceEqual(key.PublicKey.Span))
-                .Select(key.WithCertificate));
+            foreach (var certificate in certificates.Where(c => c.Type == SshCertificateType.User && c.PublicKey.Span.SequenceEqual(key.PublicKey.Span)))
+            {
+                var withCertificate = key.WithCertificate(certificate);
+                certified.Add(withCertificate);
+                if (keyFiles.TryGetValue(key, out var path))
+                {
+                    keyFiles[withCertificate] = path;
+                }
+            }
         }
 
         return [.. certified, .. plain];
@@ -393,13 +419,23 @@ public sealed partial class SshClient
     /// <summary>
     /// <c>AddKeysToAgent</c>: the identity-file keys the server accepted go to the agent, so later connections use them without loading the
     /// file (or asking for its passphrase) again. Keys the caller passed in <see cref="SshConfigConnectOptions.PrivateKeys"/> are the
-    /// caller's to manage and never go to the agent. Best effort, as with ssh: an agent that is not running or refuses is logged, not fatal.
+    /// caller's to manage and never go to the agent. With <paramref name="confirm"/> (<c>AddKeysToAgent ask</c>), each key goes only once
+    /// it says yes. Best effort, as with ssh: an agent that is not running or refuses is logged, not fatal.
     /// </summary>
-    private static async Task AddAcceptedKeysToAgentAsync(SshClient client, List<SshPrivateKey> identityKeys, SshAgent agent, SshAgentKeyConstraints constraints,
+    private static async Task AddAcceptedKeysToAgentAsync(SshClient client, List<SshPrivateKey> identityKeys, Dictionary<SshPrivateKey, string> keyFiles,
+        SshAgent agent, SshAgentKeyConstraints constraints, Func<SshAddKeyToAgentPrompt, CancellationToken, ValueTask<bool>>? confirm, string host,
         ILogger logger, CancellationToken cancellationToken)
     {
         foreach (var key in client.AcceptedKeys.Where(k => k.HasLocalPrivateMaterial && identityKeys.Contains(k, ReferenceEqualityComparer.Instance)))
         {
+            if (confirm is not null
+                && !await confirm(new SshAddKeyToAgentPrompt(keyFiles.GetValueOrDefault(key, string.Empty), key.Fingerprint, key.Comment, host), cancellationToken)
+                    .ConfigureAwait(false))
+            {
+                SshLog.KeyNotAddedToAgent(logger, key.Fingerprint);
+                continue;
+            }
+
             try
             {
                 await agent.AddKeyAsync(key, constraints, cancellationToken).ConfigureAwait(false);
