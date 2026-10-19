@@ -35,7 +35,7 @@ flowchart LR
 | Area | Guarantee |
 |---|---|
 | Server identity | A host key verifier is required; there is no "accept anything" default. The key is verified before any credential is sent. |
-| Cryptography | Only modern algorithms (no CBC, SHA-1 MACs, `ssh-rsa` signatures, DH group 1, RSA under 2048 bits); strict key exchange offered on every connection and used whenever the server supports it; post-quantum hybrid key exchange preferred. |
+| Cryptography | Only modern algorithms (no CBC, SHA-1 MACs, `ssh-rsa` signatures or DH group 1); RSA keys of at least 2048 bits, unless an application lowers `RequiredRsaSize` for an old device's host key, and never under 1024 bits; strict key exchange offered on every connection and used whenever the server supports it; post-quantum hybrid key exchange preferred. |
 | Credentials | Passwords (given, or asked for through `PasswordProvider`), new passwords for an expired one, and keyboard-interactive answers go only to the destination, never to `ProxyJump` hops; with `JumpHosts`, each hop gets only its own options' credentials and the destination's go to the destination alone. Keys held in memory sign at once (the signature is useless to anyone but that session); agent, signer and hardware keys are offered only after the server says it would accept them. Authentication failures list methods and key fingerprints, never secrets or user names. |
 | Secrets in memory | Key material is wiped (`CryptographicOperations.ZeroMemory`) when no longer needed, and disposing a key clears it. Passwords are managed strings and cannot be wiped. |
 | Logs and telemetry | Never contain passwords, private keys, command text, user names or host names. |
@@ -51,7 +51,9 @@ flowchart LR
   ([Run a command](../how-to/run-a-command.md#pass-arguments-safely)).
 - **Agent forwarding** lets anyone with enough rights on the server use your agent while you are connected. Forward only to trusted
   servers, and prefer destination-constrained keys.
-- **Listeners.** Local forwarders and SOCKS proxies have no authentication; bind them to loopback. A local Unix-socket forwarder's
+- **Listeners.** Local forwarders have no authentication, and a SOCKS proxy has none unless it is started with credentials
+  (SOCKS 5 username/password, RFC 1929, which travel in clear text with the traffic); bind them to loopback ([Dynamic
+  forwarding](../how-to/port-forwarding.md#dynamic-forwarding-a-socks-proxy-ssh--d)). A local Unix-socket forwarder's
   socket file is owner-only. Remote dynamic forwarding lets the server's side reach your network; pass an `allowDestination` filter
   (`PermitRemoteOpen` in `ssh_config`).
 - **Configuration from elsewhere.** `ProxyCommand` is allowed by default (as in `ssh`); `KnownHostsCommand` and `Match exec` are

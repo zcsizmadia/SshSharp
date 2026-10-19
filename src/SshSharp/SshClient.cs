@@ -891,7 +891,7 @@ public sealed partial class SshClient : IAsyncDisposable
                             catch (SshException ex) when (ex.Reason == SshFailureReason.AgentFailed)
                             {
                                 // The agent lost the key or the user declined to confirm: the next key may still do.
-                                SshLog.AgentKeySkipped(logger, key.Fingerprint, ex.Message);
+                                SshLog.AgentKeySkipped(logger, key.Fingerprint, new(ex));
                                 attempts.Add(new SshAuthenticationAttempt("publickey", SshAuthenticationOutcome.SigningFailed, key.Fingerprint));
                                 result = null;
                                 continue;

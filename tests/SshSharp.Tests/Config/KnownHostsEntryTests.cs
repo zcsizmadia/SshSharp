@@ -31,6 +31,30 @@ public class KnownHostsEntryTests
     }
 
     [Test]
+    [Arguments("example.com\n@cert-authority *", "ssh-ed25519", null)]
+    [Arguments("example.com\r", "ssh-ed25519", null)]
+    [Arguments("a.example.com b.example.com", "ssh-ed25519", null)]
+    [Arguments("example.com", "ssh-ed25519\n@cert-authority", null)]
+    [Arguments("example.com", "ssh-ed25519 AAAA", null)]
+    [Arguments("example.com", "ssh\u0000ed25519", null)]
+    [Arguments("example.com", "ssh-ed25519", "ok\n@cert-authority * ssh-ed25519 AAAA")]
+    [Arguments("example.com", "ssh-ed25519", "ok\r")]
+    [Arguments("example.com", "ssh-ed25519", "ok\u0085")]
+    [Arguments("example.com", "ssh-ed25519", "bell\u0007")]
+    public async Task Constructor_RefusesFieldsThatWouldAddFieldsOrLines(string hostPatterns, string keyType, string? comment)
+    {
+        // An application-supplied value must not be able to write another known_hosts line (an @cert-authority line, say).
+        await Assert.That(() => new KnownHostsEntry(hostPatterns, keyType, Key, KnownHostsMarker.None, comment)).Throws<ArgumentException>();
+    }
+
+    [Test]
+    public async Task Constructor_KeepsSpacesAndTabsInTheComment()
+    {
+        var entry = new KnownHostsEntry("example.com", "ssh-ed25519", Key, KnownHostsMarker.None, "added by\tdeploy job");
+        await Assert.That(entry.ToLine()).IsEqualTo("example.com ssh-ed25519 AQIDBA== added by\tdeploy job");
+    }
+
+    [Test]
     public async Task Matches_PlainHost()
     {
         var entry = new KnownHostsEntry("example.com", "ssh-ed25519", Key);

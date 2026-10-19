@@ -59,7 +59,9 @@ var options = new SshClientOptions
 
 Information: connected (algorithms and host key fingerprint), authenticated (method), identity files and agent keys that
 were skipped, host keys recorded by `UpdateHostKeys`, forwardings started (never with a socket path), connection attempts that will be tried again (`ConnectionAttempts`). Debug: key exchanges, rekeys, channels, sessions, authentication
-attempts. Logs never contain passwords, private keys, command text or user names.
+attempts. Logs never contain passwords, private keys, command text or user names. An agent that cannot be reached is logged
+without its socket or pipe path, which can hold the user's name (Pageant's pipe does): a system error shows as its type or socket
+error code (`Could not reach the SSH agent (socket error ConnectionRefused).`).
 
 ## Tracing and metrics
 

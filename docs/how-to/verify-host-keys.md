@@ -110,6 +110,11 @@ make a `KnownHostsEntry` from the key. `KnownHostsEntry.ForHost` writes the host
 `KnownHostsFile.Parse` reads these lines back, as `ssh` does. Neither writes the key's own comment (`SshPublicKey.Comment`, often a
 user and machine name): pass `comment` for one.
 
+Every value written into a line is checked first, so a value from your application cannot add a line (an `@cert-authority` line,
+say) to the file. Host patterns and the key type must not contain white space or control characters, and the comment must not
+contain control characters other than a tab (no CR or LF). `KnownHostsEntry`, `ForHost`, `KnownHostsFile.Add` and `AppendAsync`
+throw `ArgumentException` for such a value and write nothing.
+
 ## Notes and pitfalls
 
 - **Connections over a stream** (a tunnel, `ProxyCommand`) have no host name: set `HostKeyAlias` so `known_hosts` can be consulted.

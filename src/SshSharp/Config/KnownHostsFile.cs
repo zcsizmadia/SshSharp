@@ -450,7 +450,7 @@ public sealed class KnownHostsFile
             return new Line(raw, null, true);
         }
 
-        return new Line(raw, new KnownHostsEntry(fields[0], fields[1], key, marker, comment), false);
+        return new Line(raw, KnownHostsEntry.FromParsedFields(fields[0], fields[1], key, marker, comment), false);
     }
 
     private static bool TryDecode(string base64, out byte[] key)

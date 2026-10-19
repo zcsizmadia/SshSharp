@@ -286,6 +286,18 @@ public sealed class SshCertificateBuilderTests
     }
 
     [Test]
+    public async Task ARepeatedPrincipal_IsNotNamedInTheMessage()
+    {
+        // A principal is usually a user name, and exception messages are logged.
+        var builder = User();
+        builder.Principals.Add("secret-principal");
+        builder.Principals.Add("secret-principal");
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(async () => await builder.SignAsync(Keys[SshKeyType.Ed25519], Timeout()));
+        await Assert.That(error!.Message).DoesNotContain("secret-principal");
+        await Assert.That(error.Message).Contains("listed twice");
+    }
+
+    [Test]
     public async Task ValidOptionsAndExtensions_AreAccepted()
     {
         var builder = User();

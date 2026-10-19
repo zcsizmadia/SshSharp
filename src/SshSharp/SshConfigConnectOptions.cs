@@ -24,6 +24,7 @@ public sealed class SshConfigConnectOptions
     /// keyboard-interactive (see <see cref="SshClientOptions.Password"/>) unless <c>KbdInteractiveAuthentication</c> is <c>no</c>. Never
     /// offered to a ProxyJump hop, which logs in with keys or the agent.
     /// </summary>
+    [System.Diagnostics.DebuggerBrowsable(System.Diagnostics.DebuggerBrowsableState.Never)]
     public string? Password { get; init; }
 
     /// <summary>

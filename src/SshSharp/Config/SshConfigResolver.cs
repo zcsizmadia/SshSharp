@@ -304,7 +304,7 @@ internal sealed class SshConfigResolver(IReadOnlyList<SshConfigDocument> documen
         var canonical = answers.Canonical(host, domains);
         if (canonical is null)
         {
-            RequireFallbackLocal(host);
+            RequireFallbackLocal();
         }
 
         return canonical;
@@ -314,11 +314,12 @@ internal sealed class SshConfigResolver(IReadOnlyList<SshConfigDocument> documen
     /// <c>CanonicalizeFallbackLocal</c>, after no canonical name was found: on (the default), the name is used as it is; <c>no</c> fails.
     /// </summary>
     /// <exception cref="InvalidOperationException"><c>CanonicalizeFallbackLocal no</c>.</exception>
-    private void RequireFallbackLocal(string host)
+    private void RequireFallbackLocal()
     {
         if (_values.TryGetValue("canonicalizefallbacklocal", out var fallback) && fallback.Count > 0 && fallback[0].ToLowerInvariant() is "no" or "false")
         {
-            throw new InvalidOperationException($"Could not canonicalize host name '{host}' and CanonicalizeFallbackLocal is off.");
+            // The message leaves the host name out: exception messages end up in logs (docs/diagnostics.md).
+            throw new InvalidOperationException("Could not canonicalize the host name, and CanonicalizeFallbackLocal is off.");
         }
     }
 
@@ -349,7 +350,7 @@ internal sealed class SshConfigResolver(IReadOnlyList<SshConfigDocument> documen
                 return FollowCname(host[..^1], anchored);
             }
 
-            RequireFallbackLocal(host);
+            RequireFallbackLocal();
             return null;
         }
 
@@ -372,7 +373,7 @@ internal sealed class SshConfigResolver(IReadOnlyList<SshConfigDocument> documen
             }
         }
 
-        RequireFallbackLocal(host);
+        RequireFallbackLocal();
         return FollowBareName(host, family);
     }
 

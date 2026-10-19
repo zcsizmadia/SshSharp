@@ -493,9 +493,27 @@ public sealed class SshAgent
         }
         catch (Exception ex) when (ex is IOException or SocketException or UnauthorizedAccessException or TimeoutException)
         {
-            throw new SshException(SshFailureReason.AgentFailed, $"Could not reach the SSH agent: {ex.Message}", ex);
+            throw new SshException(SshFailureReason.AgentFailed, $"Could not reach the SSH agent ({Describe(ex)}).", ex);
         }
     }
+
+    /// <summary>
+    /// What went wrong reaching the agent, without the system's message: that can quote the socket or pipe path, which can hold the
+    /// user's name, and these messages are logged. The exception stays the inner exception for an application that wants it.
+    /// </summary>
+    internal static string Describe(Exception ex) => ex switch
+    {
+        SocketException socket => $"socket error {socket.SocketErrorCode}",
+        IOException { InnerException: SocketException socket } => $"socket error {socket.SocketErrorCode}",
+        _ => ex.GetType().Name,
+    };
+
+    /// <summary>
+    /// The reason an agent failure is logged with. The library's own messages (<see cref="SshException"/>, and the others the agent code
+    /// catches) never name the path; a system I/O error's message can, so it is logged as <see cref="Describe"/> gives it.
+    /// </summary>
+    internal static string LogReason(Exception ex) =>
+        ex is IOException or SocketException or UnauthorizedAccessException or TimeoutException ? Describe(ex) : ex.Message;
 
     /// <summary>
     /// One request and its reply over a fresh connection, each framed as <c>uint32 length || message</c>. With
@@ -524,7 +542,7 @@ public sealed class SshAgent
         }
         catch (Exception ex) when (ex is IOException or SocketException or UnauthorizedAccessException or TimeoutException)
         {
-            throw new SshException(SshFailureReason.AgentFailed, $"Could not reach the SSH agent: {ex.Message}", ex);
+            throw new SshException(SshFailureReason.AgentFailed, $"Could not reach the SSH agent ({Describe(ex)}).", ex);
         }
 
         await using (stream.ConfigureAwait(false))
@@ -540,7 +558,7 @@ public sealed class SshAgent
             }
             catch (Exception ex) when (ex is IOException or SocketException)
             {
-                throw new SshException(SshFailureReason.AgentFailed, $"The connection to the SSH agent failed: {ex.Message}", ex);
+                throw new SshException(SshFailureReason.AgentFailed, $"The connection to the SSH agent failed ({Describe(ex)}).", ex);
             }
         }
     }
@@ -646,14 +664,16 @@ public sealed class SshAgent
         {
             if (!OperatingSystem.IsWindows())
             {
-                throw new IOException("Named pipes are a Windows agent transport.");
+                throw new SshException(SshFailureReason.AgentFailed, "Named pipes are a Windows agent transport.");
             }
 
             // Connecting waits for a pipe that does not exist yet, so a stopped agent service would stall every connection; look first.
+            // The messages here leave the path out: they are logged, and an agent's pipe or socket path can hold the user's name
+            // (Pageant's pipe does).
             var name = path[PipePrefix.Length..];
             if (!await PipeMayExistAsync(name, cancellationToken).ConfigureAwait(false))
             {
-                throw new IOException($"No agent is listening on {path}.");
+                throw new SshException(SshFailureReason.AgentFailed, "No agent is listening on the named pipe.");
             }
 
             var pipe = new NamedPipeClientStream(".", name, PipeDirection.InOut, PipeOptions.Asynchronous);
@@ -662,7 +682,8 @@ public sealed class SshAgent
                 await pipe.ConnectAsync(5000, cancellationToken).ConfigureAwait(false);
                 if (!IsTrustedPipeOwner(pipe))
                 {
-                    throw new IOException($"The pipe {path} is not owned by the current user, SYSTEM or Administrators; it is not used as an agent.");
+                    throw new SshException(SshFailureReason.AgentFailed,
+                        "The agent's pipe is not owned by the current user, SYSTEM or Administrators; it is not used as an agent.");
                 }
 
                 return pipe;
@@ -682,7 +703,8 @@ public sealed class SshAgent
         catch (ArgumentException ex)
         {
             // Longer than the platform allows (104 bytes on macOS, 108 on Linux): no agent can listen there.
-            throw new IOException($"'{path}' cannot be a socket path here: {ex.Message}", ex);
+            // Not ex.Message: it quotes the path.
+            throw new SshException(SshFailureReason.AgentFailed, "The agent's socket path is longer than this platform allows.", ex);
         }
 
         var socket = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);

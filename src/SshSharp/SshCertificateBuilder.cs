@@ -265,7 +265,8 @@ public sealed class SshCertificateBuilder
 
             if (principals.Contains(principal, StringComparer.Ordinal))
             {
-                throw new InvalidOperationException($"The principal '{principal}' is listed twice.");
+                // Not the principal itself: it is usually a user name, and exception messages are logged (docs/reference/errors.md).
+                throw new InvalidOperationException($"A principal is listed twice (principal {principals.Count + 1} repeats an earlier one).");
             }
 
             principals.Add(principal);

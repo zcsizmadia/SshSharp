@@ -55,7 +55,10 @@ Exception
 
 ## Messages
 
-Exception messages never contain passwords, keys, command text, user names or host names, so they are safe to log. Some carry
+Exception messages never contain passwords, keys, command text, user names or host names, so they are safe to log. That covers
+names that are usually user names, such as a certificate's principals, and the SSH agent's socket or pipe path, which the
+environment chooses and which can hold the user's name. A file or SFTP path your code passed to the call that failed can appear,
+as it does in .NET's own I/O exceptions (`Could not find file '...'`): your code chose it, and the message is about it. Some carry
 text from the server (an SFTP error, an SCP message); treat that as untrusted before showing it to end users. `SshCommandException`
 keeps the command's stderr out of its message, in `StandardError` and `StandardErrorText`: it is the remote program's own output,
 which may contain anything, so decide whether it is safe to log, and strip control characters before showing it in a terminal.

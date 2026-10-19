@@ -69,10 +69,19 @@ internal static partial class SshLog
     public static partial void SessionClosed(ILogger logger, uint id, int? exitStatus, string? exitSignal);
 
     [LoggerMessage(EventId = 22, Level = LogLevel.Information, Message = "Agent key {Fingerprint} was skipped: {Reason}")]
-    public static partial void AgentKeySkipped(ILogger logger, string fingerprint, string reason);
+    public static partial void AgentKeySkipped(ILogger logger, string fingerprint, AgentFailure reason);
 
     [LoggerMessage(EventId = 23, Level = LogLevel.Debug, Message = "The SSH agent was not used: {Reason}")]
-    public static partial void AgentUnavailable(ILogger logger, string reason);
+    public static partial void AgentUnavailable(ILogger logger, AgentFailure reason);
+
+    /// <summary>
+    /// Why the agent failed, as logged: formatted only when the message is written, and never with the agent's socket or pipe path
+    /// (<see cref="SshAgent.LogReason"/>), which can hold the user's name.
+    /// </summary>
+    internal readonly record struct AgentFailure(Exception Error)
+    {
+        public override string ToString() => SshAgent.LogReason(Error);
+    }
 
     [LoggerMessage(EventId = 24, Level = LogLevel.Information, Message = "Forwarding {LocalEndPoint} to remote port {RemotePort}")]
     public static partial void ForwardingStarted(ILogger logger, string localEndPoint, int remotePort);
