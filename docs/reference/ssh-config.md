@@ -30,6 +30,8 @@ value.
 | `ConnectionAttempts` | `ConnectionAttempts` | Yes: the host's TCP connection (or its connection to a proxy) is tried this many times, one second apart (default 1). Only failures to reach it are tried again (refused, unreachable, timed out), never a failed handshake or authentication, and `ConnectTimeout` bounds all the attempts together, as in OpenSSH. A host reached through `ProxyJump` makes no TCP connection of its own (the first hop's setting applies to the first hop), and a `ProxyCommand` is not run again. |
 | `AddressFamily` | `AddressFamily` | Yes (`any`, `inet`, `inet6`), as `SshClientOptions.AddressFamily`. Not with a `ProxyCommand` or a proxy, which make the connection. |
 | `BindAddress`, `BindInterface` | `BindAddress`, `BindInterface` | Yes: the local address of the connection (and of the connection to a proxy). |
+| `TCPKeepAlive` | `TcpKeepAlive` | Yes: TCP keep-alive (`SO_KEEPALIVE`) on the connection this machine makes, on unless `no`, as in `ssh`. Not with a `ProxyCommand` or a proxy. |
+| `IPQoS` | `IPQoSInteractive`, `IPQoSBulk` | Yes: the type of service (DSCP) of that connection, from the second value (or the only one): a name (`af11` to `af43`, `cs0` to `cs7`, `ef`, `le`, `lowdelay`, `throughput`, `reliability`), 0 to 255, or `none`. Unset, nothing is marked. Best effort: Windows ignores it unless a policy allows it. |
 | `ServerAliveInterval`, `ServerAliveCountMax` | same names | Yes: `KeepAliveInterval` and `KeepAliveCountMax`. |
 | `ChannelTimeout` | `ChannelTimeouts` | Yes: `SshClientOptions.ChannelTimeouts`. |
 | `ObscureKeystrokeTiming` | `ObscureKeystrokeTiming` | Yes; on (20 ms) unless `no` or another interval, as in `ssh`. |
@@ -47,6 +49,7 @@ them to it):
 | `ConnectTimeout` | `ConnectTimeout` | Every host; `Timeout.InfiniteTimeSpan` for no limit. |
 | `ConnectionAttempts` | `ConnectionAttempts` | Every host. |
 | `AddressFamily` | `AddressFamily` | The connection this machine makes (the destination, or the first `ProxyJump` hop). |
+| `ConfigureSocket` | `TCPKeepAlive`, `IPQoS` | The same connection: it runs after those two are applied, so what it sets wins. |
 | `KeepAliveInterval`, `KeepAliveCountMax` | `ServerAliveInterval`, `ServerAliveCountMax` | Every host; `TimeSpan.Zero` turns keep-alives off. |
 
 `HostKeyVerifier` and `Proxy` replace the configured host key checking and connection the same way. See
@@ -86,7 +89,7 @@ The `SshClientOptions` lists take an `SshAlgorithmList` in the same `+`, `-`, `^
 | `CertificateFile` | `CertificateFiles` | Yes; `<identity>-cert.pub` is found too. |
 | `IdentityAgent` | `IdentityAgent` | Yes (`SSH_AUTH_SOCK`, a path, or `none`). |
 | `IdentitiesOnly` | `IdentitiesOnly` | Yes: only the agent keys that match an `IdentityFile`. |
-| `AddKeysToAgent` | `AddKeysToAgent` | Yes (`yes`, `confirm`, a lifetime); `ask` is treated as `no`. |
+| `AddKeysToAgent` | `AddKeysToAgent`, `AddKeysToAgentAsk` | Yes (`yes`, `confirm`, a lifetime); `ask` asks `SshConfigConnectOptions.ConfirmAddKeyToAgent` for each key, and adds nothing without it or in `BatchMode`. |
 | `PreferredAuthentications` | `PreferredAuthentications` | Yes. `SshClientOptions.PreferredAuthentications` in code. |
 | `PubkeyAuthentication`, `PasswordAuthentication`, `KbdInteractiveAuthentication` (`ChallengeResponseAuthentication`) | same names | Yes. |
 | `NumberOfPasswordPrompts` | `NumberOfPasswordPrompts` | Yes: how many times `SshConfigConnectOptions.PasswordProvider` is asked (default 3). `SshClientOptions.NumberOfPasswordPrompts` in code. |
@@ -101,11 +104,12 @@ Applied only with `SshConfigConnectOptions.StartForwardings = true`, since they 
 | Directive | Property | Notes |
 |---|---|---|
 | `LocalForward` | `LocalForwards` | TCP, and Unix sockets on either side: `/local.sock host:port`, `[bind:]port /remote.sock`, `/local.sock /remote.sock` (a field with a `/` is a path, as in `ssh`; a local one may use `\` on Windows). Paths take tokens, `~` and `${VAR}`. The local socket is created owner-only and removed when the forwarding stops. |
-| `RemoteForward` | `RemoteForwards` | TCP, remote dynamic (port only), and Unix-socket forms. |
+| `RemoteForward` | `RemoteForwards` | TCP, remote dynamic (port only), and Unix-socket forms. Socket paths take tokens and `${VAR}`, expanded here as in `ssh`; the local one takes `~` too. |
 | `PermitRemoteOpen` | `PermitRemoteOpen` | The destinations remote dynamic forwarding (`RemoteForward` with a port only) may connect to: `host:port` entries (`[address]:port` for IPv6), with `*` for any host or any port; `any` (the default) or `none`. As in OpenSSH, names are compared as given, with no pattern matching and no address lookup: `localhost:8080` does not allow `127.0.0.1:8080`. Entries that do not parse allow nothing. |
-| `DynamicForward` | `DynamicForwards` | SOCKS 4/4a/5. |
+| `DynamicForward` | `DynamicForwards` | SOCKS 4/4a/5, without authentication, as in `ssh`. In code, `ForwardDynamicPortAsync` can require a SOCKS 5 user name and password. |
 | `GatewayPorts` | `GatewayPorts` | Default bind address for forwardings without one. |
-| `StreamLocalBindUnlink` | `StreamLocalBindUnlink` | `yes` removes an existing file where `LocalForward` creates its Unix socket (a stale socket); without it, that forwarding fails, as in `ssh`. `StreamLocalBindMask` is not read: the socket is always owner-only (`ssh`'s default `0177`). |
+| `StreamLocalBindUnlink` | `StreamLocalBindUnlink` | `yes` removes an existing file where `LocalForward` creates its Unix socket (a stale socket); without it, that forwarding fails, as in `ssh`. |
+| `StreamLocalBindMask` | `StreamLocalBindMask` | The permissions cleared from a Unix socket `LocalForward` creates here, in octal: `0177` (the default) gives 0600, owner-only; `0117` gives 0660. On Windows the socket stays the current user's whatever the mask. |
 | `ExitOnForwardFailure` | `ExitOnForwardFailure` | A forwarding that cannot start fails the connection. |
 | `ClearAllForwardings` | (in `Options`) | Starts none. |
 

@@ -91,9 +91,12 @@ public sealed class SshLocalSocketForwarder : IAsyncDisposable
 }
 
 /// <summary>
-/// A SOCKS proxy (dynamic forwarding, <c>ssh -D</c>) started by <see cref="SshClient.ForwardDynamicPortAsync"/>: applications connect to
+/// A SOCKS proxy (dynamic forwarding, <c>ssh -D</c>) started by
+/// <see cref="SshClient.ForwardDynamicPortAsync(System.Net.IPEndPoint, CancellationToken)"/>: applications connect to
 /// <see cref="LocalEndPoint"/> as a SOCKS 4, 4a or 5 proxy (CONNECT, no authentication), and each connection is made by the server to
-/// the address the application asked for. Dispose it to stop listening and close the connections.
+/// the address the application asked for. Started with credentials
+/// (<see cref="SshClient.ForwardDynamicPortAsync(System.Net.IPEndPoint, System.Net.NetworkCredential?, CancellationToken)"/>), it takes
+/// SOCKS 5 with a user name and password only. Dispose it to stop listening and close the connections.
 /// </summary>
 public sealed class SshDynamicPortForwarder : IAsyncDisposable
 {

@@ -39,7 +39,7 @@ Console.WriteLine(result.StandardOutputText);
   proxies or your own transport (`SshProxy.FromConnector`), connect over any `Stream` or from a chosen local
   address (`BindAddress`, `BindInterface`), keep-alive and
   dead-connection detection; `HttpClient` through the SSH connection;
-  TCP and Unix-socket tunnels; local, remote and dynamic (SOCKS) port forwarding (`ssh -L`, `-R`, `-D`), Unix sockets on either end of local forwarding (`-L /local.sock:/remote.sock`), and remote dynamic and Unix-socket forwarding (`-R port`, `-R /socket:target`), remote forwarding to an in-process handler, also
+  TCP and Unix-socket tunnels; local, remote and dynamic (SOCKS, optionally with a password) port forwarding (`ssh -L`, `-R`, `-D`), Unix sockets on either end of local forwarding (`-L /local.sock:/remote.sock`), and remote dynamic and Unix-socket forwarding (`-R port`, `-R /socket:target`), remote forwarding to an in-process handler, also
   started from `ssh_config`.
 - **Sessions:** run commands, stream stdin/stdout/stderr, interactive shells with a pseudo-terminal, environment variables,
   signals and window resizing; subsystems (`ssh -s`) such as `netconf`; `expect`-style scripting of shells.

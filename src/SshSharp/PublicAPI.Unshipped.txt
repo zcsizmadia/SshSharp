@@ -271,3 +271,27 @@ SshSharp.SshConfigConnectOptions.KeepAliveInterval.init -> void
 SshSharp.SshConfigConnectOptions.Port.get -> int?
 SshSharp.SshConfigConnectOptions.Port.init -> void
 static SshSharp.SshAgent.FromEnvironmentAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SshSharp.SshAgent?>!
+SshSharp.Config.SshHostConfig.AddKeysToAgentAsk.get -> bool
+SshSharp.Config.SshHostConfig.AddKeysToAgentAsk.init -> void
+SshSharp.Config.SshHostConfig.IPQoSBulk.get -> int?
+SshSharp.Config.SshHostConfig.IPQoSBulk.init -> void
+SshSharp.Config.SshHostConfig.IPQoSInteractive.get -> int?
+SshSharp.Config.SshHostConfig.IPQoSInteractive.init -> void
+SshSharp.Config.SshHostConfig.StreamLocalBindMask.get -> System.IO.UnixFileMode
+SshSharp.Config.SshHostConfig.StreamLocalBindMask.init -> void
+SshSharp.Config.SshHostConfig.TcpKeepAlive.get -> bool
+SshSharp.Config.SshHostConfig.TcpKeepAlive.init -> void
+SshSharp.SshAddKeyToAgentPrompt
+SshSharp.SshAddKeyToAgentPrompt.Comment.get -> string?
+SshSharp.SshAddKeyToAgentPrompt.Fingerprint.get -> string!
+SshSharp.SshAddKeyToAgentPrompt.Host.get -> string!
+SshSharp.SshAddKeyToAgentPrompt.IdentityFile.get -> string!
+SshSharp.SshClient.ForwardDynamicPortAsync(System.Net.IPEndPoint! localEndPoint, System.Net.NetworkCredential? credentials, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SshSharp.SshDynamicPortForwarder!>!
+SshSharp.SshClient.ForwardLocalUnixSocketAsync(string! localSocketPath, string! remoteHost, int remotePort, System.IO.UnixFileMode socketMode, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SshSharp.SshLocalSocketForwarder!>!
+SshSharp.SshClient.ForwardLocalUnixSocketAsync(string! localSocketPath, string! remoteSocketPath, System.IO.UnixFileMode socketMode, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SshSharp.SshLocalSocketForwarder!>!
+SshSharp.SshClientOptions.ConnectionAttempts.get -> int
+SshSharp.SshClientOptions.ConnectionAttempts.init -> void
+SshSharp.SshConfigConnectOptions.ConfigureSocket.get -> System.Action<System.Net.Sockets.Socket!>?
+SshSharp.SshConfigConnectOptions.ConfigureSocket.init -> void
+SshSharp.SshConfigConnectOptions.ConfirmAddKeyToAgent.get -> System.Func<SshSharp.SshAddKeyToAgentPrompt!, System.Threading.CancellationToken, System.Threading.Tasks.ValueTask<bool>>?
+SshSharp.SshConfigConnectOptions.ConfirmAddKeyToAgent.init -> void

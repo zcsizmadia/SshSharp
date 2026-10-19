@@ -1,4 +1,5 @@
 using System.Net;
+using Microsoft.Extensions.Logging.Abstractions;
 using SshSharp.Protocol;
 
 namespace SshSharp;
@@ -128,10 +129,15 @@ public sealed partial class SshClient
         }
     }
 
-    /// <summary>The first network connection: through <see cref="SshClientOptions.Proxy"/> when set, otherwise TCP.</summary>
+    /// <summary>
+    /// The first network connection: through <see cref="SshClientOptions.Proxy"/> when set, otherwise TCP; tried up to
+    /// <see cref="SshClientOptions.ConnectionAttempts"/> times, as the ssh_config path does.
+    /// </summary>
     private static async Task<Stream> OpenStreamAsync(string host, int port, SshClientOptions options, IReadOnlyList<IPEndPoint>? local, string what,
         CancellationToken cancellationToken) =>
-        options.Proxy is { } proxy
-            ? await proxy.ConnectAsync(host, port, local, cancellationToken).ConfigureAwait(false)
-            : await TcpConnector.ConnectAsync(host, port, local, options.AddressFamily, what, options.ConfigureSocket, cancellationToken).ConfigureAwait(false);
+        await WithConnectionAttemptsAsync(
+            async ct => options.Proxy is { } proxy
+                ? await proxy.ConnectAsync(host, port, local, ct).ConfigureAwait(false)
+                : (Stream)await TcpConnector.ConnectAsync(host, port, local, options.AddressFamily, what, options.ConfigureSocket, ct).ConfigureAwait(false),
+            options.ConnectionAttempts, options.TimeProvider, options.Logger ?? NullLogger.Instance, cancellationToken).ConfigureAwait(false);
 }

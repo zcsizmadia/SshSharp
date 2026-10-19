@@ -67,14 +67,15 @@ internal sealed class LocalListener : IAsyncDisposable
     }
 
     /// <summary>
-    /// Creates the Unix socket <paramref name="path"/> and starts listening on it. The socket file is made owner-only before anything
-    /// can connect (mode 0600 on Unix, as OpenSSH's default <c>StreamLocalBindMask 0177</c> gives; an ACL with only the current user on
-    /// Windows): a socket that is bound but not yet listening refuses connections, so nobody else gets in between. An existing file at
-    /// the path fails the bind, unless <paramref name="unlinkExisting"/> (ssh_config's <c>StreamLocalBindUnlink</c>) removes it first.
+    /// Creates the Unix socket <paramref name="path"/> and starts listening on it. The socket file gets <paramref name="mode"/> before
+    /// anything can connect (0600 unless the caller or <c>StreamLocalBindMask</c> says otherwise; on Windows always an ACL with only the
+    /// current user): a socket that is bound but not yet listening refuses connections, so nobody else gets in between. An existing file
+    /// at the path fails the bind, unless <paramref name="unlinkExisting"/> (ssh_config's <c>StreamLocalBindUnlink</c>) removes it first.
     /// </summary>
     /// <exception cref="SocketException">The socket could not be created (the file exists, or the directory does not).</exception>
     /// <exception cref="ArgumentException">The path is longer than the platform allows.</exception>
-    public static LocalListener StartUnix(string path, bool unlinkExisting, Func<Socket, CancellationToken, Task<SshChannel?>> connect, CancellationToken connectionClosed)
+    public static LocalListener StartUnix(string path, bool unlinkExisting, UnixFileMode mode, Func<Socket, CancellationToken, Task<SshChannel?>> connect,
+        CancellationToken connectionClosed)
     {
         var endPoint = new UnixDomainSocketEndPoint(path);
         if (unlinkExisting)
@@ -88,7 +89,7 @@ internal sealed class LocalListener : IAsyncDisposable
         {
             listener.Bind(endPoint);
             bound = true;
-            RestrictToOwner(path);
+            SetMode(path, mode);
             listener.Listen(128);
         }
         catch
@@ -105,10 +106,12 @@ internal sealed class LocalListener : IAsyncDisposable
         return new LocalListener(listener, connect, connectionClosed, path);
     }
 
-    private static void RestrictToOwner(string path)
+    private static void SetMode(string path, UnixFileMode mode)
     {
         if (OperatingSystem.IsWindows())
         {
+            // A Unix mode has no faithful ACL counterpart (the owner's group means little here), so the socket stays the user's alone:
+            // a broader mode is narrowed, never widened by guessing.
             var security = new System.Security.AccessControl.FileSecurity();
             security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
             using var identity = System.Security.Principal.WindowsIdentity.GetCurrent();
@@ -118,7 +121,7 @@ internal sealed class LocalListener : IAsyncDisposable
         }
         else
         {
-            File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+            File.SetUnixFileMode(path, mode);
         }
     }
 

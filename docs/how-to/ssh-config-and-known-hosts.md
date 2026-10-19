@@ -26,7 +26,8 @@ Passphrases, answers to prompts, and policy for things a file should not decide 
 ## Override what the configuration says
 
 Some transport settings belong to the application rather than to the file: a port from its own settings, a timeout that fits its
-work, retries for a server that may be restarting. Set them in `SshConfigConnectOptions` and they win over `ssh_config`, as`n`ssh -p` and `ssh -o` do; everything else still comes from the configuration:
+work, retries for a server that may be restarting. Set them in `SshConfigConnectOptions` and they win over `ssh_config`, as
+`ssh -p` and `ssh -o` do; everything else still comes from the configuration:
 
 [!code-csharp[](../snippets/Connecting.cs#alias-overrides)]
 
@@ -38,6 +39,8 @@ work, retries for a server that may be restarting. Set them in `SshConfigConnect
 - `AddressFamily` applies to the one TCP connection this machine makes: to the destination, or to the first `ProxyJump` hop.
 - `ConnectionAttempts` tries again only when the server could not be reached (refused, unreachable, timed out), one second
   apart, within the same `ConnectTimeout`; a host key or authentication failure is never retried.
+- `ConfigureSocket` sets socket options on that same connection after `TCPKeepAlive` and `IPQoS` have been applied, so what it
+  sets wins (see [`TCPKeepAlive` and `IPQoS`](tune-and-inspect-connections.md#tcpkeepalive-and-ipqos-from-ssh_config)).
 
 ## Ship a configuration with your application
 

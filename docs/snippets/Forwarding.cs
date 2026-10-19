@@ -147,6 +147,30 @@ internal static class Forwarding
         _ = page;
     }
 
+    public static async Task DynamicWithPasswordAsync(SshClient client, CancellationToken cancellationToken)
+    {
+        // <dynamic-auth>
+        // A SOCKS proxy for other machines on the build network: beyond loopback, so it requires a user name and password
+        // (SOCKS 5, RFC 1929). SOCKS 4 and clients without credentials are refused.
+        var credentials = new NetworkCredential("builds",
+            Environment.GetEnvironmentVariable("SOCKS_PASSWORD") ?? throw new InvalidOperationException("Set SOCKS_PASSWORD."));
+        await using var socks = await client.ForwardDynamicPortAsync(
+            new IPEndPoint(IPAddress.Parse("192.0.2.1"), 1080), credentials, cancellationToken);
+
+        // On a build agent: curl --proxy socks5h://builds:$SOCKS_PASSWORD@192.0.2.1:1080 https://mirror.internal/
+        // </dynamic-auth>
+    }
+
+    public static async Task LocalUnixSocketModeAsync(SshClient client, CancellationToken cancellationToken)
+    {
+        // <local-unix-socket-mode>
+        // The socket file 0660 (StreamLocalBindMask 0117) instead of 0600: members of the owner's group may connect too, for
+        // example a service account that shares the group. Windows keeps it to the current user whatever the mode.
+        await using var docker = await client.ForwardLocalUnixSocketAsync("/run/app/docker.sock", "/var/run/docker.sock",
+            UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead | UnixFileMode.GroupWrite, cancellationToken);
+        // </local-unix-socket-mode>
+    }
+
     public static async Task RemoteDynamicAsync(SshClient client, CancellationToken cancellationToken)
     {
         // <remote-dynamic>

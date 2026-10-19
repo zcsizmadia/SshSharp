@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
+using Microsoft.Extensions.Logging;
 using SshSharp.Config;
 
 namespace SshSharp.Protocol;
@@ -138,6 +139,80 @@ internal static class TcpConnector
         }
 
         throw new SshException(SshFailureReason.ConnectFailed, $"Could not connect to {what}: {last!.SocketErrorCode}.", last);
+    }
+
+    /// <summary>
+    /// ssh_config's socket settings followed by the caller's <paramref name="then"/> (<see cref="SshConfigConnectOptions.ConfigureSocket"/>),
+    /// which runs last so that what it sets wins: <c>TCPKeepAlive</c> turns on <c>SO_KEEPALIVE</c>, and <c>IPQoS</c> sets the type of
+    /// service. Both are best effort, as in ssh: an option the platform refuses is logged, and the connection goes ahead without it.
+    /// </summary>
+    /// <param name="keepAlive">Whether to turn on TCP keep-alive.</param>
+    /// <param name="typeOfService">The type-of-service byte (DSCP in its upper six bits), or null to leave the system's.</param>
+    /// <param name="then">The caller's own settings, or null.</param>
+    /// <param name="logger">Where options that could not be set are reported.</param>
+    public static Action<Socket>? Configure(bool keepAlive, int? typeOfService, Action<Socket>? then, ILogger logger)
+    {
+        if (!keepAlive && typeOfService is null)
+        {
+            return then;
+        }
+
+        return socket =>
+        {
+            if (keepAlive)
+            {
+                TrySet(logger, "SO_KEEPALIVE", () => socket.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.KeepAlive, true));
+            }
+
+            if (typeOfService is { } tos)
+            {
+                SetTypeOfService(socket, tos, logger);
+            }
+
+            then?.Invoke(socket);
+        };
+    }
+
+    /// <summary>
+    /// Sets the type of service as ssh's <c>set_sock_tos</c> does: <c>IP_TOS</c> for IPv4 and <c>IPV6_TCLASS</c> for IPv6. A dual-mode
+    /// socket gets both, since which one applies depends on the address it reaches. Windows accepts the IPv4 option but ignores it
+    /// unless a system policy allows applications to set it.
+    /// </summary>
+    internal static void SetTypeOfService(Socket socket, int typeOfService, ILogger logger)
+    {
+        var ipv6 = socket.AddressFamily == AddressFamily.InterNetworkV6;
+        if (!ipv6 || socket.DualMode)
+        {
+            TrySet(logger, "IP_TOS", () => socket.SetSocketOption(SocketOptionLevel.IP, SocketOptionName.TypeOfService, typeOfService));
+        }
+
+        if (ipv6 && Ipv6TrafficClass is { } option)
+        {
+            // .NET has no name for IPV6_TCLASS; its number differs by platform. The value is a native int, as for setsockopt.
+            TrySet(logger, "IPV6_TCLASS", () => socket.SetRawSocketOption(Ipv6Level, option, BitConverter.GetBytes(typeOfService)));
+        }
+    }
+
+    /// <summary><c>IPPROTO_IPV6</c>, the same everywhere.</summary>
+    internal const int Ipv6Level = 41;
+
+    /// <summary><c>IPV6_TCLASS</c> on this platform, or null where it is not known.</summary>
+    internal static int? Ipv6TrafficClass =>
+        OperatingSystem.IsLinux() || OperatingSystem.IsAndroid() ? 67
+        : OperatingSystem.IsMacOS() || OperatingSystem.IsIOS() || OperatingSystem.IsTvOS() || OperatingSystem.IsMacCatalyst() || OperatingSystem.IsFreeBSD() ? 36
+        : OperatingSystem.IsWindows() ? 39
+        : null;
+
+    private static void TrySet(ILogger logger, string option, Action set)
+    {
+        try
+        {
+            set();
+        }
+        catch (SocketException ex)
+        {
+            SshLog.SocketOptionNotSet(logger, option, ex.SocketErrorCode);
+        }
     }
 
     /// <summary>
