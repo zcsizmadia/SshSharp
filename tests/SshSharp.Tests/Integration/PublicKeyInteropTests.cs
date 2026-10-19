@@ -5,6 +5,7 @@ namespace SshSharp.Tests.Integration;
 /// next to it (CI generates Ed25519, ECDSA and RSA keys in OpenSSH, PEM and PKCS#8 formats). With SSHSHARP_TEST_SSHD and
 /// SSHSHARP_TEST_USER too, and the keys in that user's authorized_keys, each key is also used to log in. Skipped when not set.
 /// </summary>
+[Category("Integration")]
 public class PublicKeyInteropTests
 {
     private static string? KeyDirectory => Environment.GetEnvironmentVariable("SSHSHARP_TEST_KEYDIR") is { Length: > 0 } dir ? dir : null;

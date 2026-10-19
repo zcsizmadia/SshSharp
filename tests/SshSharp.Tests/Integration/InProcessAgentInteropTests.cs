@@ -8,6 +8,7 @@ namespace SshSharp.Tests.Integration;
 /// without ForwardAgentFilter (#275). Needs what AgentInteropTests needs (SSHSHARP_TEST_AGENT=1, SSHSHARP_TEST_SSHD, SSHSHARP_TEST_USER),
 /// and SSHSHARP_TEST_KEYDIR with the ed25519 key in the user's authorized_keys; no agent process is used.
 /// </summary>
+[Category("Integration")]
 public class InProcessAgentInteropTests
 {
     private static CancellationToken Timeout() => new CancellationTokenSource(TimeSpan.FromSeconds(90)).Token;

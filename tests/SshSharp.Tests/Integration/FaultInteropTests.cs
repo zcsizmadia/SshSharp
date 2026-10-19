@@ -7,6 +7,7 @@ namespace SshSharp.Tests.Integration;
 /// of bytes in either direction, a network that goes silent in one direction or both, latency, small slices, low bandwidth. Every failure
 /// must surface promptly as an SshException, never as a hang, and disposal must finish. Needs SSHSHARP_TEST_SSHD and an account.
 /// </summary>
+[Category("Integration")]
 public class FaultInteropTests
 {
     private static CancellationToken Timeout() => new CancellationTokenSource(TimeSpan.FromSeconds(90)).Token;

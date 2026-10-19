@@ -7,6 +7,7 @@ namespace SshSharp.Tests.Integration;
 /// SCP against the real server's scp program: files, streams and directories up and back down, times kept, and a missing file.
 /// Needs SSHSHARP_TEST_SSHD and SSHSHARP_TEST_USER with SSHSHARP_TEST_PASSWORD or SSHSHARP_TEST_KEYDIR; skipped where scp is missing.
 /// </summary>
+[Category("Integration")]
 public sealed class ScpInteropTests : IDisposable
 {
     private readonly string _dir = Path.Combine(Path.GetTempPath(), "sshsharp-scpi-" + Guid.NewGuid().ToString("N"));

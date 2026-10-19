@@ -5,6 +5,7 @@ namespace SshSharp.Tests.Integration;
 /// purpose), SSH_AUTH_SOCK, SSHSHARP_TEST_SSHD and SSHSHARP_TEST_USER, with the agent's keys in the user's authorized_keys.
 /// </summary>
 [NotInParallel("ssh-agent")] // one agent for all of them, and one test adds constrained keys to it
+[Category("Integration")]
 public class AgentInteropTests
 {
     [Test]
@@ -219,7 +220,10 @@ public class AgentInteropTests
     }
 
     [Test]
-    [NotInParallel("authorized_keys")] // two tests editing the file at once could each drop the other's line
+    // Both keys: a method's NotInParallel replaces the class's, and this test's constrained key, while it is in the agent, is in the
+    // local key list but not in a forwarded agent's (TheForwardedAgent_IsUsableOnTheServer compares the two). Two tests editing
+    // authorized_keys at once could each drop the other's line.
+    [NotInParallel(["ssh-agent", "authorized_keys"])]
     public async Task ADestinationConstrainedKey_SignsInOnlyWhereItIsAllowed()
     {
         var user = Environment.GetEnvironmentVariable("SSHSHARP_TEST_USER");

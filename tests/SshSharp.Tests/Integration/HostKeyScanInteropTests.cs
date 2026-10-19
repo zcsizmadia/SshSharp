@@ -1,6 +1,7 @@
 namespace SshSharp.Tests.Integration;
 
 /// <summary><see cref="SshClient.ScanHostKeysAsync(string, int, SshHostKeyScanOptions?, CancellationToken)"/> against a real server (#116).</summary>
+[Category("Integration")]
 public class HostKeyScanInteropTests
 {
     private static CancellationToken Timeout() => new CancellationTokenSource(TimeSpan.FromSeconds(90)).Token;

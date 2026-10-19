@@ -4,6 +4,7 @@ namespace SshSharp.Tests.Integration;
 /// Keyboard-interactive against a real server. sshd offers it through PAM (CI's runner sshd), which asks for the password with one hidden
 /// prompt. Needs SSHSHARP_TEST_SSHD, SSHSHARP_TEST_USER and SSHSHARP_TEST_PASSWORD; skipped where the server does not offer the method.
 /// </summary>
+[Category("Integration")]
 public class KeyboardInteractiveInteropTests
 {
     [Test]

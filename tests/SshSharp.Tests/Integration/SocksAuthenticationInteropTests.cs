@@ -6,6 +6,7 @@ namespace SshSharp.Tests.Integration;
 /// Dynamic forwarding with a SOCKS 5 password, through a real server: a second SSH connection goes through the authenticated proxy to
 /// the server's own sshd. Needs SSHSHARP_TEST_SSHD and SSHSHARP_TEST_USER with SSHSHARP_TEST_PASSWORD or SSHSHARP_TEST_KEYDIR.
 /// </summary>
+[Category("Integration")]
 public class SocksAuthenticationInteropTests
 {
     private static CancellationToken Timeout() => new CancellationTokenSource(TimeSpan.FromSeconds(60)).Token;

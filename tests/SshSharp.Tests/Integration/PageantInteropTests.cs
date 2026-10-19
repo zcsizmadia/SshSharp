@@ -6,6 +6,7 @@ namespace SshSharp.Tests.Integration;
 /// PuTTY's Pageant, found by its pipe and used as an agent. Needs SSHSHARP_TEST_PAGEANT=1 with Pageant running for the current user
 /// (CI starts it on the Windows runner), no SSH_AUTH_SOCK and no OpenSSH agent service.
 /// </summary>
+[Category("Integration")]
 public class PageantInteropTests
 {
     [Test]

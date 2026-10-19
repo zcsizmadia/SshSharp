@@ -7,6 +7,7 @@ namespace SshSharp.Tests.Integration;
 /// IdentityFile and known_hosts accept-new. The one sshd plays every hop (it forwards to itself). Needs SSHSHARP_TEST_SSHD,
 /// SSHSHARP_TEST_USER and SSHSHARP_TEST_KEYDIR (with an unencrypted "ed25519" key authorized for the user); skipped otherwise.
 /// </summary>
+[Category("Integration")]
 public sealed class ConfigInteropTests : IDisposable
 {
     private readonly string _dir = Path.Combine(Path.GetTempPath(), "sshsharp-cfgi-" + Guid.NewGuid().ToString("N"));

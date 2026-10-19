@@ -4,6 +4,7 @@ using SshSharp.Sftp;
 namespace SshSharp.Tests.Integration;
 
 /// <summary>The SFTP client against a real server's <c>sftp</c> subsystem (OpenSSH's internal-sftp in CI). Needs the usual SSHSHARP_TEST_* variables.</summary>
+[Category("Integration")]
 public class SftpInteropTests
 {
     private static CancellationToken Timeout() => new CancellationTokenSource(TimeSpan.FromSeconds(120)).Token;
@@ -150,6 +151,7 @@ public class SftpInteropTests
     }
 
     [Test]
+    [Category("Measure")] // opt-in with SSHSHARP_MEASURE=1; CI leaves it out
     public async Task ATreeOfManyFiles_OverLatency_Measure()
     {
         // A measurement, not a check: with SSHSHARP_MEASURE=1, prints how long a tree of small files takes through a proxy that adds
@@ -250,6 +252,7 @@ public class SftpInteropTests
     }
 
     [Test]
+    [Category("Measure")] // opt-in with SSHSHARP_MEASURE=1; CI leaves it out
     public async Task AStreamCopy_Measure()
     {
         // A measurement, not a check: with SSHSHARP_MEASURE=1, prints how long 64 MiB takes copied into OpenWriteAsync and with

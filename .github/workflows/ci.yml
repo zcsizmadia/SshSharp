@@ -8,6 +8,13 @@ on:
 permissions:
   contents: read
 
+# Which tests each kind of job runs, by the [Category] on the test classes (docs/testing.md, "Test categories"): the unit jobs
+# leave out the tests that need a real server (Integration) and the opt-in measurements (Measure); the interop jobs run the
+# Integration tests, but not the ssh-audit one, which needs ssh-audit listening (the audit job).
+env:
+  UNIT_TESTS: /*/*/*/*[(Category!=Integration)&(Category!=Measure)]
+  INTEROP_TESTS: /*/*/*/*[(Category=Integration)&(Category!=SshAudit)&(Category!=Measure)]
+
 # A newer push to the same PR or branch makes the running workflow obsolete.
 concurrency:
   group: ci-${{ github.ref }}
@@ -30,10 +37,34 @@ jobs:
       - uses: ./.github/actions/setup-dotnet
         with:
           build: true
+      # PuTTY's command-line puttygen, for the .ppk interop tests (KeyExportInteropTests). Not on Windows: PuTTY's puttygen.exe there is
+      # the key generator's window, with no command-line conversion, so those tests skip there (tests/ci/skips/unit-windows-*.txt).
+      - name: puttygen
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$RUNNER_OS" = Linux ]; then
+            sudo apt-get update -qq > /dev/null
+            sudo apt-get install -y -qq putty-tools > /dev/null
+          else
+            HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_CLEANUP=1 brew install --quiet putty
+          fi
+          command -v puttygen
+          puttygen --version
       - name: Test net8.0
-        run: dotnet test --project tests/SshSharp.Tests -c Release -f net8.0 --no-build
+        run: dotnet test --project tests/SshSharp.Tests -c Release -f net8.0 --no-build --treenode-filter "${{ env.UNIT_TESTS }}" --report-trx --report-trx-filename unit-net8.0.trx --results-directory TestResults
       - name: Test net10.0 with coverage
-        run: dotnet test --project tests/SshSharp.Tests -c Release -f net10.0 --no-build --coverage --coverage-output-format cobertura --coverage-output coverage.cobertura.xml --results-directory TestResults
+        run: dotnet test --project tests/SshSharp.Tests -c Release -f net10.0 --no-build --treenode-filter "${{ env.UNIT_TESTS }}" --report-trx --report-trx-filename unit-net10.0.trx --coverage --coverage-output-format cobertura --coverage-output coverage.cobertura.xml --results-directory TestResults
+      # Every skip must be one this job is known to need (tests/ci/skips/unit-<os>-<framework>.txt): an unexpected one fails the job.
+      - name: Skipped tests
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: |
+          status=0
+          pwsh tests/ci/check-skips.ps1 -Job "unit (${{ matrix.os }}) net8.0" -Trx TestResults/unit-net8.0.trx || status=1
+          pwsh tests/ci/check-skips.ps1 -Job "unit (${{ matrix.os }}) net10.0" -Trx TestResults/unit-net10.0.trx || status=1
+          exit "$status"
       - name: Coverage summary
         if: matrix.os == 'ubuntu-latest'
         run: |
@@ -220,10 +251,16 @@ jobs:
       - uses: ./.github/actions/setup-dotnet
         with:
           build: true
+      # The Integration tests, and the LocalTools ones (key files read back by ssh-keygen, openssl and puttygen), which the unit jobs
+      # also run, with this job's own puttygen.
       - name: Interop tests against the real server (net8.0)
-        run: dotnet test --project tests/SshSharp.Tests -c Release -f net8.0 --no-build --treenode-filter "/*/*/*InteropTests/*"
+        run: dotnet test --project tests/SshSharp.Tests -c Release -f net8.0 --no-build --treenode-filter "$TESTS" --report-trx --report-trx-filename interop-net8.0.trx --results-directory TestResults
+        env:
+          TESTS: /*/*/*/*[((Category=Integration)|(Category=LocalTools))&(Category!=SshAudit)&(Category!=Measure)]
       - name: Interop tests against the real server (net10.0)
-        run: dotnet test --project tests/SshSharp.Tests -c Release -f net10.0 --no-build --treenode-filter "/*/*/*InteropTests/*"
+        run: dotnet test --project tests/SshSharp.Tests -c Release -f net10.0 --no-build --treenode-filter "$TESTS" --report-trx --report-trx-filename interop-net10.0.trx --results-directory TestResults
+        env:
+          TESTS: /*/*/*/*[((Category=Integration)|(Category=LocalTools))&(Category!=SshAudit)&(Category!=Measure)]
       - name: Native AOT smoke test against the real server
         # Trim and AOT warnings fail the publish; the binary then connects and uses every main feature.
         run: |
@@ -233,6 +270,13 @@ jobs:
       - name: Native AOT sample publishes
         # The sample tool must stay publishable with Native AOT (trim and AOT warnings are errors).
         run: dotnet publish samples/SshSharp.Samples.Aot -c Release -o "$RUNNER_TEMP/aot-sample"
+      - name: Skipped tests
+        if: ${{ !cancelled() }}
+        run: |
+          status=0
+          pwsh tests/ci/check-skips.ps1 -Job "interop (OpenSSH, ${{ matrix.os }}) net8.0" -Trx TestResults/interop-net8.0.trx || status=1
+          pwsh tests/ci/check-skips.ps1 -Job "interop (OpenSSH, ${{ matrix.os }}) net10.0" -Trx TestResults/interop-net10.0.trx || status=1
+          exit "$status"
       - name: sshd log
         if: failure()
         run: |
@@ -305,7 +349,7 @@ jobs:
             software: Erlang
             strict: '1'
             port: '2222'
-            filter: /*/*/(TransportInteropTests)|(HostKeyInteropTests)|(HostKeyScanInteropTests)|(SftpInteropTests)|(ForwardingInteropTests)|(FaultInteropTests)/*
+            filter: /*/*/(TransportInteropTests)|(HostKeyInteropTests)|(HostKeyScanInteropTests)|(SftpInteropTests)|(ForwardingInteropTests)|(FaultInteropTests)/*[(Category=Integration)&(Category!=Measure)]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -323,7 +367,10 @@ jobs:
           build: true
       - name: Interop tests against the container
         # Few tests at a time: Dropbear limits unauthenticated connections per address (a compile-time setting).
-        run: dotnet test --project tests/SshSharp.Tests -c Release -f net10.0 --no-build --treenode-filter "${{ matrix.filter || '/*/*/*InteropTests/*' }}" --maximum-parallel-tests 4
+        run: dotnet test --project tests/SshSharp.Tests -c Release -f net10.0 --no-build --treenode-filter "${{ matrix.filter || env.INTEROP_TESTS }}" --maximum-parallel-tests 4 --report-trx --report-trx-filename interop.trx --results-directory TestResults
+      - name: Skipped tests
+        if: ${{ !cancelled() }}
+        run: pwsh tests/ci/check-skips.ps1 -Job "interop (${{ matrix.name }})" -Trx TestResults/interop.trx
       - name: Server log
         if: failure()
         # Without the rekey test's per-packet lines, which would fill the tail.
@@ -391,7 +438,10 @@ jobs:
         # Few tests at a time: atmoz/sftp's sshd keeps OpenSSH's default MaxStartups 10:30:100 and drops some connections once ten are
         # waiting to authenticate ("drop connection ... Maxstartups" in its log; the client sees the connection close before the
         # identification line).
-        run: dotnet test --project tests/SshSharp.Tests -c Release -f net10.0 --no-build --treenode-filter "/*/*/SftpInteropTests/*" --maximum-parallel-tests 4
+        run: dotnet test --project tests/SshSharp.Tests -c Release -f net10.0 --no-build --treenode-filter "/*/*/SftpInteropTests/*[(Category=Integration)&(Category!=Measure)]" --maximum-parallel-tests 4 --report-trx --report-trx-filename interop.trx --results-directory TestResults
+      - name: Skipped tests
+        if: ${{ !cancelled() }}
+        run: pwsh tests/ci/check-skips.ps1 -Job "interop (${{ matrix.name }})" -Trx TestResults/interop.trx
       - name: Server log
         if: failure()
         run: |
@@ -435,7 +485,11 @@ jobs:
         # Few tests at a time: under a burst of connections, OpenSSH for Windows' listener fails some accepts ("error: accept:
         # Connection reset" in its log) and leaves the connection unserved, so a test forwarding to the server's own sshd waits for an
         # identification line that never comes (#188).
-        run: dotnet test --project tests/SshSharp.Tests -c Release -f net10.0 --no-build --treenode-filter "/*/*/*InteropTests/*" --maximum-parallel-tests 4
+        run: dotnet test --project tests/SshSharp.Tests -c Release -f net10.0 --no-build --treenode-filter "${{ env.INTEROP_TESTS }}" --maximum-parallel-tests 4 --report-trx --report-trx-filename interop.trx --results-directory TestResults
+      - name: Skipped tests
+        if: ${{ !cancelled() }}
+        shell: pwsh
+        run: tests/ci/check-skips.ps1 -Job "interop (OpenSSH for Windows)" -Trx TestResults/interop.trx
       - name: Server log
         if: failure()
         shell: pwsh
@@ -488,13 +542,17 @@ jobs:
             sleep 1
           done
           SSHSHARP_TEST_SSHAUDIT=2300 SSHSHARP_TEST_SSHAUDIT_FIPS=2301 \
-            dotnet test --project tests/SshSharp.Tests -c Release -f net10.0 --no-build --treenode-filter "/*/*/SshAuditClientTests/*"
+            dotnet test --project tests/SshSharp.Tests -c Release -f net10.0 --no-build --treenode-filter "/*/*/*/*[Category=SshAudit]" \
+            --report-trx --report-trx-filename audit.trx --results-directory TestResults
           wait "$DEFAULT" || true  # exit code 3 on the NIST curves; the reports are judged below
           wait "$FIPS" || true
           STATUS=0
           python3 tests/ssh-audit/check_client_audit.py "$RUNNER_TEMP/default.json" "default options" --post-quantum-first >> "$GITHUB_STEP_SUMMARY" || STATUS=1
           python3 tests/ssh-audit/check_client_audit.py "$RUNNER_TEMP/fips.json" "FIPS mode" --fips >> "$GITHUB_STEP_SUMMARY" || STATUS=1
           exit "$STATUS"
+      - name: Skipped tests
+        if: ${{ !cancelled() }}
+        run: pwsh tests/ci/check-skips.ps1 -Job "audit (ssh-audit)" -Trx TestResults/audit.trx
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:

@@ -6,6 +6,7 @@ namespace SshSharp.Tests.Integration;
 /// known_hosts against the real server's key: a changed key and a revoked one are refused whatever the policy says, and the right one
 /// is accepted. Needs SSHSHARP_TEST_SSHD and an account.
 /// </summary>
+[Category("Integration")]
 public sealed class HostKeyInteropTests : IDisposable
 {
     private readonly string _dir = Path.Combine(Path.GetTempPath(), "sshsharp-hki-" + Guid.NewGuid().ToString("N"));

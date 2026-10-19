@@ -4,6 +4,7 @@ using SshSharp.Protocol;
 namespace SshSharp.Tests.Integration;
 
 /// <summary>Handshakes against a real OpenSSH server (see <see cref="RealServer"/>).</summary>
+[Category("Integration")]
 public class TransportInteropTests
 {
     // Host key types the test server (ed25519, rsa, ecdsa-p256) offers, and key exchanges / ciphers it supports.
