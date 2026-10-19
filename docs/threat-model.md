@@ -324,9 +324,23 @@ connection, but not read or change it: each host's key is verified end to end, b
   entry without its value, and `SshEndpointPrivateKey.ToString()` and the debugger do not show them.
 - Host keys are checked strictly by default: an unknown host fails unless `AcceptNewHostKeys` is set (which trusts the first key it
   sees), and a changed key always fails.
-- `HostKeyFingerprints` replaces known_hosts with pinned fingerprints; whoever can change the configuration decides which servers
-  are trusted, as with a known_hosts file. Combining it with `KnownHostsFiles`, `AcceptNewHostKeys` or `ConfigAlias` fails validation
-  rather than widening trust to either source.
+- `HostKeyFingerprints` replaces known_hosts with pinned keys (fingerprints, `.pub` lines or known_hosts lines); whoever can change
+  the configuration decides which servers are trusted, as with a known_hosts file. Combining it with `KnownHostsFiles`,
+  `AcceptNewHostKeys` or `ConfigAlias` fails validation rather than widening trust to either source. A known_hosts line's host field
+  is not checked (the entry pins its key), and marked lines (`@cert-authority`, `@revoked`) are refused rather than turned into
+  pins.
+- `JumpHosts` reaches the server through bastions. Each hop is offered only its own credentials (password, keys, the agent when its
+  own `UseAgent` is set): the endpoint's never reach a jump host, and a hop's never reach the destination. Every hop's host key is
+  checked: against its own pins or known_hosts files, or else the endpoint's known_hosts files (with the endpoint's
+  `AcceptNewHostKeys`); behind an endpoint that pins its keys, a hop without its own fails validation rather than falling back to
+  files a pinned deployment does not have.
+- `UseAgent` lets the endpoint (or a hop) sign with the agent's keys: an `SshAgent` registered in the container, else the user's
+  agent. Every key the agent holds is offered to that server, as with ssh; an application that should offer one key only registers
+  an in-process agent (`SshAgent.FromKeys`) with it. Nothing is added to the agent.
+- `UseSshTunnel` sends an `HttpClient`'s connections through the endpoint's server, which resolves the host names and connects to
+  them (`direct-tcpip`): the server sees which services are called, but not the traffic when it is HTTPS, as TLS runs end to end.
+- Connection events (`WatchAsync`) name the endpoint by its registered name only, with no host or user name; the error they carry
+  can hold the server's disconnect text.
 - With `ConfigAlias`, the connection takes ssh_config's settings and the core defaults (`ProxyCommand` allowed, the agent used,
   `ForwardAgent` and `StrictHostKeyChecking` as the file says); an unknown host is refused, since there is no one to ask.
 - The health check's description names no server software and carries no server text, since health endpoints are often reachable

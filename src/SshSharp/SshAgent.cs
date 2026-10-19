@@ -128,15 +128,18 @@ public sealed class SshAgent
     /// <summary>
     /// The user's agent, as ssh finds it: <c>SSH_AUTH_SOCK</c>; on Windows, when that is not set, the OpenSSH agent service's pipe, or
     /// PuTTY's Pageant (0.75 and later) when only Pageant is running. Null when there is none to try. Whether an agent is actually running
-    /// shows on the first request.
+    /// shows on the first request. Asynchronous code should call <see cref="FromEnvironmentAsync"/> instead, which does not block a thread.
     /// </summary>
-    public static SshAgent? FromEnvironment() => FromEnvironmentAsync().AsTask().GetAwaiter().GetResult();
+    public static SshAgent? FromEnvironment() => FromEnvironmentAsync(CancellationToken.None).GetAwaiter().GetResult();
 
     /// <summary>
-    /// <see cref="FromEnvironment"/> without blocking a thread while Windows lists its pipes (up to <see cref="PipeListingTimeout"/>
-    /// each), for the asynchronous connect path.
+    /// The user's agent, as <see cref="FromEnvironment"/> finds it, without blocking a thread. On Windows, finding the agent service's
+    /// pipe or Pageant's means listing the named pipes, which can be slow (each listing is bounded at 2 seconds); here that wait is
+    /// awaited. Null when there is no agent to try. Nothing is sent to the agent: whether it is running shows on the first request, such
+    /// as <see cref="GetKeysAsync"/>.
     /// </summary>
-    internal static async ValueTask<SshAgent?> FromEnvironmentAsync()
+    /// <param name="cancellationToken">Stops waiting for the pipe listing.</param>
+    public static async Task<SshAgent?> FromEnvironmentAsync(CancellationToken cancellationToken = default)
     {
         var socket = Environment.GetEnvironmentVariable("SSH_AUTH_SOCK");
         if (!string.IsNullOrEmpty(socket) || !OperatingSystem.IsWindows())
@@ -146,7 +149,8 @@ public sealed class SshAgent
 
         // The OpenSSH agent service first, as ssh does; Pageant only when that is surely not running (a listing that takes too long
         // proves nothing) and Pageant is.
-        return await PipeListedAsync(WindowsPipe[PipePrefix.Length..]).ConfigureAwait(false) == false && await PageantAsync().ConfigureAwait(false) is { } pageant
+        return await PipeListedAsync(WindowsPipe[PipePrefix.Length..], cancellationToken).ConfigureAwait(false) == false
+            && await PageantAsync(cancellationToken).ConfigureAwait(false) is { } pageant
             ? pageant
             : new SshAgent(WindowsPipe);
     }
@@ -158,10 +162,10 @@ public sealed class SshAgent
     /// PuTTY's Pageant (0.75 and later), on the named pipe it creates for the current user (<c>\\.\pipe\pageant.&lt;user&gt;.&lt;hash&gt;</c>),
     /// or null when Pageant is not running or this is not Windows. Its keys work like any agent's.
     /// </summary>
-    public static SshAgent? FromPageant() => PageantAsync().AsTask().GetAwaiter().GetResult();
+    public static SshAgent? FromPageant() => PageantAsync(CancellationToken.None).AsTask().GetAwaiter().GetResult();
 
-    private static async ValueTask<SshAgent?> PageantAsync() =>
-        OperatingSystem.IsWindows() && PageantPipe.Name() is { } name && await PipeListedAsync(name).ConfigureAwait(false) == true
+    private static async ValueTask<SshAgent?> PageantAsync(CancellationToken cancellationToken) =>
+        OperatingSystem.IsWindows() && PageantPipe.Name() is { } name && await PipeListedAsync(name, cancellationToken).ConfigureAwait(false) == true
             ? new SshAgent(PipePrefix + name)
             : null;
 
@@ -169,12 +173,18 @@ public sealed class SshAgent
     /// Whether a named pipe exists, by listing the pipes (opening one would take one of its instances); null when the listing took too
     /// long to tell. The listing runs on the thread pool and is awaited, not waited for.
     /// </summary>
-    private static async ValueTask<bool?> PipeListedAsync(string name)
+    private static async ValueTask<bool?> PipeListedAsync(string name, CancellationToken cancellationToken)
     {
-        var listing = Task.Run(() => Directory.EnumerateFiles(PipePrefix, name).Any());
+        var listing = Task.Run(() => Directory.EnumerateFiles(PipePrefix, name).Any(), CancellationToken.None);
         try
         {
-            return await listing.WaitAsync(PipeListingTimeout).ConfigureAwait(false);
+            return await listing.WaitAsync(PipeListingTimeout, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // The listing goes on in the background; a failure it ends with is observed rather than left unobserved.
+            _ = listing.ContinueWith(static t => _ = t.Exception, CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
+            throw;
         }
         catch (TimeoutException)
         {

@@ -79,9 +79,14 @@ the private network work. A hop's host key is checked under the name and port gi
 
 ### In an ASP.NET Core application
 
-The DI package has no jump host settings; add them in `ConfigureClientOptions`, keeping what the endpoint built:
+An endpoint registered with `AddSshClient` takes its jump hosts as settings (`JumpHosts`), each with its own user, credentials and
+host key settings, so they can come from `appsettings.json` with no code:
 
 [!code-csharp[](../snippets/DependencyInjection.cs#jump-hosts)]
+
+A hop without host key settings of its own is checked against the endpoint's `KnownHostsFiles`; behind an endpoint that pins
+`HostKeyFingerprints`, each hop needs its own. See [Dependency injection: jump hosts](../dependency-injection.md#jump-hosts) for the
+configuration keys and the rules.
 
 ## Through your own tunnel
 

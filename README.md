@@ -54,8 +54,9 @@ Console.WriteLine(result.StandardOutputText);
 - **Files for the rest of .NET:** `SshSharp.IO.Abstractions` implements System.IO.Abstractions' `IFileSystem` over SFTP (code written
   against `IFileSystem` reads and writes the server unchanged), and `SshSharp.FileProviders` serves a directory as an `IFileProvider`, for
   ASP.NET Core static files, Razor views and configuration; nothing is mounted, so only your application sees the files.
-- **Dependency injection:** `SshSharp.Extensions.DependencyInjection` registers named endpoints from configuration, with a factory for
-  new connections, a shared connection that is opened again when it drops, and a health check.
+- **Dependency injection:** `SshSharp.Extensions.DependencyInjection` registers named endpoints from configuration (jump hosts and the
+  agent included), with a factory for new connections, a shared connection that is opened again when it drops (with notifications
+  when it does), keyed services by endpoint name, `HttpClient`s that connect through an endpoint, and a health check.
 - **Observability:** `ILogger` logging, `ActivitySource` tracing and `Meter` metrics, with no secrets recorded.
 
 ## Why not SSH.NET?

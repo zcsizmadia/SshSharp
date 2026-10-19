@@ -22,8 +22,11 @@ flowchart TB
     factory -->|"a new connection<br/>per call: caller disposes"| job["A job service"]
     factory --> provider["ISshConnectionProvider<br/>GetClientAsync('deploy')"]
     provider -->|"one shared connection,<br/>reopened when it drops"| api["Endpoints and services"]
+    provider --> keyed["ISshEndpoint keyed 'deploy'<br/>[FromKeyedServices('deploy')]"]
     provider --> health["Health check<br/>AddSsh('deploy'): PingAsync"]
     provider -->|"OpenSftpAsync('deploy'):<br/>SFTP sessions on it"| files["SftpFileProvider,<br/>SftpFileSystem"]
+    provider -->|"UseSshTunnel('deploy'):<br/>direct-tcpip per connection"| http["HttpClient"]
+    provider -->|"WatchAsync('deploy'):<br/>connected, disconnected, reconnected"| watcher["A hosted service<br/>restoring forwardings"]
 ```
 
 ## Register endpoints
@@ -112,6 +115,15 @@ connection at once), opened on first use and again after it drops.
 
 [!code-csharp[](../snippets/DependencyInjection.cs#endpoint)]
 
+## Take an endpoint by name
+
+Each endpoint is also a keyed service, `ISshEndpoint`, so a service names its endpoint once, where it is injected:
+
+[!code-csharp[](../snippets/DependencyInjection.cs#keyed)]
+
+`GetClientAsync` is the shared connection and `ConnectAsync` a new one, as on the provider and the factory; the keyed service is a
+singleton over them.
+
 ## Use SFTP on the shared connection
 
 `OpenSftpAsync(name)`, an extension method on `ISshConnectionProvider`, opens a new SFTP session on the endpoint's shared connection,
@@ -134,6 +146,68 @@ An `IFileSystem` for services that take one, owned by the container:
 - **One session per adapter.** Each adapter keeps its own SFTP session on the shared connection; SSH runs them side by side with the
   commands and other sessions on that connection.
 
+## Call an internal API through the server
+
+`UseSshTunnel` makes an `HttpClient` from `IHttpClientFactory` connect through an endpoint's shared connection, so it reaches a
+service only the SSH server can reach, such as an API behind a bastion. No local port is opened.
+
+[!code-csharp[](../snippets/DependencyInjection.cs#http-client)]
+
+[!code-csharp[](../snippets/DependencyInjection.cs#http-client-use)]
+
+The SSH server resolves the host name, and TLS runs end to end. See
+[Dependency injection: HttpClient through an endpoint](../dependency-injection.md#httpclient-through-an-endpoint) for what happens
+across a drop.
+
+## Restore a forwarding after a reconnect
+
+Forwardings, sessions and running commands end with their connection. `WatchAsync` reports the shared connection's changes, so a
+hosted service can set them up again on each new connection:
+
+[!code-csharp[](../snippets/DependencyInjection.cs#watch)]
+
+```csharp
+builder.Services.AddHostedService<ReverseTunnel>();
+```
+
+- **Connect, then watch.** The first event is the current state (`Connected`, or `Disconnected` when it dropped in between), so
+  nothing is missed.
+- **Watching does not reconnect.** After `Disconnected`, call `GetClientAsync` (here in a loop); `Reconnected` follows when it
+  succeeds.
+- **Events name the endpoint only.** No host or user name is in them; `Error` may hold the server's disconnect text, so log it rather
+  than returning it to a caller.
+
+## Reach the server through a bastion
+
+`JumpHosts` lists bastions in configuration, each with its own user, keys and host key pins:
+
+```json
+{
+  "Ssh": {
+    "Deploy": {
+      "Host": "app1.internal.example.com",
+      "UserName": "deploy",
+      "PrivateKeyFiles": [ "~/.ssh/deploy_ed25519" ],
+      "KnownHostsFiles": [ "/etc/myapp/known_hosts" ],
+      "JumpHosts": [ { "Host": "bastion.example.com", "UserName": "jump", "PrivateKeyFiles": [ "~/.ssh/jump_ed25519" ] } ]
+    }
+  }
+}
+```
+
+The endpoint's password and keys never reach the bastion, and a hop without host key settings of its own is checked against the
+endpoint's `KnownHostsFiles`. See [Dependency injection: jump hosts](../dependency-injection.md#jump-hosts).
+
+## Use the SSH agent
+
+`UseAgent` offers the agent's keys after the endpoint's own; the keys never enter the process:
+
+[!code-csharp[](../snippets/DependencyInjection.cs#agent)]
+
+The agent is an `SshAgent` registered in the container, if any (`SshAgent.FromKeys` serves keys held by the application), otherwise
+the user's agent. A server process often has no agent; then the endpoint connects with its other credentials. See
+[Dependency injection: the SSH agent](../dependency-injection.md#the-ssh-agent).
+
 ## Open a connection of your own
 
 `ISshClientFactory` opens a new connection on each call, which the caller owns. Use it for long jobs that should not share, or
@@ -143,10 +217,9 @@ for something that holds a session for the application's lifetime.
 
 ## Customize the client options
 
-`ConfigureClientOptions` adjusts the `SshClientOptions` the endpoint builds, for what the settings do not cover: jump hosts
-([Jump hosts: in an ASP.NET Core application](jump-hosts.md#in-an-aspnet-core-application)), a host key policy
-of your own, keys held elsewhere (`SshPrivateKey.FromSigner`), an agent. Pinned fingerprints, keys as values and a proxy need no
-code: they are settings.
+`ConfigureClientOptions` adjusts the `SshClientOptions` the endpoint builds, for what the settings do not cover: a host key policy
+of your own, keys held elsewhere (`SshPrivateKey.FromSigner`), a custom proxy. Pinned keys, keys as values, a proxy, jump hosts and
+the agent need no code: they are settings. Keep what the endpoint built, jump hosts included:
 
 [!code-csharp[](../snippets/DependencyInjection.cs#customize)]
 
@@ -162,8 +235,8 @@ code: they are settings.
   `StrictHostKeyChecking yes`; `AcceptNewHostKeys` switches to `accept-new`. In a container, pin `HostKeyFingerprints` or mount a
   `known_hosts` file.
 - **`ConfigAlias`** connects through `ssh_config` instead; then `Host`, `Port`, `UserName`, `PrivateKeyFiles`, `KnownHostsFiles`,
-  `AcceptNewHostKeys`, `KeepAliveInterval` and `ConfigureClientOptions` are not used, and `PrivateKeys`, `HostKeyFingerprints` and
-  `Proxy` fail validation. `AddressFamily`, when set, overrides `ssh_config`'s.
+  `AcceptNewHostKeys`, `KeepAliveInterval` and `ConfigureClientOptions` are not used, and `PrivateKeys`, `HostKeyFingerprints`,
+  `Proxy` and `JumpHosts` fail validation. `AddressFamily`, when set, overrides `ssh_config`'s.
 - **IPv4 or IPv6 only.** `AddressFamily` (`Inet` or `Inet6`, `"AddressFamily": "Inet"` in configuration) limits which of the server's
   addresses are tried, as `ssh -4` and `-6` do: for a host whose IPv6 address is published but not reachable from the cluster. It
   is the built `SshClientOptions.AddressFamily`.
@@ -173,7 +246,7 @@ code: they are settings.
   (`Reason = Timeout`) when it is the shorter.
 - **Health endpoints are often public.** The check's description names no server software; the exception is attached for logging,
   so keep it out of public responses.
-- **Testing.** `ISshClientFactory` and `ISshConnectionProvider` are interfaces, but they return `SshClient`, which only a server can
+- **Testing.** `ISshClientFactory`, `ISshConnectionProvider` and `ISshEndpoint` are interfaces, but they return `SshClient`, which only a server can
   create. Put your own interface in front of the operations you use; see [Unit-test code that uses SshSharp](unit-testing.md).
 
 ## See also

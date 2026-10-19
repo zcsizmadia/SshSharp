@@ -40,6 +40,9 @@
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Condition="'$(TargetFramework)' != 'net8.0'" />
     <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks" VersionOverride="8.0.0" Condition="'$(TargetFramework)' == 'net8.0'" />
     <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks" Condition="'$(TargetFramework)' != 'net8.0'" />
+    <!-- For UseSshTunnel on IHttpClientBuilder. Part of the ASP.NET Core shared framework, so a web application gets nothing new. -->
+    <PackageReference Include="Microsoft.Extensions.Http" VersionOverride="8.0.0" Condition="'$(TargetFramework)' == 'net8.0'" />
+    <PackageReference Include="Microsoft.Extensions.Http" Condition="'$(TargetFramework)' != 'net8.0'" />
     <ProjectReference Include="../SshSharp/SshSharp.csproj" />
     <InternalsVisibleTo Include="SshSharp.Tests" />
     <None Include="README.md" Pack="true" PackagePath="/" />

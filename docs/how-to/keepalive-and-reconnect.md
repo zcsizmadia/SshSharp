@@ -46,7 +46,9 @@ flowchart LR
 ```
 
 In an application with dependency injection, `ISshConnectionProvider` does exactly this, with a backoff after failures and one
-attempt shared by concurrent callers; see [ASP.NET Core and dependency injection](aspnetcore-and-di.md). Without it, a small wrapper
+attempt shared by concurrent callers; see [ASP.NET Core and dependency injection](aspnetcore-and-di.md). Its `WatchAsync` reports
+each drop and reconnection, to set forwardings up again on the new connection; see
+[Restore a forwarding after a reconnect](aspnetcore-and-di.md#restore-a-forwarding-after-a-reconnect). Without it, a small wrapper
 is enough:
 
 [!code-csharp[](../snippets/Resilience.cs#reconnecting)]

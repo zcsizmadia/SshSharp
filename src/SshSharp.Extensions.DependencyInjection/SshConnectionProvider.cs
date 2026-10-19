@@ -1,10 +1,13 @@
 using System.Collections.Concurrent;
+using System.Runtime.CompilerServices;
+using System.Threading.Channels;
 
 namespace SshSharp.Extensions.DependencyInjection;
 
 /// <summary>
 /// The shared connection per endpoint: kept while it is up, opened again when it drops, with a growing wait after failures so a down
-/// server is not hammered. Owns its clients; disposing it (with the container) disposes them.
+/// server is not hammered. Owns its clients; disposing it (with the container) disposes them. Reports each connection's start and end
+/// to the watchers of its endpoint (<see cref="WatchAsync"/>).
 /// </summary>
 internal sealed class SshConnectionProvider(SshClientFactory factory, TimeProvider? time = null) : ISshConnectionProvider, IAsyncDisposable
 {
@@ -33,6 +36,9 @@ internal sealed class SshConnectionProvider(SshClientFactory factory, TimeProvid
 
             if (entry.Client is { } dead)
             {
+                // Reported here as well as by the closed token's callback, whichever comes first: that callback may still be on its
+                // way, and the drop must reach watchers before the reconnection does.
+                ReportDisconnected(name, entry, dead);
                 entry.Client = null;
                 await dead.DisposeAsync().ConfigureAwait(false);
             }
@@ -51,6 +57,7 @@ internal sealed class SshConnectionProvider(SshClientFactory factory, TimeProvid
                 entry.Client = client;
                 entry.LastError = null;
                 entry.Delay = TimeSpan.Zero;
+                ReportConnected(name, entry, client);
                 return client;
             }
             catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
@@ -67,6 +74,103 @@ internal sealed class SshConnectionProvider(SshClientFactory factory, TimeProvid
         finally
         {
             entry.Gate.Release();
+        }
+    }
+
+    public async IAsyncEnumerable<SshConnectionEvent> WatchAsync(string name, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        factory.Registry.ThrowIfUnknown(name);
+        var entry = _entries.GetOrAdd(name, static _ => new Entry());
+
+        // Unbounded, so a slow watcher misses nothing and never slows the connection down: an endpoint has at most a few events per
+        // connection, and the reconnect delay bounds how often connections come and go.
+        var events = Channel.CreateUnbounded<SshConnectionEvent>(new UnboundedChannelOptions { SingleReader = true });
+        lock (entry.Watchers)
+        {
+            entry.Watchers.Add(events);
+            if (_disposed)
+            {
+                events.Writer.TryComplete();
+            }
+            else if (entry.Current is { } current)
+            {
+                // The current state first, so a watcher that starts late still knows where things stand. A connection that has ended
+                // but is not reported yet is left to the report, which is on its way and reaches this watcher too.
+                if (current.Reported)
+                {
+                    events.Writer.TryWrite(new SshConnectionEvent(name, SshConnectionEventKind.Disconnected, current.Client, entry.LastDropError,
+                        _time.GetUtcNow()));
+                }
+                else if (current.Client.IsConnected)
+                {
+                    events.Writer.TryWrite(new SshConnectionEvent(name, SshConnectionEventKind.Connected, current.Client, null, _time.GetUtcNow()));
+                }
+            }
+        }
+
+        try
+        {
+            while (await events.Reader.WaitToReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                while (events.Reader.TryRead(out var change))
+                {
+                    yield return change;
+                }
+            }
+        }
+        finally
+        {
+            lock (entry.Watchers)
+            {
+                entry.Watchers.Remove(events);
+            }
+        }
+    }
+
+    /// <summary>A new shared connection: tells the watchers, and watches the connection for its end.</summary>
+    private void ReportConnected(string name, Entry entry, SshClient client)
+    {
+        var tracked = new Tracked(client);
+        lock (entry.Watchers)
+        {
+            var kind = entry.EverConnected ? SshConnectionEventKind.Reconnected : SshConnectionEventKind.Connected;
+            var error = entry.EverConnected ? entry.LastDropError : null;
+            entry.EverConnected = true;
+            entry.Current = tracked;
+            Publish(entry, new SshConnectionEvent(name, kind, client, error, _time.GetUtcNow()));
+        }
+
+        // The callback runs on the thread that ends the connection (its receive loop, often): it only queues the event. Registered
+        // after the lock is released, as a connection that has already ended runs it at once, here.
+        client.ConnectionClosed.UnsafeRegister(static state =>
+        {
+            var (provider, name, entry, client) = ((SshConnectionProvider, string, Entry, SshClient))state!;
+            provider.ReportDisconnected(name, entry, client);
+        }, (this, name, entry, client));
+    }
+
+    /// <summary>The shared connection <paramref name="client"/> ended: tells the watchers, once, unless the provider is closing it.</summary>
+    private void ReportDisconnected(string name, Entry entry, SshClient client)
+    {
+        lock (entry.Watchers)
+        {
+            if (_disposed || entry.Current is not { Reported: false } current || !ReferenceEquals(current.Client, client))
+            {
+                return;
+            }
+
+            current.Reported = true;
+            entry.LastDropError = client.ConnectionError;
+            Publish(entry, new SshConnectionEvent(name, SshConnectionEventKind.Disconnected, client, entry.LastDropError, _time.GetUtcNow()));
+        }
+    }
+
+    private static void Publish(Entry entry, SshConnectionEvent change)
+    {
+        foreach (var watcher in entry.Watchers)
+        {
+            watcher.Writer.TryWrite(change);
         }
     }
 
@@ -88,6 +192,14 @@ internal sealed class SshConnectionProvider(SshClientFactory factory, TimeProvid
             {
                 entry.Gate.Release();
             }
+
+            lock (entry.Watchers)
+            {
+                foreach (var watcher in entry.Watchers)
+                {
+                    watcher.Writer.TryComplete();
+                }
+            }
         }
     }
 
@@ -102,5 +214,26 @@ internal sealed class SshConnectionProvider(SshClientFactory factory, TimeProvid
         public DateTimeOffset RetryAt { get; set; }
 
         public TimeSpan Delay { get; set; }
+
+        // The fields below are guarded by Watchers' lock.
+
+        /// <summary>The watchers' queues.</summary>
+        public List<Channel<SshConnectionEvent>> Watchers { get; } = [];
+
+        /// <summary>The latest shared connection, and whether its end has been reported.</summary>
+        public Tracked? Current { get; set; }
+
+        /// <summary>Whether a connection was ever opened, so the next one is a reconnection.</summary>
+        public bool EverConnected { get; set; }
+
+        /// <summary>Why the last connection ended, for the reconnection's event.</summary>
+        public Exception? LastDropError { get; set; }
+    }
+
+    private sealed class Tracked(SshClient client)
+    {
+        public SshClient Client { get; } = client;
+
+        public bool Reported { get; set; }
     }
 }

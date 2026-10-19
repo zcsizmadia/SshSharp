@@ -9,7 +9,7 @@ operations run in parallel, why unread output stalls a program, and what the ser
 | Channel type | Opened by | Created by |
 |---|---|---|
 | `session` | client | `RunCommandAsync`, `StartCommandAsync`, `StartShellAsync`, `StartSubsystemAsync`, `OpenSftpAsync`, SCP transfers |
-| `direct-tcpip` | client | `OpenTcpTunnelAsync`, each connection to a local forwarder or SOCKS proxy, `CreateHttpConnectCallback`, ProxyJump hops |
+| `direct-tcpip` | client | `OpenTcpTunnelAsync`, each connection to a local forwarder or SOCKS proxy, `CreateHttpConnectCallback` (and the DI package's `UseSshTunnel`), ProxyJump hops and `JumpHosts` |
 | `direct-streamlocal@openssh.com` | client | `OpenUnixSocketTunnelAsync`, and each connection to a local forwarding to a Unix socket on the server |
 | `forwarded-tcpip` | server | each connection to a remote forwarding (`ForwardRemotePortAsync`, to a host and port or to a handler, `ForwardRemoteDynamicPortAsync`) |
 | `forwarded-streamlocal@openssh.com` | server | each connection to a remote Unix-socket forwarding |

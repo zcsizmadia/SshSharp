@@ -76,7 +76,9 @@ work with the usual HTTP stack. TLS still runs end to end, from this machine to 
 
 [!code-csharp[](../snippets/Forwarding.cs#http)]
 
-The same handler works with `IHttpClientFactory` (`ConfigurePrimaryHttpMessageHandler`).
+The same handler works with `IHttpClientFactory` (`ConfigurePrimaryHttpMessageHandler`). With the dependency injection package,
+`AddHttpClient(...).UseSshTunnel("name")` does it on an endpoint's shared connection, and follows it across drops; see
+[Call an internal API through the server](aspnetcore-and-di.md#call-an-internal-api-through-the-server).
 
 ## Dynamic forwarding: a SOCKS proxy (`ssh -D`)
 

@@ -50,10 +50,16 @@ public sealed class SshEndpointOptions
     public bool AcceptNewHostKeys { get; set; }
 
     /// <summary>
-    /// Trust only host keys with one of these SHA-256 fingerprints, in OpenSSH's format (<c>SHA256:</c> and 43 base64 characters, as
-    /// <c>ssh-keygen -lf</c> prints them), as <see cref="SshHostKeyVerifier.Pinned(string[])"/> does. They replace known_hosts: setting
-    /// <see cref="KnownHostsFiles"/>, <see cref="AcceptNewHostKeys"/> or <see cref="ConfigAlias"/> as well fails validation, so it is
-    /// never unclear which of them decides. List more than one to allow for a host key rotation.
+    /// Trust only these host keys, as <see cref="SshHostKeyVerifier.Pinned(string[])"/> does. Each entry is one of:
+    /// <list type="bullet">
+    /// <item>a SHA-256 fingerprint in OpenSSH's format (<c>SHA256:</c> and 43 base64 characters, as <c>ssh-keygen -lf</c> prints it);</item>
+    /// <item>a public key line, as the server's <c>/etc/ssh/ssh_host_ed25519_key.pub</c> holds it (<c>ssh-ed25519 AAAA... comment</c>,
+    /// read by <see cref="SshPublicKey.Parse"/>);</item>
+    /// <item>a known_hosts line (<c>host ssh-ed25519 AAAA...</c>), as <c>ssh-keyscan</c> prints it. Its host field is not checked: the
+    /// line pins the key. Marked lines (<c>@cert-authority</c>, <c>@revoked</c>) fail validation.</item>
+    /// </list>
+    /// They replace known_hosts: setting <see cref="KnownHostsFiles"/>, <see cref="AcceptNewHostKeys"/> or <see cref="ConfigAlias"/> as
+    /// well fails validation, so it is never unclear which of them decides. List more than one to allow for a host key rotation.
     /// </summary>
     public IList<string> HostKeyFingerprints { get; set; } = [];
 
@@ -70,10 +76,29 @@ public sealed class SshEndpointOptions
     /// Connect by this <c>ssh_config</c> alias instead (ProxyJump, IdentityFile, known_hosts and the rest come from the user's and the
     /// system's ssh_config). <see cref="Host"/>, <see cref="Port"/>, <see cref="UserName"/>, <see cref="PrivateKeyFiles"/> and
     /// <see cref="KnownHostsFiles"/> are then ignored; <see cref="Password"/> is still offered. <see cref="PrivateKeys"/>,
-    /// <see cref="HostKeyFingerprints"/> and <see cref="Proxy"/> cannot be combined with it (validation fails), as ssh_config decides
-    /// keys, host keys and proxies there.
+    /// <see cref="HostKeyFingerprints"/>, <see cref="Proxy"/> and <see cref="JumpHosts"/> cannot be combined with it (validation fails), as
+    /// ssh_config decides keys, host keys, proxies and jump hosts there.
     /// </summary>
     public string? ConfigAlias { get; set; }
+
+    /// <summary>
+    /// Jump hosts (bastions) to reach <see cref="Host"/> through, first to last, as <c>ssh -J</c> does (see
+    /// <see cref="SshClientOptions.JumpHosts"/>). Each has its own user, credentials and host key settings, and is offered only those; the
+    /// endpoint's password and keys go to <see cref="Host"/> alone. With <see cref="Proxy"/>, the proxy carries the connection to the
+    /// first hop. <see cref="ConnectTimeout"/> bounds the whole chain. Cannot be combined with <see cref="ConfigAlias"/>, where ssh_config's
+    /// <c>ProxyJump</c> applies.
+    /// </summary>
+    public IList<SshEndpointJumpHost> JumpHosts { get; set; } = [];
+
+    /// <summary>
+    /// Whether to offer the keys of the user's SSH agent. Without <see cref="ConfigAlias"/>, true offers them after
+    /// <see cref="PrivateKeyFiles"/> and <see cref="PrivateKeys"/>, and null or false does not (the default). With <see cref="ConfigAlias"/>,
+    /// null leaves it to ssh_config (<c>IdentityAgent</c>, as ssh does), false turns the agent off, and true uses the agent registered in
+    /// the container, if any. That agent is the one registered as <see cref="SshAgent"/> (<see cref="SshAgent.FromKeys"/> for keys held in
+    /// this process); without one, it is the environment's (<see cref="SshAgent.FromEnvironmentAsync"/>). An agent that is not running is
+    /// skipped, as ssh skips it.
+    /// </summary>
+    public bool? UseAgent { get; set; }
 
     /// <summary>Send keep-alives at this interval, so a dead connection is noticed (none by default).</summary>
     public TimeSpan? KeepAliveInterval { get; set; }
@@ -100,9 +125,10 @@ public sealed class SshEndpointOptions
     public TimeSpan MaxReconnectDelay { get; set; } = TimeSpan.FromMinutes(1);
 
     /// <summary>
-    /// Adjusts the client options built from these settings (an agent, a custom host key verifier, keys held elsewhere, a proxy, jump
-    /// hosts through <see cref="SshClientOptions.JumpHosts"/>, ...):
-    /// receives the services and the options built so far, and returns the options to use. Not used with <see cref="ConfigAlias"/>.
+    /// Adjusts the client options built from these settings (a custom host key verifier, keys held elsewhere, a custom proxy, ...):
+    /// receives the services and the options built so far, and returns the options to use. The options it receives already hold
+    /// <see cref="JumpHosts"/> (as <see cref="SshClientOptions.JumpHosts"/>) and the agent's keys: copy them into new options. Not used
+    /// with <see cref="ConfigAlias"/>.
     /// </summary>
     public Func<IServiceProvider, SshClientOptions, SshClientOptions>? ConfigureClientOptions { get; set; }
 }
