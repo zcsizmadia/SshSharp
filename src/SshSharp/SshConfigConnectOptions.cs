@@ -24,6 +24,19 @@ public sealed class SshConfigConnectOptions
     public string? Password { get; init; }
 
     /// <summary>
+    /// Asks for the destination's password when authentication reaches it, at most <c>NumberOfPasswordPrompts</c> times (default 3); see
+    /// <see cref="SshClientOptions.PasswordProvider"/>. Not called in <c>BatchMode</c>, when both <c>PasswordAuthentication</c> and
+    /// <c>KbdInteractiveAuthentication</c> are <c>no</c>, or for a ProxyJump hop.
+    /// </summary>
+    public Func<SshPasswordPrompt, CancellationToken, ValueTask<string?>>? PasswordProvider { get; init; }
+
+    /// <summary>
+    /// Answers the destination's request to change an expired password (see <see cref="SshClientOptions.ChangePassword"/>). Not called
+    /// in <c>BatchMode</c> or for a ProxyJump hop.
+    /// </summary>
+    public Func<SshPasswordChangeRequest, CancellationToken, ValueTask<string?>>? ChangePassword { get; init; }
+
+    /// <summary>
     /// Answers the destination's keyboard-interactive authentication (see <see cref="SshClientOptions.KeyboardInteractive"/>). Not called
     /// in <c>BatchMode</c>, with <c>KbdInteractiveAuthentication no</c>, or for a ProxyJump hop.
     /// </summary>

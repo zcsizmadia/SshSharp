@@ -505,7 +505,7 @@ public sealed partial class SshClient : IAsyncDisposable
         {
             await transport.ConnectAsync(cancellationToken).ConfigureAwait(false);
             var acceptedKeys = new List<SshPrivateKey>();
-            await AuthenticateAsync(transport, options, logger, acceptedKeys, host, cancellationToken).ConfigureAwait(false);
+            await AuthenticateAsync(transport, options, logger, acceptedKeys, host, port, cancellationToken).ConfigureAwait(false);
             var client = CompleteConnection(transport, stream, options, leaveOpen, owner, host, port, logger, measurement);
             client.AcceptedKeys = acceptedKeys;
             return client;
@@ -648,8 +648,11 @@ public sealed partial class SshClient : IAsyncDisposable
     /// <summary>Walks of the method order; each one after the first needs a partial success, so this bounds a server that never finishes.</summary>
     private const int MaxAuthenticationPasses = 8;
 
+    /// <summary>Requests for a new password the client answers for one password, before it treats the password as expired and unchanged.</summary>
+    internal const int MaxPasswordChangeRequests = 3;
+
     private static async Task AuthenticateAsync(SshTransport transport, SshClientOptions options, ILogger logger, List<SshPrivateKey> acceptedKeys,
-        string? host, CancellationToken cancellationToken)
+        string? host, int port, CancellationToken cancellationToken)
     {
         var auth = new SshUserAuth(transport, options.UserName, options.AuthenticationBanner);
         await auth.RequestServiceAsync(cancellationToken).ConfigureAwait(false);
@@ -667,18 +670,56 @@ public sealed partial class SshClient : IAsyncDisposable
 
         var order = options.PreferredAuthentications ?? DefaultAuthenticationOrder;
         var methods = outcome.RemainingMethods;
+
+        // What each attempt came to, for the exception if none succeeds: methods and key fingerprints only, never a secret or the user.
+        var attempts = new List<SshAuthenticationAttempt>();
+        var reported = new HashSet<string>(StringComparer.Ordinal); // methods already listed as not offered or unavailable
+        void Report(string method, SshAuthenticationOutcome what)
+        {
+            if (reported.Add(method))
+            {
+                attempts.Add(new SshAuthenticationAttempt(method, what));
+            }
+        }
+
+        void Record(string method, AuthOutcome result, string? fingerprint = null)
+        {
+            if (!result.Success)
+            {
+                attempts.Add(new SshAuthenticationAttempt(method, result.PartialSuccess ? SshAuthenticationOutcome.PartialSuccess : SshAuthenticationOutcome.Rejected, fingerprint));
+            }
+        }
+
+        var passwords = new PasswordSource(options, host, port);
+        var passwordThroughKeyboard = false;
         var passes = 0;
         bool progressed;
         do
         {
             progressed = false;
+            if (passes > 0)
+            {
+                passwords.NewPass();
+            }
+
             for (var step = 0; step < order.Count; step++)
             {
                 AuthOutcome? result = null;
                 switch (order[step])
                 {
-                    case SshUserAuth.GssapiMethod when options.Gssapi is { } gssapi && Gssapi.IsSupported && methods.Contains(SshUserAuth.GssapiMethod)
-                        && (gssapi.TargetHost ?? host) is { Length: > 0 } target:
+                    case SshUserAuth.GssapiMethod when options.Gssapi is { } gssapi:
+                        if (!methods.Contains(SshUserAuth.GssapiMethod))
+                        {
+                            Report(SshUserAuth.GssapiMethod, SshAuthenticationOutcome.NotOffered);
+                            break;
+                        }
+
+                        if (!Gssapi.IsSupported || (gssapi.TargetHost ?? host) is not { Length: > 0 } target)
+                        {
+                            Report(SshUserAuth.GssapiMethod, SshAuthenticationOutcome.Unavailable);
+                            break;
+                        }
+
                         IGssapiContext context;
                         try
                         {
@@ -690,6 +731,7 @@ public sealed partial class SshClient : IAsyncDisposable
                             // No GSS-API library or provider here (libgssapi missing on Linux, say): the other methods remain.
                             var reason = ex.GetType().Name;
                             SshLog.GssapiUnavailable(logger, reason);
+                            Report(SshUserAuth.GssapiMethod, SshAuthenticationOutcome.Unavailable);
                             break;
                         }
 
@@ -699,9 +741,24 @@ public sealed partial class SshClient : IAsyncDisposable
                             result = await auth.GssapiAsync(context, cancellationToken).ConfigureAwait(false);
                         }
 
+                        if (result is null)
+                        {
+                            attempts.Add(new SshAuthenticationAttempt(SshUserAuth.GssapiMethod, SshAuthenticationOutcome.Unavailable)); // no ticket, say
+                        }
+                        else
+                        {
+                            Record(SshUserAuth.GssapiMethod, result);
+                        }
+
                         break;
 
-                    case "publickey":
+                    case "publickey" when options.PrivateKeys.Count > 0:
+                        if (!methods.Contains("publickey"))
+                        {
+                            Report("publickey", SshAuthenticationOutcome.NotOffered);
+                            break;
+                        }
+
                         foreach (var key in options.PrivateKeys)
                         {
                             if (!methods.Contains("publickey"))
@@ -711,7 +768,9 @@ public sealed partial class SshClient : IAsyncDisposable
 
                             if (SshUserAuth.ChooseSignatureAlgorithm(key, transport.ServerExtensions) is not { } algorithm)
                             {
-                                continue; // the server accepts no signature algorithm this key can make (for example an RSA key and no rsa-sha2-*)
+                                // The server accepts no signature algorithm this key can make (for example an RSA key and no rsa-sha2-*).
+                                attempts.Add(new SshAuthenticationAttempt("publickey", SshAuthenticationOutcome.NoAcceptedAlgorithm, key.Fingerprint));
+                                continue;
                             }
 
                             SshLog.Authenticating(logger, "publickey");
@@ -723,10 +782,12 @@ public sealed partial class SshClient : IAsyncDisposable
                             {
                                 // The agent lost the key or the user declined to confirm: the next key may still do.
                                 SshLog.AgentKeySkipped(logger, key.Fingerprint, ex.Message);
+                                attempts.Add(new SshAuthenticationAttempt("publickey", SshAuthenticationOutcome.SigningFailed, key.Fingerprint));
                                 result = null;
                                 continue;
                             }
 
+                            Record("publickey", result, key.Fingerprint);
                             if (result.Success || result.PartialSuccess)
                             {
                                 acceptedKeys.Add(key);
@@ -738,24 +799,81 @@ public sealed partial class SshClient : IAsyncDisposable
 
                         break;
 
-                    case "keyboard-interactive" when methods.Contains("keyboard-interactive"):
-                        var respond = options.KeyboardInteractive;
-                        if (respond is null && options.Password is { } secret && !(methods.Contains("password") && order.Skip(step + 1).Contains("password")))
+                    case "keyboard-interactive":
+                        if (options.KeyboardInteractive is { } respond)
                         {
-                            respond = AnswerWithPassword(secret); // a server that takes passwords only this way (PAM)
-                        }
+                            if (!methods.Contains("keyboard-interactive"))
+                            {
+                                Report("keyboard-interactive", SshAuthenticationOutcome.NotOffered);
+                                break;
+                            }
 
-                        if (respond is not null)
-                        {
                             SshLog.Authenticating(logger, "keyboard-interactive");
                             result = await auth.KeyboardInteractiveAsync(respond, cancellationToken).ConfigureAwait(false);
+                            if (result is null)
+                            {
+                                attempts.Add(new SshAuthenticationAttempt("keyboard-interactive", SshAuthenticationOutcome.Declined));
+                            }
+                            else
+                            {
+                                Record("keyboard-interactive", result);
+                            }
+                        }
+                        else if (passwords.IsSet && methods.Contains("keyboard-interactive")
+                            && !(methods.Contains("password") && order.Skip(step + 1).Contains("password")))
+                        {
+                            // A server that takes passwords only this way (PAM): the password answers a single hidden question.
+                            passwordThroughKeyboard = true;
+                            result = await PasswordThroughKeyboardInteractiveAsync(auth, passwords, attempts, logger, cancellationToken).ConfigureAwait(false);
                         }
 
                         break;
 
-                    case "password" when options.Password is { } password && methods.Contains("password"):
-                        SshLog.Authenticating(logger, "password");
-                        result = await auth.PasswordAsync(password, cancellationToken).ConfigureAwait(false);
+                    case "password" when passwords.IsSet:
+                        if (!methods.Contains("password"))
+                        {
+                            if (!passwordThroughKeyboard)
+                            {
+                                Report("password", SshAuthenticationOutcome.NotOffered);
+                            }
+
+                            break;
+                        }
+
+                        while (passwords.HasMore)
+                        {
+                            var (password, declined) = await passwords.NextAsync("password", cancellationToken).ConfigureAwait(false);
+                            if (password is null)
+                            {
+                                if (declined)
+                                {
+                                    attempts.Add(new SshAuthenticationAttempt("password", SshAuthenticationOutcome.Declined));
+                                }
+
+                                break;
+                            }
+
+                            SshLog.Authenticating(logger, "password");
+                            var sent = await SendPasswordAsync(auth, options, password, host, port, attempts, cancellationToken).ConfigureAwait(false);
+                            if (sent is null)
+                            {
+                                break; // expired and not changed: another password would not be the answer
+                            }
+
+                            result = sent;
+                            if (result.Success || result.PartialSuccess)
+                            {
+                                break;
+                            }
+
+                            passwords.Rejected();
+                            methods = result.RemainingMethods;
+                            if (!methods.Contains("password"))
+                            {
+                                break;
+                            }
+                        }
+
                         break;
                 }
 
@@ -777,30 +895,176 @@ public sealed partial class SshClient : IAsyncDisposable
         while (progressed && ++passes < MaxAuthenticationPasses);
 
         SshLog.AuthenticationFailed(logger, string.Join(", ", methods));
-        throw new SshAuthenticationException($"Authentication failed. The server accepts: {string.Join(", ", methods)}.", methods);
+        var tried = attempts.Count > 0 ? $" Attempts: {string.Join("; ", attempts)}." : " No method was tried: give credentials for one of them.";
+        throw new SshAuthenticationException($"Authentication failed. The server accepts: {string.Join(", ", methods)}.{tried}", methods, attempts);
     }
 
     /// <summary>
-    /// Answers keyboard-interactive with the password: a round with no questions gets no answers, and the first round that asks for exactly
-    /// one hidden input gets the password. Anything else (a second password round, a one-time code, a visible question) ends the attempt.
+    /// Sends a password; when it has expired and the server asks for a new one (RFC 4252 section 8), asks
+    /// <see cref="SshClientOptions.ChangePassword"/> and sends the change, up to <see cref="MaxPasswordChangeRequests"/> times. Returns the
+    /// server's answer, or null when the password is expired and was not changed (recorded as such).
     /// </summary>
-    private static Func<SshKeyboardInteractiveRequest, CancellationToken, ValueTask<IReadOnlyList<string>?>> AnswerWithPassword(string password)
+    private static async Task<AuthOutcome?> SendPasswordAsync(SshUserAuth auth, SshClientOptions options, string password, string? host, int port,
+        List<SshAuthenticationAttempt> attempts, CancellationToken cancellationToken)
     {
-        var answered = false;
-        return (request, _) =>
+        var result = await auth.PasswordAsync(password, cancellationToken).ConfigureAwait(false);
+        for (var request = 1; result.ChangeRequest is { } change; request++)
+        {
+            string? newPassword = null;
+            if (options.ChangePassword is { } changePassword && request <= MaxPasswordChangeRequests)
+            {
+                newPassword = await changePassword(new SshPasswordChangeRequest(change.Prompt, change.Language, options.UserName, host, port, request), cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
+            if (newPassword is null)
+            {
+                // Declined, no handler, or the server refused every new password: the password stays as it was. RFC 4252 forbids a
+                // server to accept the expired one, so the next method is the way in, if any.
+                attempts.Add(new SshAuthenticationAttempt("password", SshAuthenticationOutcome.PasswordChangeRequired));
+                return null;
+            }
+
+            result = await auth.ChangePasswordAsync(password, newPassword, cancellationToken).ConfigureAwait(false);
+        }
+
+        if (!result.Success)
+        {
+            attempts.Add(new SshAuthenticationAttempt("password", result.PartialSuccess ? SshAuthenticationOutcome.PartialSuccess : SshAuthenticationOutcome.Rejected));
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// keyboard-interactive answered with the password (<see cref="PasswordSource"/>): again after each refusal, while the provider may
+    /// be asked. Returns the last outcome, or null when no attempt was made or this side gave up (recorded as declined).
+    /// </summary>
+    private static async Task<AuthOutcome?> PasswordThroughKeyboardInteractiveAsync(SshUserAuth auth, PasswordSource passwords,
+        List<SshAuthenticationAttempt> attempts, ILogger logger, CancellationToken cancellationToken)
+    {
+        AuthOutcome? last = null;
+        while (passwords.HasMore)
+        {
+            var answer = new KeyboardInteractivePassword(passwords);
+            SshLog.Authenticating(logger, "keyboard-interactive");
+            var result = await auth.KeyboardInteractiveAsync(answer.RespondAsync, cancellationToken).ConfigureAwait(false);
+            if (result is null)
+            {
+                // The questions were not a single password prompt (a one-time code, a second round), or the provider declined.
+                attempts.Add(new SshAuthenticationAttempt("keyboard-interactive", SshAuthenticationOutcome.Declined));
+                return last;
+            }
+
+            last = result;
+            if (!result.Success)
+            {
+                attempts.Add(new SshAuthenticationAttempt("keyboard-interactive",
+                    result.PartialSuccess ? SshAuthenticationOutcome.PartialSuccess : SshAuthenticationOutcome.Rejected));
+            }
+
+            if (result.Success || result.PartialSuccess || !answer.Answered || !result.RemainingMethods.Contains("keyboard-interactive"))
+            {
+                return result;
+            }
+
+            passwords.Rejected();
+        }
+
+        return last;
+    }
+
+    /// <summary>
+    /// The passwords to try, in order: <see cref="SshClientOptions.Password"/>, then what <see cref="SshClientOptions.PasswordProvider"/>
+    /// answers, at most <see cref="SshClientOptions.NumberOfPasswordPrompts"/> times per connection.
+    /// </summary>
+    private sealed class PasswordSource(SshClientOptions options, string? host, int port)
+    {
+        private bool _givenRejected;
+        private bool _lastWasGiven;
+        private bool _anyRejected;
+        private bool _declined;
+        private int _prompts;
+
+        /// <summary>Whether there is a password, or a provider to ask for one.</summary>
+        public bool IsSet => options.Password is not null || options.PasswordProvider is not null;
+
+        /// <summary>Whether <see cref="NextAsync"/> may still give a password.</summary>
+        public bool HasMore =>
+            (options.Password is not null && !_givenRejected)
+            || (options.PasswordProvider is not null && !_declined && _prompts < options.NumberOfPasswordPrompts);
+
+        /// <summary>The next password; null when there is none left, with Declined when the provider just said to stop.</summary>
+        public async ValueTask<(string? Password, bool Declined)> NextAsync(string method, CancellationToken cancellationToken)
+        {
+            if (options.Password is { } given && !_givenRejected)
+            {
+                _lastWasGiven = true;
+                return (given, false);
+            }
+
+            if (options.PasswordProvider is not { } provider || _declined || _prompts >= options.NumberOfPasswordPrompts)
+            {
+                return (null, false);
+            }
+
+            _lastWasGiven = false;
+            _prompts++;
+            var password = await provider(new SshPasswordPrompt(options.UserName, host, port, method, _prompts, _anyRejected), cancellationToken)
+                .ConfigureAwait(false);
+            if (password is null)
+            {
+                _declined = true;
+                return (null, true);
+            }
+
+            return (password, false);
+        }
+
+        /// <summary>The server refused the last password: the given one is not sent again in this walk of the order.</summary>
+        public void Rejected()
+        {
+            _anyRejected = true;
+            _givenRejected |= _lastWasGiven;
+        }
+
+        /// <summary>
+        /// A new walk of the order after a partial success: the server's state changed, so the given password may be tried again (it may
+        /// have been refused only because another method had to come first). Prompts already made still count.
+        /// </summary>
+        public void NewPass() => _givenRejected = false;
+    }
+
+    /// <summary>
+    /// Answers keyboard-interactive with a password: a round with no questions gets no answers, and the first round that asks for exactly
+    /// one hidden input gets the password, asked for only then. Anything else (a second password round, a one-time code, a visible
+    /// question) ends the attempt.
+    /// </summary>
+    private sealed class KeyboardInteractivePassword(PasswordSource passwords)
+    {
+        /// <summary>Whether a password was sent.</summary>
+        public bool Answered { get; private set; }
+
+        public async ValueTask<IReadOnlyList<string>?> RespondAsync(SshKeyboardInteractiveRequest request, CancellationToken cancellationToken)
         {
             if (request.Prompts.Count == 0)
             {
-                return new ValueTask<IReadOnlyList<string>?>([]);
+                return [];
             }
 
-            if (answered || request.Prompts.Count != 1 || request.Prompts[0].Echo)
+            if (Answered || request.Prompts.Count != 1 || request.Prompts[0].Echo)
             {
-                return new ValueTask<IReadOnlyList<string>?>((IReadOnlyList<string>?)null);
+                return null;
             }
 
-            answered = true;
-            return new ValueTask<IReadOnlyList<string>?>([password]);
-        };
+            var (password, _) = await passwords.NextAsync("keyboard-interactive", cancellationToken).ConfigureAwait(false);
+            if (password is null)
+            {
+                return null;
+            }
+
+            Answered = true;
+            return [password];
+        }
     }
 }

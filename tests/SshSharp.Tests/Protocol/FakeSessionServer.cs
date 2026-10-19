@@ -630,6 +630,38 @@ internal sealed class FakeSessionServer : IAsyncDisposable
                         break;
                     }
                 }
+                else if (method == "password" && user == UserName && PasswordExpired)
+                {
+                    // RFC 4252 section 8: an expired password is answered with PASSWD_CHANGEREQ, and a change request carries old and new.
+                    var isChange = reader.ReadBoolean();
+                    var password = reader.ReadUtf8String();
+                    var newPassword = isChange ? reader.ReadUtf8String() : null;
+                    lock (PasswordsReceived)
+                    {
+                        PasswordsReceived.Add(password);
+                        if (newPassword is not null)
+                        {
+                            NewPasswordsReceived.Add(newPassword);
+                        }
+                    }
+
+                    if (password != Password || (newPassword is not null && NewPasswordsRefused < 0))
+                    {
+                        await FinishAuthAsync(method, ok: false); // a wrong old password, or a server that will not change it at all
+                        break;
+                    }
+
+                    if (newPassword is null || NewPasswordsReceived.Count <= NewPasswordsRefused)
+                    {
+                        var prompt = newPassword is null ? PasswordChangePrompt : "Password too short.";
+                        await _server.SendAsync(Build(w => { w.WriteByte(SshMessage.UserAuthPasswordChangeRequest); w.WriteString(prompt); w.WriteString("en"); }));
+                        break;
+                    }
+
+                    ChangedPassword = newPassword;
+                    await FinishAuthAsync(method, ok: true);
+                    break;
+                }
                 else
                 {
                     ok = user == UserName && ((method == "none" && AllowNone)
@@ -1350,8 +1382,34 @@ internal sealed class FakeSessionServer : IAsyncDisposable
     private bool PasswordMatches(ref SshReader reader)
     {
         reader.ReadBoolean();
-        return reader.ReadUtf8String() == Password;
+        var password = reader.ReadUtf8String();
+        lock (PasswordsReceived)
+        {
+            PasswordsReceived.Add(password);
+        }
+
+        return password == Password;
     }
+
+    /// <summary>Every password the client sent with the password method, in order (the old one, for a change request).</summary>
+    public List<string> PasswordsReceived { get; } = [];
+
+    /// <summary>
+    /// The right password has expired: it is answered with SSH_MSG_USERAUTH_PASSWD_CHANGEREQ (<see cref="PasswordChangePrompt"/>), and a
+    /// change request with it as the old password succeeds once <see cref="NewPasswordsRefused"/> new passwords were refused.
+    /// </summary>
+    public bool PasswordExpired { get; init; }
+
+    public string PasswordChangePrompt { get; init; } = "Your password has expired.";
+
+    /// <summary>New passwords answered with another change request before one is accepted; negative refuses changes with FAILURE.</summary>
+    public int NewPasswordsRefused { get; init; }
+
+    /// <summary>The new passwords the client sent, in order.</summary>
+    public List<string> NewPasswordsReceived { get; } = [];
+
+    /// <summary>The new password the server accepted, if any.</summary>
+    public string? ChangedPassword { get; private set; }
 
     private ServerChannel Find(uint id)
     {

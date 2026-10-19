@@ -36,7 +36,7 @@ flowchart LR
 |---|---|
 | Server identity | A host key verifier is required; there is no "accept anything" default. The key is verified before any credential is sent. |
 | Cryptography | Only modern algorithms (no CBC, SHA-1 MACs, `ssh-rsa` signatures, DH group 1, RSA under 2048 bits); strict key exchange offered on every connection and used whenever the server supports it; post-quantum hybrid key exchange preferred. |
-| Credentials | Passwords and keyboard-interactive answers go only to the destination, never to `ProxyJump` hops. Keys are offered only after the server says it would accept them. |
+| Credentials | Passwords (given, or asked for through `PasswordProvider`), new passwords for an expired one, and keyboard-interactive answers go only to the destination, never to `ProxyJump` hops. Keys are offered only after the server says it would accept them. Authentication failures list methods and key fingerprints, never secrets or user names. |
 | Secrets in memory | Key material is wiped (`CryptographicOperations.ZeroMemory`) when no longer needed, and disposing a key clears it. Passwords are managed strings and cannot be wiped. |
 | Logs and telemetry | Never contain passwords, private keys, command text, user names or host names. |
 | Downloads | SFTP and SCP directory downloads treat names from the server as hostile: no path separators, `..`, device names or control characters; nothing lands outside the target (CVE-2019-6111). |

@@ -38,6 +38,12 @@ A man in the middle can read, change, drop and inject bytes. The server itself m
   signed data starts with this session's identifier (and, host-bound, names this server's host key), so the signature logs in
   nowhere else. Keys held by an agent or a signer, whose signature may need the user's confirmation, a touch or a remote call, are
   still offered first and sign only for a server that accepts them.
+- **Passwords and password changes:** passwords go only to the server whose host key was verified, inside the encrypted
+  transport. A server that answers with a password change request (RFC 4252 section 8) receives the old password again and the new
+  one the application's `ChangePassword` returns; without that handler nothing more is sent. A server cannot make the client loop:
+  it gets at most 3 new passwords per password, `PasswordProvider` is asked at most `NumberOfPasswordPrompts` times per connection,
+  and keyboard-interactive rounds and walks of the method order stay bounded as before. What the server says in a change request
+  (`SshPasswordChangeRequest.Prompt`) is its own text, for the application to clean before showing.
 - **Downgrade and prefix attacks:** only modern algorithms are offered (no SHA-1 KEX or MACs, no CBC, no `ssh-rsa`
   SHA-1 signatures, RSA ≥ 2048 bits). Strict KEX (Terrapin, CVE-2023-48795) is negotiated whenever the server supports it.
   The application can narrow or reorder the algorithm lists (`SshClientOptions.KexAlgorithms`, `HostKeyAlgorithms`, `Ciphers`,
@@ -225,6 +231,11 @@ A man in the middle can read, change, drop and inject bytes. The server itself m
 
 - Passwords, private keys and command text are never logged. User names and host names are not logged either; host key
   fingerprints and algorithm names are.
+- `SshAuthenticationException` (its message and `Attempts`) names methods, outcomes and the SHA-256 fingerprints of the keys
+  offered, which identify public keys only. It never holds a password, a keyboard-interactive answer or the user name. A key
+  fingerprint can link a failed login to its owner, as it can in the server's own log; treat it as you treat host key fingerprints.
+- `PasswordProvider` and `ChangePassword` get the user name and the host as the caller gave it, to show a prompt. The library
+  keeps neither the passwords they return nor the new password after authentication.
 - Derived keys and key material are wiped (`CryptographicOperations.ZeroMemory`) when no longer needed. Managed strings
   (the `Password` option) cannot be wiped; this is a known limitation. The same holds for `SshGssapiOptions.Credential`: a
   `NetworkCredential` keeps its password as a managed string, so prefer the platform's ticket (`kinit`, or the Windows logon
@@ -241,7 +252,8 @@ A man in the middle can read, change, drop and inject bytes. The server itself m
 - `ProxyCommand` runs by default, as with `ssh`. Applications that load configurations they do not control can turn it off
   with `SshConfigConnectOptions.AllowProxyCommand = false`.
 - The password and keyboard-interactive answers given in `SshConfigConnectOptions` go to the destination only: a `ProxyJump`
-  hop, perhaps run by someone else, is never offered them, and logs in with keys or the agent.
+  hop, perhaps run by someone else, is never offered them, and logs in with keys or the agent. The same holds for
+  `PasswordProvider` and `ChangePassword`: they are never called for a hop, nor in `BatchMode`.
 - `Include` is bounded: at most 16 levels deep and 1,024 files in all, so a configuration cannot make resolution parse without end.
 - `KnownHostsCommand` runs only with `SshConfigConnectOptions.AllowKnownHostsCommand = true`. It is off by default, unlike
   `ProxyCommand`, because its output is trusted as known_hosts lines: a configuration the application does not control must not

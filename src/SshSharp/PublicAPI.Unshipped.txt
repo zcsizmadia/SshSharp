@@ -140,3 +140,56 @@ SshSharp.SshPrivateKeyFormat
 SshSharp.SshPrivateKeyFormat.OpenSsh = 0 -> SshSharp.SshPrivateKeyFormat
 SshSharp.SshPrivateKeyFormat.Pkcs8 = 1 -> SshSharp.SshPrivateKeyFormat
 SshSharp.SshPrivateKeyFormat.Putty = 2 -> SshSharp.SshPrivateKeyFormat
+SshSharp.Config.SshHostConfig.NumberOfPasswordPrompts.get -> int
+SshSharp.Config.SshHostConfig.NumberOfPasswordPrompts.init -> void
+SshSharp.SshAuthenticationAttempt
+SshSharp.SshAuthenticationAttempt.<Clone>$() -> SshSharp.SshAuthenticationAttempt!
+SshSharp.SshAuthenticationAttempt.Deconstruct(out string! Method, out SshSharp.SshAuthenticationOutcome Outcome, out string? KeyFingerprint) -> void
+SshSharp.SshAuthenticationAttempt.Equals(SshSharp.SshAuthenticationAttempt? other) -> bool
+SshSharp.SshAuthenticationAttempt.KeyFingerprint.get -> string?
+SshSharp.SshAuthenticationAttempt.KeyFingerprint.init -> void
+SshSharp.SshAuthenticationAttempt.Method.get -> string!
+SshSharp.SshAuthenticationAttempt.Method.init -> void
+SshSharp.SshAuthenticationAttempt.Outcome.get -> SshSharp.SshAuthenticationOutcome
+SshSharp.SshAuthenticationAttempt.Outcome.init -> void
+SshSharp.SshAuthenticationAttempt.SshAuthenticationAttempt(string! Method, SshSharp.SshAuthenticationOutcome Outcome, string? KeyFingerprint = null) -> void
+override SshSharp.SshAuthenticationAttempt.Equals(object? obj) -> bool
+override SshSharp.SshAuthenticationAttempt.GetHashCode() -> int
+override SshSharp.SshAuthenticationAttempt.ToString() -> string!
+static SshSharp.SshAuthenticationAttempt.operator !=(SshSharp.SshAuthenticationAttempt? left, SshSharp.SshAuthenticationAttempt? right) -> bool
+static SshSharp.SshAuthenticationAttempt.operator ==(SshSharp.SshAuthenticationAttempt? left, SshSharp.SshAuthenticationAttempt? right) -> bool
+SshSharp.SshAuthenticationException.Attempts.get -> System.Collections.Generic.IReadOnlyList<SshSharp.SshAuthenticationAttempt!>!
+SshSharp.SshAuthenticationException.SshAuthenticationException(string! message, System.Collections.Generic.IReadOnlyList<string!>! allowedMethods, System.Collections.Generic.IReadOnlyList<SshSharp.SshAuthenticationAttempt!>! attempts) -> void
+SshSharp.SshAuthenticationOutcome
+SshSharp.SshAuthenticationOutcome.Declined = 5 -> SshSharp.SshAuthenticationOutcome
+SshSharp.SshAuthenticationOutcome.NoAcceptedAlgorithm = 3 -> SshSharp.SshAuthenticationOutcome
+SshSharp.SshAuthenticationOutcome.NotOffered = 2 -> SshSharp.SshAuthenticationOutcome
+SshSharp.SshAuthenticationOutcome.PartialSuccess = 1 -> SshSharp.SshAuthenticationOutcome
+SshSharp.SshAuthenticationOutcome.PasswordChangeRequired = 6 -> SshSharp.SshAuthenticationOutcome
+SshSharp.SshAuthenticationOutcome.Rejected = 0 -> SshSharp.SshAuthenticationOutcome
+SshSharp.SshAuthenticationOutcome.SigningFailed = 4 -> SshSharp.SshAuthenticationOutcome
+SshSharp.SshAuthenticationOutcome.Unavailable = 7 -> SshSharp.SshAuthenticationOutcome
+SshSharp.SshClientOptions.ChangePassword.get -> System.Func<SshSharp.SshPasswordChangeRequest!, System.Threading.CancellationToken, System.Threading.Tasks.ValueTask<string?>>?
+SshSharp.SshClientOptions.ChangePassword.init -> void
+SshSharp.SshClientOptions.NumberOfPasswordPrompts.get -> int
+SshSharp.SshClientOptions.NumberOfPasswordPrompts.init -> void
+SshSharp.SshClientOptions.PasswordProvider.get -> System.Func<SshSharp.SshPasswordPrompt!, System.Threading.CancellationToken, System.Threading.Tasks.ValueTask<string?>>?
+SshSharp.SshClientOptions.PasswordProvider.init -> void
+SshSharp.SshConfigConnectOptions.ChangePassword.get -> System.Func<SshSharp.SshPasswordChangeRequest!, System.Threading.CancellationToken, System.Threading.Tasks.ValueTask<string?>>?
+SshSharp.SshConfigConnectOptions.ChangePassword.init -> void
+SshSharp.SshConfigConnectOptions.PasswordProvider.get -> System.Func<SshSharp.SshPasswordPrompt!, System.Threading.CancellationToken, System.Threading.Tasks.ValueTask<string?>>?
+SshSharp.SshConfigConnectOptions.PasswordProvider.init -> void
+SshSharp.SshPasswordChangeRequest
+SshSharp.SshPasswordChangeRequest.Attempt.get -> int
+SshSharp.SshPasswordChangeRequest.Host.get -> string?
+SshSharp.SshPasswordChangeRequest.Language.get -> string!
+SshSharp.SshPasswordChangeRequest.Port.get -> int
+SshSharp.SshPasswordChangeRequest.Prompt.get -> string!
+SshSharp.SshPasswordChangeRequest.UserName.get -> string!
+SshSharp.SshPasswordPrompt
+SshSharp.SshPasswordPrompt.Attempt.get -> int
+SshSharp.SshPasswordPrompt.Host.get -> string?
+SshSharp.SshPasswordPrompt.IsRetry.get -> bool
+SshSharp.SshPasswordPrompt.Method.get -> string!
+SshSharp.SshPasswordPrompt.Port.get -> int
+SshSharp.SshPasswordPrompt.UserName.get -> string!

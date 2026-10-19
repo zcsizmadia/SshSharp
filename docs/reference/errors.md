@@ -9,7 +9,7 @@ reasons have their own exception types with extra information. Everything else f
 Exception
 ├── SshException                  Reason: SshFailureReason
 │   ├── SshHostKeyException       HostKey: the key the server presented
-│   ├── SshAuthenticationException AllowedMethods: what the server would accept
+│   ├── SshAuthenticationException AllowedMethods: what the server would accept; Attempts: what was tried
 │   ├── SshProtocolException      the server violated the protocol
 │   ├── SftpException             Status: SftpStatusCode, Path
 │   └── SshCommandException       ExitStatus, ExitSignal, StandardError (last 4 KiB): from EnsureSuccess()
@@ -25,7 +25,7 @@ Exception
 |---|---|---|---|
 | `ConnectFailed` | The TCP connection, a proxy, a `ProxyJump` hop or a `ProxyCommand` could not be established. | `SshException` | Check name, port, firewall and proxy; retry with backoff. |
 | `HostKeyRejected` | The host key verifier refused the server's key: unknown, changed or revoked. | `SshHostKeyException` | Do not retry with a looser policy. Confirm the key out of band. |
-| `AuthenticationFailed` | No credential was accepted. | `SshAuthenticationException` | Compare `AllowedMethods` with the credentials you gave. |
+| `AuthenticationFailed` | No credential was accepted. | `SshAuthenticationException` | Compare `AllowedMethods` with the credentials you gave; `Attempts` lists each key (by fingerprint) and method tried, and what became of it. |
 | `KeyExchangeFailed` | No common algorithms, or the key exchange failed. | `SshException` | The server needs a modern algorithm; see [Algorithms](algorithms.md). |
 | `ProtocolError` | The server sent something that violates the protocol. | `SshProtocolException` | Report it with a `Debug` log; usually a server bug or interference on the path. |
 | `ConnectionClosed` | The connection was lost, or the server or the client closed it. | `SshException` | Reconnect; decide whether interrupted work is safe to repeat. |

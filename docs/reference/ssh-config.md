@@ -72,6 +72,7 @@ The `SshClientOptions` lists take an `SshAlgorithmList` in the same `+`, `-`, `^
 | `AddKeysToAgent` | `AddKeysToAgent` | Yes (`yes`, `confirm`, a lifetime); `ask` is treated as `no`. |
 | `PreferredAuthentications` | `PreferredAuthentications` | Yes. `SshClientOptions.PreferredAuthentications` in code. |
 | `PubkeyAuthentication`, `PasswordAuthentication`, `KbdInteractiveAuthentication` (`ChallengeResponseAuthentication`) | same names | Yes. |
+| `NumberOfPasswordPrompts` | `NumberOfPasswordPrompts` | Yes: how many times `SshConfigConnectOptions.PasswordProvider` is asked (default 3). `SshClientOptions.NumberOfPasswordPrompts` in code. |
 | `GSSAPIAuthentication`, `GSSAPIDelegateCredentials` | `GssapiAuthentication`, `GssapiDelegateCredentials` | Yes (.NET 10). |
 | `BatchMode` | `BatchMode` | Yes: no prompts or passphrase requests. |
 | `ForwardAgent` | `ForwardAgent` | Yes: the agent used for authentication is forwarded; `SshConfigConnectOptions.ForwardAgentFilter` decides what the server may do with it. |

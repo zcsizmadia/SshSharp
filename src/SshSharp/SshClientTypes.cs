@@ -132,14 +132,62 @@ public sealed class SshClientOptions
     /// <summary>
     /// The password, if used. Tried after <see cref="PrivateKeys"/> and <see cref="KeyboardInteractive"/> with the <c>password</c> method.
     /// When the server offers only <c>keyboard-interactive</c> (common with PAM) and there is no handler, it answers a round that asks
-    /// for exactly one hidden input.
+    /// for exactly one hidden input. With a <see cref="PasswordProvider"/> too, this password is tried first, and the provider is asked
+    /// only if the server refuses it.
     /// </summary>
     public string? Password { get; init; }
 
     /// <summary>
+    /// Asks for the password when authentication reaches it, as ssh prompts <c>user@host's password:</c>: only after the keys (and
+    /// Kerberos) did not log in, so an interactive tool prompts only when it has to. It is called again after each refused password,
+    /// at most <see cref="NumberOfPasswordPrompts"/> times per connection; return null to stop asking. It answers the <c>password</c>
+    /// method, and keyboard-interactive the way <see cref="Password"/> does (a round that asks for exactly one hidden input) when there
+    /// is no <see cref="KeyboardInteractive"/> handler. A <see cref="Password"/> that is set is tried first.
+    /// </summary>
+    /// <remarks>
+    /// It gets the connect's cancellation token; an exception it throws (an <see cref="OperationCanceledException"/> when the user
+    /// cancels) fails the connect. The password is sent to the server being authenticated with only, and is not kept.
+    /// </remarks>
+    public Func<SshPasswordPrompt, CancellationToken, ValueTask<string?>>? PasswordProvider { get; init; }
+
+    /// <summary>
+    /// How many times <see cref="PasswordProvider"/> may be asked on one connection, as ssh_config's <c>NumberOfPasswordPrompts</c>.
+    /// Default 3, as in ssh; 0 never asks. A given <see cref="Password"/> is not counted.
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException">The value is negative.</exception>
+    public int NumberOfPasswordPrompts
+    {
+        get => _numberOfPasswordPrompts;
+        init
+        {
+            ArgumentOutOfRangeException.ThrowIfNegative(value);
+            _numberOfPasswordPrompts = value;
+        }
+    }
+
+    private readonly int _numberOfPasswordPrompts = DefaultNumberOfPasswordPrompts;
+
+    /// <summary>ssh's default for <c>NumberOfPasswordPrompts</c>.</summary>
+    internal const int DefaultNumberOfPasswordPrompts = 3;
+
+    /// <summary>
+    /// Answers the server's request to change an expired password (<c>SSH_MSG_USERAUTH_PASSWD_CHANGEREQ</c>, RFC 4252 section 8) with
+    /// the new one, or null to decline. The password just sent is sent again as the old one, with the new one; when the server
+    /// refuses the new password it can ask again (at most 3 times), and when it accepts it, the connection is authenticated (or goes
+    /// on to the next method the server requires). Null (the default), or declining, leaves the password unchanged: the attempt counts
+    /// as failed (<see cref="SshAuthenticationOutcome.PasswordChangeRequired"/>) and the other methods are tried.
+    /// </summary>
+    /// <remarks>
+    /// Store the new password only once the connect succeeds: until then the server may not have accepted it. Servers that change
+    /// passwords through PAM ask through keyboard-interactive instead, which <see cref="KeyboardInteractive"/> answers.
+    /// </remarks>
+    public Func<SshPasswordChangeRequest, CancellationToken, ValueTask<string?>>? ChangePassword { get; init; }
+
+    /// <summary>
     /// Answers keyboard-interactive authentication (RFC 4256): one-time codes, PAM prompts, or a password the server asks for this way.
     /// Called once per round with the server's questions; return one answer per prompt, or null to give up on the method. Tried after
-    /// <see cref="PrivateKeys"/> and before <see cref="Password"/>, like ssh.
+    /// <see cref="PrivateKeys"/> and before <see cref="Password"/>, like ssh. Unlike <see cref="PasswordProvider"/>, the method is not
+    /// retried after the server refuses the answers: it is tried once per walk of the authentication order.
     /// </summary>
     public Func<SshKeyboardInteractiveRequest, CancellationToken, ValueTask<IReadOnlyList<string>?>>? KeyboardInteractive { get; init; }
 

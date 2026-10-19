@@ -4,10 +4,11 @@
 server accepts), then **publickey** with each key, then **keyboard-interactive**, then **password**. When the server needs
 more than one method (sshd's `AuthenticationMethods publickey,keyboard-interactive`, for example), it reports a partial
 success and the client continues with the next method. If nothing works, `SshAuthenticationException.AllowedMethods`
-lists what the server would accept.
+lists what the server would accept, and `Attempts` what was tried and what became of each attempt.
 
 For short task-oriented examples, see the how-to guides: [Keys and the SSH agent](how-to/agent-and-keys.md),
-[Certificates](how-to/certificates.md) and [Kerberos](how-to/kerberos.md).
+[Passwords: prompts, expiry and failures](how-to/passwords.md), [Certificates](how-to/certificates.md) and
+[Kerberos](how-to/kerberos.md).
 
 ## The order methods are tried in
 
@@ -17,9 +18,9 @@ flowchart TD
     gss -- yes --> kerberos["gssapi-with-mic<br/>(Kerberos ticket)"]
     gss -- no --> keys
     kerberos -- failed --> keys["publickey, each key in PrivateKeys order:<br/>sign (a key held elsewhere: ask first)"]
-    keys -- "no key accepted" --> kbd["keyboard-interactive<br/>(KeyboardInteractive handler, or Password<br/>for a single hidden prompt)"]
-    kbd -- "failed or not offered" --> pw["password"]
-    pw -- failed --> fail(["SshAuthenticationException<br/>with AllowedMethods"])
+    keys -- "no key accepted" --> kbd["keyboard-interactive<br/>(KeyboardInteractive handler, or the password<br/>for a single hidden prompt)"]
+    kbd -- "failed or not offered" --> pw["password<br/>(Password, then PasswordProvider<br/>up to NumberOfPasswordPrompts times)"]
+    pw -- failed --> fail(["SshAuthenticationException<br/>with AllowedMethods and Attempts"])
     kerberos -- success --> ok(["authenticated"])
     keys -- success --> ok
     kbd -- success --> ok
@@ -54,6 +55,35 @@ var options = new SshClientOptions { UserName = "deploy", Password = password, H
 
 When the server takes passwords only through keyboard-interactive (sshd with PAM and `PasswordAuthentication no`), the
 password answers a round that asks for exactly one hidden input. It is never sent to a visible prompt or to a second round.
+
+### Asking for the password
+
+`PasswordProvider` asks for the password only when authentication reaches it, after Kerberos and the keys, as `ssh` prompts
+`user@host's password:`. It is asked again after each refused password, at most `NumberOfPasswordPrompts` times per connection
+(3 by default, as in `ssh`); returning null stops asking. It answers keyboard-interactive the way `Password` does when there is no
+`KeyboardInteractive` handler. A `Password` that is set is tried first, and the provider is asked only if the server refuses it.
+
+```csharp
+var options = new SshClientOptions
+{
+    UserName = "deploy",
+    PrivateKeys = keys,
+    HostKeyVerifier = verifier,
+    PasswordProvider = (prompt, ct) => ValueTask.FromResult<string?>(ReadPassword($"{prompt.UserName}@{prompt.Host}'s password: ")),
+};
+```
+
+The `KeyboardInteractive` handler is not retried after a refusal: its answers may be one-time codes. See
+[Prompt for the password only when it is needed](how-to/passwords.md#prompt-for-the-password-only-when-it-is-needed).
+
+### Expired passwords
+
+A server can answer a right but expired password with a request for a new one (`SSH_MSG_USERAUTH_PASSWD_CHANGEREQ`, RFC 4252
+section 8). `ChangePassword` gets the server's prompt and returns the new password, or null to leave it unchanged; the client
+sends the old password again with the new one. The server may refuse the new password and ask again (at most 3 times per
+password). Without a handler, or when it declines, the attempt fails as `PasswordChangeRequired` and the other methods follow.
+Servers that change passwords through PAM ask through keyboard-interactive instead, which the `KeyboardInteractive` handler answers.
+See [Change an expired password](how-to/passwords.md#change-an-expired-password).
 
 ## Private keys
 
@@ -394,8 +424,17 @@ var options = new SshClientOptions
 ## With `ssh_config`
 
 `PreferredAuthentications`, `PubkeyAuthentication`, `PasswordAuthentication`, `KbdInteractiveAuthentication`,
-`IdentityFile`, `CertificateFile`, `IdentityAgent`, `IdentitiesOnly` and `BatchMode` (no prompts) are honored;
-`SshConfigConnectOptions` supplies the password, passphrases and the keyboard-interactive handler.
+`NumberOfPasswordPrompts`, `IdentityFile`, `CertificateFile`, `IdentityAgent`, `IdentitiesOnly` and `BatchMode` (no prompts) are
+honored; `SshConfigConnectOptions` supplies the password, the password provider and change handler, passphrases and the
+keyboard-interactive handler, all for the destination only.
+
+## When authentication fails
+
+`SshAuthenticationException` says what the server would still accept (`AllowedMethods`) and what was tried (`Attempts`): each key by
+its SHA-256 fingerprint, each password and keyboard-interactive try, and methods whose credentials were set but that the server did
+not offer, each with its outcome (`Rejected`, `PartialSuccess`, `NotOffered`, `NoAcceptedAlgorithm`, `SigningFailed`, `Declined`,
+`PasswordChangeRequired`, `Unavailable`). The message lists them too. Neither holds a password, an answer or the user name. See
+[Find out why authentication failed](how-to/passwords.md#find-out-why-authentication-failed).
 
 ## See also
 

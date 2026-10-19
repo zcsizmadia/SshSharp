@@ -102,10 +102,31 @@ public sealed class SshAuthenticationException : SshException
     /// <param name="message">A description.</param>
     /// <param name="allowedMethods">The methods the server said it still accepts.</param>
     public SshAuthenticationException(string message, IReadOnlyList<string> allowedMethods)
-        : base(SshFailureReason.AuthenticationFailed, message) => AllowedMethods = allowedMethods;
+        : this(message, allowedMethods, [])
+    {
+    }
+
+    /// <summary>Creates an exception that lists the attempts made.</summary>
+    /// <param name="message">A description.</param>
+    /// <param name="allowedMethods">The methods the server said it still accepts.</param>
+    /// <param name="attempts">Each attempt and what became of it, in order.</param>
+    public SshAuthenticationException(string message, IReadOnlyList<string> allowedMethods, IReadOnlyList<SshAuthenticationAttempt> attempts)
+        : base(SshFailureReason.AuthenticationFailed, message)
+    {
+        ArgumentNullException.ThrowIfNull(attempts);
+        AllowedMethods = allowedMethods;
+        Attempts = attempts;
+    }
 
     /// <summary>The methods the server still accepts (from its last <c>USERAUTH_FAILURE</c>), for example <c>publickey</c>.</summary>
     public IReadOnlyList<string> AllowedMethods { get; }
+
+    /// <summary>
+    /// Each authentication attempt, in order, and what became of it: every key offered (by fingerprint), each password and
+    /// keyboard-interactive try, and the methods whose credentials were set but that the server did not offer. The <c>none</c> request
+    /// that opens authentication is not listed. Like the message, it holds no password, answer or user name, so it can be logged.
+    /// </summary>
+    public IReadOnlyList<SshAuthenticationAttempt> Attempts { get; }
 }
 
 /// <summary>
