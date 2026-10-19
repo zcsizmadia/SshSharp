@@ -126,6 +126,7 @@ pinned key).
 
 ## See also
 
+- [Jump host sample](https://github.com/zcsizmadia/SshSharp/tree/main/samples/SshSharp.Samples.JumpHost): `JumpHosts` in code, with a certificate issued in the program
 - [Connecting: jump hosts and proxy commands](../connecting.md#jump-hosts-and-proxy-commands)
 - [Threat model: jump hosts](../threat-model.md#jump-hosts)
 - [Use ssh_config and known_hosts](ssh-config-and-known-hosts.md)

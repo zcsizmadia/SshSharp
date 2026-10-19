@@ -43,5 +43,6 @@ against a real OpenSSH server: configuration parsing, connecting, and the main f
 
 ## See also
 
+- [Native AOT sample](https://github.com/zcsizmadia/SshSharp/tree/main/samples/SshSharp.Samples.Aot): `sshrun`, a published tool with source-generated JSON
 - [Microsoft's Native AOT documentation](https://learn.microsoft.com/dotnet/core/deploying/native-aot/)
 - [Design notes](../design.md)

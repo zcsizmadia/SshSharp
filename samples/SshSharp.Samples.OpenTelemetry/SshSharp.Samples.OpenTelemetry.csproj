@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- OpenTelemetry wiring: SshSharp's traces and metrics exported over OTLP. Built with the solution, so it keeps compiling as the API
+       changes. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" />
+    <ProjectReference Include="../../src/SshSharp/SshSharp.csproj" />
+  </ItemGroup>
+</Project>

@@ -25,5 +25,7 @@
     <PackageVersion Include="Microsoft.Extensions.TimeProvider.Testing" Version="10.11.0" />
     <PackageVersion Include="MinVer" Version="8.0.0" />
     <PackageVersion Include="SharpFuzz" Version="2.3.0" />
+    <!-- Samples only: the OpenTelemetry sample exports over OTLP. -->
+    <PackageVersion Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.19.1" />
   </ItemGroup>
 </Project>

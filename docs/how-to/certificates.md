@@ -143,6 +143,7 @@ using var ca = SshPrivateKey.FromSigner(new CertificateAuthoritySigner(caPublicK
 
 ## See also
 
+- [Jump host sample](https://github.com/zcsizmadia/SshSharp/tree/main/samples/SshSharp.Samples.JumpHost): a five-minute certificate issued in the program, used for a jump host and the destination
 - [Scenario: short-lived certificates for CI jobs](../scenarios/ci-certificates.md)
 - [Authentication: certificates](../authentication.md#certificates)
 - [Keys held elsewhere](../authentication.md#keys-held-elsewhere-key-vaults-hsms-tpm)
