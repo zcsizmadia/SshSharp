@@ -111,7 +111,43 @@ internal static class ConnectionTuning
         Console.WriteLine($"session id: {Convert.ToHexString(client.SessionId.Span)}");
         Console.WriteLine($"traffic:    {client.BytesSent:N0} bytes sent, {client.BytesReceived:N0} received");
         Console.WriteLine($"cipher:     {client.Algorithms.EncryptionClientToServer}");
+        Console.WriteLine($"compressed: {client.Algorithms.CompressionServerToClient}");  // zlib@openssh.com, or none
         // </inspect-connection>
+    }
+
+    public static async Task CompressionAsync(SshHostKeyVerifier verifier, CancellationToken cancellationToken)
+    {
+        // <compression>
+        // A slow link and text-heavy output: ask for zlib@openssh.com, as ssh -C does. The server decides whether it is used.
+        await using var client = await SshClient.ConnectAsync("build.example.com", 22, new SshClientOptions
+        {
+            UserName = "deploy",
+            PrivateKeys = [await SshPrivateKey.LoadAsync("/etc/myapp/deploy_ed25519", cancellationToken: cancellationToken)],
+            HostKeyVerifier = verifier,
+            Compression = true,
+        }, cancellationToken);
+
+        // zlib@openssh.com when the server agreed, none when it did not. Compression starts once the login has succeeded.
+        Console.WriteLine($"compression: {client.Algorithms.CompressionServerToClient}");
+        var log = await client.RunCommandAsync("journalctl -u myapp --since today", cancellationToken);
+        // </compression>
+    }
+
+    public static async Task CompressionFromConfigAsync(CancellationToken cancellationToken)
+    {
+        // <compression-config>
+        // ssh_config's Compression yes turns it on for a host; SshConfigConnectOptions.Compression overrides it, as ssh -C does.
+        var config = SshConfig.Parse("""
+            Host branch-office
+              HostName gw.branch.example.com
+              User deploy
+              Compression yes
+            """);
+        await using var client = await SshClient.ConnectAsync("branch-office", new SshConfigConnectOptions
+        {
+            Config = config,
+        }, cancellationToken);
+        // </compression-config>
     }
 
     public static async Task RekeyAsync(SshClient client, CancellationToken cancellationToken)

@@ -39,15 +39,15 @@ internal sealed class AlgorithmPreferences
     /// <summary>
     /// Builds preferences from the algorithm specifications of a resolved <c>ssh_config</c> host (<c>+</c>, <c>-</c>, <c>^</c> and plain
     /// lists, with wildcards, as ssh applies them) applied to the defaults, optionally restricted to FIPS-approved algorithms. Names this
-    /// library does not implement are dropped.
+    /// library does not implement are dropped. <paramref name="compression"/>, when set, takes the place of the host's <c>Compression</c>.
     /// </summary>
     /// <exception cref="SshException">A directive leaves no algorithm of its kind that SshSharp can use (<see cref="SshFailureReason.ConnectFailed"/>).</exception>
-    public static AlgorithmPreferences FromConfig(SshHostConfig config, bool fipsMode = false)
+    public static AlgorithmPreferences FromConfig(SshHostConfig config, bool fipsMode = false, bool? compression = null)
     {
         ArgumentNullException.ThrowIfNull(config);
         var preferences = From(SshAlgorithmList.FromConfig(config.KexAlgorithms), SshAlgorithmList.FromConfig(config.HostKeyAlgorithms),
             SshAlgorithmList.FromConfig(config.Ciphers), SshAlgorithmList.FromConfig(config.Macs), SshAlgorithmList.FromConfig(config.PubkeyAcceptedAlgorithms),
-            fipsMode);
+            compression ?? config.Compression, fipsMode);
 
         // As ssh refuses such a configuration: said now, naming the directive, rather than as a negotiation failure that looks like the
         // server's doing (or, for PubkeyAcceptedAlgorithms, as keys that are silently never offered).
@@ -65,7 +65,7 @@ internal sealed class AlgorithmPreferences
     {
         ArgumentNullException.ThrowIfNull(options);
         var preferences = From(options.KexAlgorithms, options.HostKeyAlgorithms, options.Ciphers, options.Macs, options.PubkeyAcceptedAlgorithms,
-            options.FipsMode);
+            options.Compression, options.FipsMode);
 
         // Said now, with the option named, rather than as a negotiation failure that looks like the server's doing.
         const string Options = nameof(SshClientOptions) + ".";
@@ -104,9 +104,12 @@ internal sealed class AlgorithmPreferences
     /// <summary>
     /// The defaults with each list applied, without the algorithms this platform lacks (ML-KEM before .NET 10), restricted to FIPS-approved
     /// ones in FIPS mode. The one path for both ssh_config and <see cref="SshClientOptions"/>, where lists apply as ssh applies them.
+    /// Compression is a yes or no, as ssh's <c>Compression</c>, not a list: on, it is the fixed <c>zlib@openssh.com,none</c> (plain
+    /// <c>zlib</c> can never be named), so it is never empty and needs no wildcard expansion. FIPS mode does not restrict it: zlib is not a
+    /// cryptographic algorithm, and FIPS 140 says nothing about it.
     /// </summary>
     private static AlgorithmPreferences From(SshAlgorithmList? kex, SshAlgorithmList? hostKeys, SshAlgorithmList? ciphers, SshAlgorithmList? macs,
-        SshAlgorithmList? publicKeys, bool fipsMode)
+        SshAlgorithmList? publicKeys, bool compression, bool fipsMode)
     {
         IReadOnlyList<string> Resolve(SshAlgorithmList? spec, IReadOnlyList<string> defaults, AlgorithmKind kind)
         {
@@ -121,6 +124,7 @@ internal sealed class AlgorithmPreferences
             HostKeys = Resolve(hostKeys, SshAlgorithms.DefaultHostKeys, AlgorithmKind.HostKey),
             Ciphers = Resolve(ciphers, SshAlgorithms.DefaultCiphers, AlgorithmKind.Cipher),
             Macs = Resolve(macs, SshAlgorithms.DefaultMacs, AlgorithmKind.Mac),
+            Compression = compression ? SshAlgorithms.EnabledCompression : SshAlgorithms.DefaultCompression,
 
             // FIPS mode does not restrict the client's own keys (FilterFips keeps them all), as before this list was applied.
             PublicKeys = publicKeys is null ? null : Resolve(publicKeys, SshAlgorithms.PublicKeySignatures, AlgorithmKind.PublicKey),

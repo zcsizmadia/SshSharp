@@ -113,6 +113,22 @@ using (var back = new MemoryStream())
 await client.RunCommandAsync($"rm -f '{remote}'", ct);
 Pass("SCP");
 
+// zlib@openssh.com through System.IO.Compression's native zlib, compiled in. A server that does not offer it negotiates none.
+await using (var compressed = await SshClient.ConnectAsync(host, port, new SshClientOptions
+{
+    UserName = Environment.GetEnvironmentVariable("SSHSHARP_TEST_USER")!,
+    Password = Environment.GetEnvironmentVariable("SSHSHARP_TEST_PASSWORD"),
+    PrivateKeys = keys,
+    HostKeyVerifier = SshHostKeyVerifier.FromDelegate((_, _) => ValueTask.FromResult(true)),
+    Compression = true,
+}, ct))
+{
+    var text = string.Concat(Enumerable.Repeat("compressible line\n", 5000));
+    var echoed = await compressed.RunCommandAsync("cat", null, SshCommandInput.FromText(text), ct);
+    Check(echoed.ExitStatus == 0 && echoed.StandardOutputText == text, "a command's input and output cross a compressed connection");
+    Pass($"compression ({compressed.Algorithms.CompressionClientToServer}/{compressed.Algorithms.CompressionServerToClient})");
+}
+
 Console.WriteLine($"{steps} steps passed.");
 return 0;
 

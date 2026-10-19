@@ -52,6 +52,7 @@ them to it):
 | `ConfigureSocket` | `TCPKeepAlive`, `IPQoS` | The same connection: it runs after those two are applied, so what it sets wins. |
 | `KeepAliveInterval`, `KeepAliveCountMax` | `ServerAliveInterval`, `ServerAliveCountMax` | Every host; `TimeSpan.Zero` turns keep-alives off (as it does in `SshClientOptions.KeepAliveInterval`). |
 | `PrivateKeys` | (adds to `IdentityFile`) | The destination only: offered before its identity files, never to a `ProxyJump` hop, which logs in with its own identity files and the agent. |
+| `Compression` | `Compression` | The destination only, as `ssh -C`; each `ProxyJump` hop keeps its own. |
 
 `HostKeyVerifier` and `Proxy` replace the configured host key checking and connection the same way. See
 [Override what the configuration says](../how-to/ssh-config-and-known-hosts.md#override-what-the-configuration-says).
@@ -66,6 +67,7 @@ them to it):
 | `MACs` | `Macs` | Yes. `SshClientOptions.Macs` in code. |
 | `PubkeyAcceptedAlgorithms` (`PubkeyAcceptedKeyTypes`) | `PubkeyAcceptedAlgorithms` | Yes, as in `ssh`: a key (an identity file's, the agent's, or one in `SshConfigConnectOptions.PrivateKeys`) is offered only with an algorithm the list allows, and is skipped when it allows none of the key's (a key with a certificate needs the certificate's algorithm, such as `ssh-ed25519-cert-v01@openssh.com`). An RSA key signs with the list's first RSA algorithm (`rsa-sha2-512` or `rsa-sha2-256`) that the server lists in `server-sig-algs` (RFC 8308). SHA-1 `ssh-rsa` is never used, so `+ssh-rsa` changes nothing. Unset, every key is offered with its own algorithms. `SshClientOptions.PubkeyAcceptedAlgorithms` in code. |
 | `RequiredRSASize` | `RequiredRsaSize` | Yes: the smallest RSA host key accepted (default 2048; values under 1024 are ignored, as `ssh` refuses them). `SshClientOptions.RequiredRsaSize` in code. |
+| `Compression` | `Compression` | Yes: `yes` offers `zlib@openssh.com` (OpenSSH's delayed compression, which starts after authentication) before `none`; `no`, the default, offers only `none`. `SshClientOptions.Compression` in code. See [Compress a slow link](../how-to/tune-and-inspect-connections.md#compress-a-slow-link). |
 
 Each list is applied as `ssh` applies it: `+` adds names after the defaults (one that is already a default stays where it is),
 `^` puts them first, `-` removes what its patterns match, and in every form a wildcard stands for the names it matches
@@ -140,7 +142,7 @@ equivalent, where one exists:
 - **`SshConfigConnectOptions`**: connecting by alias, where the option overrides or supplements what the configuration says.
 - **`SshEndpointOptions`**: a named endpoint in the dependency injection package. With `Host` set it builds an `SshClientOptions`
   (and `ConfigureClientOptions` can set anything in the first column); with `ConfigAlias` set, the configuration decides, and only
-  `Password`, `AddressFamily`, `UseAgent` and `ConnectTimeout` are used.
+  `Password`, `AddressFamily`, `UseAgent`, `Compression` and `ConnectTimeout` are used.
 
 A dash means there is no typed equivalent. The "Applied" tables above say how each directive behaves.
 
@@ -164,6 +166,7 @@ A dash means there is no typed equivalent. The "Applied" tables above say how ea
 | `KexAlgorithms`, `HostKeyAlgorithms`, `Ciphers`, `MACs` | `KexAlgorithms`, `HostKeyAlgorithms`, `Ciphers`, `Macs` | - | - |
 | `PubkeyAcceptedAlgorithms` | `PubkeyAcceptedAlgorithms` | - | - |
 | `RequiredRSASize` | `RequiredRsaSize` | - | - |
+| `Compression` | `Compression` | `Compression` (the destination only) | `Compression` |
 | `StrictHostKeyChecking` | `HostKeyVerifier = new KnownHostsVerifier(...) { Policy = ... }` | `HostKeyVerifier` (replaces it), `AskHostKey` (answers `ask`) | `AcceptNewHostKeys` (`accept-new`; otherwise `yes`), `HostKeyFingerprints` (pinned keys instead) |
 | `UserKnownHostsFile`, `GlobalKnownHostsFile` | The `KnownHostsVerifier` constructor's two lists | - | `KnownHostsFiles` |
 | `HashKnownHosts` | `KnownHostsVerifier.HashNewEntries` | - | - |

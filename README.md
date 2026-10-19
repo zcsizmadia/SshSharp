@@ -46,7 +46,8 @@ Console.WriteLine(result.StandardOutputText);
 - **Modern algorithms:** post-quantum `mlkem768x25519-sha256`, and the FIPS-compatible `mlkem768nistp256-sha256` and `mlkem1024nistp384-sha384` (on .NET 10 where the platform has ML-KEM),
   and `sntrup761x25519-sha512` (managed, on every platform), `curve25519-sha256`,
   ECDH, and finite-field DH (group exchange, and groups 14, 16 and 18) key exchange; ChaCha20-Poly1305, AES-GCM and
-  AES-CTR with HMAC-SHA2 (ETM preferred, plain `hmac-sha2-256/512` for network equipment); Ed25519, ECDSA and RSA (SHA-2) keys; strict key exchange (Terrapin) always on; a FIPS mode.
+  AES-CTR with HMAC-SHA2 (ETM preferred, plain `hmac-sha2-256/512` for network equipment); Ed25519, ECDSA and RSA (SHA-2) keys; strict key exchange (Terrapin) always on; a FIPS mode;
+  OpenSSH's delayed compression (`zlib@openssh.com`, after authentication, Huffman-only as OpenSSH), off by default as in `ssh`.
 - **File transfer:** SFTP (version 3 with OpenSSH's extensions: pipelined uploads and downloads, seekable remote file
   streams, directory transfers with several files at once, a filter and an rsync-style skip of unchanged files, pipelined
   listings with patterns and recursion, pipelined recursive delete and `mkdir -p`, whole-file reads and writes, segmented
@@ -102,7 +103,7 @@ Console.WriteLine(result.StandardOutputText);
 | Post-quantum key exchange `mlkem768x25519-sha256` (OpenSSH 9.9+) | ✅ (.NET 10 with platform ML-KEM) | ✅ |
 | FIPS-compatible post-quantum key exchange (`mlkem768nistp256-sha256`, `mlkem1024nistp384-sha384`) | ✅ (.NET 10 with platform ML-KEM) | ❌ |
 | Strict key exchange (Terrapin fix) | ✅ | ✅ |
-| Legacy algorithms (CBC, 3DES, SHA-1, `ssh-rsa`, DH group 1, zlib) | — (by design) | ✅ |
+| Legacy algorithms (CBC, 3DES, SHA-1, `ssh-rsa`, DH group 1, pre-authentication `zlib`) | — (by design) | ✅ |
 | Commands, shells with a terminal, `expect`-style scripting | ✅ | ✅ |
 | Environment variables for a session (`env` requests, as ssh's `SetEnv` and `SendEnv`) | ✅ | ❌ |
 | Any signal to a running session, including extension signals (`INFO@openssh.com`) | ✅ | ❌ (TERM or KILL, when cancelling a command) |
@@ -163,7 +164,7 @@ Checked on 2026-10-19 against Tmds.Ssh 0.26.0 ([NuGet](https://www.nuget.org/pac
 | Private key formats | OpenSSH, PKCS#1/#8, SEC1, PuTTY `.ppk` | OpenSSH (`openssh-key-v1`) |
 | Transport ciphers | AES-GCM, ChaCha20-Poly1305, AES-CTR with HMAC-SHA2 | AES-GCM, ChaCha20-Poly1305 (AES-CTR and AES-CBC only decrypt private key files) |
 | Key exchange | `mlkem768x25519-sha256`, `sntrup761x25519-sha512`, Curve25519, NIST ECDH, SHA-2 finite-field DH | `mlkem768x25519-sha256`, `sntrup761x25519-sha512`, Curve25519, NIST ECDH |
-| Compression (`zlib@openssh.com`) | ❌ | ✅ (off by default) |
+| Compression (`zlib@openssh.com`) | ✅ (off by default; on .NET 8 only what the server sends) | ✅ (off by default) |
 | Local, remote and dynamic forwarding; Unix-socket channels and listeners | ✅ | ✅ |
 | SFTP, including directory transfers | ✅ | ✅ |
 | SCP | ✅ | ❌ (the repository's `ssh-cp` tool copies over SFTP) |
@@ -171,7 +172,7 @@ Checked on 2026-10-19 against Tmds.Ssh 0.26.0 ([NuGet](https://www.nuget.org/pac
 | Tracing and metrics (`ActivitySource`, `Meter`) | ✅ | ❌ |
 | Dependency injection package, file system adapters | ✅ | ❌ |
 
-Tmds.Ssh has X11 forwarding, compression and .NET 9 and .NET 11 builds, which SshSharp does not.
+Tmds.Ssh has X11 forwarding and .NET 9 and .NET 11 builds, which SshSharp does not.
 ## Install
 
 ```

@@ -63,3 +63,5 @@ SshSharp.Extensions.DependencyInjection.SshEndpointOptions.JumpHosts.get -> Syst
 SshSharp.Extensions.DependencyInjection.SshEndpointOptions.JumpHosts.set -> void
 SshSharp.Extensions.DependencyInjection.SshEndpointOptions.UseAgent.get -> bool?
 SshSharp.Extensions.DependencyInjection.SshEndpointOptions.UseAgent.set -> void
+SshSharp.Extensions.DependencyInjection.SshEndpointOptions.Compression.get -> bool?
+SshSharp.Extensions.DependencyInjection.SshEndpointOptions.Compression.set -> void

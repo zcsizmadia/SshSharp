@@ -81,12 +81,12 @@ public sealed partial class SshClient : IAsyncDisposable
 
     /// <summary>
     /// SSH message bytes sent over the connection so far, from the key exchange on: the payload of each packet, key exchange messages
-    /// (KEXINIT, NEWKEYS, EXT_INFO) included, before encryption, padding and MAC, as the <c>sshsharp.bytes.sent</c> metric counts them.
+    /// (KEXINIT, NEWKEYS, EXT_INFO) included, before compression, encryption, padding and MAC, as the <c>sshsharp.bytes.sent</c> metric counts them.
     /// Safe to read from any thread.
     /// </summary>
     public long BytesSent => _connection.BytesSent;
 
-    /// <summary>SSH message bytes received over the connection so far, counted as <see cref="BytesSent"/> is.</summary>
+    /// <summary>SSH message bytes received over the connection so far, counted as <see cref="BytesSent"/> is (after decryption and decompression).</summary>
     public long BytesReceived => _connection.BytesReceived;
 
     /// <summary>

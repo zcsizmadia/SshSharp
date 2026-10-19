@@ -117,6 +117,13 @@ public sealed class SshEndpointOptions
     public Config.SshAddressFamily? AddressFamily { get; set; }
 
     /// <summary>
+    /// Compress the connection after authentication (<c>zlib@openssh.com</c>, see <see cref="SshClientOptions.Compression"/>), as
+    /// ssh's <c>Compression yes</c>: it helps on slow links and with text, and costs CPU on fast ones. With <see cref="ConfigAlias"/>, it
+    /// overrides ssh_config's <c>Compression</c>. Null (the default) does not compress, or leaves it to ssh_config.
+    /// </summary>
+    public bool? Compression { get; set; }
+
+    /// <summary>
     /// How long one connection attempt, handshake and authentication included, may take (default 30 seconds; at most about 24 days,
     /// <see cref="int.MaxValue"/> milliseconds, as <see cref="SshClientOptions.ConnectTimeout"/> allows). It is also the
     /// <see cref="SshClientOptions.ConnectTimeout"/> of the client options built from these settings, which

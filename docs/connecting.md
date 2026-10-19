@@ -449,7 +449,9 @@ ciphers, then `aes*-ctr` with the plain `hmac-sha2-256` and `hmac-sha2-512` for 
 `-etm` MAC; `ssh-ed25519`, `ecdsa-sha2-*` and `rsa-sha2-256/512` host keys, and OpenSSH host certificates. Strict key exchange
 (the Terrapin fix) is always on. `FipsMode = true` limits negotiation to FIPS-approved algorithms, led by the two NIST-curve ML-KEM hybrids,
 so FIPS mode keeps a post-quantum key exchange where the server offers one. Keys are renewed after
-`RekeyAfterBytes` (default 1 GiB) or `RekeyAfterTime` (default 1 hour).
+`RekeyAfterBytes` (default 1 GiB, counted in message bytes before compression) or `RekeyAfterTime` (default 1 hour).
+Compression is off by default, as in `ssh`; `Compression = true` offers OpenSSH's delayed `zlib@openssh.com`, for slow links (see
+[Compress a slow link](how-to/tune-and-inspect-connections.md#compress-a-slow-link)).
 
 To change the lists, set `KexAlgorithms`, `HostKeyAlgorithms`, `Ciphers` or `Macs` to an `SshAlgorithmList`, in the forms of
 `ssh_config`'s directives of the same names: `SshAlgorithmList.Remove("diffie-hellman-*")` drops from the defaults, `Prepend` moves

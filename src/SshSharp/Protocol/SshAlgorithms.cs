@@ -64,6 +64,9 @@ internal static class SshAlgorithms
     // Compression
     public const string CompressionNone = "none";
 
+    /// <summary>OpenSSH's delayed zlib compression: negotiated like any algorithm, started only once user authentication has succeeded.</summary>
+    public const string CompressionZlibOpenSsh = "zlib@openssh.com";
+
     // OpenSSH's client order. Declared before DefaultKex, which reads it during static initialization.
     private static readonly string[] ClassicKex =
     [
@@ -134,7 +137,29 @@ internal static class SshAlgorithms
         "hmac-sha2-512-etm@openssh.com", "hmac-sha2-256-etm@openssh.com", "hmac-sha2-256", "hmac-sha2-512",
     ];
 
+    /// <summary>No compression, the default (as OpenSSH's <c>Compression no</c>).</summary>
     public static IReadOnlyList<string> DefaultCompression { get; } = [CompressionNone];
+
+    /// <summary>
+    /// The compression offered when it is turned on, as ssh's <c>Compression yes</c>: delayed zlib first, then none for a server without
+    /// it. Plain <c>zlib</c>, which compresses from the first packet on, is left out by design (as OpenSSH 9.9 dropped it): it exposes
+    /// the decompressor to data from a peer that has not authenticated.
+    /// </summary>
+    public static IReadOnlyList<string> EnabledCompression { get; } = [CompressionZlibOpenSsh, CompressionNone];
+
+    /// <summary>
+    /// Whether SshSharp compresses what it sends. It needs zlib's Huffman-only strategy (see <see cref="ZlibCompressor"/>), which .NET
+    /// exposes from .NET 9; on .NET 8 only what the server sends is compressed.
+    /// </summary>
+#if NET10_0_OR_GREATER
+    public static bool CanCompressOutgoing => true;
+#else
+    public static bool CanCompressOutgoing => false;
+#endif
+
+    /// <summary>The compression list for client-to-server: <paramref name="list"/> without what SshSharp cannot send here (<see cref="CanCompressOutgoing"/>).</summary>
+    public static IReadOnlyList<string> OutgoingCompression(IReadOnlyList<string> list) =>
+        CanCompressOutgoing ? list : [.. list.Where(n => n != CompressionZlibOpenSsh)];
 
     private static readonly Dictionary<string, CipherInfo> Ciphers = new(StringComparer.Ordinal)
     {

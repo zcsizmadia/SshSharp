@@ -132,6 +132,9 @@ public sealed partial class SshClient
             // perhaps run by someone else, is never offered them, as ssh asks for each host's password separately. Hops log in with their
             // own configuration's identity files and the agent.
             var destination = depth == 0;
+
+            // As ssh -C: the override is the destination's. A hop would compress the destination's packets, already encrypted, for nothing.
+            var compression = destination && options.Compression is { } compress ? compress : hostConfig.Compression;
             var clientOptions = new SshClientOptions
             {
                 UserName = hostConfig.User,
@@ -163,7 +166,8 @@ public sealed partial class SshClient
                 KeepAliveCountMax = options.KeepAliveCountMax ?? hostConfig.ServerAliveCountMax,
                 ChannelTimeouts = hostConfig.ChannelTimeouts,
                 ObscureKeystrokeTiming = hostConfig.ObscureKeystrokeTiming,
-                AlgorithmPreferences = AlgorithmPreferences.FromConfig(hostConfig),
+                Compression = compression,
+                AlgorithmPreferences = AlgorithmPreferences.FromConfig(hostConfig, compression: compression),
                 RequiredRsaSize = hostConfig.RequiredRsaSize ?? SshClientOptions.DefaultMinimumRsaBits,
                 Logger = options.Logger,
                 TimeProvider = options.TimeProvider,

@@ -66,6 +66,7 @@ internal sealed partial class SshClientFactory(
                     Password = endpoint.Password,
                     Logger = _logger,
                     AddressFamily = endpoint.AddressFamily,
+                    Compression = endpoint.Compression,
                     UseAgent = endpoint.UseAgent ?? true,
                     Agent = await AliasAgentAsync(endpoint.UseAgent, services.GetService<SshAgent>(), SshAgent.FromEnvironmentAsync, timeout.Token)
                         .ConfigureAwait(false),
@@ -114,6 +115,7 @@ internal sealed partial class SshClientFactory(
                 KeepAliveInterval = endpoint.KeepAliveInterval,
                 ConnectTimeout = endpoint.ConnectTimeout,
                 AddressFamily = endpoint.AddressFamily ?? SshAddressFamily.Any,
+                Compression = endpoint.Compression ?? false,
                 Logger = _logger,
             };
             if (endpoint.ConfigureClientOptions is { } configure)

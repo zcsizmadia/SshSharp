@@ -1,8 +1,8 @@
 # Tune and inspect a connection
 
 A few connection settings matter only in some environments: socket options for a network that drops idle flows or marks traffic,
-a comment that tells your application's connections apart in the server's logs, and a larger channel window for fast links with a
-long round trip. Once connected, `SshClient` tells you where the connection goes, how much it has carried, and lets you renew its
+a comment that tells your application's connections apart in the server's logs, a larger channel window for fast links with a
+long round trip, and compression for slow ones. Once connected, `SshClient` tells you where the connection goes, how much it has carried, and lets you renew its
 keys on demand.
 
 ## When to use
@@ -12,6 +12,8 @@ keys on demand.
 - Your network marks traffic by DSCP, or the socket's buffer sizes need raising.
 - Server administrators need to tell which application or job a connection comes from.
 - Downloads, command output or tunnels are slow over a fast link with a long round trip (another continent, a satellite link).
+- The link itself is slow (a few Mbit/s or less: a branch office, a mobile or radio link) and what crosses it is text: command
+  output, logs, CSV or JSON.
 - You report on connections: their endpoints, age, traffic, session id and algorithms.
 - A policy asks for new keys before a sensitive transfer, or at times of your choosing.
 
@@ -116,6 +118,65 @@ Notes:
 - **TCP.** The operating system's TCP window has to keep up as well. Modern systems scale it automatically. Where they do not,
   raise the receive buffer with `ConfigureSocket`.
 
+## Compress a slow link
+
+`Compression` asks the server for OpenSSH's delayed compression, `zlib@openssh.com`, as `ssh -C` does:
+
+[!code-csharp[](../snippets/ConnectionTuning.cs#compression)]
+
+It is off by default, as in `ssh`. The server decides: OpenSSH's sshd agrees unless it is configured with `Compression no`, and
+other servers may not offer it. `client.Algorithms.CompressionServerToClient` and `CompressionClientToServer` tell what was
+negotiated; a server without it gives `none`, and the connection works as it would have without compression.
+
+When connecting by alias, `Compression yes` in `ssh_config` turns it on for that host, and `SshConfigConnectOptions.Compression`
+overrides the configuration for the destination, as `ssh -C` does:
+
+[!code-csharp[](../snippets/ConnectionTuning.cs#compression-config)]
+
+```mermaid
+sequenceDiagram
+    participant C as SshSharp
+    participant S as Server
+    C->>S: KEXINIT (compression: zlib@openssh.com,none)
+    S->>C: KEXINIT
+    Note over C,S: key exchange, NEWKEYS: still uncompressed
+    C->>S: USERAUTH_REQUEST
+    S->>C: USERAUTH_SUCCESS (the last uncompressed packet)
+    Note over C,S: from here on, every packet in both directions is compressed
+    C->>S: CHANNEL_OPEN, CHANNEL_DATA, ...
+    S->>C: CHANNEL_DATA, ...
+    Note over C,S: each key re-exchange starts new zlib streams
+```
+
+**When it helps.** Compression trades CPU for bytes. Text from a command (logs, listings, JSON, CSV) often shrinks to a third or
+less, so on a link of a few Mbit/s, where the network is the limit, it arrives sooner. Interactive sessions over a slow link feel
+quicker too.
+
+**When it costs.** On a fast link (a LAN, a data center, anything where the CPU rather than the network is the limit) compression
+slows transfers down: every byte is compressed on one side and decompressed on the other. Data that is already compressed or
+encrypted (`.zst`, `.gz`, `.jpg`, a backup archive, a tunnel carrying TLS) does not shrink at all, and only costs CPU. Measure before
+turning it on for bulk transfers.
+
+Notes:
+
+- **It starts after the login.** Compression begins with the first packet after the server accepts the authentication, never
+  before. Plain `zlib`, which compresses from the first packet and so exposes the decompressor to an unauthenticated peer, is not
+  supported, by design.
+- **Huffman coding only.** What SshSharp sends is compressed with Huffman coding alone, as OpenSSH has done since September 2026, without LZ77's
+  references to earlier data: it shrinks text less, but the size of a packet no longer tells whether it repeats something sent
+  before on another channel. Even so, keep compression off for a connection that carries both secrets and data an attacker can
+  choose; see the [threat model](../threat-model.md#compression).
+- **.NET 8.** Choosing the Huffman-only strategy needs .NET 9 or later, so on .NET 8 SshSharp offers compression only for what the
+  server sends (`CompressionClientToServer` is `none`). Downloads and command output, usually what benefits, are compressed either
+  way.
+- **Limits.** A compressed packet from the server may inflate to less than 256 KiB, the most a packet can carry. More (a
+  "decompression bomb") fails the connection with `SshFailureReason.ProtocolError`, as malformed compressed data does.
+- **Byte counters** (`BytesSent`, `BytesReceived` and the `sshsharp.bytes.*` metrics) count message payloads before compression and
+  after decompression: what the application sent and received, not what crossed the network.
+- **FIPS mode** allows it: zlib is not a cryptographic algorithm.
+- **Jump hosts.** `SshConfigConnectOptions.Compression` applies to the destination only, as `ssh -C` does. A jump host carries the
+  destination's packets already encrypted, and they do not compress; its own `Compression` line in `ssh_config` still applies to it.
+
 ## Inspect a connection
 
 [!code-csharp[](../snippets/ConnectionTuning.cs#inspect-connection)]
@@ -125,9 +186,9 @@ Notes:
 | `RemoteEndPoint`, `LocalEndPoint` | The TCP connection's endpoints, when there is a socket: a connection SshSharp made, or a `NetworkStream` you passed. Through an HTTP or SOCKS proxy, the remote one is the proxy. Null over other streams (a ProxyJump tunnel, a ProxyCommand). |
 | `ConnectedAt` | When authentication succeeded, in UTC. |
 | `SessionId` | The session identifier: the exchange hash of the first key exchange (RFC 4253 section 7.2). It stays the same across re-exchanges. It is not secret, and both sides know it, so it can correlate a connection with the server's records. A copy, readable after the client is disposed. |
-| `BytesSent`, `BytesReceived` | SSH message bytes so far: each packet's payload, key exchange messages included, before encryption, padding and MAC, as the `sshsharp.bytes.*` metrics count them. |
+| `BytesSent`, `BytesReceived` | SSH message bytes so far: each packet's payload, key exchange messages included, before compression, encryption, padding and MAC (after decryption and decompression for what is received), as the `sshsharp.bytes.*` metrics count them. |
 | `ServerIdentification` | The server's identification line, for example `SSH-2.0-OpenSSH_9.9`. |
-| `Algorithms` | The negotiated key exchange, host key algorithm, ciphers and MACs; a re-exchange can change them. |
+| `Algorithms` | The negotiated key exchange, host key algorithm, ciphers, MACs and compression; a re-exchange can change them. |
 | `HostKey` | The host key the server proved. |
 
 All of them are cheap to read from any thread: the byte counters are read atomically, and the rest is fixed at connect time.

@@ -239,7 +239,7 @@ the agent need no code: they are settings. Keep what the endpoint built, jump ho
   `known_hosts` file.
 - **`ConfigAlias`** connects through `ssh_config` instead; then `Host`, `Port`, `UserName`, `PrivateKeyFiles`, `PrivateKeyPassphrase`,
   `KnownHostsFiles`, `AcceptNewHostKeys`, `KeepAliveInterval` and `ConfigureClientOptions` are not used, and `PrivateKeys`,
-  `HostKeyFingerprints`, `Proxy` and `JumpHosts` fail validation. `AddressFamily`, when set, overrides `ssh_config`'s, and
+  `HostKeyFingerprints`, `Proxy` and `JumpHosts` fail validation. `AddressFamily` and `Compression`, when set, override `ssh_config`'s, and
   `UseAgent` set to `false` turns the agent off (`true` uses the agent registered in the container, else the user's, in place of
   `IdentityAgent`).
 - **IPv4 or IPv6 only.** `AddressFamily` (`Inet` or `Inet6`, `"AddressFamily": "Inet"` in configuration) limits which of the server's

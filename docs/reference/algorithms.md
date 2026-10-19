@@ -63,7 +63,16 @@ switches and appliances offer. A server that offers both always gets an `-etm` M
 
 ## Compression
 
-`none` only.
+| Algorithm | Notes | FIPS mode |
+|---|---|---|
+| `none` | The default. | Yes |
+| `zlib@openssh.com` | OpenSSH's delayed compression: zlib, started with the first packet after the server accepts the user's authentication, in both directions, and kept for the rest of the connection. Offered only when `SshClientOptions.Compression` (or `Compression yes` in `ssh_config`) turns it on, before `none`, as `ssh -C` does. What SshSharp sends is Huffman-coded only, as OpenSSH does; on .NET 8 SshSharp does not compress what it sends and offers `none` for that direction. | Yes: zlib is not a cryptographic algorithm |
+
+Compression is off by default, as in OpenSSH: it costs CPU, helps only on slow links with compressible data, and makes packet
+lengths depend on the content (see the [threat model](../threat-model.md#compression)). Each key re-exchange that negotiates it
+starts new zlib streams, as OpenSSH does; one that negotiates `none` turns compression off. A packet must inflate to less than
+256 KiB, or the connection fails with a protocol error. Plain `zlib`, which compresses from the first packet, is not supported (see
+below). See [Compress a slow link](../how-to/tune-and-inspect-connections.md#compress-a-slow-link).
 
 ## User authentication keys
 
@@ -78,7 +87,9 @@ switches and appliances offer. A server that offers both always gets an `-etm` M
 ## Not supported
 
 By design, none of these are implemented: CBC ciphers, 3DES, RC4, `hmac-sha1` and other SHA-1 MACs, `ssh-rsa` (SHA-1) signatures,
-`ssh-dss`, `diffie-hellman-group1-sha1`, `diffie-hellman-group14-sha1`, `diffie-hellman-group-exchange-sha1`, and `zlib` compression.
+`ssh-dss`, `diffie-hellman-group1-sha1`, `diffie-hellman-group14-sha1`, `diffie-hellman-group-exchange-sha1`, and plain `zlib`
+compression, which starts before authentication and so exposes the decompressor to an unauthenticated peer (OpenSSH's client
+dropped it in 9.9; `zlib@openssh.com`, above, is supported).
 A server that offers nothing else fails the connection with `SshFailureReason.KeyExchangeFailed`; see
 [Troubleshooting](troubleshooting.md#no-common-algorithms).
 
@@ -102,6 +113,7 @@ A server that offers nothing else fails the connection with `SshFailureReason.Ke
 - **RSA host key size:** `SshClientOptions.RequiredRsaSize` (`RequiredRSASize` in `ssh_config`), 2048 bits by default, 1024 at
   the least.
 - **Rekeying:** `RekeyAfterBytes` (1 GiB) and `RekeyAfterTime` (1 hour).
+- **Compression:** `SshClientOptions.Compression` (`Compression` in `ssh_config`) offers `zlib@openssh.com` before `none`.
 
 ## See also
 

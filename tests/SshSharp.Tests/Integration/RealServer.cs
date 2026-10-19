@@ -38,7 +38,7 @@ internal static class RealServer
     /// or null when no server or account is configured.
     /// </summary>
     public static async Task<SshClientOptions?> OptionsAsync(
-        SshHostKeyVerifier? verifier = null, TimeSpan? keepAlive = null, int keepAliveCountMax = 3, long? rekeyAfterBytes = null)
+        SshHostKeyVerifier? verifier = null, TimeSpan? keepAlive = null, int keepAliveCountMax = 3, long? rekeyAfterBytes = null, bool compression = false)
     {
         if (!HasAccount)
         {
@@ -55,6 +55,7 @@ internal static class RealServer
             KeepAliveInterval = keepAlive,
             KeepAliveCountMax = keepAliveCountMax,
             RekeyAfterBytes = rekeyAfterBytes ?? 1L << 30, // SshClientOptions' default
+            Compression = compression,
         };
     }
 

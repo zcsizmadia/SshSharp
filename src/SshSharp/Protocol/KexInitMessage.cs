@@ -105,7 +105,7 @@ internal sealed class KexInitMessage
             EncryptionServerToClient = preferences.Ciphers,
             MacClientToServer = preferences.Macs,
             MacServerToClient = preferences.Macs,
-            CompressionClientToServer = preferences.Compression,
+            CompressionClientToServer = SshAlgorithms.OutgoingCompression(preferences.Compression),
             CompressionServerToClient = preferences.Compression,
         };
     }
