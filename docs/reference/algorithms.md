@@ -84,8 +84,9 @@ A server that offers nothing else fails the connection with `SshFailureReason.Ke
 
 ## Changing the lists
 
-- **With `ssh_config`:** `KexAlgorithms`, `HostKeyAlgorithms`, `Ciphers`, `MACs` and `PubkeyAcceptedAlgorithms`, with OpenSSH's
-  `+`, `-` and `^` forms, applied to these defaults. Names SshSharp does not implement are ignored.
+- **With `ssh_config`:** `KexAlgorithms`, `HostKeyAlgorithms`, `Ciphers` and `MACs`, with OpenSSH's `+`, `-` and `^` forms,
+  applied to these defaults. Names SshSharp does not implement are ignored. `PubkeyAcceptedAlgorithms` is resolved but not
+  applied: each key is signed with the first of its algorithms the server lists in `server-sig-algs`.
 - **In code:** `SshClientOptions.KexAlgorithms`, `HostKeyAlgorithms`, `Ciphers` and `Macs` take an `SshAlgorithmList` in the same
   four forms (`Only`, `Append`, `Prepend`, `Remove`, or `SshAlgorithmList.Parse` for the text form). Unlike in `ssh_config`, a name
   SshSharp does not implement throws `ArgumentException`. See

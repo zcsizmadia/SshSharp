@@ -68,7 +68,7 @@ asks for (sshd's `MaxSessions`, 10 by default).
 
 In the benchmarks, `CopyToAsync` into `OpenWriteAsync` took 226 ms for 32 MiB against 244 ms for `UploadAsync`, on a Linux client
 over loopback ([Benchmarks](../benchmarks.md#a-second-machine-windows-and-wsl)). See
-[Transfer files with SFTP](transfer-files-sftp.md#download-large-files-faster) and [Writes in flight](../sftp.md#writes-in-flight).
+[Transfer files with SFTP](transfer-files-sftp.md#transfer-large-files-faster) and [Writes in flight](../sftp.md#writes-in-flight).
 
 ## Cipher choice
 
