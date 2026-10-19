@@ -18,6 +18,13 @@ public class SshChannelStateTests
 
     private static CancellationToken Timeout() => new CancellationTokenSource(TimeSpan.FromSeconds(30)).Token;
 
+    /// <summary>Whether the wire holds at least one whole packet: its length field, and that many bytes after it.</summary>
+    private static bool WholePacketWritten(MemoryStream wire)
+    {
+        var written = wire.ToArray();
+        return written.Length >= 4 && written.Length >= 4 + System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(written);
+    }
+
     [Test]
     public async Task StderrSplitAfterTheEndOfData_EndsToo()
     {
@@ -72,9 +79,20 @@ public class SshChannelStateTests
         channel.OnOpenConfirmed(5, 0, 32 * 1024);
         channel.OnWindowAdjust(10);
 
-        // The window is the confirmed one, not 1000: 10 bytes go, in one packet, and the rest waits for more until given up.
-        using var cancel = new CancellationTokenSource(TimeSpan.FromMilliseconds(200));
-        await Assert.That(async () => await channel.SendDataAsync(new byte[20], cancel.Token)).Throws<OperationCanceledException>();
+        // The window is the confirmed one, not 1000: 10 bytes go, in one packet, and the rest waits for more until given up. It is given
+        // up once that packet is on the wire, not on a timer: a timer that fired first (a busy thread pool in the full suite) cancelled
+        // the send before anything was written, and the empty wire failed the test.
+        using var cancel = CancellationTokenSource.CreateLinkedTokenSource(Timeout());
+        var send = channel.SendDataAsync(new byte[20], cancel.Token).AsTask();
+        var deadline = Timeout();
+        while (!WholePacketWritten(wire))
+        {
+            await Task.Delay(10, deadline);
+        }
+
+        await Assert.That(send.IsCompleted).IsFalse(); // waiting for more window
+        await cancel.CancelAsync();
+        await Assert.That(async () => await send).Throws<OperationCanceledException>();
         var packet = wire.ToArray();
         await Assert.That(packet[5]).IsEqualTo(SshMessage.ChannelData);
         await Assert.That(System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(packet.AsSpan(6))).IsEqualTo(5u); // the recipient
