@@ -12,19 +12,23 @@ internal readonly record struct SocksRequest(string Host, int Port, int Version)
 /// <summary>
 /// The user name and password a SOCKS 5 client must give (RFC 1929). Only keyed digests of the two are kept, not the password, and a
 /// client's attempt is compared with them in constant time: both are digested (the time that takes depends only on what the client
-/// sent, which it knows) and the digests compared with <see cref="CryptographicOperations.FixedTimeEquals"/>, user name and password
-/// alike, without stopping at the first that differs. So the time to answer tells nothing about the expected values, their lengths
-/// included.
+/// sent, which it knows) and the two digests, side by side, are compared with the expected pair in one
+/// <see cref="CryptographicOperations.FixedTimeEquals"/>, which does not stop at the first byte that differs. So the time to answer
+/// tells nothing about the expected values, their lengths included, nor about which of the two was wrong.
 /// </summary>
 internal sealed class SocksCredentials
 {
     /// <summary>RFC 1929's limit on each field.</summary>
     public const int MaxLength = 255;
 
-    private readonly byte[] _key = RandomNumberGenerator.GetBytes(32);
-    private readonly byte[] _userName;
-    private readonly byte[] _password;
+    private const int DigestSize = HMACSHA256.HashSizeInBytes;
 
+    private readonly byte[] _key = RandomNumberGenerator.GetBytes(32);
+
+    /// <summary>The user name's digest, then the password's.</summary>
+    private readonly byte[] _expected = new byte[2 * DigestSize];
+
+    /// <summary>Keeps digests of <paramref name="credentials"/>' user name and password, under a key made for this instance.</summary>
     /// <exception cref="ArgumentException">The user name or password is empty or longer than 255 bytes in UTF-8.</exception>
     public SocksCredentials(NetworkCredential credentials, string parameterName)
     {
@@ -37,8 +41,7 @@ internal sealed class SocksCredentials
                 throw new ArgumentException("A SOCKS 5 user name and password are each 1 to 255 bytes in UTF-8 (RFC 1929).", parameterName);
             }
 
-            _userName = HMACSHA256.HashData(_key, userName);
-            _password = HMACSHA256.HashData(_key, password);
+            Digests(userName, password, _expected);
         }
         finally
         {
@@ -49,11 +52,15 @@ internal sealed class SocksCredentials
     /// <summary>Whether the client's user name and password are the expected ones; constant time in the expected values.</summary>
     public bool Matches(ReadOnlySpan<byte> userName, ReadOnlySpan<byte> password)
     {
-        Span<byte> user = stackalloc byte[HMACSHA256.HashSizeInBytes];
-        Span<byte> pass = stackalloc byte[HMACSHA256.HashSizeInBytes];
-        HMACSHA256.HashData(_key, userName, user);
-        HMACSHA256.HashData(_key, password, pass);
-        return CryptographicOperations.FixedTimeEquals(user, _userName) & CryptographicOperations.FixedTimeEquals(pass, _password);
+        Span<byte> given = stackalloc byte[2 * DigestSize];
+        Digests(userName, password, given);
+        return CryptographicOperations.FixedTimeEquals(given, _expected);
+    }
+
+    private void Digests(ReadOnlySpan<byte> userName, ReadOnlySpan<byte> password, Span<byte> destination)
+    {
+        HMACSHA256.HashData(_key, userName, destination[..DigestSize]);
+        HMACSHA256.HashData(_key, password, destination[DigestSize..]);
     }
 }
 

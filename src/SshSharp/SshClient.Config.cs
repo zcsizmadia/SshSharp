@@ -402,9 +402,10 @@ public sealed partial class SshClient
         var certified = new List<SshPrivateKey>();
         foreach (var key in plain.Where(k => k.Certificate is null))
         {
-            foreach (var certificate in certificates.Where(c => c.Type == SshCertificateType.User && c.PublicKey.Span.SequenceEqual(key.PublicKey.Span)))
+            foreach (var withCertificate in certificates
+                .Where(c => c.Type == SshCertificateType.User && c.PublicKey.Span.SequenceEqual(key.PublicKey.Span))
+                .Select(key.WithCertificate))
             {
-                var withCertificate = key.WithCertificate(certificate);
                 certified.Add(withCertificate);
                 if (keyFiles.TryGetValue(key, out var path))
                 {
