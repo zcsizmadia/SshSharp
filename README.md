@@ -49,7 +49,8 @@ Console.WriteLine(result.StandardOutputText);
   AES-CTR with HMAC-SHA2 (ETM preferred, plain `hmac-sha2-256/512` for network equipment); Ed25519, ECDSA and RSA (SHA-2) keys; strict key exchange (Terrapin) always on; a FIPS mode.
 - **File transfer:** SFTP (version 3 with OpenSSH's extensions: pipelined uploads and downloads, seekable remote file
   streams, directory transfers with several files at once, pipelined recursive delete and `mkdir -p`, whole-file reads and
-  writes, a timeout for a server that stops answering, links and attributes), and SCP uploads and downloads of files,
+  writes, segmented uploads and downloads, server-side file hashes (`check-file`), raw extended requests for vendor
+  extensions, a timeout for a server that stops answering, links and attributes), and SCP uploads and downloads of files,
   streams and directories, with progress, kept times, and checks that stop a hostile server from writing outside the target.
 - **Files for the rest of .NET:** `SshSharp.IO.Abstractions` implements System.IO.Abstractions' `IFileSystem` over SFTP (code written
   against `IFileSystem` reads and writes the server unchanged), and `SshSharp.FileProviders` serves a directory as an `IFileProvider`, for
@@ -116,7 +117,8 @@ Console.WriteLine(result.StandardOutputText);
 | FIPS mode (FIPS-approved algorithms only) | ✅ | ❌ |
 | SCP | ✅ | ✅ |
 | SFTP | ✅ (version 3 with OpenSSH extensions, pipelined transfers) | ✅ |
-| Segmented SFTP downloads (one file in parallel ranges over several sessions) | ✅ | ❌ |
+| Segmented SFTP downloads and uploads (one file in parallel ranges over several sessions) | ✅ | ❌ |
+| SFTP file hashes computed by the server (`check-file`, to verify a transfer) and raw extended requests | ✅ | ❌ |
 | SFTP `fsync@openssh.com` (durable uploads), `hardlink@openssh.com` and `limits@openssh.com` | ✅ | ❌ |
 | Remote files as an `IFileSystem` (System.IO.Abstractions: `File`, `Directory`, `Path`, streams) | ✅ (`SshSharp.IO.Abstractions`) | ❌ |
 | Remote files as an `IFileProvider` (ASP.NET Core static files, Razor, configuration) | ✅ (`SshSharp.FileProviders`) | ❌ |

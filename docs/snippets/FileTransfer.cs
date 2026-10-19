@@ -1,3 +1,5 @@
+using System.Buffers.Binary;
+using System.Security.Cryptography;
 using System.Text;
 using SshSharp;
 using SshSharp.Scp;
@@ -72,6 +74,79 @@ internal static class FileTransfer
         // A large file over a high-latency link: four ranges in parallel, each over its own SFTP session.
         await sftp.DownloadFileAsync("images/vm.qcow2", "vm.qcow2", new SftpTransferOptions { Segments = 4 }, cancellationToken);
         // </sftp-segments>
+    }
+
+    public static async Task SegmentedUploadAsync(SftpClient sftp, CancellationToken cancellationToken)
+    {
+        // <sftp-segments-upload>
+        // The other way: four ranges written in parallel into one remote file, each over its own SFTP session. A server that allows
+        // one writer per file, or takes writes in order only, still gets the whole file (over fewer sessions, or in order).
+        var options = new SftpTransferOptions { Segments = 4 };
+        await sftp.UploadFileAsync("backups/db.tar.zst", "incoming/db.tar.zst", options, cancellationToken);
+        // </sftp-segments-upload>
+    }
+
+    public static async Task SegmentedUploadRetryAsync(SftpClient sftp, CancellationToken cancellationToken)
+    {
+        // <sftp-segments-upload-cleanup>
+        var options = new SftpTransferOptions { Segments = 4 };
+        try
+        {
+            await sftp.UploadFileAsync("backups/db.tar.zst", "incoming/db.tar.zst", options, cancellationToken);
+        }
+        catch (SshException ex) when (ex.Reason is not SshFailureReason.ChannelClosed and not SshFailureReason.ConnectionClosed)
+        {
+            // Resume only a file whose cleanup finished: then it holds an unbroken start of the upload, and no gaps. Otherwise start
+            // over (Resume off truncates the file).
+            var mayHaveGaps = ex.Data[SftpClient.UploadCleanupIncompleteKey] is true;
+            var retry = new SftpTransferOptions { Resume = !mayHaveGaps };
+            await sftp.UploadFileAsync("backups/db.tar.zst", "incoming/db.tar.zst", retry, cancellationToken);
+        }
+        // </sftp-segments-upload-cleanup>
+    }
+
+    public static async Task VerifyWithHashAsync(SftpClient sftp, CancellationToken cancellationToken)
+    {
+        // <sftp-verify-hash>
+        await sftp.UploadFileAsync("backups/db.tar.zst", "incoming/db.tar.zst", cancellationToken: cancellationToken);
+
+        if (sftp.SupportsFileHash)
+        {
+            // The server hashes its copy where it is (check-file), so nothing is read back; ask for SHA-256 to compare it here.
+            var remote = await sftp.GetFileHashAsync("incoming/db.tar.zst", ["sha256"], cancellationToken: cancellationToken);
+
+            await using var local = File.OpenRead("backups/db.tar.zst");
+            var expected = await SHA256.HashDataAsync(local, cancellationToken);
+            if (!remote.Matches(expected))
+            {
+                throw new IOException("The uploaded file differs from the local one.");
+            }
+        }
+        // </sftp-verify-hash>
+    }
+
+    public static async Task ExtendedRequestAsync(SftpClient sftp, CancellationToken cancellationToken)
+    {
+        // <sftp-extended-request>
+        // A vendor extension this library has no method for: its fields after the name, encoded as the extension defines them.
+        // Here one SSH string, a path (uint32 length, then the UTF-8 bytes).
+        if (sftp.Extensions.ContainsKey("space-available"))
+        {
+            var path = Encoding.UTF8.GetBytes("/srv/data");
+            var request = new byte[4 + path.Length];
+            BinaryPrimitives.WriteInt32BigEndian(request, path.Length);
+            path.CopyTo(request, 4);
+
+            var reply = await sftp.SendExtendedRequestAsync("space-available", request, cancellationToken);
+            reply.EnsureSuccess(); // a status other than OK throws SftpException
+            if (reply.IsExtendedReply)
+            {
+                // The extension's reply fields: here four uint64 values and a uint32, the first the bytes on the device.
+                var bytesOnDevice = BinaryPrimitives.ReadUInt64BigEndian(reply.Data.Span);
+                Console.WriteLine($"{bytesOnDevice:N0} bytes on the device");
+            }
+        }
+        // </sftp-extended-request>
     }
 
     public static async Task DirectoriesAsync(SftpClient sftp, CancellationToken cancellationToken)

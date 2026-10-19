@@ -61,7 +61,7 @@ No `ssh_config`? Pass the host, the credentials and a host key policy in [`SshCl
   </div></div></div>
   <div class="col"><div class="card h-100"><div class="card-body">
     <h5 class="card-title">SFTP and SCP</h5>
-    <p class="card-text">Pipelined transfers, resume, segmented downloads, directories, remote file streams, and SCP for servers
+    <p class="card-text">Pipelined transfers, resume, segmented downloads and uploads, server-side hashes, directories, remote file streams, and SCP for servers
     without SFTP.</p>
     <a href="how-to/transfer-files-sftp.md" class="card-link">SFTP</a>
     <a href="how-to/transfer-files-scp.md" class="card-link">SCP</a>

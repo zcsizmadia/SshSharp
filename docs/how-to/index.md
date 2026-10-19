@@ -18,7 +18,7 @@ Every example on these pages is compiled with the library in CI, so it matches t
 
 | Guide | Use it to |
 |---|---|
-| [Transfer files with SFTP](transfer-files-sftp.md) | Upload, download, resume, copy directories, and work with remote files in place. |
+| [Transfer files with SFTP](transfer-files-sftp.md) | Upload, download, resume, split large files over several sessions, verify with a server-side hash, copy directories, work with remote files in place, and call vendor extensions. |
 | [Transfer files with SCP](transfer-files-scp.md) | Copy files where the server has no SFTP. |
 | [IFileSystem and IFileProvider](file-system-adapters.md) | Use remote files through System.IO.Abstractions or `Microsoft.Extensions.FileProviders`. |
 

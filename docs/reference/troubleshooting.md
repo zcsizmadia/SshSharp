@@ -88,7 +88,7 @@ the method with `KexAlgorithms -diffie-hellman-group-exchange-sha256`.
 ### Transfers are slow over a long-distance link
 
 One channel moves at most one window per round trip: with the default 2 MiB window, about 20 MiB/s at 100 ms, whatever the
-bandwidth. Raise `ChannelWindowSize` (for example to 16 MiB), or use SFTP's `Segments` for downloads. See
+bandwidth. Raise `ChannelWindowSize` (for example to 16 MiB), or use SFTP's `Segments` for downloads and uploads. See
 [Move more data per round trip on long links](../how-to/tune-and-inspect-connections.md#move-more-data-per-round-trip-on-long-links).
 
 ## Host keys
@@ -195,8 +195,16 @@ The server accepts only the variables its `AcceptEnv` lists. Pass values on the 
 
 ### `NotSupportedException` from SFTP
 
-The server lacks an OpenSSH extension the operation needs: an overwriting rename (`posix-rename@openssh.com`), hard links, server-side
-copy. `sftp.Extensions` lists what it has. Or a synchronous `Read`/`Write` on an SFTP stream: use the async methods.
+The server lacks an extension the operation needs: an overwriting rename (`posix-rename@openssh.com`), hard links, server-side
+copy, a file hash (`check-file`; OpenSSH has none, check `SupportsFileHash`). `sftp.Extensions` lists what it has. A file hash
+asked for with the default SHA-2 algorithms from a server that lists only `md5` or `sha1` is refused too: name those explicitly.
+Or a synchronous `Read`/`Write` on an SFTP stream: use the async methods.
+
+### A segmented upload is no faster
+
+The server took the file over fewer sessions: it allows one writer per file, or takes writes in order only (object storage behind
+SFTP), and the upload fell back without failing. It may also cap sessions (sshd's `MaxSessions`). Use `Segments = 1` with such
+servers, or raise `ChannelWindowSize` instead. See [Transfer large files faster](../how-to/transfer-files-sftp.md#transfer-large-files-faster).
 
 ### An SFTP call never returns
 

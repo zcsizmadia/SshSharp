@@ -144,6 +144,55 @@ internal sealed class FakeSftpServer
     /// <summary>OPEN answers a status of OK instead of a handle.</summary>
     public bool OpenAnswersOk { get; set; }
 
+    /// <summary>Refuse to open a file for writing while another handle has it open for writing (a server with one writer per file).</summary>
+    public bool RefuseSecondWriter { get; set; }
+
+    /// <summary>Refuse a WRITE anywhere but at the file's current end (a server that stores files as objects, written from the start).</summary>
+    public bool WritesInOrderOnly { get; set; }
+
+    /// <summary>Refuse to set a file's size (SETSTAT or FSETSTAT with a size): a server that cannot truncate.</summary>
+    public bool RefuseSetSize { get; set; }
+
+    /// <summary>The algorithms check-file and md5-hash hash with: the first of those asked for that is here is used.</summary>
+    public List<string> HashAlgorithms { get; } = ["md5", "sha1", "sha256", "sha384", "sha512"];
+
+    /// <summary>Every check-file or md5-hash request: its name, the file's path, the algorithms asked for, the offset and length.</summary>
+    public List<(string Request, string Path, string Algorithms, long Offset, long Length)> HashRequests { get; } = [];
+
+    /// <summary>The payloads of the vendor extension <c>echo@example.com</c>, which answers an EXTENDED_REPLY with the payload.</summary>
+    public List<byte[]> Echoes { get; } = [];
+
+    /// <summary>Extended requests answered with OP_UNSUPPORTED although the server handles them otherwise (announced or not).</summary>
+    public HashSet<string> UnsupportedRequests { get; } = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Requests (the raw packet, type first) this matches are answered only once <see cref="Released"/> completes, and so is every
+    /// later request of the same session: a server that stops answering on one session.
+    /// </summary>
+    public Func<byte[], bool>? Hold { get; set; }
+
+    /// <summary>Completed to answer the requests <see cref="Hold"/> holds.</summary>
+    public TaskCompletionSource Released { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    /// <summary>How many requests <see cref="Hold"/> has held.</summary>
+    public int Held => Volatile.Read(ref _held);
+
+    private int _held;
+
+    /// <summary>The offset of a WRITE request (the raw packet), or null for another request.</summary>
+    public static long? WriteOffset(byte[] packet)
+    {
+        if (packet[0] != 6)
+        {
+            return null;
+        }
+
+        var handleLength = BinaryPrimitives.ReadInt32BigEndian(packet.AsSpan(5));
+        return (long)BinaryPrimitives.ReadUInt64BigEndian(packet.AsSpan(9 + handleLength));
+    }
+
+    private readonly Dictionary<string, uint> _openFlags = new(StringComparer.Ordinal);
+
     public void AddDirectory(string path) => _nodes[path] = new Node { IsDirectory = true, Mode = 0x1ED };
 
     public void AddFile(string path, byte[] data, uint modifyTime = 1_700_000_000)
@@ -401,6 +450,12 @@ internal sealed class FakeSftpServer
             if (packet[0] is 6 && HoldWrites is { } holdWrites)
             {
                 await holdWrites.Task;
+            }
+
+            if (Hold?.Invoke(packet) == true)
+            {
+                Interlocked.Increment(ref _held);
+                await Released.Task;
             }
 
             var reply = HandleLocked(packet, opened);
@@ -695,6 +750,12 @@ internal sealed class FakeSftpServer
                     }
                 }
 
+                if ((flags & 0x02) != 0 && RefuseSecondWriter
+                    && _handles.Any(h => h.Value.Path == path && _openFlags.TryGetValue(h.Key, out var other) && (other & 0x02) != 0))
+                {
+                    return Status(id, 4, "Text file busy");
+                }
+
                 if ((flags & 0x10) != 0)
                 {
                     node!.Data.Clear();
@@ -702,6 +763,7 @@ internal sealed class FakeSftpServer
 
                 var handle = "h" + _nextHandle++;
                 _handles[handle] = (path, 0);
+                _openFlags[handle] = flags;
                 MaxOpenFileHandles = Math.Max(MaxOpenFileHandles, _handles.Keys.Count(h => h.StartsWith('h')));
                 return Build(w => { w.WriteByte(102); w.WriteUInt32(id); w.WriteString(handle); });
             }
@@ -756,6 +818,11 @@ internal sealed class FakeSftpServer
                     return Status(id, 4, "No space left on device");
                 }
 
+                if (WritesInOrderOnly && offset != node.Data.Count)
+                {
+                    return Status(id, 4, "Out of order write");
+                }
+
                 if (node.Data.Count < offset + data.Length)
                 {
                     node.Data.AddRange(new byte[offset + data.Length - node.Data.Count]);
@@ -799,6 +866,11 @@ internal sealed class FakeSftpServer
                 if (node is null)
                 {
                     return Status(id, 2, "No such file");
+                }
+
+                if (RefuseSetSize && (new SshReader(r.Remaining).ReadUInt32() & 0x01) != 0)
+                {
+                    return Status(id, 8, "Truncation is not supported");
                 }
 
                 ApplyAttributes(ref r, node);
@@ -957,6 +1029,11 @@ internal sealed class FakeSftpServer
             case 200: // EXTENDED
             {
                 var name = r.ReadUtf8String();
+                if (UnsupportedRequests.Contains(name))
+                {
+                    return Status(id, 8, "Unsupported");
+                }
+
                 switch (name)
                 {
                     case "limits@openssh.com":
@@ -1066,6 +1143,15 @@ internal sealed class FakeSftpServer
                         });
                     }
 
+                    case "check-file-name" or "check-file-handle" or "md5-hash" or "md5-hash-handle":
+                        return HashFile(id, name, ref r);
+                    case "echo@example.com":
+                    {
+                        var payload = r.Remaining.ToArray();
+                        Echoes.Add(payload);
+                        return Build(w => { w.WriteByte(201); w.WriteUInt32(id); w.WriteBytes(payload); });
+                    }
+
                     case "home-directory" when HomeDirectoryFailsForEmptyUser && r.ReadUtf8String().Length == 0:
                         return Status(id, 4, "Failure"); // OpenSSH before 10.x looks the empty name up as a user
                     case "home-directory":
@@ -1078,6 +1164,62 @@ internal sealed class FakeSftpServer
             default:
                 return Status(id, 8, "Unsupported");
         }
+    }
+
+    /// <summary>check-file-name, check-file-handle, md5-hash and md5-hash-handle, with a block size of 0 only (one hash per request).</summary>
+    private byte[] HashFile(uint id, string request, ref SshReader r)
+    {
+        var target = r.ReadUtf8String();
+        string path;
+        if (request.EndsWith("-handle", StringComparison.Ordinal))
+        {
+            if (!_handles.TryGetValue(target, out var open))
+            {
+                return Status(id, 4, "Bad handle");
+            }
+
+            path = open.Path;
+        }
+        else
+        {
+            path = Resolve(target);
+        }
+
+        var md5 = request.StartsWith("md5", StringComparison.Ordinal);
+        var algorithms = md5 ? "md5" : r.ReadUtf8String();
+        var offset = (long)r.ReadUInt64();
+        var length = (long)r.ReadUInt64();
+        if (md5 ? r.ReadString().Length != 0 : r.ReadUInt32() != 0)
+        {
+            return Status(id, 8, "Quick-check and block hashes are not supported");
+        }
+
+        HashRequests.Add((request, path, algorithms, offset, length));
+        if (Follow(path) is not { IsDirectory: false } node)
+        {
+            return Status(id, 2, "No such file");
+        }
+
+        var algorithm = algorithms.Split(',').FirstOrDefault(HashAlgorithms.Contains);
+        if (algorithm is null)
+        {
+            return Status(id, 8, "No such hash algorithm");
+        }
+
+        var data = node.Data.Skip((int)Math.Min(offset, node.Data.Count)).Take(length == 0 ? int.MaxValue : (int)length).ToArray();
+#pragma warning disable CA5350, CA5351 // the fake server computes what the client asks for: MD5 and SHA-1 are interop formats here, not security
+        var hash = algorithm switch
+        {
+            "md5" => System.Security.Cryptography.MD5.HashData(data),
+            "sha1" => System.Security.Cryptography.SHA1.HashData(data),
+            "sha256" => System.Security.Cryptography.SHA256.HashData(data),
+            "sha384" => System.Security.Cryptography.SHA384.HashData(data),
+            _ => System.Security.Cryptography.SHA512.HashData(data),
+        };
+#pragma warning restore CA5350, CA5351
+        return md5
+            ? Build(w => { w.WriteByte(201); w.WriteUInt32(id); w.WriteString("md5-hash"); w.WriteString(hash); })
+            : Build(w => { w.WriteByte(201); w.WriteUInt32(id); w.WriteString("check-file"); w.WriteString(algorithm); w.WriteBytes(hash); });
     }
 
     private byte[] Rename(uint id, string from, string to, bool overwrite)
