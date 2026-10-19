@@ -358,6 +358,42 @@ public sealed class SftpListingTests
     }
 
     [Test]
+    public async Task Recursive_HoldsAtMostMaxConcurrentDirectoriesListingsReadAhead()
+    {
+        // A slot is free again as soon as a listing read ahead has been read; the listings themselves stay until the walk reaches them.
+        // Those must stay bounded too, not just the handles: a wide directory must not be listed ahead whole and held.
+        await using var rig = await Rig.StartAsync(f =>
+        {
+            f.AddDirectory(Home + "/wide");
+            for (var i = 0; i < 30; i++)
+            {
+                AddFiles(f, $"{Home}/wide/d{i:D2}", 3);
+            }
+        });
+
+        var reached = 0; // subdirectories returned so far
+        var mostAhead = 0;
+        await foreach (var entry in rig.Sftp.ListDirectoryAsync("wide", new SftpListOptions { Recursive = true, MaxConcurrentDirectories = 3 }, Timeout()))
+        {
+            if (entry.Attributes.IsDirectory)
+            {
+                reached++;
+            }
+
+            // Let what was started ahead be read whole, so freed slots would be taken again were nothing else holding them back.
+            await rig.HandlesClosedAsync();
+            await Task.Delay(5);
+            await rig.HandlesClosedAsync();
+            var opened = rig.Files.Requests.Count(r => r == 11) - 1; // OPENDIRs, the top directory's aside
+            mostAhead = Math.Max(mostAhead, opened - reached);
+        }
+
+        await Assert.That(reached).IsEqualTo(30);
+        await Assert.That(mostAhead).IsLessThanOrEqualTo(3);
+        await Assert.That(mostAhead).IsGreaterThan(0).Because("listings are still read ahead");
+    }
+
+    [Test]
     public async Task Recursive_ASubdirectoryThatCannotBeListed_EndsTheListingThere()
     {
         await using var rig = await Rig.StartAsync(f =>

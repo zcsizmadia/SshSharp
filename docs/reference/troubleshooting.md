@@ -219,7 +219,9 @@ servers, or raise `ChannelWindowSize` instead. See [Transfer large files faster]
 
 The server stopped answering while the connection stayed up (a stuck disk or NFS mount on the server, a firewall that drops packets
 silently). Set `SftpClient.OperationTimeout`, which then fails the request with `SshException` (`Reason = Timeout`), and keep-alives
-(`KeepAliveInterval`) for a connection that died. See
+(`KeepAliveInterval`) for a connection that died. An upload or a write stream can also hang while it sends, when `sftp-server`
+stops reading and the channel's window fills: `OperationTimeout` bounds that too, and then closes the SFTP session
+(`SftpClient.IsConnected` is false; open a new one). See
 [Fail when the server stops answering](../how-to/transfer-files-sftp.md#fail-when-the-server-stops-answering).
 
 ### A recursive delete stopped part way

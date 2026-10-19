@@ -45,6 +45,16 @@ A failed download leaves no partial local file behind, unless `Resume` is set, i
 next attempt. A resume trusts that the destination's bytes are the start of the same file (nothing compares them), and a
 destination larger than the source is an error.
 
+A failed or cancelled upload (one session, in order) keeps what was written, so `Resume` can continue it. Its writes are
+pipelined, though, and one that fails (a full disk, say) may be followed by later ones that land, which would leave the file at
+nearly its full size with a hole that a resume, taking the file's size for what was sent, would keep. So when a write landed past
+one that failed, the upload cuts the remote file back to the part it holds without a gap before it throws. If the server cannot
+cut a file, or a write went unanswered and may still land after the cut, the exception's
+`Data[SftpClient.UploadCleanupIncompleteKey]` is `true`: then do not resume that file; delete it or upload it again. After a
+cancellation the answers to the writes already sent are awaited for at most `OperationTimeout` (5 s when it is not set), so this is
+known. A segmented upload cleans up the same way, and deletes the file where it cannot be cut (see
+[Segmented transfers](#segmented-transfers)).
+
 ### Memory
 
 Transfers reuse their buffers instead of allocating new ones for each request, so moving a large file costs the garbage collector
@@ -80,6 +90,13 @@ may allow fewer sessions than asked (sshd's `MaxSessions`, 10 per connection by 
 sessions it opens. `Progress` reports the file's total over all segments. `DownloadFileAsync`, `UploadFileAsync` and the directory
 transfers (per file) use segments; `DownloadAsync` and `UploadAsync` use a stream in order, and `Resume` needs a sequential
 transfer (only that leaves a prefix to resume from), so with `Resume` set a file moves over one session.
+
+> [!NOTE]
+> **Behavior change since 1.0.** In 1.0, `Segments` applied to downloads only. Since 1.1 it also applies to uploads:
+> `UploadFileAsync` and `UploadDirectoryAsync` (per file) write each file of at least 1 MiB per segment over several sessions. A
+> server that refuses a second writer of a file, or writes out of order, gets fewer sessions or in-order writes over one session,
+> as described below, and the upload still succeeds. What a failed segmented upload leaves also differs from a sequential one (see
+> the cleanup below). Set `Segments = 1` for uploads to keep 1.0's behavior.
 
 **Downloads.** Each range is written into the local file at its offset. The first range that fails stops the others and the local
 file is removed. A file that grows during the download is fetched to its new end; one that shrinks, or is replaced, fails the
@@ -121,8 +138,17 @@ flowchart TD
   `Data[SftpClient.UploadCleanupIncompleteKey]` is `true`, and the remote file may have gaps.
 
 > [!WARNING]
-> Do not continue with `Resume` a segmented upload whose exception has `SftpClient.UploadCleanupIncompleteKey` set: the remote
+> Do not continue with `Resume` an upload whose exception has `SftpClient.UploadCleanupIncompleteKey` set: the remote
 > file may hold gaps of zeros that a resume would keep. Delete it, or upload it again without `Resume`.
+
+Compared with a sequential upload (`Segments = 1`, `UploadAsync`, or any upload with `Resume`):
+
+| After a failure or cancellation | Sequential upload | Segmented upload |
+|---|---|---|
+| The remote file | Keeps what was written. Cut back to its unbroken start only when a write landed past one that failed. | Always cut to its unbroken start (the ranges were written side by side). |
+| A server that cannot cut a file | The file is kept, and `UploadCleanupIncompleteKey` is set when it has a gap. | The file is deleted. |
+| The cleanup could not finish in time | `UploadCleanupIncompleteKey` is set, when a cut was needed. | `UploadCleanupIncompleteKey` is set. |
+| Continue with `Resume` | Yes, unless the key is set. | Yes, unless the key is set or the file was deleted (then it starts over). |
 
 [!code-csharp[](snippets/FileTransfer.cs#sftp-segments-upload-cleanup)]
 
@@ -245,7 +271,9 @@ throwing it again. Writes sent after the failed one may or may not have landed, 
 Cancelling `FlushAsync` or a read only stops that wait: the writes stay in flight and the stream stays usable.
 
 To get the errors where you handle them, end with `await stream.FlushAsync()` (or `await using`, whose `DisposeAsync` waits too).
-A synchronous `Dispose` also waits for the writes in flight, blocking the thread, so dispose asynchronously when you can.
+A synchronous `Dispose` also waits for the writes in flight, blocking the thread, so dispose asynchronously when you can. These
+waits are bounded by `OperationTimeout` when it is set, also when the server has stopped reading and a write cannot even be sent
+(see [Timeouts](#timeouts)).
 
 ## Files, directories and links
 
@@ -256,7 +284,7 @@ A synchronous `Dispose` also waits for the writes in flight, blocking the thread
 | `GetOwnerNamesAsync(userIds, groupIds)` | User and group names for owner ids, as `ls -l` shows them (`users-groups-by-id@openssh.com`), as an `SftpOwnerNames` (`UserNames`, `GroupNames`). |
 | `ExistsAsync(path)` | Whether the path exists. |
 | `ListDirectoryAsync(path)` | The entries, as `IAsyncEnumerable<SftpFileInfo>`, without `.` and `..`, in the server's order. Up to 8 READDIR requests are in flight at once, so a large directory costs few round trips. A name that is not valid UTF-8 is listed with replacement characters (and cannot be opened by that name); a listing stops with an error after 1,000,000 entries. |
-| `ListDirectoryAsync(path, SftpListOptions)` | Only the names that match `Pattern` (`*`, `?`, `[a-z]`; case-sensitive), and with `Recursive` the whole tree, depth first (each subtree right after its directory's entry; within a directory, the server's order, unsorted), up to `MaxDepth` levels (64), a few subdirectories read ahead at once; links are entered only with `FollowSymbolicLinks` ([details](how-to/transfer-files-sftp.md#list-files-that-match-a-pattern-or-a-whole-tree)). |
+| `ListDirectoryAsync(path, SftpListOptions)` | Only the names that match `Pattern` (`*`, `?`, `[a-z]`; case-sensitive), and with `Recursive` the whole tree, depth first (each subtree right after its directory's entry; within a directory, the server's order, unsorted), up to `MaxDepth` levels (64), a few subdirectories read ahead at once (`MaxConcurrentDirectories`, which also bounds the listings held in memory); links are entered only with `FollowSymbolicLinks` ([details](how-to/transfer-files-sftp.md#list-files-that-match-a-pattern-or-a-whole-tree)). |
 | `CreateDirectoryAsync`, `DeleteDirectoryAsync` | One directory (deleting needs it empty). |
 | `CreateDirectoryAsync(path, createParents: true)` | As `mkdir -p`: the missing directories above it too, and an existing directory is not an error (a file in the path is). `permissions` apply to the last one. |
 | `DeleteDirectoryAsync(path, recursive: true)` | As `rm -r`: the directory and everything in it, many requests at once; links are removed, never followed, provided no one else changes the tree on the server meanwhile (SFTP has no `O_NOFOLLOW`, so the checks are not atomic). The first failure stops it and is thrown, leaving the rest ([details](how-to/transfer-files-sftp.md#delete-recursively)). |
@@ -379,8 +407,16 @@ Unix-only for local files, but work over SFTP from any client OS (suppress CA141
 Each method takes a `CancellationToken`, and `SftpClient.OperationTimeout` (off by default) fails a request once the server has sent
 nothing at all for that long: `SshException` with `Reason = Timeout` and an inner `TimeoutException`. It limits the server's silence,
 not how long an operation takes, so a transfer whose window of requests takes longer than the timeout to work through goes on as long
-as replies keep coming. A request that timed out is abandoned (its late reply is dropped, a handle it opens is closed) and the session
-stays usable. See [Fail when the server stops answering](how-to/transfer-files-sftp.md#fail-when-the-server-stops-answering).
+as replies keep coming. A request that timed out waiting for its reply is abandoned (its late reply is dropped, a handle it opens is
+closed) and the session stays usable.
+
+It also bounds a request that cannot be sent. When the server's `sftp-server` stops reading (it hangs, while sshd goes on answering
+keep-alives), the channel's flow-control window fills and a write cannot go out; once the server has sent nothing for
+`OperationTimeout`, that send is cut off and the whole SFTP session is closed, since part of the request may have gone out and
+nothing could follow it. Every request waiting on the session then fails with `Timeout`, so uploads, the cleanup of a failed upload
+and disposing a write stream all end, and `SftpClient.IsConnected` is false: open a new session. Without `OperationTimeout`, a
+cancelled request stops waiting for a send that cannot finish, and the send goes on in the background until the session ends. See
+[Fail when the server stops answering](how-to/transfer-files-sftp.md#fail-when-the-server-stops-answering).
 
 The adapters above (`IFileProvider`, `IFileSystem`) have an `OperationTimeout` of their own, which they apply to each call with a
 token and report their own way (`SshException` and `IOException`). They do not change the `SftpClient`'s; set that too if you want
@@ -390,7 +426,9 @@ both, and the adapters report its timeout as they report a failed session.
 
 A request the server refuses throws `SftpException`, an `SshException` with `Reason = SftpFailed`, `Status` (the SFTP status
 code, such as `NoSuchFile`, `PermissionDenied` or `Failure`) and the `Path` concerned. A broken SFTP session or connection is an
-`SshException` with `ChannelClosed` or `ConnectionClosed`, and a passed `OperationTimeout` one with `Timeout`. An operation needing
+`SshException` with `ChannelClosed` or `ConnectionClosed` (or `Timeout` when a keep-alive declared the connection dead), and a
+passed `OperationTimeout` one with `Timeout`. `SftpClient.IsConnected` tells the two kinds apart without looking at the reason: it
+is false once the session has ended, and stays true after one request's failure. An operation needing
 an extension the server lacks (an overwriting rename, a hard link, a file hash) throws `NotSupportedException`. `SendExtendedRequestAsync`
 returns the server's status instead of throwing it; `EnsureSuccess()` throws it.
 

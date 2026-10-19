@@ -16,8 +16,9 @@ public sealed partial class SftpClient
     /// <remarks>
     /// <para>
     /// A recursive listing reads up to <see cref="SftpListOptions.MaxConcurrentDirectories"/> subdirectories ahead while the caller
-    /// works through the entries already listed, each subdirectory read whole (its handle closed) before its entries are returned. It
-    /// goes no deeper than <see cref="SftpListOptions.MaxDepth"/>. Symbolic links are listed but not entered unless
+    /// works through the entries already listed, each subdirectory read whole (its handle closed) before its entries are returned. At
+    /// most that many listings read ahead are kept until the walk reaches them, so the memory it holds is those listings and the ones
+    /// of the directories it is inside, however wide the tree. It goes no deeper than <see cref="SftpListOptions.MaxDepth"/>. Symbolic links are listed but not entered unless
     /// <see cref="SftpListOptions.FollowSymbolicLinks"/> is set. A subdirectory that cannot be listed (permission denied, or deleted
     /// meanwhile) ends the listing with its <see cref="SftpException"/> when the listing reaches it.
     /// </para>
@@ -52,8 +53,11 @@ public sealed partial class SftpClient
     /// <summary>
     /// The recursive listing: a stack of listed directories, the top one's entries returned in order, and each subdirectory's listing
     /// pushed when its entry has been returned. The listings of the top directory's subdirectories are started ahead, in entry order,
-    /// while one of the slots is free; one not started by the time it is reached is started then, waiting for a slot. A slot is held only
-    /// while a listing is read, so a listing waiting for one always gets it, and at most that many handles are open at once.
+    /// while one of the slots is free and fewer than that many listings read ahead wait to be reached; one not started by the time it is
+    /// reached is started then, waiting for a slot. A slot is held only while a listing is read, so a listing waiting for one always gets
+    /// it, and at most that many handles are open at once. A listing read ahead counts against starting more until the walk reaches it,
+    /// so the listings held in memory are bounded too: otherwise every subdirectory of a wide directory would be read ahead, one freed
+    /// slot after another, and held until reached.
     /// </summary>
     private async IAsyncEnumerable<SftpFileInfo> ListTreeAsync(string path, SftpListOptions options, SftpGlob? pattern,
         [EnumeratorCancellation] CancellationToken cancellationToken)
@@ -65,6 +69,7 @@ public sealed partial class SftpClient
         using var stop = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         using var slots = new SemaphoreSlim(concurrency, concurrency);
         var started = new List<Task>();
+        var ahead = 0; // listings started ahead and not reached yet; only the walk changes it
         try
         {
             // With links followed, every directory's real path is known (the top one's from the server, the others' from their parent's,
@@ -92,7 +97,15 @@ public sealed partial class SftpClient
                 if (directory.Descents[index] is { } descent)
                 {
                     directory.Descents[index] = null;
-                    descent.Listing ??= Start(descent, directory, slotTaken: false);
+                    if (descent.Listing is null)
+                    {
+                        descent.Listing = Start(descent, directory, slotTaken: false);
+                    }
+                    else
+                    {
+                        ahead--; // reached: its listing is the walk's now, and another may be read ahead
+                    }
+
                     if (await descent.Listing.ConfigureAwait(false) is { } child)
                     {
                         stack.Push(child);
@@ -119,11 +132,12 @@ public sealed partial class SftpClient
                     continue;
                 }
 
-                if (!slots.Wait(0, stop.Token))
+                if (ahead >= concurrency || !slots.Wait(0, stop.Token))
                 {
                     return;
                 }
 
+                ahead++;
                 descent.Listing = Start(descent, directory, slotTaken: true);
             }
         }
@@ -306,7 +320,8 @@ public sealed class SftpListOptions
     /// <summary>
     /// How many subdirectories a recursive listing reads at once, ahead of the entries being returned (default 4, at most 64). Each holds
     /// a directory handle while it is read; when the server announces <see cref="SftpLimits.MaxOpenHandles"/>, fewer are read at once if
-    /// needed, keeping a handle free.
+    /// needed, keeping a handle free. It also bounds the memory: at most this many listings read ahead are held until the listing
+    /// reaches them, besides those of the directories it is inside.
     /// </summary>
     public int MaxConcurrentDirectories
     {

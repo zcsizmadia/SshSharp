@@ -279,7 +279,11 @@ internal static class FileTransfer
         }
         catch (SshException ex) when (ex.Reason == SshFailureReason.Timeout)
         {
-            Console.WriteLine("The server stopped answering; reconnect and resume.");
+            // A reply that timed out leaves the session usable; a request that could not even be sent (the server stopped reading)
+            // closes it. Either way the server is not answering: reconnect and resume.
+            Console.WriteLine(sftp.IsConnected
+                ? "The server stopped answering; reconnect and resume."
+                : "The SFTP session is closed; open a new one and resume.");
         }
         // </sftp-operation-timeout>
     }
