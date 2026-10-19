@@ -241,6 +241,16 @@ connection, but not read or change it: each host's key is verified end to end, b
   tree. It is bounded like a directory download (64 levels; each listing bounded) and touches only the server's files.
 - A server that stops answering holds a request until the session ends, unless `SftpClient.OperationTimeout` is set; it then
   fails the request (`Timeout`) once the server has been silent that long.
+- Segmented transfers (`Segments`) open more SFTP sessions as channels of the same connection: nothing new is authenticated or sent
+  anywhere else. A segmented upload that fails cuts the remote file it created or truncated to its unbroken start, or deletes that
+  file where the server cannot cut it, so a later resume cannot keep a gap; it never touches another path.
+- A file hash (`GetFileHashAsync`, `check-file` or `md5-hash`) is computed by the server, so a match is only as good as the server:
+  it detects a truncated or damaged file, not a server that lies. Only SHA-2 is accepted unless the application names `md5`,
+  `sha1` or `crc32`, which detect accidental damage only. The reply must name an algorithm that was asked for and carry a digest
+  of that algorithm's length.
+- A raw extended request (`SendExtendedRequestAsync`) sends the name and bytes the application gives, to the SFTP server of this
+  session only. The reply is returned as untrusted bytes for the application to parse; only a status is parsed, and its message is
+  stripped of control characters and cut to 200 characters, as for every other status.
 - `SshSharp.FileProviders` treats backslashes as separators and refuses `..` and NUL in subpaths, so a web request cannot leave
   the configured root by name, and bounds its cache. The server follows symbolic links, including ones that point out of the root.
 

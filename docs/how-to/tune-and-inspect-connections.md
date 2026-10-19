@@ -110,7 +110,7 @@ Notes:
   that adds up: 100 channels with a 16 MiB window may buffer up to 1.6 GiB if nothing reads them.
 - **The server's side matters too.** For uploads, the server's window limits the client the same way, and only the server can
   raise it. OpenSSH's sshd uses 2 MiB.
-- **SFTP.** A larger window helps a single download as `Segments` does, without opening more sessions. The two combine.
+- **SFTP.** A larger window helps a single transfer as `Segments` does, without opening more sessions. The two combine.
 - **TCP.** The operating system's TCP window has to keep up as well. Modern systems scale it automatically. Where they do not,
   raise the receive buffer with `ConfigureSocket`.
 
@@ -156,6 +156,6 @@ prove the same host key as at the start, or the connection fails. Keys are renew
 - [Tune for throughput](performance-tuning.md)
 - [Connecting](../connecting.md)
 - [Channels and flow control](../concepts/channels.md)
-- [Transfer files with SFTP](transfer-files-sftp.md#download-large-files-faster)
+- [Transfer files with SFTP](transfer-files-sftp.md#transfer-large-files-faster)
 - [Logging and diagnostics](logging-and-diagnostics.md)
 - <xref:SshSharp.SshClientOptions> and <xref:SshSharp.SshClient> in the API reference

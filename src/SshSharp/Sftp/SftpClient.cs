@@ -72,7 +72,7 @@ public sealed partial class SftpClient : IAsyncDisposable
     /// <para>
     /// A request that timed out is abandoned, not undone: the server may still carry it out, and its late reply is dropped (a handle it
     /// opens is closed). The session stays usable. It can be changed at any time; requests already waiting keep the value they started
-    /// with. A segmented download's extra sessions (<see cref="SftpTransferOptions.Segments"/>) take this session's value.
+    /// with. A segmented transfer's extra sessions (<see cref="SftpTransferOptions.Segments"/>) take this session's value.
     /// </para>
     /// </remarks>
     /// <exception cref="ArgumentOutOfRangeException">Not positive and not <see cref="Timeout.InfiniteTimeSpan"/>, or longer than <see cref="int.MaxValue"/> milliseconds.</exception>
@@ -149,8 +149,27 @@ public sealed partial class SftpClient : IAsyncDisposable
                 SftpChannel.ParseVersion(packet);
                 break;
             case SftpProtocol.ExtendedReply:
-                ParseLimits(reply);
-                ParseStatVfs(reply);
+                // Every parser of an extended reply sees the input: one rejecting it (as an SshException) must not hide another.
+                foreach (var parse in (Action<SftpResponse>[])
+                [
+                    r => ParseLimits(r),
+                    r => ParseStatVfs(r),
+                    r => Parse(r, (ref SshReader x) => SftpExtensionReplies.ParseCheckFile(ref x, DefaultHashAlgorithms)),
+                    r => Parse(r, (ref SshReader x) => SftpExtensionReplies.ParseCheckFile(ref x, ["md5", "sha1", "crc32", "vendor@example.com"])),
+                    r => Parse(r, static (ref SshReader x) => SftpExtensionReplies.ParseMd5Hash(ref x)),
+                ])
+                {
+                    try
+                    {
+                        parse(reply);
+                    }
+                    catch (SshException)
+                    {
+                        // Rejected as it should be; the next parser gets its turn.
+                    }
+                }
+
+                ToExtendedReply("fuzzing", reply);
                 break;
             case SftpProtocol.Attrs:
                 ExpectAttributes(reply, "Fuzzing", "path");
@@ -165,7 +184,9 @@ public sealed partial class SftpClient : IAsyncDisposable
                 ExpectData(reply, SftpProtocol.MaxChunk, "path");
                 break;
             default:
-                ExpectOk(reply, "Fuzzing", "path"); // a status, or an unexpected type
+                // A status, or an unexpected type: as a raw extended request returns it, then as any other request checks it.
+                ToExtendedReply("fuzzing", reply);
+                ExpectOk(reply, "Fuzzing", "path");
                 break;
         }
     }
@@ -757,7 +778,8 @@ public sealed partial class SftpClient : IAsyncDisposable
 
     /// <summary>
     /// Uploads the local file <paramref name="localPath"/> to <paramref name="remotePath"/>. With <see cref="SftpTransferOptions.Preserve"/>,
-    /// the remote file gets the local one's modification and access times, and its permissions where this system has Unix modes.
+    /// the remote file gets the local one's modification and access times, and its permissions where this system has Unix modes. With
+    /// <see cref="SftpTransferOptions.Segments"/>, a large file is written in parallel ranges over several sessions.
     /// </summary>
     /// <returns>The number of bytes uploaded.</returns>
     public async Task<long> UploadFileAsync(string localPath, string remotePath, SftpTransferOptions? options = null, CancellationToken cancellationToken = default)
@@ -765,8 +787,13 @@ public sealed partial class SftpClient : IAsyncDisposable
         ArgumentException.ThrowIfNullOrEmpty(localPath);
         options ??= new SftpTransferOptions();
         long total;
-        await using (var file = new FileStream(localPath, FileMode.Open, FileAccess.Read, FileShare.Read, 64 * 1024, useAsync: true))
+        if (options.Segments > 1 && !options.Resume && OpenSibling is not null && new FileInfo(localPath).Length >= 2 * MinSegmentBytes)
         {
+            total = await UploadSegmentedAsync(localPath, remotePath, options, cancellationToken).ConfigureAwait(false);
+        }
+        else
+        {
+            await using var file = new FileStream(localPath, FileMode.Open, FileAccess.Read, FileShare.Read, 64 * 1024, useAsync: true);
             total = await UploadAsync(file, remotePath, options, cancellationToken).ConfigureAwait(false);
         }
 
@@ -1107,7 +1134,35 @@ public sealed partial class SftpClient : IAsyncDisposable
     }
 
     /// <summary>Writes <paramref name="source"/> from its position to the remote file from <paramref name="start"/>; returns the bytes written.</summary>
-    private async Task<long> UploadHandleAsync(byte[] handle, string path, Stream source, long start, SftpTransferOptions options, CancellationToken cancellationToken)
+    private Task<long> UploadHandleAsync(byte[] handle, string path, Stream source, long start, SftpTransferOptions options, CancellationToken cancellationToken)
+    {
+        long? size = options.Progress is not null && source.CanSeek ? source.Length : null;
+        long acknowledged = 0;
+        return WriteRangeAsync(handle, path, start, stop: null,
+            (buffer, _, ct) => source.ReadAtLeastAsync(buffer, buffer.Length, throwOnEndOfStream: false, ct),
+            options.Progress is { } progress
+                ? length =>
+                {
+                    acknowledged += length;
+                    progress.Report(new SftpTransferProgress(path, start + acknowledged, size));
+                }
+                : null,
+            confirmed: null, options, cancellationToken);
+    }
+
+    /// <summary>
+    /// Writes to <paramref name="handle"/> from <paramref name="start"/> up to <paramref name="stop"/>, or with no stop until
+    /// <paramref name="read"/> fills less than it was given (the end of the source); returns the bytes written. <paramref name="read"/>
+    /// fills a buffer with the source's bytes for a file offset, as many as it can. <paramref name="acknowledged"/> hears of each write
+    /// the server acknowledges, in offset order. <paramref name="confirmed"/>, when given, ends up as the bytes from
+    /// <paramref name="start"/> the server is known to hold without a gap, even when the range fails: the writes in flight when it
+    /// does are counted while each one, in order, succeeded. Writes are sent and their replies awaited with <paramref name="repliesToken"/>
+    /// when given (else <paramref name="cancellationToken"/>): a caller that must know which writes landed after it cancels passes one
+    /// that outlasts the cancellation.
+    /// </summary>
+    private async Task<long> WriteRangeAsync(byte[] handle, string path, long start, long? stop,
+        Func<Memory<byte>, long, CancellationToken, ValueTask<int>> read, Action<int>? acknowledged, StrongBox<long>? confirmed,
+        SftpTransferOptions options, CancellationToken cancellationToken, CancellationToken? repliesToken = null)
     {
         // A window of writes in flight; progress counts what the server has acknowledged. In a directory transfer with several files at
         // once, each write (and its buffer) also holds a slot of the transfer's shared budget until it is acknowledged, taken as in
@@ -1115,11 +1170,11 @@ public sealed partial class SftpClient : IAsyncDisposable
         var chunk = Limits.MaxWriteLength;
         var budget = options.RequestBudget;
         var inFlight = new Queue<(Task<SftpResponse> Reply, int Length)>();
-        long offset = start, acknowledged = 0;
-        long? size = options.Progress is not null && source.CanSeek ? source.Length : null;
+        var offset = start;
+        var unbroken = true; // every write so far succeeded, so the confirmed bytes have no gap
         try
         {
-            while (true)
+            while (stop is not { } limit || offset < limit)
             {
                 if (budget is not null)
                 {
@@ -1128,14 +1183,15 @@ public sealed partial class SftpClient : IAsyncDisposable
 
                 // The request is built in one pooled buffer, and the source is read straight into its data: no buffer of its own, no copy.
                 // This method owns the frame until RequestAsync takes it over, which returns it once it is sent.
-                var frame = StartWrite(handle, offset, chunk);
+                var requested = stop is { } last ? (int)Math.Min(chunk, last - offset) : chunk;
+                var frame = StartWrite(handle, offset, requested);
                 var handedOver = false;
-                int read;
+                int count;
                 try
                 {
                     try
                     {
-                        read = await source.ReadAtLeastAsync(frame.GetMemory(chunk)[..chunk], chunk, throwOnEndOfStream: false, cancellationToken).ConfigureAwait(false);
+                        count = await read(frame.GetMemory(requested)[..requested], offset, cancellationToken).ConfigureAwait(false);
                     }
                     catch
                     {
@@ -1143,16 +1199,16 @@ public sealed partial class SftpClient : IAsyncDisposable
                         throw;
                     }
 
-                    if (read == 0)
+                    if (count == 0)
                     {
                         budget?.Release();
                         break;
                     }
 
-                    EndWrite(frame, handle, read);
-                    var request = _channel.RequestAsync(frame, cancellationToken); // takes the frame over, whatever happens
+                    EndWrite(frame, handle, count);
+                    var request = _channel.RequestAsync(frame, repliesToken ?? cancellationToken); // takes the frame over, whatever happens
                     handedOver = true;
-                    inFlight.Enqueue((request, read));
+                    inFlight.Enqueue((request, count));
                 }
                 finally
                 {
@@ -1162,13 +1218,13 @@ public sealed partial class SftpClient : IAsyncDisposable
                     }
                 }
 
-                offset += read;
+                offset += count;
                 if (inFlight.Count >= options.MaxRequestsInFlight)
                 {
                     await AcknowledgeAsync().ConfigureAwait(false);
                 }
 
-                if (read < chunk)
+                if (count < requested)
                 {
                     break;
                 }
@@ -1185,13 +1241,19 @@ public sealed partial class SftpClient : IAsyncDisposable
         {
             while (inFlight.Count > 0)
             {
+                var (reply, length) = inFlight.Dequeue();
                 try
                 {
-                    await inFlight.Dequeue().Reply.ConfigureAwait(false);
+                    var landed = IsOkStatus(await reply.ConfigureAwait(false));
+                    unbroken &= landed;
+                    if (unbroken && confirmed is not null)
+                    {
+                        confirmed.Value += length;
+                    }
                 }
                 catch (Exception ex) when (ex is SshException or OperationCanceledException or ObjectDisposedException)
                 {
-                    // Already failing.
+                    unbroken = false; // already failing
                 }
                 finally
                 {
@@ -1205,15 +1267,26 @@ public sealed partial class SftpClient : IAsyncDisposable
             var (reply, length) = inFlight.Dequeue();
             try
             {
-                ExpectWritten(await reply.ConfigureAwait(false), path);
+                var response = await reply.ConfigureAwait(false);
+                unbroken = IsOkStatus(response);
+                ExpectWritten(response, path);
+            }
+            catch
+            {
+                unbroken = false;
+                throw;
             }
             finally
             {
                 budget?.Release();
             }
 
-            acknowledged += length;
-            options.Progress?.Report(new SftpTransferProgress(path, start + acknowledged, size));
+            if (confirmed is not null)
+            {
+                confirmed.Value += length;
+            }
+
+            acknowledged?.Invoke(length);
         }
 
         async Task TakeSlotAsync(SemaphoreSlim slots)
@@ -1230,6 +1303,10 @@ public sealed partial class SftpClient : IAsyncDisposable
             }
         }
     }
+
+    /// <summary>Whether a reply is a well-formed status of OK.</summary>
+    private static bool IsOkStatus(SftpResponse reply) =>
+        reply.Type == SftpProtocol.Status && reply.Packet.Length >= 9 && reply.Body.ReadUInt32() == (uint)SftpStatusCode.Ok;
 
     // ---- replies ----
 
@@ -1438,15 +1515,29 @@ public sealed class SftpTransferOptions
     } = 64;
 
     /// <summary>
-    /// How many parts of one file <see cref="SftpClient.DownloadFileAsync"/> fetches at once, each over its own SFTP session on the same
-    /// connection (default 1: one session). Each session is an SSH channel with its own flow-control window, and on OpenSSH its own
-    /// <c>sftp-server</c> process, so on a link with high latency several segments move more than one session can: one session carries at
-    /// most its 2 MiB window per round trip. It does not help where the bandwidth, or the server's single connection, is the limit.
-    /// Files smaller than 1 MiB per segment use fewer segments; the server may allow fewer sessions (sshd's <c>MaxSessions</c>, 10 by
-    /// default), and then fewer are used. Ignored with <see cref="Resume"/> (only a sequential download leaves a prefix to resume from)
-    /// and by <see cref="SftpClient.DownloadAsync"/>, which writes a stream in order. Each extra session opens the file by path, so a
-    /// file whose size or modification time has changed by then (replaced, or still being written) fails the download.
+    /// How many parts of one file <see cref="SftpClient.DownloadFileAsync"/> fetches, or <see cref="SftpClient.UploadFileAsync"/> writes,
+    /// at once, each over its own SFTP session on the same connection (default 1: one session). Each session is an SSH channel with its
+    /// own flow-control window, and on OpenSSH its own <c>sftp-server</c> process, so on a link with high latency several segments move
+    /// more than one session can: one session carries at most its 2 MiB window per round trip. It does not help where the bandwidth, or
+    /// the server's single connection, is the limit. Files smaller than 1 MiB per segment use fewer segments; the server may allow fewer
+    /// sessions (sshd's <c>MaxSessions</c>, 10 by default), and then fewer are used. Ignored with <see cref="Resume"/> (only a sequential
+    /// transfer leaves a prefix to resume from) and by <see cref="SftpClient.DownloadAsync"/> and <see cref="SftpClient.UploadAsync"/>,
+    /// which use a stream in order.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A download: each extra session opens the file by path, so a file whose size or modification time has changed by then (replaced,
+    /// or still being written) fails the download, which leaves no local file.
+    /// </para>
+    /// <para>
+    /// An upload: the first session creates (or truncates) the remote file and each extra session opens it for writing too, without
+    /// truncating it; the ranges are written at their offsets, and nothing is allocated in advance (a range past the current end extends
+    /// the file). A server that will not open a file for a second writer gets fewer sessions, down to one; a server that refuses a write
+    /// out of order (one that stores files as objects, written from the start) has the rest of the file written in order over the first
+    /// session, from as far as it holds the file without a gap. A failed or cancelled upload cuts the remote file to that unbroken start,
+    /// so <see cref="Resume"/> can continue it; a server that cannot cut a file has it deleted instead.
+    /// </para>
+    /// </remarks>
     public int Segments
     {
         get;
