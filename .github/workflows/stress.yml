@@ -47,6 +47,20 @@ jobs:
         with:
           build: true
           build-args: -p:SshSharpInstrument=true
+      # As in CI: PuTTY's command-line puttygen for the .ppk interop tests, except on Windows, where puttygen.exe is a window only.
+      - name: puttygen
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$RUNNER_OS" = Linux ]; then
+            sudo apt-get update -qq > /dev/null
+            sudo apt-get install -y -qq putty-tools > /dev/null
+          else
+            HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_CLEANUP=1 brew install --quiet putty
+          fi
+          command -v puttygen
+          puttygen --version
       - name: Loop
         shell: bash
         run: tests/stress/loop.sh "$ITERATIONS" "$RUNNER_TEMP/stress" net8.0,net10.0 "${UNIT_FILTER:-$UNIT_TESTS}"

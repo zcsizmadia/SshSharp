@@ -2,14 +2,6 @@ BindAddressTests.BindAddress_InSshConfig_IsWhereTheConnectionComesFrom
 BindAddressTests.LocalEndPoint_IsWhereTheConnectionComesFrom
 ExternalKeyTests.FromECDsa_RefusesACurveSshDoesNotUse
 GssapiTests.OnDotNet8_TheMethodIsNotOffered
-KeyExportInteropTests.KeysFromPuttygen_ExportToTheSamePpk(ecdsa, 256)
-KeyExportInteropTests.KeysFromPuttygen_ExportToTheSamePpk(ed25519, 0)
-KeyExportInteropTests.KeysFromPuttygen_ExportToTheSamePpk(rsa, 2048)
-KeyExportInteropTests.Puttygen_ReadsPpk(EcdsaNistp256, ecdsa-sha2-nistp256)
-KeyExportInteropTests.Puttygen_ReadsPpk(EcdsaNistp384, ecdsa-sha2-nistp384)
-KeyExportInteropTests.Puttygen_ReadsPpk(EcdsaNistp521, ecdsa-sha2-nistp521)
-KeyExportInteropTests.Puttygen_ReadsPpk(Ed25519, ssh-ed25519)
-KeyExportInteropTests.Puttygen_ReadsPpk(Rsa, ssh-rsa)
 KeyExportInteropTests.SshKeygen_ReadsPkcs8(Ed25519, ssh-ed25519)
 MlKemKexTests.AMalformedNistHybridReply_IsRefused(mlkem1024nistp384-sha384, off-curve)
 MlKemKexTests.AMalformedNistHybridReply_IsRefused(mlkem1024nistp384-sha384, short)

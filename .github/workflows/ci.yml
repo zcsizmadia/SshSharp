@@ -37,6 +37,21 @@ jobs:
       - uses: ./.github/actions/setup-dotnet
         with:
           build: true
+      # PuTTY's command-line puttygen, for the .ppk interop tests (KeyExportInteropTests). Not on Windows: PuTTY's puttygen.exe there is
+      # the key generator's window, with no command-line conversion, so those tests skip there (tests/ci/skips/unit-windows-*.txt).
+      - name: puttygen
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$RUNNER_OS" = Linux ]; then
+            sudo apt-get update -qq > /dev/null
+            sudo apt-get install -y -qq putty-tools > /dev/null
+          else
+            HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_CLEANUP=1 brew install --quiet putty
+          fi
+          command -v puttygen
+          puttygen --version
       - name: Test net8.0
         run: dotnet test --project tests/SshSharp.Tests -c Release -f net8.0 --no-build --treenode-filter "${{ env.UNIT_TESTS }}" --report-trx --report-trx-filename unit-net8.0.trx --results-directory TestResults
       - name: Test net10.0 with coverage
@@ -236,8 +251,8 @@ jobs:
       - uses: ./.github/actions/setup-dotnet
         with:
           build: true
-      # The Integration tests, and the LocalTools ones (key files read back by ssh-keygen, openssl and puttygen): the unit jobs run those
-      # too, but only this job has puttygen.
+      # The Integration tests, and the LocalTools ones (key files read back by ssh-keygen, openssl and puttygen), which the unit jobs
+      # also run, with this job's own puttygen.
       - name: Interop tests against the real server (net8.0)
         run: dotnet test --project tests/SshSharp.Tests -c Release -f net8.0 --no-build --treenode-filter "$TESTS" --report-trx --report-trx-filename interop-net8.0.trx --results-directory TestResults
         env:

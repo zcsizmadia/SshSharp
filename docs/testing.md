@@ -149,7 +149,7 @@ The test classes carry a TUnit `[Category]`, and each CI job selects its tests b
 | Category | What | Where it runs |
 |---|---|---|
 | (none) | Unit tests: fake servers, in-memory streams, no network | The unit jobs, on every OS and target framework |
-| `LocalTools` | Key files read back by `ssh-keygen`, OpenSSL and `puttygen`; no server | The unit jobs, and the OpenSSH runner job, the only one with `puttygen` |
+| `LocalTools` | Key files read back by `ssh-keygen`, OpenSSL and `puttygen`; no server | The unit jobs and the OpenSSH runner job. CI installs PuTTY's command-line `puttygen` on Linux and macOS; on Windows, PuTTY's `puttygen.exe` has only a window, so the `.ppk` tests skip there |
 | `Integration` | Tests against a real server (`SSHSHARP_TEST_SSHD` and the other `SSHSHARP_TEST_*` variables) | The interop jobs |
 | `SshAudit` | The client audit; also `Integration`, but it needs ssh-audit listening, not an SSH server | The audit job |
 | `Measure` | Measurements, not checks (`SSHSHARP_MEASURE=1`) | Nowhere in CI; by hand |
