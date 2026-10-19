@@ -25,7 +25,7 @@ Console.WriteLine(result.StandardOutputText);
   (Arm64); trimming- and Native AOT-compatible, with an AOT-compiled smoke test against a real server in CI.
 - **Async all the way:** `CancellationToken` on every network operation, `IAsyncDisposable`, `System.IO.Pipelines` I/O with zero-copy
   packet handling.
-- **OpenSSH configuration:** `ssh_config` (`Host`, `Match`, `Include`, tokens) and `known_hosts` (hashed hosts,
+- **OpenSSH configuration:** `ssh_config` (`Host`, `Match`, `Include`, tokens, host name canonicalization with DNS) and `known_hosts` (hashed hosts,
   `@cert-authority`, `@revoked`), resolved like `ssh -G`.
 - **Authentication:** password (asked for only when keys fail, and changed when it has expired), public keys (OpenSSH, PKCS#8, PKCS#1/SEC1 and PuTTY `.ppk` formats, encrypted too),
   OpenSSH user certificates, ssh-agent (Unix sockets, the Windows OpenSSH agent and PuTTY's Pageant), FIDO security keys

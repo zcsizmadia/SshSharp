@@ -39,6 +39,40 @@ and `Match exec` inputs from the caller (host and user names) are validated so t
 resolves with `ResolveAsync`; `Resolve` throws `NotSupportedException` for it. Connecting by alias always resolves
 asynchronously.
 
+### Host name canonicalization
+
+`CanonicalizeHostname yes` (or `always`) replaces the host name with a fully qualified one, and the configuration is read again
+for it, so `Host` blocks written for full names apply and `Match canonical` is true. The name comes from
+`SshConfigResolveOptions.HostCanonicalizer` (your own lookup, given the host and `CanonicalDomains`), or, with
+`UseDnsCanonicalizer = true` and no `HostCanonicalizer`, from the built-in one, which follows OpenSSH's `resolve_canonicalize`:
+
+```mermaid
+flowchart TD
+    start["Host name"] --> addr{"An IP address?"}
+    addr -- yes --> keep["Unchanged"]
+    addr -- no --> proxy{"ProxyJump or ProxyCommand,<br/>and not 'always'?"}
+    proxy -- yes --> keep
+    proxy -- no --> dot{"Ends with a dot?"}
+    dot -- yes --> anchored["Look it up as it is"]
+    dot -- no --> dots{"More dots than<br/>CanonicalizeMaxDots?"}
+    dots -- yes --> bare
+    dots -- no --> domains["Look up name.domain.<br/>for each CanonicalDomains entry,<br/>in order, until 'none'"]
+    domains -- found --> cname{"CanonicalizePermittedCNAMEs<br/>allows name to its CNAME target?"}
+    anchored -- found --> cname
+    cname -- yes --> target["The CNAME target"]
+    cname -- no --> found["The name found"]
+    domains -- "none found" --> fallback{"CanonicalizeFallbackLocal no?"}
+    anchored -- "not found" --> fallback
+    fallback -- yes --> fail["InvalidOperationException"]
+    fallback -- no --> bare["With CNAME rules: the name as the system<br/>resolves it, to its CNAME target if a rule allows"]
+```
+
+The lookups go to the system resolver (`System.Net.Dns`, the hosts file and DNS, as `getaddrinfo` for `ssh`), for the configured
+`AddressFamily`. It reports the end of a CNAME chain, not the names in between, which is also what `ssh` sees; when the platform
+reports no canonical name, the rules have nothing to act on. Each name is looked up once per resolution, second pass included.
+`CanonicalizePermittedCNAMEs` without `CanonicalizeHostname` follows no CNAMEs here, unlike `ssh`. The built-in canonicalizer is
+off by default, because resolving a configuration then makes network queries.
+
 Within one resolution, each distinct `Match exec` command runs once and its answer is reused, as is each canonicalization. That
 includes the second pass that `Match final` or canonicalization causes, where OpenSSH runs the command again. A command whose
 tokens expand differently in that pass (`%h` after canonicalization, say) is a different command, and runs.

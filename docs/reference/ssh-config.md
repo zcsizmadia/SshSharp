@@ -36,7 +36,7 @@ value.
 | `ChannelTimeout` | `ChannelTimeouts` | Yes: `SshClientOptions.ChannelTimeouts`. |
 | `ObscureKeystrokeTiming` | `ObscureKeystrokeTiming` | Yes; on (20 ms) unless `no` or another interval, as in `ssh`. |
 | `RefuseConnection` | `RefuseConnection` | Yes: the connection fails before any network activity. |
-| `CanonicalizeHostname`, `CanonicalDomains`, `CanonicalizeMaxDots`, `CanonicalizeFallbackLocal` | (in `Options`) | Only when `SshConfigResolveOptions.HostCanonicalizer` is set. |
+| `CanonicalizeHostname`, `CanonicalDomains`, `CanonicalizeMaxDots`, `CanonicalizeFallbackLocal`, `CanonicalizePermittedCNAMEs` | (in `Options`; the result is `HostName`) | When `SshConfigResolveOptions.UseDnsCanonicalizer` is on (DNS, with `ssh`'s rules, CNAMEs followed only as `CanonicalizePermittedCNAMEs` allows) or `HostCanonicalizer` is set (your own lookup, which gets the host and `CanonicalDomains`). Neither is on by default. See [Host name canonicalization](../config-files.md#host-name-canonicalization). |
 
 ## Overriding in code
 

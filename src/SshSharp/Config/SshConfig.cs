@@ -156,8 +156,8 @@ public sealed class SshConfig
     /// <param name="host">The host name or alias, as the user typed it.</param>
     /// <param name="options">External inputs (explicit user and port, home directory, ...); defaults are taken from the process.</param>
     /// <exception cref="NotSupportedException">
-    /// The config needs <see cref="SshConfigResolveOptions.ExecMatcher"/> or <see cref="SshConfigResolveOptions.HostCanonicalizer"/>,
-    /// which are asynchronous: use <see cref="ResolveAsync"/>.
+    /// The config needs <see cref="SshConfigResolveOptions.ExecMatcher"/>, <see cref="SshConfigResolveOptions.HostCanonicalizer"/> or
+    /// the DNS lookups of <see cref="SshConfigResolveOptions.UseDnsCanonicalizer"/>, which are asynchronous: use <see cref="ResolveAsync"/>.
     /// </exception>
     public SshHostConfig Resolve(string host, SshConfigResolveOptions? options = null)
     {
@@ -174,8 +174,9 @@ public sealed class SshConfig
 
     /// <summary>
     /// Resolves the effective settings for <paramref name="host"/>, as <see cref="Resolve"/> does, awaiting
-    /// <see cref="SshConfigResolveOptions.ExecMatcher"/> and <see cref="SshConfigResolveOptions.HostCanonicalizer"/> when the config
-    /// needs them (<c>Match exec</c>, <c>CanonicalizeHostname</c>).
+    /// <see cref="SshConfigResolveOptions.ExecMatcher"/> and <see cref="SshConfigResolveOptions.HostCanonicalizer"/> (or the DNS lookups
+    /// of <see cref="SshConfigResolveOptions.UseDnsCanonicalizer"/>) when the config needs them (<c>Match exec</c>,
+    /// <c>CanonicalizeHostname</c>).
     /// </summary>
     /// <param name="host">The host name or alias, as the user typed it.</param>
     /// <param name="options">External inputs (explicit user and port, home directory, ...); defaults are taken from the process.</param>
@@ -192,6 +193,11 @@ public sealed class SshConfig
             try
             {
                 return ResolveCore(host, options, answers);
+            }
+            catch (SshConfigCallbackNeeded needed) when (needed.LookupFamily is { } family)
+            {
+                var lookup = options.NameLookup ?? SshDnsLookup.CanonicalNameAsync;
+                answers.RecordLookup(needed.Argument, family, await lookup(needed.Argument, family, cancellationToken).ConfigureAwait(false));
             }
             catch (SshConfigCallbackNeeded needed) when (needed.Domains is null)
             {

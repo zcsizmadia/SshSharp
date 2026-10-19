@@ -32,10 +32,30 @@ public sealed class SshConfigResolveOptions
     /// <summary>
     /// Looks up the canonical name for <c>CanonicalizeHostname</c>: receives the host and the <c>CanonicalDomains</c> and completes
     /// with the canonical name, or null when none is found. Null (the default) disables canonicalization, since resolving names is
-    /// the caller's business (DNS, <c>CanonicalizePermittedCNAMEs</c> policy). Asynchronous, so a config that needs it resolves with
+    /// the caller's business (DNS, <c>CanonicalizePermittedCNAMEs</c> policy), unless <see cref="UseDnsCanonicalizer"/> turns on the
+    /// built-in one; when set, it is used instead of that. Asynchronous, so a config that needs it resolves with
     /// <see cref="SshConfig.ResolveAsync"/>.
     /// </summary>
     public Func<string, IReadOnlyList<string>, CancellationToken, ValueTask<string?>>? HostCanonicalizer { get; init; }
+
+    /// <summary>
+    /// Canonicalizes host names with DNS, as ssh does, when the configuration asks for it (<c>CanonicalizeHostname yes</c> or
+    /// <c>always</c>) and <see cref="HostCanonicalizer"/> is not set. The host is looked up with each of <c>CanonicalDomains</c> appended,
+    /// in order, as a fully qualified name (no search list); the first that resolves is the new <c>HostName</c>, and the configuration
+    /// is read again for it. <c>CanonicalizeMaxDots</c>, <c>CanonicalizeFallbackLocal</c> and <c>CanonicalizePermittedCNAMEs</c> apply
+    /// as in ssh: the name becomes its CNAME target only when a rule allows that pair. A name ending in a dot is looked up as it is, and
+    /// an IP address is never canonicalized. The lookups use the system's resolver (<see cref="System.Net.Dns"/>), which reports the end
+    /// of a CNAME chain as ssh's <c>getaddrinfo</c> does, but not the chain's middle; when it reports no canonical name, CNAME rules have
+    /// nothing to act on and the name stays as found. Off by default: resolving a configuration then makes DNS queries, and needs
+    /// <see cref="SshConfig.ResolveAsync"/>.
+    /// </summary>
+    public bool UseDnsCanonicalizer { get; init; }
+
+    /// <summary>
+    /// Looks up a fully qualified name for <see cref="UseDnsCanonicalizer"/>: its canonical name (the end of its CNAME chain), or null
+    /// when it does not resolve. The system's resolver by default; replaceable in tests.
+    /// </summary>
+    internal Func<string, SshAddressFamily, CancellationToken, ValueTask<string?>>? NameLookup { get; init; }
 
     /// <summary>A tag given by the caller (<c>ssh -P</c>), matched by <c>Match tagged</c>; overrides <c>Tag</c> in the file.</summary>
     public string? Tag { get; init; }
@@ -90,6 +110,8 @@ public sealed class SshConfigResolveOptions
         GetEnvironmentVariable = GetEnvironmentVariable,
         ExecMatcher = ExecMatcher,
         HostCanonicalizer = HostCanonicalizer,
+        UseDnsCanonicalizer = UseDnsCanonicalizer,
+        NameLookup = NameLookup,
         Tag = Tag,
         SessionType = jumpHost ? "none" : SessionType,
         Command = jumpHost ? null : Command,

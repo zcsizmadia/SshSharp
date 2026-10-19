@@ -162,6 +162,29 @@ internal static class Connecting
         _ = keys;
     }
 
+    public static async Task CanonicalizeAsync(CancellationToken cancellationToken)
+    {
+        // <canonicalize>
+        // ~/.ssh/config:
+        //   CanonicalizeHostname yes
+        //   CanonicalDomains corp.example.com example.com
+        //   CanonicalizePermittedCNAMEs *.corp.example.com:*.lb.example.net
+        //   Host *.corp.example.com
+        //     User deploy
+        //
+        // "ssh web" looks up web.corp.example.com., then web.example.com., and connects to the first that resolves; the Host block
+        // for it applies, as the configuration is read again for the canonical name.
+        await using var client = await SshClient.ConnectAsync("web", new SshConfigConnectOptions
+        {
+            ResolveOptions = new SshConfigResolveOptions { UseDnsCanonicalizer = true },
+        }, cancellationToken);
+
+        // Without connecting: ResolveAsync, since the lookups are asynchronous.
+        var host = await SshConfig.LoadDefault().ResolveAsync("web", new SshConfigResolveOptions { UseDnsCanonicalizer = true }, cancellationToken);
+        Console.WriteLine(host.HostName); // web.corp.example.com
+        // </canonicalize>
+    }
+
     public static void Resolve()
     {
         // <resolve>
