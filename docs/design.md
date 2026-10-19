@@ -32,6 +32,8 @@ code generation.
   packet buffer, released when read, with `Stream` adapters on top.
 - Sent channel data is copied once, from the caller's buffer straight into the packet, behind its header; padding randomness is
   drawn from the system RNG in blocks rather than once per packet.
+- With compression on (`zlib@openssh.com`, off by default), each payload goes through one more buffer: compressed into a reusable
+  one before it is encrypted, and inflated from the decrypted packet into a pooled one. With compression off the path is as above.
 - Backpressure comes from the SSH channel window.
 - Secrets (keys, passwords) are zeroed after use (`CryptographicOperations.ZeroMemory`).
 - Allocation budgets are tested: allocation-assert tests on the hot path (encrypt, send, receive) and BenchmarkDotNet.

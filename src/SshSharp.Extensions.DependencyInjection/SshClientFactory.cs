@@ -66,6 +66,7 @@ internal sealed partial class SshClientFactory(
                     Password = endpoint.Password,
                     Logger = _logger,
                     AddressFamily = endpoint.AddressFamily,
+                    Compression = endpoint.Compression,
                     // Null leaves the agent to ssh_config, as before UseAgent existed; true prefers an agent the application registered.
                     UseAgent = endpoint.UseAgent ?? true,
                     Agent = endpoint.UseAgent == true ? services.GetService<SshAgent>() : null,
@@ -104,6 +105,7 @@ internal sealed partial class SshClientFactory(
                 KeepAliveInterval = endpoint.KeepAliveInterval,
                 ConnectTimeout = endpoint.ConnectTimeout,
                 AddressFamily = endpoint.AddressFamily ?? SshAddressFamily.Any,
+                Compression = endpoint.Compression ?? false,
                 Logger = _logger,
             };
             if (endpoint.ConfigureClientOptions is { } configure)

@@ -65,7 +65,8 @@ A man in the middle can read, change, drop and inject bytes. The server itself m
 - **Resource exhaustion:** packets are limited to 256 KiB, channel data to the advertised window (`ChannelWindowSize`, 2 MiB by
   default and at most 1 GiB, which is also the most unread data one channel can buffer) and maximum packet size,
   command output to `MaxCommandOutputBytes`, and banners, identification lines and `EXT_INFO` entries are bounded.
-  A peer that overruns the window is a protocol error.
+  A peer that overruns the window is a protocol error. With compression on, a packet must also inflate to less than 256 KiB
+  ([Compression](#compression)).
 - **Keys and nonces:** keys are renewed after 1 GiB (configurable, capped at 64 GiB), 2^31 packets or one hour, so sequence
   numbers (the ChaCha20-Poly1305 nonce) never wrap under one key.
 - **Post-quantum key exchange:** `mlkem768x25519-sha256` and the FIPS-compatible `mlkem768nistp256-sha256` and
@@ -92,6 +93,39 @@ A man in the middle can read, change, drop and inject bytes. The server itself m
   critical extension this library does not know, refuses every host key, as ssh does, rather than let a revoked key through. The
   KRL parser is bounded (16 MiB files, 1 MiB per serial bitmap) and fuzzed. KRL signatures are not verified: the file is local
   configuration, trusted like `known_hosts`.
+
+### Compression
+
+Off by default, as in `ssh`. `SshClientOptions.Compression` (`Compression yes` in `ssh_config`) offers `zlib@openssh.com`, and the
+server decides whether it is used. It changes two things.
+
+**What packet lengths say.** Encryption hides content but not length, and compressed data is as long as it is compressible. When
+secrets and data an attacker can choose share a compression context, the attacker can guess a secret piece by piece and watch the
+length of the packets: a guess that matches compresses better (CRIME and BREACH against TLS and HTTP, and "Crossing the Streams"
+against SSH, where every channel of a connection shares one zlib stream per direction). This is the main reason compression is off
+by default.
+
+- **What SshSharp sends** is compressed with Huffman coding only, as OpenSSH has done since September 2026: no LZ77, so nothing
+  refers back to earlier data, and a packet's length depends on its own bytes alone, not on whether they repeat a secret sent
+  before. Huffman coding still lets the length reflect how varied a packet's own bytes are. On .NET 8, where the strategy cannot be
+  chosen, SshSharp does not compress what it sends at all.
+- **What the server sends** is compressed however the server chooses. OpenSSH before that change, and other servers, use LZ77, so
+  a secret the server sends (a file's content, a command's output) and attacker-influenced data in another channel of the same
+  connection can leak through the lengths of the server's packets.
+- So keep compression off for a connection that carries both secrets and data from a party that also watches the network, for
+  example a tunnel that forwards a browser's traffic next to a session that reads credentials. It is fine for what it is meant
+  for: command output, logs and files over a slow link, with no untrusted party feeding the same connection.
+
+**What the decompressor sees.** Only delayed compression is supported: nothing is compressed or inflated before the server has
+accepted the user's authentication, and every packet is decrypted and its MAC or tag checked before it is inflated. So the zlib
+decoder only ever reads data from the server whose host key was verified, after login. Plain `zlib`, which starts with the first
+packet and exposes the decoder to an unauthenticated peer, is not implemented, by design (OpenSSH removed it from its client in
+2024). The decoder is .NET's (`System.IO.Compression`, zlib), and its output is bounded: a packet that inflates to 256 KiB or more
+(a decompression bomb) or is not valid zlib data fails the connection with a protocol error, before any of it reaches a channel.
+
+Compression is not a cryptographic algorithm, so `FipsMode` allows it. zlib's own buffers (its window of recent data, in native
+memory, and the stream's input buffer) hold plaintext; they are released, not wiped, when the connection ends, unlike SshSharp's
+packet buffers. With compression off there are none.
 
 ### Channels the server opens
 

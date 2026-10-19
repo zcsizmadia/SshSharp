@@ -129,6 +129,9 @@ public sealed partial class SshClient
             // The password and the keyboard-interactive answers are the destination's: a ProxyJump hop (depth > 0), perhaps run by
             // someone else, is never offered them, as ssh asks for each host's password separately. Hops log in with keys or the agent.
             var destination = depth == 0;
+
+            // As ssh -C: the override is the destination's. A hop would compress the destination's packets, already encrypted, for nothing.
+            var compression = destination && options.Compression is { } compress ? compress : hostConfig.Compression;
             var clientOptions = new SshClientOptions
             {
                 UserName = hostConfig.User,
@@ -160,7 +163,8 @@ public sealed partial class SshClient
                 KeepAliveCountMax = options.KeepAliveCountMax ?? hostConfig.ServerAliveCountMax,
                 ChannelTimeouts = hostConfig.ChannelTimeouts,
                 ObscureKeystrokeTiming = hostConfig.ObscureKeystrokeTiming,
-                AlgorithmPreferences = AlgorithmPreferences.FromConfig(hostConfig),
+                Compression = compression,
+                AlgorithmPreferences = AlgorithmPreferences.FromConfig(hostConfig, compression: compression),
                 RequiredRsaSize = hostConfig.RequiredRsaSize ?? SshClientOptions.DefaultMinimumRsaBits,
                 Logger = options.Logger,
                 TimeProvider = options.TimeProvider,

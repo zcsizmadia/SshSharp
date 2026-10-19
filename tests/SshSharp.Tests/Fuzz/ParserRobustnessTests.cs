@@ -45,6 +45,70 @@ public class ParserRobustnessTests
     }
 
     [Test]
+    public async Task CompressedPayloads_OnlyEverFailWithAProtocolError()
+    {
+        // zlib@openssh.com's inflater, fed one stream as consecutive packets (each framed by a 2-byte length here, as the fuzz target
+        // does): corrupt zlib data, streams that end early or go on after their end, and bombs must all be clean rejections.
+        var failures = Run(CompressedStreams(), InflatePackets, ProtocolErrors, iterations: 2000);
+        await Assert.That(failures).IsEmpty();
+    }
+
+    /// <summary>Splits <paramref name="input"/> into packets (a 2-byte big-endian length, then that many bytes) and inflates them as one stream.</summary>
+    private static void InflatePackets(byte[] input)
+    {
+        using var decompressor = new ZlibDecompressor(limit: 64 * 1024);
+        var rest = input.AsMemory();
+        while (!rest.IsEmpty)
+        {
+            ReadOnlyMemory<byte> payload;
+            if (rest.Length < 2)
+            {
+                payload = rest;
+                rest = default;
+            }
+            else
+            {
+                var length = Math.Min((rest.Span[0] << 8) | rest.Span[1], rest.Length - 2);
+                payload = rest.Slice(2, length);
+                rest = rest[(2 + length)..];
+            }
+
+            decompressor.Decompress(payload).Dispose();
+        }
+    }
+
+    private static byte[][] CompressedStreams()
+    {
+        byte[] Stream(params byte[][] payloads)
+        {
+            var framed = new List<byte>();
+            var output = new MemoryStream();
+            using var zlib = new System.IO.Compression.ZLibStream(output, System.IO.Compression.CompressionLevel.Optimal, leaveOpen: true);
+            foreach (var payload in payloads)
+            {
+                output.SetLength(0);
+                zlib.Write(payload);
+                zlib.Flush();
+                var compressed = output.ToArray();
+                framed.Add((byte)(compressed.Length >> 8));
+                framed.Add((byte)compressed.Length);
+                framed.AddRange(compressed);
+            }
+
+            return [.. framed];
+        }
+
+        var text = Encoding.ASCII.GetBytes(string.Concat(Enumerable.Repeat("drwxr-xr-x 2 deploy staff 4096 config\n", 40)));
+        return
+        [
+            Stream(text),
+            Stream([94, 0, 0, 0, 1], text, [96, 0, 0, 0, 1]),
+            Stream(RandomNumberGenerator.GetBytes(300), text.AsSpan(0, 50).ToArray()),
+            Stream(new byte[60_000]),
+        ];
+    }
+
+    [Test]
     public async Task PublicKeyParsing_AndVerification_OnlyEverFailWithAProtocolError()
     {
         var failures = Run(PublicKeyBlobs(), input =>

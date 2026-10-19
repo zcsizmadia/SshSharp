@@ -35,10 +35,10 @@ public static class SshTelemetry
         "sshsharp.connect.duration", "s", "Time to connect, key-exchange and authenticate.");
 
     internal static readonly Counter<long> BytesSent = Instruments.CreateCounter<long>(
-        "sshsharp.bytes.sent", "By", "SSH message payload bytes sent (before encryption and padding).");
+        "sshsharp.bytes.sent", "By", "SSH message payload bytes sent (before compression, encryption and padding).");
 
     internal static readonly Counter<long> BytesReceived = Instruments.CreateCounter<long>(
-        "sshsharp.bytes.received", "By", "SSH message payload bytes received.");
+        "sshsharp.bytes.received", "By", "SSH message payload bytes received (after decryption and decompression).");
 
     internal static readonly Counter<int> KeyExchanges = Instruments.CreateCounter<int>(
         "sshsharp.key_exchanges", "{exchange}", "Completed key exchanges, including the first one on each connection.");

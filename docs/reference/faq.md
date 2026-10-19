@@ -107,8 +107,13 @@ No. RSA keys sign with `rsa-sha2-256` or `rsa-sha2-512`, which every OpenSSH sin
 
 ## Features
 
-**X11 forwarding? `gssapi-keyex`? Compression?**
-Not supported. Compression is `none` only.
+**X11 forwarding? `gssapi-keyex`?**
+Not supported.
+
+**Compression?**
+Yes: OpenSSH's delayed `zlib@openssh.com`, off by default as in `ssh`. Set `SshClientOptions.Compression = true`, or
+`Compression yes` in `ssh_config`. It helps on slow links with text, and costs CPU on fast ones. Plain `zlib`, which starts before
+authentication, is not supported by design. See [Compress a slow link](../how-to/tune-and-inspect-connections.md#compress-a-slow-link).
 
 **Why is there no interface for `SshClient`?**
 An interface can be added later without breaking anyone, but changing one after it ships breaks every implementation. Put your own

@@ -8,7 +8,7 @@ namespace SshSharp;
 /// from <c>ssh_config</c>: host name, port, user, identity files, known_hosts and StrictHostKeyChecking, algorithms, ProxyJump,
 /// ProxyCommand, ServerAliveInterval, ConnectTimeout, ConnectionAttempts and AddressFamily. A few of these can be set here instead,
 /// overriding what the configuration says: <see cref="Port"/>, <see cref="ConnectTimeout"/>, <see cref="ConnectionAttempts"/>,
-/// <see cref="AddressFamily"/>, <see cref="KeepAliveInterval"/> and <see cref="KeepAliveCountMax"/>, as <see cref="HostKeyVerifier"/>
+/// <see cref="AddressFamily"/>, <see cref="KeepAliveInterval"/>, <see cref="KeepAliveCountMax"/> and <see cref="Compression"/>, as <see cref="HostKeyVerifier"/>
 /// and <see cref="Proxy"/> do for host key checking and the first network hop.
 /// </summary>
 public sealed class SshConfigConnectOptions
@@ -251,6 +251,13 @@ public sealed class SshConfigConnectOptions
     }
 
     private readonly int? _keepAliveCountMax;
+
+    /// <summary>
+    /// Overrides ssh_config's <c>Compression</c> for the destination, as <c>ssh -C</c> does (see <see cref="SshClientOptions.Compression"/>).
+    /// ProxyJump hops keep their own configuration's <c>Compression</c>: what they carry for the destination is already encrypted, which
+    /// does not compress. Null (the default) leaves it to ssh_config (off when unset).
+    /// </summary>
+    public bool? Compression { get; init; }
 
     /// <summary>Opens TCP connections; replaceable in tests.</summary>
     internal Func<string, int, SshAddressFamily, CancellationToken, ValueTask<(Stream Stream, IAsyncDisposable? Owner)>>? TcpConnector { get; init; }

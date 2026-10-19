@@ -229,6 +229,14 @@ internal sealed class FakeServerOptions
 
     /// <summary>Send this application message (channel data, for example) between KEXINIT and the reply of a re-exchange: a protocol violation.</summary>
     public byte[]? ApplicationMessageDuringRekey { get; init; }
+
+    // ---- compression ----
+
+    /// <summary>The compression offered for both directions; sshd offers <c>none,zlib@openssh.com</c> (its default <c>Compression yes</c>).</summary>
+    public IReadOnlyList<string> Compression { get; init; } = ["none"];
+
+    /// <summary>The compression offered on re-exchange, when it differs from <see cref="Compression"/>.</summary>
+    public IReadOnlyList<string>? RekeyCompression { get; init; }
 }
 
 /// <summary>
@@ -249,6 +257,12 @@ internal sealed class FakeSshServer : IAsyncDisposable
     private uint _sendSeq;
     private uint _receiveSeq;
     private bool _strict;
+
+    // zlib@openssh.com as sshd does it: started for both directions right after USERAUTH_SUCCESS is sent, a new stream at each NEWKEYS.
+    // The server compresses with zlib's usual LZ77 coding (not Huffman only), so the client's inflater meets a full zlib stream.
+    private ServerDeflater? _deflater; // under _sendLock
+    private ZlibDecompressor? _inflater; // receive side only
+    private bool _authenticated; // set under _sendLock, read by the receive side
 
     // Re-exchange state (protected by _sendLock, like the client's).
     private bool _rekeying;
@@ -282,6 +296,31 @@ internal sealed class FakeSshServer : IAsyncDisposable
 
     /// <summary>How many key exchanges have completed on the server side, including the first.</summary>
     public int KeyExchangeCount { get; private set; }
+
+    /// <summary>Every packet received from the client after the first key exchange: its message number and whether it came compressed.</summary>
+    public System.Collections.Concurrent.ConcurrentQueue<(byte Type, bool Compressed)> ReceivedPackets { get; } = new();
+
+    /// <summary>Every packet sent to the client: its message number and whether it went compressed.</summary>
+    public System.Collections.Concurrent.ConcurrentQueue<(byte Type, bool Compressed)> SentPackets { get; } = new();
+
+    /// <summary>
+    /// Sends <paramref name="payload"/> as the payload of one packet without compressing it, even after compression has started: the
+    /// client then inflates it as it is (malformed or hostile compressed data).
+    /// </summary>
+    public async ValueTask SendUncompressedAsync(ReadOnlyMemory<byte> payload, CancellationToken cancellationToken = default)
+    {
+        await _sendLock.WaitAsync(cancellationToken);
+        try
+        {
+            ThrowIfWriterCompleted();
+            PacketCodec.Encode(_writer, payload.Span, _send, _sendSeq++);
+            await _writer.FlushAsync(cancellationToken);
+        }
+        finally
+        {
+            _sendLock.Release();
+        }
+    }
 
     /// <summary>Runs the server side of the handshake. Await it together with the client's ConnectAsync.</summary>
     /// <summary>How far the initial handshake got, for tests that time out waiting for it (#188).</summary>
@@ -451,6 +490,8 @@ internal sealed class FakeSshServer : IAsyncDisposable
         await _reader.CompleteAsync();
         _send.Dispose();
         _receive.Dispose();
+        _deflater?.Dispose();
+        _inflater?.Dispose();
         ClientStream.Dispose();
     }
 
@@ -458,7 +499,15 @@ internal sealed class FakeSshServer : IAsyncDisposable
     private void EncodeLocked(ReadOnlySpan<byte> payload)
     {
         ThrowIfWriterCompleted();
-        PacketCodec.Encode(_writer, payload, _send, _sendSeq++);
+        var compressed = _deflater is not null && _authenticated;
+        PacketCodec.Encode(_writer, compressed ? _deflater!.Compress(payload) : payload, _send, _sendSeq++);
+        var type = payload.IsEmpty ? (byte)0 : payload[0]; // some tests send an empty packet on purpose
+        SentPackets.Enqueue((type, compressed));
+        if (type == SshMessage.UserAuthSuccess && !_authenticated)
+        {
+            // As sshd: compression starts right after USERAUTH_SUCCESS has been sent, in both directions.
+            Volatile.Write(ref _authenticated, true);
+        }
     }
 
     /// <summary>Writing after the close fails as the completed pipe would have failed it.</summary>
@@ -655,6 +704,8 @@ internal sealed class FakeSshServer : IAsyncDisposable
             await _writer.FlushAsync(cancellationToken);
             _send.Dispose();
             _send = newSend;
+            _deflater?.Dispose();
+            _deflater = negotiated.CompressionServerToClient == SshAlgorithms.CompressionZlibOpenSsh ? new ServerDeflater() : null;
             if (_strict)
             {
                 _sendSeq = 0;
@@ -685,6 +736,8 @@ internal sealed class FakeSshServer : IAsyncDisposable
 
         _receive.Dispose();
         _receive = newReceive;
+        _inflater?.Dispose();
+        _inflater = negotiated.CompressionClientToServer == SshAlgorithms.CompressionZlibOpenSsh ? new ZlibDecompressor() : null;
         if (_strict)
         {
             _receiveSeq = 0;
@@ -735,6 +788,17 @@ internal sealed class FakeSshServer : IAsyncDisposable
             {
                 _reader.AdvanceTo(buffer.GetPosition(consumed));
                 _receiveSeq++;
+                var compressed = _inflater is not null && Volatile.Read(ref _authenticated);
+                if (compressed)
+                {
+                    packet = _inflater!.Decompress(packet!);
+                }
+
+                if (KeyExchangeCount > 0)
+                {
+                    ReceivedPackets.Enqueue((packet!.Payload.IsEmpty ? (byte)0 : packet.Payload.Span[0], compressed));
+                }
+
                 return packet!;
             }
 
@@ -783,8 +847,8 @@ internal sealed class FakeSshServer : IAsyncDisposable
             EncryptionServerToClient = [cipher],
             MacClientToServer = [Options.Mac],
             MacServerToClient = [Options.Mac],
-            CompressionClientToServer = ["none"],
-            CompressionServerToClient = ["none"],
+            CompressionClientToServer = !initial && Options.RekeyCompression is { } rekeyCompression ? rekeyCompression : Options.Compression,
+            CompressionServerToClient = !initial && Options.RekeyCompression is { } rekeyCompressionS2C ? rekeyCompressionS2C : Options.Compression,
             FirstKexPacketFollows = initial && Options.WrongGuess,
         };
     }
@@ -965,3 +1029,22 @@ internal sealed class FakeSshServer : IAsyncDisposable
 
 /// <summary>A group exchange in progress on the fake server: the client's request and the group sent (p and g as unsigned magnitudes).</summary>
 internal sealed record GexState((uint Min, uint Preferred, uint Max) Request, byte[] P, byte[] G);
+
+/// <summary>The fake server's zlib@openssh.com compressor: one zlib stream (LZ77 and Huffman at level 6, as sshd compressed before it moved to Huffman coding only), sync-flushed per packet.</summary>
+internal sealed class ServerDeflater : IDisposable
+{
+    private readonly MemoryStream _output = new();
+    private readonly System.IO.Compression.ZLibStream _zlib;
+
+    public ServerDeflater() => _zlib = new System.IO.Compression.ZLibStream(_output, System.IO.Compression.CompressionLevel.Optimal, leaveOpen: true);
+
+    public byte[] Compress(ReadOnlySpan<byte> payload)
+    {
+        _output.SetLength(0);
+        _zlib.Write(payload);
+        _zlib.Flush();
+        return _output.ToArray();
+    }
+
+    public void Dispose() => _zlib.Dispose();
+}

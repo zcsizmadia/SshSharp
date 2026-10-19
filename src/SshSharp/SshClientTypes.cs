@@ -51,6 +51,8 @@ public sealed class SshNegotiatedAlgorithms
         MacClientToServer = IsAead(negotiated.CipherClientToServer) ? string.Empty : negotiated.MacClientToServer;
         MacServerToClient = IsAead(negotiated.CipherServerToClient) ? string.Empty : negotiated.MacServerToClient;
         StrictKeyExchange = negotiated.StrictKex;
+        CompressionClientToServer = negotiated.CompressionClientToServer;
+        CompressionServerToClient = negotiated.CompressionServerToClient;
     }
 
     /// <summary>The key exchange method, for example <c>mlkem768x25519-sha256</c> or <c>curve25519-sha256</c>.</summary>
@@ -79,6 +81,16 @@ public sealed class SshNegotiatedAlgorithms
 
     /// <summary>Whether strict key exchange (the Terrapin fix, CVE-2023-48795) is in effect: the server supports it.</summary>
     public bool StrictKeyExchange { get; }
+
+    /// <summary>
+    /// The compression from the client to the server: <c>none</c>, or <c>zlib@openssh.com</c> when <see cref="SshClientOptions.Compression"/>
+    /// is on and the server offers it. That compression is delayed: it starts once authentication has succeeded. On .NET 8 SshSharp does
+    /// not compress what it sends, so this is always <c>none</c> there.
+    /// </summary>
+    public string CompressionClientToServer { get; }
+
+    /// <summary>The compression from the server to the client: <c>none</c>, or <c>zlib@openssh.com</c> (see <see cref="CompressionClientToServer"/>).</summary>
+    public string CompressionServerToClient { get; }
 
     private static bool IsAead(string cipher) => Protocol.SshAlgorithms.TryGetCipher(cipher, out var info) && info.IsAead;
 }
@@ -635,6 +647,17 @@ public sealed class SshClientOptions
     }
 
     private readonly SshAlgorithmList? _macs;
+
+    /// <summary>
+    /// Compress the connection, as ssh's <c>Compression yes</c> (<c>ssh -C</c>): offer <c>zlib@openssh.com</c> before <c>none</c>. The server
+    /// decides whether it is used; <see cref="SshClient.Algorithms"/> tells what was negotiated. Compression starts only after
+    /// authentication succeeds (OpenSSH's delayed compression; plain <c>zlib</c>, which starts before it, is not supported by design) and
+    /// lasts for the rest of the connection. Off by default, as in ssh: it helps on slow links and with text, costs CPU on fast links, and
+    /// packet lengths can reveal what compressed well when secrets and data an attacker chooses share the connection. SshSharp compresses
+    /// with Huffman coding only, as OpenSSH does, which limits that. On .NET 8 only what the server sends is compressed. Allowed in
+    /// <see cref="FipsMode"/>: zlib is not a cryptographic algorithm.
+    /// </summary>
+    public bool Compression { get; init; }
 
     /// <summary>
     /// The smallest RSA host key accepted, in bits, as ssh_config's <c>RequiredRSASize</c>; a smaller one fails the connection with an

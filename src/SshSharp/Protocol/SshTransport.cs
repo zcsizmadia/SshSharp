@@ -59,6 +59,17 @@ internal sealed class SshTransport : IAsyncDisposable
     private long _bytesSent;
     private long _bytesReceived;
 
+    // zlib@openssh.com, for the keys in use: null when the last exchange negotiated none for that direction. Each exchange that
+    // negotiates it starts a new stream, as OpenSSH does (it ends the zlib stream and starts another when it installs new keys). Neither
+    // is used before _authenticated: delayed compression starts with the first packet after USERAUTH_SUCCESS, in both directions.
+    // _sendCompressor is replaced and used under _sendLock; _receiveDecompressor only on the receive side.
+    private ZlibCompressor? _sendCompressor;
+    private ZlibDecompressor? _receiveDecompressor;
+
+    // Set on the receive side when USERAUTH_SUCCESS arrives; read by senders under _sendLock. The server starts compressing right after
+    // it sends that message, and expects compressed packets from then on; the client sends nothing in between, as it waits for the reply.
+    private bool _authenticated;
+
     public SshTransport(Stream stream, SshTransportOptions options)
     {
         ArgumentNullException.ThrowIfNull(stream);
@@ -108,10 +119,10 @@ internal sealed class SshTransport : IAsyncDisposable
     /// <summary>How many key exchanges have completed, including the first.</summary>
     public int KeyExchangeCount { get; private set; }
 
-    /// <summary>Message payload bytes sent so far (before encryption, padding and MAC), as <c>sshsharp.bytes.sent</c> counts them.</summary>
+    /// <summary>Message payload bytes sent so far (before compression, encryption, padding and MAC), as <c>sshsharp.bytes.sent</c> counts them.</summary>
     public long BytesSent => Interlocked.Read(ref _bytesSent);
 
-    /// <summary>Message payload bytes received so far, as <c>sshsharp.bytes.received</c> counts them.</summary>
+    /// <summary>Message payload bytes received so far (after decompression), as <c>sshsharp.bytes.received</c> counts them.</summary>
     public long BytesReceived => Interlocked.Read(ref _bytesReceived);
 
     /// <summary>Extensions announced by the server in <c>SSH_MSG_EXT_INFO</c> (RFC 8308), for example <c>server-sig-algs</c>.</summary>
@@ -240,6 +251,12 @@ internal sealed class SshTransport : IAsyncDisposable
                     await RekeyFromPeerAsync(serverInit, cancellationToken).ConfigureAwait(false);
                     continue;
                 default:
+                    if (payload[0] == SshMessage.UserAuthSuccess && !_authenticated)
+                    {
+                        // Delayed compression starts here, when negotiated: with the next packet in each direction.
+                        Volatile.Write(ref _authenticated, true);
+                    }
+
                     // A connection that mostly receives (a big download) must also re-key on its own: the threshold counts both directions.
                     if (_connected && !_rekeying && RekeyDue())
                     {
@@ -338,6 +355,7 @@ internal sealed class SshTransport : IAsyncDisposable
             if (locked)
             {
                 _padding.Clear(); // nothing is encoded any more: _failed is set, and this holds the lock
+                _sendCompressor?.Dispose();
                 await _writer.CompleteAsync(closed).ConfigureAwait(false);
             }
         }
@@ -356,6 +374,7 @@ internal sealed class SshTransport : IAsyncDisposable
         await _reader.CompleteAsync().ConfigureAwait(false);
         _sendProtector.Dispose();
         _receiveProtector.Dispose();
+        _receiveDecompressor?.Dispose();
         if (SessionId is not null)
         {
             CryptographicOperations.ZeroMemory(SessionId);
@@ -445,23 +464,28 @@ internal sealed class SshTransport : IAsyncDisposable
         }
 
         // After the first exchange, a client may announce its own extensions (RFC 8308) when the server asked for them (ext-info-s).
-        await SwitchKeysAsync(newSend, newReceive, strict, strictMessages, sendExtInfo: initial && negotiated.ServerSupportsExtInfo, cancellationToken)
+        var compression = new KeyCompression(negotiated.CompressionClientToServer == SshAlgorithms.CompressionZlibOpenSsh,
+            negotiated.CompressionServerToClient == SshAlgorithms.CompressionZlibOpenSsh);
+        await SwitchKeysAsync(newSend, newReceive, compression, strict, strictMessages, sendExtInfo: initial && negotiated.ServerSupportsExtInfo, cancellationToken)
             .ConfigureAwait(false);
     }
+
+    /// <summary>Whether an exchange negotiated <c>zlib@openssh.com</c> for each direction.</summary>
+    private readonly record struct KeyCompression(bool Send, bool Receive);
 
     /// <summary>
     /// Sends NEWKEYS and installs the new keys for each direction. Takes ownership of both protectors: one that is not installed when the
     /// exchange fails part way is wiped here, rather than left to the garbage collector.
     /// </summary>
-    private async Task SwitchKeysAsync(PacketProtector newSend, PacketProtector newReceive, bool strict, bool strictMessages, bool sendExtInfo,
-        CancellationToken cancellationToken)
+    private async Task SwitchKeysAsync(PacketProtector newSend, PacketProtector newReceive, KeyCompression compression, bool strict, bool strictMessages,
+        bool sendExtInfo, CancellationToken cancellationToken)
     {
         var sendInstalled = false;
         var receiveInstalled = false;
         try
         {
-            await SwitchKeysCoreAsync(newSend, newReceive, strict, strictMessages, sendExtInfo, () => sendInstalled = true, () => receiveInstalled = true,
-                cancellationToken)
+            await SwitchKeysCoreAsync(newSend, newReceive, compression, strict, strictMessages, sendExtInfo, () => sendInstalled = true,
+                () => receiveInstalled = true, cancellationToken)
                 .ConfigureAwait(false);
         }
         catch
@@ -480,19 +504,22 @@ internal sealed class SshTransport : IAsyncDisposable
         }
     }
 
-    private async Task SwitchKeysCoreAsync(PacketProtector newSend, PacketProtector newReceive, bool strict, bool strictMessages, bool sendExtInfo, Action sendInstalled,
-        Action receiveInstalled, CancellationToken cancellationToken)
+    private async Task SwitchKeysCoreAsync(PacketProtector newSend, PacketProtector newReceive, KeyCompression compression, bool strict, bool strictMessages,
+        bool sendExtInfo, Action sendInstalled, Action receiveInstalled, CancellationToken cancellationToken)
     {
         // Each side sends NEWKEYS under the old keys, then protects what it sends with the new ones; incoming switches on the peer's NEWKEYS.
+        // Compression switches with the keys: NEWKEYS itself is compressed as before it (once authenticated), what follows as negotiated.
         await _sendLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            PacketCodec.Encode(_writer, [], [SshMessage.NewKeys], _sendProtector, _sendSequence++, _padding);
+            EncodeLocked([], [SshMessage.NewKeys]);
             TraceKexMessage("sent", SshMessage.NewKeys, _sendSequence - 1);
             await _writer.FlushAsync(_lifetime.Token).ConfigureAwait(false);
             _sendProtector.Dispose();
             _sendProtector = newSend;
             sendInstalled();
+            _sendCompressor?.Dispose();
+            _sendCompressor = compression.Send ? new ZlibCompressor() : null;
             if (strict)
             {
                 _sendSequence = 0;
@@ -503,7 +530,7 @@ internal sealed class SshTransport : IAsyncDisposable
                 // The first packet under the new keys (RFC 8308 section 2.4). ext-info-in-auth@openssh.com (PROTOCOL 1.10) lets the server
                 // send server-sig-algs again during authentication, for example when a Match block changes them for this user; the
                 // authentication reads the current list before each key.
-                PacketCodec.Encode(_writer, [], ClientExtInfo, _sendProtector, _sendSequence++, _padding);
+                EncodeLocked([], ClientExtInfo);
                 await _writer.FlushAsync(_lifetime.Token).ConfigureAwait(false);
             }
 
@@ -528,6 +555,8 @@ internal sealed class SshTransport : IAsyncDisposable
         _receiveProtector.Dispose();
         _receiveProtector = newReceive;
         receiveInstalled();
+        _receiveDecompressor?.Dispose();
+        _receiveDecompressor = compression.Receive ? new ZlibDecompressor() : null;
         if (strict)
         {
             _receiveSequence = 0;
@@ -664,7 +693,7 @@ internal sealed class SshTransport : IAsyncDisposable
         Volatile.Write(ref _exchangePending, true);
         _pendingClientInit = clientInit;
         _pendingClientInitPayload = payload;
-        PacketCodec.Encode(_writer, [], payload, _sendProtector, _sendSequence++, _padding);
+        EncodeLocked([], payload);
         TraceKexMessage("sent", payload[0], _sendSequence - 1);
         await _writer.FlushAsync(_lifetime.Token).ConfigureAwait(false);
     }
@@ -784,12 +813,36 @@ internal sealed class SshTransport : IAsyncDisposable
         {
             Span<byte> prefix = stackalloc byte[ChannelDataHeader.Size];
             value.Write(prefix);
-            PacketCodec.Encode(_writer, prefix, payload.Span, _sendProtector, _sendSequence++, _padding);
+            EncodeLocked(prefix, payload.Span);
             return ChannelDataHeader.Size + payload.Length;
         }
 
-        PacketCodec.Encode(_writer, [], payload.Span, _sendProtector, _sendSequence++, _padding);
+        EncodeLocked([], payload.Span);
         return payload.Length;
+    }
+
+    /// <summary>
+    /// Encodes one packet whose payload is <paramref name="prefix"/> and then <paramref name="body"/>, with the next sequence number,
+    /// compressed once delayed compression has started. Every packet goes this way, key exchange messages too: once compression is on,
+    /// it covers all of them. The caller holds <see cref="_sendLock"/>.
+    /// </summary>
+    private void EncodeLocked(ReadOnlySpan<byte> prefix, ReadOnlySpan<byte> body)
+    {
+        if (_sendCompressor is { } compressor && Volatile.Read(ref _authenticated))
+        {
+            try
+            {
+                PacketCodec.Encode(_writer, [], compressor.Compress(prefix, body), _sendProtector, _sendSequence++, _padding);
+            }
+            finally
+            {
+                compressor.Clear();
+            }
+
+            return;
+        }
+
+        PacketCodec.Encode(_writer, prefix, body, _sendProtector, _sendSequence++, _padding);
     }
 
     private static byte MessageType(ChannelDataHeader? header, ReadOnlyMemory<byte> payload) => header is null ? payload.Span[0] : SshMessage.ChannelData;
@@ -848,6 +901,12 @@ internal sealed class SshTransport : IAsyncDisposable
             {
                 _reader.AdvanceTo(buffer.GetPosition(consumed));
                 _receiveSequence++;
+                if (_receiveDecompressor is { } decompressor && _authenticated)
+                {
+                    // Decrypted and authenticated first: only data the server has sent is ever inflated. Disposes the compressed packet.
+                    packet = decompressor.Decompress(packet!);
+                }
+
                 if (packet!.Payload.Length == 0)
                 {
                     packet.Dispose();

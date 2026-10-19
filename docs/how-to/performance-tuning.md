@@ -92,6 +92,14 @@ server that offers no AES-GCM:
 `client.Algorithms.EncryptionClientToServer` shows what was negotiated. See
 [Choose algorithms and authentication methods](algorithms-and-authentication-order.md).
 
+## Compression on slow links
+
+Compression is off by default, and on a fast link it should stay off: it adds CPU work on both sides for every byte, and the link
+was not the limit. On a slow link (a few Mbit/s, a branch office or a radio link) carrying text, `Compression = true` sends fewer
+bytes and can make command output, logs and text files arrive sooner. Already compressed data (archives, images, TLS in a tunnel)
+gains nothing. Measure both ways on the real link. See
+[Compress a slow link](tune-and-inspect-connections.md#compress-a-slow-link).
+
 ## Socket options and Nagle's algorithm
 
 SshSharp turns Nagle's algorithm off on the sockets it opens (`Socket.NoDelay`), so small writes (keystrokes, short commands) are

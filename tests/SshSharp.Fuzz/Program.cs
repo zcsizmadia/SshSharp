@@ -37,7 +37,35 @@ internal static class Targets
         ["identification"] = data => _ = SshIdentification.TryParse(Encoding.Latin1.GetString(data), out _),
         ["sftp"] = Sftp,
         ["krl"] = data => Format(() => RevokedKeyList.Parse(data).IsRevoked(data, null)),
+        ["zlib"] = data => Protocol(() => InflatePackets(data)),
     };
+
+    /// <summary>
+    /// zlib@openssh.com's inflater, fed one stream as consecutive packets: each a 2-byte big-endian length, then that many bytes (the last
+    /// one whatever is left). A small limit, so bombs are found quickly.
+    /// </summary>
+    private static void InflatePackets(byte[] data)
+    {
+        using var decompressor = new ZlibDecompressor(limit: 64 * 1024);
+        var rest = data.AsMemory();
+        while (!rest.IsEmpty)
+        {
+            ReadOnlyMemory<byte> payload;
+            if (rest.Length < 2)
+            {
+                payload = rest;
+                rest = default;
+            }
+            else
+            {
+                var length = Math.Min((rest.Span[0] << 8) | rest.Span[1], rest.Length - 2);
+                payload = rest.Slice(2, length);
+                rest = rest[(2 + length)..];
+            }
+
+            decompressor.Decompress(payload).Dispose();
+        }
+    }
 
     /// <summary>Every reply an SFTP server can send; SftpException is an SshException, which is the documented rejection.</summary>
     private static void Sftp(byte[] data)

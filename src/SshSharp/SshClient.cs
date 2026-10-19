@@ -80,12 +80,12 @@ public sealed partial class SshClient : IAsyncDisposable
     public System.Net.EndPoint? LocalEndPoint { get; private init; }
 
     /// <summary>
-    /// SSH message bytes sent over the connection so far, from the key exchange on: the payload of each packet, before
+    /// SSH message bytes sent over the connection so far, from the key exchange on: the payload of each packet, before compression,
     /// encryption, padding and MAC, as the <c>sshsharp.bytes.sent</c> metric counts them. Safe to read from any thread.
     /// </summary>
     public long BytesSent => _connection.BytesSent;
 
-    /// <summary>SSH message bytes received over the connection so far, counted as <see cref="BytesSent"/> is.</summary>
+    /// <summary>SSH message bytes received over the connection so far, counted as <see cref="BytesSent"/> is (after decryption and decompression).</summary>
     public long BytesReceived => _connection.BytesReceived;
 
     /// <summary>

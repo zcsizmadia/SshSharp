@@ -51,6 +51,7 @@ them to it):
 | `AddressFamily` | `AddressFamily` | The connection this machine makes (the destination, or the first `ProxyJump` hop). |
 | `ConfigureSocket` | `TCPKeepAlive`, `IPQoS` | The same connection: it runs after those two are applied, so what it sets wins. |
 | `KeepAliveInterval`, `KeepAliveCountMax` | `ServerAliveInterval`, `ServerAliveCountMax` | Every host; `TimeSpan.Zero` turns keep-alives off. |
+| `Compression` | `Compression` | The destination only, as `ssh -C`; each `ProxyJump` hop keeps its own. |
 
 `HostKeyVerifier` and `Proxy` replace the configured host key checking and connection the same way. See
 [Override what the configuration says](../how-to/ssh-config-and-known-hosts.md#override-what-the-configuration-says).
@@ -65,6 +66,7 @@ them to it):
 | `MACs` | `Macs` | Yes. `SshClientOptions.Macs` in code. |
 | `PubkeyAcceptedAlgorithms` (`PubkeyAcceptedKeyTypes`) | `PubkeyAcceptedAlgorithms` | No: resolved, but not applied. Each key is offered with the first of its signature algorithms the server lists in `server-sig-algs` (RFC 8308). |
 | `RequiredRSASize` | `RequiredRsaSize` | Yes: the smallest RSA host key accepted (default 2048; values under 1024 are ignored, as `ssh` refuses them). `SshClientOptions.RequiredRsaSize` in code. |
+| `Compression` | `Compression` | Yes: `yes` offers `zlib@openssh.com` (OpenSSH's delayed compression, which starts after authentication) before `none`; `no`, the default, offers only `none`. `SshClientOptions.Compression` in code. See [Compress a slow link](../how-to/tune-and-inspect-connections.md#compress-a-slow-link). |
 
 The `SshClientOptions` lists take an `SshAlgorithmList` in the same `+`, `-`, `^` and plain forms; see
 [Choose algorithms and authentication methods](../how-to/algorithms-and-authentication-order.md).
@@ -133,7 +135,7 @@ equivalent, where one exists:
 - **`SshConfigConnectOptions`**: connecting by alias, where the option overrides or supplements what the configuration says.
 - **`SshEndpointOptions`**: a named endpoint in the dependency injection package. With `Host` set it builds an `SshClientOptions`
   (and `ConfigureClientOptions` can set anything in the first column); with `ConfigAlias` set, the configuration decides, and only
-  `Password`, `AddressFamily`, `UseAgent` and `ConnectTimeout` are used.
+  `Password`, `AddressFamily`, `UseAgent`, `Compression` and `ConnectTimeout` are used.
 
 A dash means there is no typed equivalent. The "Applied" tables above say how each directive behaves.
 
@@ -156,6 +158,7 @@ A dash means there is no typed equivalent. The "Applied" tables above say how ea
 | `CanonicalizeHostname` and the other `Canonicalize*` directives | - (pass the fully qualified name as `host`) | `ResolveOptions` with `UseDnsCanonicalizer` (`ssh`'s DNS rules) or `HostCanonicalizer` (your own lookup) | - |
 | `KexAlgorithms`, `HostKeyAlgorithms`, `Ciphers`, `MACs` | `KexAlgorithms`, `HostKeyAlgorithms`, `Ciphers`, `Macs` | - | - |
 | `RequiredRSASize` | `RequiredRsaSize` | - | - |
+| `Compression` | `Compression` | `Compression` (the destination only) | `Compression` |
 | `StrictHostKeyChecking` | `HostKeyVerifier = new KnownHostsVerifier(...) { Policy = ... }` | `HostKeyVerifier` (replaces it), `AskHostKey` (answers `ask`) | `AcceptNewHostKeys` (`accept-new`; otherwise `yes`), `HostKeyFingerprints` (pinned keys instead) |
 | `UserKnownHostsFile`, `GlobalKnownHostsFile` | The `KnownHostsVerifier` constructor's two lists | - | `KnownHostsFiles` |
 | `HashKnownHosts` | `KnownHostsVerifier.HashNewEntries` | - | - |

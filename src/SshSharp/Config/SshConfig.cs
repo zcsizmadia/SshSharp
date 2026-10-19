@@ -300,6 +300,7 @@ public sealed class SshConfig
             KexAlgorithms = First("kexalgorithms"),
             Ciphers = First("ciphers"),
             Macs = First("macs"),
+            Compression = Bool(First("compression"), false),
             PubkeyAcceptedAlgorithms = First("pubkeyacceptedalgorithms") ?? First("pubkeyacceptedkeytypes"),
             ServerAliveInterval = Time(First("serveraliveinterval")) is { } sai && sai > TimeSpan.Zero ? sai : null,
             ServerAliveCountMax = int.TryParse(First("serveralivecountmax"), NumberStyles.None, CultureInfo.InvariantCulture, out var count) ? count : 3,

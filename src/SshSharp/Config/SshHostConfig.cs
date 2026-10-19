@@ -143,6 +143,12 @@ public sealed class SshHostConfig
     /// <summary>Raw <c>MACs</c> specification, or null.</summary>
     public string? Macs { get; init; }
 
+    /// <summary>
+    /// <c>Compression</c>: whether to offer <c>zlib@openssh.com</c>, which compresses everything after authentication (default false, as
+    /// in ssh). See <see cref="SshClientOptions.Compression"/>.
+    /// </summary>
+    public bool Compression { get; init; }
+
     /// <summary>Raw <c>PubkeyAcceptedAlgorithms</c> specification, or null.</summary>
     public string? PubkeyAcceptedAlgorithms { get; init; }
 

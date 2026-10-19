@@ -37,6 +37,8 @@ work, retries for a server that may be restarting. Set them in `SshConfigConnect
   `Timeout.InfiniteTimeSpan` removes the time limit and `KeepAliveInterval = TimeSpan.Zero` the keep-alives, whatever the file
   says.
 - `AddressFamily` applies to the one TCP connection this machine makes: to the destination, or to the first `ProxyJump` hop.
+- `Compression` is the destination's, as `ssh -C`: `true` or `false` wins over its `Compression` line, and each `ProxyJump` hop
+  keeps its own (see [Compress a slow link](tune-and-inspect-connections.md#compress-a-slow-link)).
 - `ConnectionAttempts` tries again only when the server could not be reached (refused, unreachable, timed out), one second
   apart, within the same `ConnectTimeout`; a host key or authentication failure is never retried.
 - `ConfigureSocket` sets socket options on that same connection after `TCPKeepAlive` and `IPQoS` have been applied, so what it
