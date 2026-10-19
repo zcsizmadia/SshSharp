@@ -208,6 +208,12 @@ internal sealed class FakeSftpServer
     /// <summary>Answers OPEN of the paths this matches with Failure (a disk error on the server, say).</summary>
     public Func<string, bool>? FailOpen { get; set; }
 
+    /// <summary>Describe a symbolic link in a listing by what it points to (stat rather than lstat), as a careless server might.</summary>
+    public bool ListingFollowsLinks { get; set; }
+
+    /// <summary>Answers REMOVE of the paths this matches with PERMISSION_DENIED, removing nothing (a file the user may not delete).</summary>
+    public Func<string, bool>? DenyRemove { get; set; }
+
     /// <summary>The most file handles (not directory handles) open at once, across sessions.</summary>
     public int MaxOpenFileHandles { get; private set; }
 
@@ -868,7 +874,7 @@ internal sealed class FakeSftpServer
                     {
                         w.WriteString(name);
                         w.WriteString($"-rw-r--r-- 1 tester tester {node.Data.Count} Nov 14 2023 {name}");
-                        WriteAttributes(w, node);
+                        WriteAttributes(w, ListingFollowsLinks && node.LinkTarget is not null && Follow(prefix + name) is { } target ? target : node);
                     }
                 });
             }
@@ -876,6 +882,11 @@ internal sealed class FakeSftpServer
             case 13: // REMOVE
             {
                 var path = Resolve(r.ReadUtf8String());
+                if (DenyRemove?.Invoke(path) == true)
+                {
+                    return Status(id, 3, "Permission denied");
+                }
+
                 return !_nodes.TryGetValue(path, out var node) ? Status(id, 2, "No such file")
                     : node.IsDirectory ? Status(id, 4, "Is a directory")
                     : _nodes.Remove(path) ? Status(id, 0) : Status(id, 4);

@@ -176,6 +176,11 @@ A man in the middle can read, change, drop and inject bytes. The server itself m
 - With `Preserve`, a download applies the server's permission bits (read, write and execute for owner, group and others; never
   set-id or sticky) where this machine has Unix modes, without the local umask, as `sftp -p` does: a server can make what it sends
   world-writable. A directory's mode is applied after its contents, and a name listed twice is fetched once.
+- A recursive delete (`DeleteDirectoryAsync(path, recursive: true)`) removes symbolic links without following them, and checks
+  every subdirectory with `LSTAT` before entering it, so a listing that describes a link as a directory cannot lead it outside the
+  tree. It is bounded like a directory download (64 levels; each listing bounded) and touches only the server's files.
+- A server that stops answering holds a request until the session ends, unless `SftpClient.OperationTimeout` is set; it then
+  fails the request (`Timeout`) once the server has been silent that long.
 - `SshSharp.FileProviders` treats backslashes as separators and refuses `..` and NUL in subpaths, so a web request cannot leave
   the configured root by name, and bounds its cache. The server follows symbolic links, including ones that point out of the root.
 

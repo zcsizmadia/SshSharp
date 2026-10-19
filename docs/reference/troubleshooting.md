@@ -146,6 +146,19 @@ The server accepts only the variables its `AcceptEnv` lists. Pass values on the 
 The server lacks an OpenSSH extension the operation needs: an overwriting rename (`posix-rename@openssh.com`), hard links, server-side
 copy. `sftp.Extensions` lists what it has. Or a synchronous `Read`/`Write` on an SFTP stream: use the async methods.
 
+### An SFTP call never returns
+
+The server stopped answering while the connection stayed up (a stuck disk or NFS mount on the server, a firewall that drops packets
+silently). Set `SftpClient.OperationTimeout`, which then fails the request with `SshException` (`Reason = Timeout`), and keep-alives
+(`KeepAliveInterval`) for a connection that died. See
+[Fail when the server stops answering](../how-to/transfer-files-sftp.md#fail-when-the-server-stops-answering).
+
+### A recursive delete stopped part way
+
+`DeleteDirectoryAsync(path, recursive: true)` stops at the first entry it cannot delete and throws that `SftpException` (its `Path`
+says which; usually `PermissionDenied`: on Unix, deleting needs write permission on the directory that holds the entry). What it
+deleted stays deleted. Fix the cause and call it again; it carries on with what is left.
+
 ### `SftpException` from `FlushAsync`, `DisposeAsync` or a later `WriteAsync`
 
 SFTP file streams write behind: `WriteAsync` returns before the server answers, so a write it refused (a full disk, a quota) is

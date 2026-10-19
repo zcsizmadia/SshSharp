@@ -121,6 +121,78 @@ several files at once over the same session:
 
 [!code-csharp[](../snippets/FileTransfer.cs#sftp-browse)]
 
+## Read and write whole files
+
+For a small file (a configuration, a manifest, a marker), `ReadAllBytesAsync`, `ReadAllTextAsync`, `WriteAllBytesAsync` and
+`WriteAllTextAsync` do it in one call, as their `File` namesakes do locally:
+
+[!code-csharp[](../snippets/FileTransfer.cs#sftp-whole-files)]
+
+- **Text** is UTF-8 by default. Reading honours a byte order mark when there is one; writing adds none unless you pass an
+  `Encoding` that has one, as `File.WriteAllTextAsync` does.
+- **Writing replaces the file**: it is created or truncated, then written with many writes in flight. A failure part way leaves it
+  partly written; when readers must never see that, [replace it atomically](#replace-a-file-atomically) instead.
+- **Reading holds the whole file in memory** (at most about 2 GiB, the largest array). For large files, use `DownloadFileAsync`
+  or `DownloadAsync` into a stream.
+
+## Create and delete directory trees
+
+`CreateDirectoryAsync` and `DeleteDirectoryAsync` work on one directory. With `createParents: true` and `recursive: true` they work
+on trees, as `mkdir -p` and `rm -r` do:
+
+[!code-csharp[](../snippets/FileTransfer.cs#sftp-trees)]
+
+### Create with parents
+
+- An existing directory is not an error; a file anywhere in the path is (`SftpException`, `Status = Failure`).
+- The directory is created first, and only if that fails are the directories above it looked at, up to the first that exists. An
+  existing tree costs one request, and a directory above that you may not write to (a chroot's top, for example) is never touched.
+- `permissions` apply to the last directory only; the parents get the server's defaults, as `mkdir -p -m` does.
+
+### Delete recursively
+
+Each directory is listed, emptied and then removed, with many requests in flight: up to 64 removals at once, and up to 4
+directories listed at once (fewer when the server limits open handles). A tree of thousands of files costs a few round trips per
+directory, not one per file.
+
+```mermaid
+flowchart LR
+    L["List the directory<br/>(whole, then close it)"] --> F["Remove its files and links<br/>(up to 64 REMOVE in flight)"]
+    L --> D["Each subdirectory: LSTAT,<br/>then the same, on a free walker<br/>or right here"]
+    F --> R["RMDIR the directory"]
+    D --> R
+```
+
+- **Links are never followed.** A symbolic link in the tree is removed itself, even when it points to a directory; every
+  subdirectory is checked with `LSTAT` before it is entered, so a server that describes a link as a directory in its listing
+  cannot lead the delete out of the tree. A `path` that is itself a link removes only the link.
+- **The first failure stops it.** No more requests are sent, the ones in flight finish, and that failure is thrown (for example
+  `SftpException` with `PermissionDenied` and the `Path` it could not delete). What was deleted stays deleted; once the cause is
+  fixed, calling again finishes the job. Cancelling stops it the same way.
+- **Entries that vanish** meanwhile (deleted by someone else) are not an error, but a `path` that does not exist is
+  (`NoSuchFile`).
+- **Depth** is limited to 64 levels, as for directory downloads (`SshException`, `Reason = TransferFailed`).
+
+## Fail when the server stops answering
+
+By default, a request waits for its reply as long as the session lasts. A server that hangs (a stuck disk, a network path that
+drops packets without closing the connection) then hangs your code too. Set `OperationTimeout`:
+
+[!code-csharp[](../snippets/FileTransfer.cs#sftp-operation-timeout)]
+
+- **It limits silence, not duration.** A request fails once the server has sent nothing at all for that long. While replies keep
+  coming, a request waits on, so a large transfer over a slow link is never cut off for its size, even when a window of 64 requests
+  takes longer than the timeout to work through.
+- **What is thrown:** `SshException` with `Reason = Timeout`, and a `TimeoutException` as its inner exception. Your
+  `CancellationToken` still works alongside it, and cancelling is an `OperationCanceledException`, never a timeout.
+- **The session stays usable.** A request that timed out is abandoned, not undone: the server may still carry it out, and its
+  late reply is dropped (a file it opens is closed again). A server that has really stopped answering fails the next requests too;
+  reconnect, and resume transfers with `Resume = true`.
+- It applies to every request of the `SftpClient`, including those of streams, listings and transfers, and to the extra sessions
+  of a segmented download. Change it at any time.
+- [Keep-alives](keepalive-and-reconnect.md) (`KeepAliveInterval`) detect a dead connection; `OperationTimeout` also catches a
+  server that is connected but no longer answering SFTP requests.
+
 ## Replace a file atomically
 
 Readers must never see a half-written configuration file. Upload under a temporary name and rename over the target; with

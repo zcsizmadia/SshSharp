@@ -124,3 +124,11 @@ SshSharp.SshClientOptions.PreferredAuthentications.get -> System.Collections.Gen
 SshSharp.SshClientOptions.PreferredAuthentications.init -> void
 SshSharp.SshClientOptions.RequiredRsaSize.get -> int
 SshSharp.SshClientOptions.RequiredRsaSize.init -> void
+SshSharp.Sftp.SftpClient.CreateDirectoryAsync(string! path, bool createParents, System.IO.UnixFileMode? permissions = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+SshSharp.Sftp.SftpClient.DeleteDirectoryAsync(string! path, bool recursive, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+SshSharp.Sftp.SftpClient.OperationTimeout.get -> System.TimeSpan
+SshSharp.Sftp.SftpClient.OperationTimeout.set -> void
+SshSharp.Sftp.SftpClient.ReadAllBytesAsync(string! path, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<byte[]!>!
+SshSharp.Sftp.SftpClient.ReadAllTextAsync(string! path, System.Text.Encoding? encoding = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<string!>!
+SshSharp.Sftp.SftpClient.WriteAllBytesAsync(string! path, System.ReadOnlyMemory<byte> bytes, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+SshSharp.Sftp.SftpClient.WriteAllTextAsync(string! path, string! contents, System.Text.Encoding? encoding = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!

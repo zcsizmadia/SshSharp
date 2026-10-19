@@ -55,6 +55,42 @@ public sealed partial class SftpClient : IAsyncDisposable
     /// <summary>The server's limits (<c>limits@openssh.com</c>), or the defaults every server accepts when it announces none.</summary>
     public SftpLimits Limits { get; }
 
+    /// <summary>
+    /// How long a request may go unanswered while the server sends nothing at all, before it fails with an <see cref="SshException"/>
+    /// (<see cref="SshFailureReason.Timeout"/>, with a <see cref="TimeoutException"/> inside). The default,
+    /// <see cref="Timeout.InfiniteTimeSpan"/>, waits for as long as the session lasts.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The limit is on the server's silence, not on how long an operation takes: while the server keeps answering other requests (a
+    /// transfer's window of reads or writes on a slow link, or other callers on this session), a request waits on, so a large file is
+    /// never cut off for its size. A server or link that has stopped answering fails every waiting request once this much time has
+    /// passed without a reply. It applies to every request, those of transfers, streams and listings included; the
+    /// <see cref="CancellationToken"/> each method takes still works alongside it, and cancelling is an
+    /// <see cref="OperationCanceledException"/>, never a timeout.
+    /// </para>
+    /// <para>
+    /// A request that timed out is abandoned, not undone: the server may still carry it out, and its late reply is dropped (a handle it
+    /// opens is closed). The session stays usable. It can be changed at any time; requests already waiting keep the value they started
+    /// with. A segmented download's extra sessions (<see cref="SftpTransferOptions.Segments"/>) take this session's value.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="ArgumentOutOfRangeException">Not positive and not <see cref="Timeout.InfiniteTimeSpan"/>, or longer than <see cref="int.MaxValue"/> milliseconds.</exception>
+    public TimeSpan OperationTimeout
+    {
+        get => _channel.OperationTimeout;
+        set
+        {
+            if (value != Timeout.InfiniteTimeSpan)
+            {
+                ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(value, TimeSpan.Zero);
+                ArgumentOutOfRangeException.ThrowIfGreaterThan(value, TimeSpan.FromMilliseconds(int.MaxValue));
+            }
+
+            _channel.OperationTimeout = value;
+        }
+    }
+
     /// <summary>Opens another SFTP session on the same connection (for <see cref="SftpTransferOptions.Segments"/>); null when unknown.</summary>
     internal Func<CancellationToken, Task<SftpClient>>? OpenSibling { get; set; }
 
@@ -243,7 +279,10 @@ public sealed partial class SftpClient : IAsyncDisposable
         }
     }
 
-    /// <summary>Creates a directory, with <paramref name="permissions"/> if given (the server's umask applies).</summary>
+    /// <summary>
+    /// Creates a directory, with <paramref name="permissions"/> if given (the server's umask applies). To create missing parents too,
+    /// and accept an existing directory, use <see cref="CreateDirectoryAsync(string, bool, UnixFileMode?, CancellationToken)"/>.
+    /// </summary>
     /// <exception cref="SftpException">It exists already, the parent does not exist, or another error.</exception>
     public async Task CreateDirectoryAsync(string path, UnixFileMode? permissions = null, CancellationToken cancellationToken = default)
     {
@@ -256,7 +295,10 @@ public sealed partial class SftpClient : IAsyncDisposable
         ExpectOk(reply, "Creating the directory", path);
     }
 
-    /// <summary>Deletes an empty directory.</summary>
+    /// <summary>
+    /// Deletes an empty directory. To delete one with everything in it, use
+    /// <see cref="DeleteDirectoryAsync(string, bool, CancellationToken)"/>.
+    /// </summary>
     public async Task DeleteDirectoryAsync(string path, CancellationToken cancellationToken = default)
     {
         CheckPath(path);
@@ -561,7 +603,9 @@ public sealed partial class SftpClient : IAsyncDisposable
             {
                 try
                 {
-                    siblings.Add(await OpenSibling!(cancellationToken).ConfigureAwait(false));
+                    var sibling = await OpenSibling!(cancellationToken).ConfigureAwait(false);
+                    sibling.OperationTimeout = OperationTimeout;
+                    siblings.Add(sibling);
                 }
                 catch (SshException ex) when (ex.Reason is SshFailureReason.ChannelClosed or SshFailureReason.ProtocolError)
                 {
