@@ -14,6 +14,8 @@ The TCP connection (or a proxy, `ProxyJump` or `JumpHosts` hop or `ProxyCommand`
 - With `BindAddress` or `LocalEndPoint`: an IPv4 bind address reaches only IPv4 destinations, and the reverse.
 - With `AddressFamily` (`SshClientOptions` or `ssh_config`): only addresses of that family are tried.
 - `RefuseConnection yes` in `ssh_config` refuses on purpose.
+- A server that is restarting refuses for a moment: `ConnectionAttempts` (`ssh_config`, or `SshConfigConnectOptions`) tries again,
+  one second apart.
 
 ### `Timeout` while connecting
 

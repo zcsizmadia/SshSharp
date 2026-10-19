@@ -23,6 +23,22 @@ Passphrases, answers to prompts, and policy for things a file should not decide 
 
 [!code-csharp[](../snippets/Connecting.cs#alias-options)]
 
+## Override what the configuration says
+
+Some transport settings belong to the application rather than to the file: a port from its own settings, a timeout that fits its
+work, retries for a server that may be restarting. Set them in `SshConfigConnectOptions` and they win over `ssh_config`, as`n`ssh -p` and `ssh -o` do; everything else still comes from the configuration:
+
+[!code-csharp[](../snippets/Connecting.cs#alias-overrides)]
+
+- `Port` is the destination's, never a `ProxyJump` hop's, and resolution sees it (`%p`, `Match`). A port written in an
+  `ssh://host:port` destination still wins.
+- `ConnectTimeout`, `ConnectionAttempts` and the keep-alive settings apply to the destination and every `ProxyJump` hop.
+  `Timeout.InfiniteTimeSpan` removes the time limit and `KeepAliveInterval = TimeSpan.Zero` the keep-alives, whatever the file
+  says.
+- `AddressFamily` applies to the one TCP connection this machine makes: to the destination, or to the first `ProxyJump` hop.
+- `ConnectionAttempts` tries again only when the server could not be reached (refused, unreachable, timed out), one second
+  apart, within the same `ConnectTimeout`; a host key or authentication failure is never retried.
+
 ## Ship a configuration with your application
 
 `SshConfig.Parse` (or `SshConfig.Load` for a file) gives the application its own configuration, independent of the user's:

@@ -52,8 +52,8 @@ flowchart LR
 - **Agent forwarding** lets anyone with enough rights on the server use your agent while you are connected. Forward only to trusted
   servers, and prefer destination-constrained keys.
 - **Listeners.** Local forwarders and SOCKS proxies have no authentication; bind them to loopback. A local Unix-socket forwarder's
-  socket file is owner-only. Remote dynamic forwarding lets
-  the server's side reach your network; pass an `allowDestination` filter.
+  socket file is owner-only. Remote dynamic forwarding lets the server's side reach your network; pass an `allowDestination` filter
+  (`PermitRemoteOpen` in `ssh_config`).
 - **Configuration from elsewhere.** `ProxyCommand` is allowed by default (as in `ssh`); `KnownHostsCommand` and `Match exec` are
   opt-in. For configuration files you do not control, set `AllowProxyCommand = false` and leave the others off.
 - **Server text.** Banners, prompts, error messages and command output come from the server. Strip control characters before showing

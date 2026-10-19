@@ -25,7 +25,13 @@ token still works alongside it, and cancelling it is an `OperationCanceledExcept
 apart. `null` (the default) sets no limit.
 
 With `ssh_config`, `ConnectTimeout` applies when connecting by alias, per hop, and fails the same way. There it starts before the
-identity files are loaded and covers the `ProxyJump` hops before the host, as `ssh`'s does.
+identity files are loaded and covers the `ProxyJump` hops before the host, as `ssh`'s does. `SshConfigConnectOptions.ConnectTimeout`,
+when set, replaces the configured value for every host (`Timeout.InfiniteTimeSpan` for no limit).
+
+`ConnectionAttempts` (in `ssh_config`, or `SshConfigConnectOptions.ConnectionAttempts`) tries a server that could not be reached
+again, one second later, for a host that may be restarting. Only failures to reach it count (refused, unreachable, timed out), and
+the attempts share the one `ConnectTimeout`: with `ConnectTimeout 10` and `ConnectionAttempts 30`, connecting still gives up
+after ten seconds.
 
 With `SshClientOptions.JumpHosts`, the destination's `ConnectTimeout` bounds the whole chain (every hop, every tunnel, and the
 destination's handshake and login), and a hop's own `ConnectTimeout` bounds that hop within it. Either fails the same way.

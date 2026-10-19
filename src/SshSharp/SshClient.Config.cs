@@ -27,7 +27,7 @@ public sealed partial class SshClient
         options ??= new SshConfigConnectOptions();
         var config = options.Config ?? SshConfig.LoadDefault(options.ResolveOptions?.HomeDirectory);
         var (user, host, port) = ParseDestination(destination);
-        return await ConnectHopAsync(host, user, port, config, options, via: null, depth: 0, cancellationToken).ConfigureAwait(false);
+        return await ConnectHopAsync(host, user, port ?? options.Port, config, options, via: null, depth: 0, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -58,8 +58,9 @@ public sealed partial class SshClient
 
         // Covers the whole hop, as ssh's does: loading identities, any ProxyJump hosts, the connection, handshake and authentication. So it
         // is applied here rather than through the hop's SshClientOptions.ConnectTimeout, which would start only at the connection.
-        // As in OpenSSH, ConnectTimeout 0 means no limit.
-        using var deadline = new ConnectDeadline(hostConfig.ConnectTimeout is { } limit && limit > TimeSpan.Zero ? limit : null, cancellationToken);
+        // As in OpenSSH, ConnectTimeout 0 means no limit; so does an infinite SshConfigConnectOptions.ConnectTimeout, which overrides it.
+        using var deadline = new ConnectDeadline((options.ConnectTimeout ?? hostConfig.ConnectTimeout) is { } limit && limit > TimeSpan.Zero ? limit : null,
+            cancellationToken);
         var token = deadline.Token;
 
         // Measured from here, so failures to reach the server count too; a direct TCP connection is tagged as one.
@@ -111,7 +112,10 @@ public sealed partial class SshClient
             {
                 var local = TcpConnector.FromConfig(hostConfig.BindAddress, hostConfig.BindInterface);
                 var connector = options.TcpConnector ?? (options.Proxy is { } proxy ? ProxyConnector(proxy, local) : DirectConnector(local));
-                var (tcpStream, tcpOwner) = await connector(hostConfig.HostName, hostConfig.Port, hostConfig.AddressFamily, token).ConfigureAwait(false);
+                var family = options.AddressFamily ?? hostConfig.AddressFamily;
+                var attempts = options.ConnectionAttempts ?? hostConfig.ConnectionAttempts;
+                var (tcpStream, tcpOwner) = await WithConnectionAttemptsAsync(
+                    ct => connector(hostConfig.HostName, hostConfig.Port, family, ct), attempts, options.TimeProvider, logger, token).ConfigureAwait(false);
 
                 // Owned from here, so the socket is closed if anything fails before the client takes it (disposing it twice is harmless).
                 owner.Add(tcpOwner ?? tcpStream);
@@ -148,8 +152,8 @@ public sealed partial class SshClient
                 HostKeyVerifier = options.HostKeyVerifier ?? KnownHostsVerifier.FromConfig(hostConfig, hostConfig.BatchMode ? null : options.AskHostKey,
                     hostConfig.BatchMode ? null : options.ConfirmHostKeyUpdate, options.AllowKnownHostsCommand),
                 HostKeyAlias = hostConfig.HostKeyAlias,
-                KeepAliveInterval = hostConfig.ServerAliveInterval,
-                KeepAliveCountMax = hostConfig.ServerAliveCountMax,
+                KeepAliveInterval = options.KeepAliveInterval is { } interval ? (interval > TimeSpan.Zero ? interval : null) : hostConfig.ServerAliveInterval,
+                KeepAliveCountMax = options.KeepAliveCountMax ?? hostConfig.ServerAliveCountMax,
                 ChannelTimeouts = hostConfig.ChannelTimeouts,
                 ObscureKeystrokeTiming = hostConfig.ObscureKeystrokeTiming,
                 AlgorithmPreferences = AlgorithmPreferences.FromConfig(hostConfig),
@@ -202,6 +206,37 @@ public sealed partial class SshClient
             }
         }
     }
+
+    /// <summary>
+    /// <c>ConnectionAttempts</c>: makes the connection, and after a failure to reach the server tries again one second later, up to
+    /// <paramref name="attempts"/> times in all, as ssh does. Anything else (a name that does not resolve, a bind address that cannot be
+    /// used, a proxy that refuses) fails at once: trying again would not change it.
+    /// </summary>
+    internal static async ValueTask<T> WithConnectionAttemptsAsync<T>(Func<CancellationToken, ValueTask<T>> connect, int attempts, TimeProvider timeProvider,
+        ILogger logger, CancellationToken cancellationToken)
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                return await connect(cancellationToken).ConfigureAwait(false);
+            }
+            catch (SshException ex) when (attempt < attempts && ex is { Reason: SshFailureReason.ConnectFailed, InnerException: SocketException socketError }
+                && IsUnreachable(socketError.SocketErrorCode))
+            {
+                SshLog.ConnectionAttemptFailed(logger, attempt, attempts, socketError.SocketErrorCode);
+            }
+
+            await Task.Delay(ConnectionAttemptInterval, timeProvider, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>The wait between connection attempts, as in ssh.</summary>
+    internal static readonly TimeSpan ConnectionAttemptInterval = TimeSpan.FromSeconds(1);
+
+    /// <summary>The failures that mean the server was not reached, which a later attempt may get past (it is starting, or a route returns).</summary>
+    private static bool IsUnreachable(SocketError error) => error is SocketError.ConnectionRefused or SocketError.TimedOut or SocketError.HostUnreachable
+        or SocketError.NetworkUnreachable or SocketError.HostDown or SocketError.NetworkDown;
 
     /// <summary>Opens the first hop through a proxy; the address family is the proxy's business, since it makes the connection.</summary>
     private static Func<string, int, SshAddressFamily, CancellationToken, ValueTask<(Stream Stream, IAsyncDisposable? Owner)>> ProxyConnector(SshProxy proxy, IReadOnlyList<IPEndPoint>? local) =>

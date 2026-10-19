@@ -94,6 +94,15 @@ what they may reach:
 
 [!code-csharp[](../snippets/Forwarding.cs#remote-dynamic)]
 
+From `ssh_config`, `RemoteForward` with only a port starts it, and `PermitRemoteOpen` is its filter, as in `ssh`:
+
+[!code-csharp[](../snippets/Forwarding.cs#remote-dynamic-config)]
+
+`PermitRemoteOpen` takes `host:port` entries (`[2001:db8::1]:22` for IPv6), with `*` for any host or any port, or `any` (the
+default) or `none`. Unlike `allowDestination`, which also sees every address a name resolves to, it compares the requested name as
+given and makes no lookup, as `ssh_config(5)` says: `mirror.example.com:443` allows that name, and the connection goes to whatever it
+resolves to here; `192.0.2.10:*` allows that address only, not a name that resolves to it.
+
 ## Serving a remote port from your app
 
 Remote forwarding can also hand each connection to your code instead of relaying it to a host and port: the server listens, and
@@ -164,7 +173,8 @@ requested; its `LocalHost` is empty and `LocalPort` 0.
 - **Lifetime.** Forwarding runs until the forwarder is disposed, the client is disposed, or the connection ends. Watch
   `client.ConnectionClosed` if you need to know (see [Keep-alive and reconnecting](keepalive-and-reconnect.md)).
 - **Remote destinations come from the server's side.** With remote dynamic forwarding, every destination is allowed when
-  `allowDestination` is null, as with `ssh`. Pass a filter unless you trust everyone on the server.
+  `allowDestination` is null (or, from `ssh_config`, without `PermitRemoteOpen`), as with `ssh`. Pass a filter unless you trust
+  everyone on the server.
 - **Limits.** The server can open at most `SshClientOptions.MaxForwardedConnections` (1,000) forwarded connections at a time, and a
   forwarding to a handler at most its `maxConnections`.
 - **From `ssh_config`.** `LocalForward`, `RemoteForward` and `DynamicForward` start with the connection when

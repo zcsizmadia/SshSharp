@@ -14,3 +14,5 @@ SshSharp.Extensions.DependencyInjection.SshEndpointPrivateKey.Passphrase.set -> 
 SshSharp.Extensions.DependencyInjection.SshEndpointPrivateKey.SshEndpointPrivateKey() -> void
 SshSharp.Extensions.DependencyInjection.SshConnectionProviderExtensions
 static SshSharp.Extensions.DependencyInjection.SshConnectionProviderExtensions.OpenSftpAsync(this SshSharp.Extensions.DependencyInjection.ISshConnectionProvider! connections, string! name, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SshSharp.Sftp.SftpClient!>!
+SshSharp.Extensions.DependencyInjection.SshEndpointOptions.AddressFamily.get -> SshSharp.Config.SshAddressFamily?
+SshSharp.Extensions.DependencyInjection.SshEndpointOptions.AddressFamily.set -> void

@@ -27,6 +27,7 @@ value.
 | `ProxyJump` | `ProxyJump` | Yes: each hop resolved, verified and authenticated with its own settings. |
 | `ProxyCommand` | `ProxyCommand` | Yes, unless `SshConfigConnectOptions.AllowProxyCommand = false`. |
 | `ConnectTimeout` | `ConnectTimeout` | Yes, per hop, from before the identity files are loaded through authentication; fails with `SshFailureReason.Timeout`, as `SshClientOptions.ConnectTimeout` does. `0` means no limit, as in OpenSSH. |
+| `ConnectionAttempts` | `ConnectionAttempts` | Yes: the host's TCP connection (or its connection to a proxy) is tried this many times, one second apart (default 1). Only failures to reach it are tried again (refused, unreachable, timed out), never a failed handshake or authentication, and `ConnectTimeout` bounds all the attempts together, as in OpenSSH. A host reached through `ProxyJump` makes no TCP connection of its own (the first hop's setting applies to the first hop), and a `ProxyCommand` is not run again. |
 | `AddressFamily` | `AddressFamily` | Yes (`any`, `inet`, `inet6`), as `SshClientOptions.AddressFamily`. Not with a `ProxyCommand` or a proxy, which make the connection. |
 | `BindAddress`, `BindInterface` | `BindAddress`, `BindInterface` | Yes: the local address of the connection (and of the connection to a proxy). |
 | `ServerAliveInterval`, `ServerAliveCountMax` | same names | Yes: `KeepAliveInterval` and `KeepAliveCountMax`. |
@@ -34,6 +35,22 @@ value.
 | `ObscureKeystrokeTiming` | `ObscureKeystrokeTiming` | Yes; on (20 ms) unless `no` or another interval, as in `ssh`. |
 | `RefuseConnection` | `RefuseConnection` | Yes: the connection fails before any network activity. |
 | `CanonicalizeHostname`, `CanonicalDomains`, `CanonicalizeMaxDots`, `CanonicalizeFallbackLocal` | (in `Options`) | Only when `SshConfigResolveOptions.HostCanonicalizer` is set. |
+
+## Overriding in code
+
+A few transport settings can be given in `SshConfigConnectOptions` instead, and then win over the configuration (null leaves
+them to it):
+
+| Option | Overrides | For |
+|---|---|---|
+| `Port` | `Port` | The destination only, as `ssh -p` (a port in an `ssh://` destination still wins). Resolution sees it (`%p`, `Match`). |
+| `ConnectTimeout` | `ConnectTimeout` | Every host; `Timeout.InfiniteTimeSpan` for no limit. |
+| `ConnectionAttempts` | `ConnectionAttempts` | Every host. |
+| `AddressFamily` | `AddressFamily` | The connection this machine makes (the destination, or the first `ProxyJump` hop). |
+| `KeepAliveInterval`, `KeepAliveCountMax` | `ServerAliveInterval`, `ServerAliveCountMax` | Every host; `TimeSpan.Zero` turns keep-alives off. |
+
+`HostKeyVerifier` and `Proxy` replace the configured host key checking and connection the same way. See
+[Override what the configuration says](../how-to/ssh-config-and-known-hosts.md#override-what-the-configuration-says).
 
 ## Algorithms
 
@@ -85,6 +102,7 @@ Applied only with `SshConfigConnectOptions.StartForwardings = true`, since they 
 |---|---|---|
 | `LocalForward` | `LocalForwards` | TCP, and Unix sockets on either side: `/local.sock host:port`, `[bind:]port /remote.sock`, `/local.sock /remote.sock` (a field with a `/` is a path, as in `ssh`; a local one may use `\` on Windows). Paths take tokens, `~` and `${VAR}`. The local socket is created owner-only and removed when the forwarding stops. |
 | `RemoteForward` | `RemoteForwards` | TCP, remote dynamic (port only), and Unix-socket forms. |
+| `PermitRemoteOpen` | `PermitRemoteOpen` | The destinations remote dynamic forwarding (`RemoteForward` with a port only) may connect to: `host:port` entries (`[address]:port` for IPv6), with `*` for any host or any port; `any` (the default) or `none`. As in OpenSSH, names are compared as given, with no pattern matching and no address lookup: `localhost:8080` does not allow `127.0.0.1:8080`. Entries that do not parse allow nothing. |
 | `DynamicForward` | `DynamicForwards` | SOCKS 4/4a/5. |
 | `GatewayPorts` | `GatewayPorts` | Default bind address for forwardings without one. |
 | `StreamLocalBindUnlink` | `StreamLocalBindUnlink` | `yes` removes an existing file where `LocalForward` creates its Unix socket (a stale socket); without it, that forwarding fails, as in `ssh`. `StreamLocalBindMask` is not read: the socket is always owner-only (`ssh`'s default `0177`). |
