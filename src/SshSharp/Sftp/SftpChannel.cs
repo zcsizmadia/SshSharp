@@ -474,27 +474,30 @@ internal sealed class SftpChannel : IAsyncDisposable
     /// <summary>Writes one whole frame (length included) under the send lock, then releases the lock and disposes <paramref name="owner"/>.</summary>
     private async Task WriteLockedAsync(ReadOnlyMemory<byte> frame, SftpRequestFrame? owner)
     {
-        try
+        // Disposed last, after the lock is released below.
+        using (owner)
         {
-            // A request that waited for the lock while the channel failed (a write cut off halfway) must not follow it onto the stream.
-            if (Volatile.Read(ref _failure) is { } failed)
+            try
             {
-                throw Ended(failed);
-            }
+                // A request that waited for the lock while the channel failed (a write cut off halfway) must not follow it onto the stream.
+                if (Volatile.Read(ref _failure) is { } failed)
+                {
+                    throw Ended(failed);
+                }
 
-            // Only the channel ending stops a write (see FinishSendAsync); the caller's token does not.
-            var stop = _stop.Token;
-            await _session.StandardInput.WriteAsync(frame, stop).ConfigureAwait(false);
-            await _session.StandardInput.FlushAsync(stop).ConfigureAwait(false);
-        }
-        catch (Exception ex) when (ex is IOException or ObjectDisposedException or OperationCanceledException)
-        {
-            throw Ended(Volatile.Read(ref _failure) ?? ex);
-        }
-        finally
-        {
-            _sendLock.Release();
-            owner?.Dispose();
+                // Only the channel ending stops a write (see FinishSendAsync); the caller's token does not.
+                var stop = _stop.Token;
+                await _session.StandardInput.WriteAsync(frame, stop).ConfigureAwait(false);
+                await _session.StandardInput.FlushAsync(stop).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is IOException or ObjectDisposedException or OperationCanceledException)
+            {
+                throw Ended(Volatile.Read(ref _failure) ?? ex);
+            }
+            finally
+            {
+                _sendLock.Release();
+            }
         }
     }
 
