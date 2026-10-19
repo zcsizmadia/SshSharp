@@ -574,11 +574,15 @@ internal sealed class SshTransport : IAsyncDisposable
         exchanged.TrySetResult();
     }
 
+    // Not before authentication, as in OpenSSH (ssh_packet_need_rekeying): with delayed compression the server turns inflation on when
+    // it sends USERAUTH_SUCCESS, so a KEXINIT of ours sent uncompressed just before it would arrive at a server that inflates it, and
+    // the connection would break. A re-exchange the server starts is still carried out, and RekeyAsync still starts one when asked.
     private bool RekeyDue() =>
-        Interlocked.Read(ref _bytesSinceKex) >= _options.RekeyBytes
+        Volatile.Read(ref _authenticated)
+        && (Interlocked.Read(ref _bytesSinceKex) >= _options.RekeyBytes
         || Interlocked.Read(ref _packetsSentSinceKex) >= _options.RekeyPackets
         || Interlocked.Read(ref _packetsReceivedSinceKex) >= _options.RekeyPackets
-        || _options.TimeProvider.GetElapsedTime(_kexStartedAt) >= _options.RekeyInterval;
+        || _options.TimeProvider.GetElapsedTime(_kexStartedAt) >= _options.RekeyInterval);
 
     /// <summary>
     /// Runs on the receive side after each key re-exchange completes, before the next message is read. OpenSSH drops a PING that

@@ -415,13 +415,18 @@ public sealed class SshClientOptions
     /// <summary>
     /// Negotiate new keys after this many bytes have been transferred under the current ones. Default 1 GiB (RFC 4253 section 9).
     /// Values above 64 GiB (2^32 cipher blocks, the limit OpenSSH applies) are capped, and keys are also renewed every 2^31 packets.
+    /// As in OpenSSH, the client starts a re-exchange only once the user is authenticated; one the server starts is carried out at any
+    /// time.
     /// </summary>
     public long RekeyAfterBytes { get; init; } = 1L << 30;
 
     /// <summary>The largest effective <see cref="RekeyAfterBytes"/>: 2^32 blocks of a 128-bit cipher.</summary>
     internal const long MaxRekeyAfterBytes = 1L << 36;
 
-    /// <summary>Negotiate new keys after the current ones have been in use this long. Default 1 hour (RFC 4253 section 9).</summary>
+    /// <summary>
+    /// Negotiate new keys after the current ones have been in use this long. Default 1 hour (RFC 4253 section 9). Like
+    /// <see cref="RekeyAfterBytes"/>, it applies only once the user is authenticated.
+    /// </summary>
     public TimeSpan RekeyAfterTime { get; init; } = TimeSpan.FromHours(1);
 
     /// <summary>Receives diagnostics (connection, algorithms, authentication outcome, channels, rekeys). Never receives passwords or command text. Default: no logging.</summary>

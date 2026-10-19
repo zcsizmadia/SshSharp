@@ -172,6 +172,74 @@ public sealed class TcpConnectorTests
     }
 
     [Test]
+    [Arguments(SshAddressFamily.Any, false)]
+    [Arguments(SshAddressFamily.Inet, false)]
+    [Arguments(SshAddressFamily.Any, true)]
+    public async Task AnIpv4MappedAddress_IsConnectedToOverIpv4(SshAddressFamily family, bool bind)
+    {
+        // A resolver may return ::ffff:127.0.0.1. An IPv6 socket that is not dual-mode cannot reach it (Windows refuses with
+        // AddressNotAvailable), and an IPv4 bind address could not be used for it: it is the IPv4 address it carries.
+        using var listener = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+        listener.Bind(new IPEndPoint(IPAddress.Loopback, 0));
+        listener.Listen();
+        var accepted = listener.AcceptAsync(Timeout()).AsTask();
+        var families = new List<AddressFamily>();
+
+        await using var stream = await TcpConnector.ConnectAsync("server.example.com", ((IPEndPoint)listener.LocalEndPoint!).Port,
+            bind ? [new IPEndPoint(IPAddress.Loopback, 0)] : null, family, "the server", socket => families.Add(socket.AddressFamily),
+            Resolving(IPAddress.Loopback.MapToIPv6()), Timeout());
+        using var server = await accepted.WaitAsync(Timeout());
+
+        await Assert.That(families).IsEquivalentTo([AddressFamily.InterNetwork]);
+        await Assert.That(((IPEndPoint)server.RemoteEndPoint!).Address).IsEqualTo(IPAddress.Loopback);
+    }
+
+    [Test]
+    public async Task AnIpv4MappedLiteral_IsConnectedToOverIpv4_EvenWithAddressFamilyInet()
+    {
+        using var listener = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+        listener.Bind(new IPEndPoint(IPAddress.Loopback, 0));
+        listener.Listen();
+        var accepted = listener.AcceptAsync(Timeout()).AsTask();
+
+        await using var stream = await TcpConnector.ConnectAsync("::ffff:127.0.0.1", ((IPEndPoint)listener.LocalEndPoint!).Port, null,
+            SshAddressFamily.Inet, "the server", Timeout());
+        using var server = await accepted.WaitAsync(Timeout());
+
+        await Assert.That(stream.Socket.AddressFamily).IsEqualTo(AddressFamily.InterNetwork);
+    }
+
+    [Test]
+    public async Task AFamilyTheSystemLacks_IsSkipped_AndTheOtherAddressesErrorIsReported()
+    {
+        // A system with IPv6 turned off: creating an IPv6 socket would fail with AddressFamilyNotSupported, which said nothing about why
+        // the IPv4 address failed. The IPv6 address is not tried; the IPv4 one's refusal is the error.
+        var families = new List<AddressFamily>();
+
+        var ex = await Assert.That(async () => await TcpConnector.ConnectAsync("server.example.com", 1, local: null, SshAddressFamily.Any, "the server",
+                socket => families.Add(socket.AddressFamily), Resolving(IPAddress.IPv6Loopback, IPAddress.Loopback),
+                family => family == AddressFamily.InterNetwork, Timeout()))
+            .Throws<SshException>();
+
+        await Assert.That(ex!.Message).IsEqualTo("Could not connect to the server: ConnectionRefused.");
+        await Assert.That(families).IsEquivalentTo([AddressFamily.InterNetwork]);
+    }
+
+    [Test]
+    public async Task OnlyAddressesOfAFamilyTheSystemLacks_SaySo_WithoutTryingAny()
+    {
+        var sockets = 0;
+
+        var ex = await Assert.That(async () => await TcpConnector.ConnectAsync("server.example.com", 22, local: null, SshAddressFamily.Any, "the server",
+                _ => sockets++, Resolving(IPAddress.IPv6Loopback), family => family == AddressFamily.InterNetwork, Timeout()))
+            .Throws<SshException>();
+
+        await Assert.That(ex!.Reason).IsEqualTo(SshFailureReason.ConnectFailed);
+        await Assert.That(ex.Message).IsEqualTo("None of the addresses of the server is of an address family this system supports.");
+        await Assert.That(sockets).IsEqualTo(0);
+    }
+
+    [Test]
     public async Task ANameThatDoesNotResolve_IsAConnectFailure_WithoutABind()
     {
         // .invalid never resolves (RFC 6761).

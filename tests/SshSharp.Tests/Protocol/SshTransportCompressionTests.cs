@@ -16,13 +16,15 @@ public class SshTransportCompressionTests
     /// <summary>What the client compresses with, where it can (zlib@openssh.com on .NET 10, none on .NET 8).</summary>
     private static string ClientToServer => SshAlgorithms.CanCompressOutgoing ? SshAlgorithms.CompressionZlibOpenSsh : SshAlgorithms.CompressionNone;
 
-    private static async Task<(SshTransport Client, FakeSshServer Server)> StartAsync(FakeServerOptions? server = null, bool compression = true)
+    private static async Task<(SshTransport Client, FakeSshServer Server)> StartAsync(FakeServerOptions? server = null, bool compression = true,
+        long rekeyBytes = long.MaxValue)
     {
         var fake = new FakeSshServer(server ?? new FakeServerOptions { Compression = ServerOffers });
         var transport = new SshTransport(fake.ClientStream, new SshTransportOptions
         {
             VerifyHostKey = (_, _) => ValueTask.FromResult(true),
             Preferences = new AlgorithmPreferences { Compression = compression ? SshAlgorithms.EnabledCompression : SshAlgorithms.DefaultCompression },
+            RekeyBytes = rekeyBytes,
         });
         var token = Timeout();
         var serverTask = fake.StartAsync(token);
@@ -251,6 +253,100 @@ public class SshTransportCompressionTests
             await Assert.That(server.SentPackets.Skip(sentBefore).SkipWhile(p => p.Type != SshMessage.NewKeys).Skip(1).All(p => !p.Compressed)).IsTrue();
             await Assert.That(server.ReceivedPackets.Skip(receivedBefore).SkipWhile(p => p.Type != SshMessage.NewKeys).Skip(1).All(p => !p.Compressed)).IsTrue();
         }
+    }
+
+    [Test]
+    public async Task AThresholdCrossedDuringAuthentication_WaitsForTheSuccess_ThenReexchangesCompressed()
+    {
+        // The review's case: a 150-byte request crosses a 100-byte threshold before the user is authenticated. A KEXINIT sent then goes
+        // out plain, and the server, which inflates from its USERAUTH_SUCCESS on, would inflate it and drop the connection. As in
+        // OpenSSH, the re-exchange waits until the success has arrived, and then runs compressed like any other packet.
+        var (client, server) = await StartAsync(rekeyBytes: 100);
+        await using (client)
+        await using (server)
+        {
+            // A failed attempt and a second one: neither is held back for an exchange, and no KEXINIT comes between them.
+            await client.SendAsync(Message(SshMessage.UserAuthRequest, 150, 1), Timeout());
+            await ServerGetsARequestAsync(server);
+            await server.SendAsync(Message(SshMessage.UserAuthFailure, 30, 2), Timeout());
+            await Assert.That((await ClientReceivesAsync(client))[0]).IsEqualTo(SshMessage.UserAuthFailure);
+            await client.SendAsync(Message(SshMessage.UserAuthRequest, 150, 3), Timeout());
+            await ServerGetsARequestAsync(server);
+            await Assert.That(server.ReceivedPackets.Count(p => p.Type == SshMessage.KexInit)).IsEqualTo(0); // none since the first exchange
+            await Assert.That(client.KeyExchangeCount).IsEqualTo(1);
+            var before = server.ReceivedPackets.Count;
+            await server.SendAsync(new byte[] { SshMessage.UserAuthSuccess }, Timeout());
+
+            // The server's next read gets the client's KEXINIT (and carries out the exchange) and then the client's next message.
+            var serverNext = ServerReceivesAsync(server);
+            await Assert.That((await ClientReceivesAsync(client))[0]).IsEqualTo(SshMessage.UserAuthSuccess);
+            var clientNext = ClientReceivesAsync(client);
+            var token = Timeout();
+            while (server.KeyExchangeCount < 2 || client.KeyExchangeCount < 2)
+            {
+                await Task.Delay(10, token);
+            }
+
+            var up = Message(94, 500, 7);
+            await client.SendAsync(up, Timeout());
+            await Assert.That((await serverNext).AsSpan().SequenceEqual(up)).IsTrue();
+            var down = Message(94, 500, 8);
+            await server.SendAsync(down, Timeout());
+            await Assert.That((await clientNext).AsSpan().SequenceEqual(down)).IsTrue();
+
+            // The re-exchange's KEXINIT came after the success, compressed where the client compresses, as the server expects.
+            await Assert.That(server.ReceivedPackets.Skip(before).Where(p => p.Type == SshMessage.KexInit).Select(p => p.Compressed))
+                .IsEquivalentTo(new[] { SshAlgorithms.CanCompressOutgoing });
+        }
+    }
+
+    private static async Task ServerGetsARequestAsync(FakeSshServer server) =>
+        await Assert.That((await ServerReceivesAsync(server))[0]).IsEqualTo(SshMessage.UserAuthRequest);
+
+    [Test]
+    public async Task ATimeThreshold_DoesNotStartAReexchangeBeforeAuthentication()
+    {
+        var time = new ManualTime();
+        var fake = new FakeSshServer(new FakeServerOptions { Compression = ServerOffers });
+        var transport = new SshTransport(fake.ClientStream, new SshTransportOptions
+        {
+            VerifyHostKey = (_, _) => ValueTask.FromResult(true),
+            Preferences = new AlgorithmPreferences { Compression = SshAlgorithms.EnabledCompression },
+            RekeyInterval = TimeSpan.FromMinutes(1),
+            TimeProvider = time,
+        });
+        await using (transport)
+        await using (fake)
+        {
+            var token = Timeout();
+            var serverTask = fake.StartAsync(token);
+            await transport.ConnectAsync(token);
+            await serverTask;
+
+            // An authentication that takes longer than the interval (a user typing a password) sends no KEXINIT: the next thing the server
+            // reads is the request itself, and the request is not held back waiting for an exchange.
+            time.Advance(TimeSpan.FromMinutes(5));
+            await transport.SendAsync(Message(SshMessage.UserAuthRequest, 60, 1), token);
+            await ServerGetsARequestAsync(fake);
+            await fake.SendAsync(Message(SshMessage.UserAuthFailure, 30, 2), token);
+            await Assert.That((await ClientReceivesAsync(transport))[0]).IsEqualTo(SshMessage.UserAuthFailure);
+            await transport.SendAsync(Message(SshMessage.UserAuthRequest, 60, 3), token);
+            await ServerGetsARequestAsync(fake);
+            await Assert.That(fake.ReceivedPackets.Count(p => p.Type == SshMessage.KexInit)).IsEqualTo(0); // none since the first exchange
+            await Assert.That(transport.KeyExchangeCount).IsEqualTo(1);
+        }
+    }
+
+    /// <summary>A clock the test moves by hand.</summary>
+    private sealed class ManualTime : TimeProvider
+    {
+        private long _ticks;
+
+        public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+
+        public override long GetTimestamp() => Interlocked.Read(ref _ticks);
+
+        public void Advance(TimeSpan span) => Interlocked.Add(ref _ticks, span.Ticks);
     }
 
     [Test]

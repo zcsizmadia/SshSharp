@@ -125,6 +125,30 @@ public class PacketCompressionTests
     }
 
     [Test]
+    public async Task APacketThatFailsPartWay_LeavesNoneOfItsOutputInThePooledBuffer()
+    {
+        // Text the stream inflates, then a block of the reserved type, in one packet: zlib writes the text into the buffer and then fails
+        // in the same read, so none of it is counted. All of the buffer zlib could write to is wiped before it goes back to the pool.
+        var text = Text(3000, 4);
+        byte[] compressed = [.. CompressWithZlib([text])[0], 0x06, 0x00];
+        byte[]? discarded = null;
+        var wiped = false;
+        using var decompressor = new ZlibDecompressor
+        {
+            Discarding = buffer =>
+            {
+                discarded = buffer;
+                wiped = buffer.AsSpan(0, Math.Min(buffer.Length, PacketCodec.MaxPacketLength)).IndexOfAnyExcept((byte)0) < 0;
+            },
+        };
+
+        var error = await Assert.That(() => Inflate(decompressor, compressed)).Throws<SshProtocolException>();
+        await Assert.That(error!.Message).Contains("not valid zlib");
+        await Assert.That(discarded).IsNotNull();
+        await Assert.That(wiped).IsTrue();
+    }
+
+    [Test]
     public async Task AStreamThatEndsInsideAPacket_FailsWithAProtocolError()
     {
         // A sender that finishes its zlib stream (a final block and the checksum) and puts more after it in the same packet. Bytes that

@@ -104,8 +104,13 @@ internal static class SocksHandshake
         {
             // SOCKS 4's user id is no password; a client that cannot do SOCKS 5 is turned away. The whole request is read first: closing
             // with unread data sends a reset, and on Windows a reset can discard the refusal before the client has read it.
-            await ReadSocks4Async(stream, cancellationToken).ConfigureAwait(false);
-            await SendAsync(stream, [0, 0x5B, 0, 0, 0, 0, 0, 0], cancellationToken).ConfigureAwait(false);
+            // A request this proxy would not do anyway (not CONNECT, port 0, a bad 4a name) has had its refusal from ReadSocks4Async;
+            // the client gets one reply, not two.
+            if (await ReadSocks4Async(stream, cancellationToken).ConfigureAwait(false) is not null)
+            {
+                await SendAsync(stream, [0, 0x5B, 0, 0, 0, 0, 0, 0], cancellationToken).ConfigureAwait(false);
+            }
+
             throw new SocksAuthenticationException("SOCKS 4 has no password authentication");
         }
 

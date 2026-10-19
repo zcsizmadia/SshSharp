@@ -115,15 +115,18 @@ public class SshTransportTests
     [Test]
     public async Task AFailedConnection_ReleasesSendersWaitingForAReexchange_AndRefusesNewOnes()
     {
-        // Our KEXINIT goes out after the first send (RekeyBytes = 1) and the server never answers it: the next send waits for an exchange
-        // that cannot finish. When the connection fails (keep-alive timeout, DISCONNECT, reset), that sender must not wait forever.
+        // Our KEXINIT goes out once the user is authenticated (RekeyBytes = 1 is long passed) and the server never answers it: the next
+        // send waits for an exchange that cannot finish. When the connection fails (keep-alive timeout, DISCONNECT, reset), that sender
+        // must not wait forever.
         var options = Accepting();
         options = new SshTransportOptions { Preferences = options.Preferences, VerifyHostKey = options.VerifyHostKey, RekeyBytes = 1 };
         var (transport, server) = await Connect(new FakeServerOptions(), options);
         await using (transport)
         await using (server)
         {
-            await transport.SendAsync(new byte[] { 90, 1 }, Timeout());
+            await server.SendAsync(new byte[] { SshMessage.UserAuthSuccess }, Timeout());
+            (await transport.ReceiveAsync(Timeout())).Dispose();
+
             var waiting = transport.SendAsync(new byte[] { 90, 2 }, CancellationToken.None).AsTask();
             await Task.Delay(100);
             await Assert.That(waiting.IsCompleted).IsFalse();

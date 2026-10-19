@@ -47,6 +47,10 @@ public class SshConnectionRekeyTests
         await transport.ConnectAsync(token);
         await serverStart;
 
+        // Thresholds count only once the user is authenticated.
+        await server.SendAsync(new byte[] { SshMessage.UserAuthSuccess }, token);
+        (await transport.ReceiveAsync(token)).Dispose();
+
         await using var connection = new SshConnection(transport);
         connection.Start();
         var opening = connection.OpenSessionAsync(token);

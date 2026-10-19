@@ -130,9 +130,20 @@ packet and exposes the decoder to an unauthenticated peer, is not implemented, b
 2024). The decoder is .NET's (`System.IO.Compression`, zlib), and its output is bounded: a packet that inflates to 256 KiB or more
 (a decompression bomb) or is not valid zlib data fails the connection with a protocol error, before any of it reaches a channel.
 
-Compression is not a cryptographic algorithm, so `FipsMode` allows it. zlib's own buffers (its window of recent data, in native
-memory, and the stream's input buffer) hold plaintext; they are released, not wiped, when the connection ends, unlike SshSharp's
-packet buffers. With compression off there are none.
+Compression is not a cryptographic algorithm, so `FipsMode` allows it.
+
+**What stays in memory.** With compression on, plaintext is left behind in buffers SshSharp cannot wipe, unlike its own packet
+buffers (which are zeroed before they go back to the pool, a packet that fails to inflate included):
+
+- zlib's native state: its window of recent data (up to 32 KiB per direction) is freed, not wiped, when the stream ends.
+- .NET's `ZLibStream` (a `DeflateStream`) rents an 8 KiB buffer from the process-wide `ArrayPool<byte>.Shared` for each direction.
+  When inflating, it holds the server's last compressed payloads; when compressing, SshSharp's last compressed payloads. Compressed
+  is not encrypted: anyone who can inflate it reads the plaintext. The stream returns the buffer to the shared pool without clearing
+  it when it is disposed (at each key exchange and when the connection ends), and the next code in the process that rents an array
+  of that size gets it, contents and all.
+
+This matters only to a threat that can read the process's memory or that shares its array pool with code it does not trust; such a
+threat can usually read the data where the application uses it anyway. With compression off there are none of these buffers.
 
 ### Channels the server opens
 
