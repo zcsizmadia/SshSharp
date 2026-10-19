@@ -203,31 +203,62 @@ public class TransportInteropTests
     /// </summary>
     private static async Task<(Stream Stream, SshTransport Transport)> ConnectOrSkipAsync(Func<SshTransportOptions> options, CancellationToken cancellationToken)
     {
-        for (var attempt = 1; ; attempt++)
+        // Older OpenSSH and Dropbear lack some algorithms; only "the server does not offer it" is a skip, anything else fails. That is
+        // decided from the server's KEXINIT before connecting, not from the failed handshake: a server that finds nothing in common
+        // disconnects at once, OpenSSH for Windows with a reset, and Windows then may drop the server's KEXINIT before the client reads
+        // it, so the client would see the reset instead of "no matching".
+        var serverInit = await ServerKexInitAsync(cancellationToken);
+        try
         {
-            var stream = await RealServer.ConnectAsync();
-            var transport = new SshTransport(stream, options());
-            try
-            {
-                await transport.ConnectAsync(cancellationToken);
-                return (stream, transport);
-            }
-            catch (SshException ex) when (ex.Reason == SshFailureReason.KeyExchangeFailed && ex.Message.StartsWith("No matching", StringComparison.Ordinal))
-            {
-                // Older OpenSSH and Dropbear lack some algorithms; only "the server does not offer it" is a skip, anything else fails.
-                await transport.DisposeAsync();
-                await stream.DisposeAsync();
-                Skip.Test($"{RealServer.Software} does not offer this combination: {ex.Message}");
-                throw new System.Diagnostics.UnreachableException(); // Skip.Test throws
-            }
-            catch (Exception ex) when (attempt == 1 && ex is IOException or SshException { Reason: SshFailureReason.ConnectionClosed })
-            {
-                // A server that finds nothing in common disconnects at once, and OpenSSH for Windows resets the connection; Windows may then
-                // drop its KEXINIT before the client reads it, so the client sees the reset instead of "no matching". Once more decides:
-                // that race is rare, and a real failure fails again.
-                await transport.DisposeAsync();
-                await stream.DisposeAsync();
-            }
+            AlgorithmNegotiator.Negotiate(KexInitMessage.ForClient(options().Preferences), serverInit);
+        }
+        catch (SshException ex) when (ex.Reason == SshFailureReason.KeyExchangeFailed && ex.Message.StartsWith("No matching", StringComparison.Ordinal))
+        {
+            Skip.Test($"{RealServer.Software} does not offer this combination: {ex.Message}");
+        }
+
+        var stream = await RealServer.ConnectAsync();
+        var transport = new SshTransport(stream, options());
+        try
+        {
+            await transport.ConnectAsync(cancellationToken);
+            return (stream, transport);
+        }
+        catch
+        {
+            await transport.DisposeAsync();
+            await stream.DisposeAsync();
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// The server's KEXINIT, read without sending one: servers send theirs right after the identification lines, and with no KEXINIT
+    /// from the client there is nothing to disagree on, so the server waits instead of closing.
+    /// </summary>
+    private static async Task<KexInitMessage> ServerKexInitAsync(CancellationToken cancellationToken)
+    {
+        await using var stream = await RealServer.ConnectAsync();
+        await stream.WriteAsync("SSH-2.0-SshSharpTests_probe\r\n"u8.ToArray(), cancellationToken);
+        var reader = System.IO.Pipelines.PipeReader.Create(stream);
+        await SshIdentification.ReadAsync(reader, cancellationToken);
+
+        // The first binary packet, unencrypted: uint32 packet_length, byte padding_length, payload, padding (RFC 4253, section 6).
+        var header = await reader.ReadAtLeastAsync(5, cancellationToken);
+        var (length, padding) = ReadHeader(header.Buffer);
+        reader.AdvanceTo(header.Buffer.Start);
+        var packet = await reader.ReadAtLeastAsync(4 + length, cancellationToken);
+        var payload = packet.Buffer.Slice(5, length - padding - 1).ToArray();
+        reader.AdvanceTo(packet.Buffer.GetPosition(4 + length));
+        await reader.CompleteAsync();
+        await Assert.That(payload[0]).IsEqualTo(SshMessage.KexInit);
+        return KexInitMessage.Parse(payload);
+
+        static (int Length, int Padding) ReadHeader(ReadOnlySequence<byte> buffer)
+        {
+            Span<byte> bytes = stackalloc byte[5];
+            buffer.Slice(0, 5).CopyTo(bytes);
+            return ((int)System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(bytes), bytes[4]);
         }
     }
 
