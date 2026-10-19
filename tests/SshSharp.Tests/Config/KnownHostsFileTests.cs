@@ -31,6 +31,75 @@ public class KnownHostsFileTests
     }
 
     [Test]
+    public async Task AppendAsync_WithAnSshPublicKey_RoundTripsThroughTheParser_PlainAndHashed()
+    {
+        using var hostKey = SshPrivateKey.Generate(SshKeyType.Ed25519, "host-comment");
+        var key = hostKey.GetPublicKey();
+        var path = Path.Combine(Directory.CreateTempSubdirectory("kh").FullName, "known_hosts");
+        try
+        {
+            var plain = await KnownHostsFile.AppendAsync(path, "srv.example.com", 2222, key);
+            var hashed = await KnownHostsFile.AppendAsync(path, "hidden.example.com", 22, key, hash: true, comment: "added by test");
+
+            // The key's own comment is not written; the line is what Add writes, and the library's own parser reads it back.
+            await Assert.That(plain.ToLine()).IsEqualTo($"[srv.example.com]:2222 {key.KeyType} {Convert.ToBase64String(key.Blob.Span)}");
+            await Assert.That(hashed.IsHashed).IsTrue();
+            var file = KnownHostsFile.Load(path);
+            await Assert.That(file.InvalidLineCount).IsEqualTo(0);
+            await Assert.That(file.Entries.Select(e => e.ToLine())).IsEquivalentTo([plain.ToLine(), hashed.ToLine()]);
+            await Assert.That(file.Check("srv.example.com", 2222, key)).IsEqualTo(KnownHostsCheckResult.Match);
+            await Assert.That(file.Check("hidden.example.com", key)).IsEqualTo(KnownHostsCheckResult.Match);
+            await Assert.That(file.Check("srv.example.com", key)).IsEqualTo(KnownHostsCheckResult.Unknown); // port 22 is another host
+            await Assert.That(file.Entries[1].Comment).IsEqualTo("added by test");
+            await Assert.That(file.Entries[1].GetPublicKey()).IsEqualTo(key);
+            await Assert.That(file.Entries[1].HostPatterns).DoesNotContain("hidden");
+
+            await Assert.ThrowsAsync<ArgumentNullException>(() => KnownHostsFile.AppendAsync(path, "srv.example.com", 22, (SshPublicKey)null!));
+            await Assert.ThrowsAsync<ArgumentException>(() => KnownHostsFile.AppendAsync(path, "two hosts", 22, key));
+            await Assert.That(KnownHostsFile.Load(path).Entries.Count).IsEqualTo(2); // nothing written for a refused call
+        }
+        finally
+        {
+            Directory.Delete(Path.GetDirectoryName(path)!, recursive: true);
+        }
+    }
+
+    [Test]
+    public async Task AnEntry_CanBeMadeFromAnSshPublicKey()
+    {
+        using var hostKey = SshPrivateKey.Generate(SshKeyType.EcdsaNistp256, "ignored");
+        var key = hostKey.GetPublicKey();
+
+        var entry = new KnownHostsEntry("a.example.com,192.0.2.10", key, KnownHostsMarker.Revoked, "old key");
+        await Assert.That(entry.KeyType).IsEqualTo("ecdsa-sha2-nistp256");
+        await Assert.That(entry.PublicKey.ToArray()).IsEquivalentTo(key.Blob.ToArray());
+        await Assert.That(entry.ToLine()).IsEqualTo($"@revoked a.example.com,192.0.2.10 ecdsa-sha2-nistp256 {Convert.ToBase64String(key.Blob.Span)} old key");
+        await Assert.That(entry.Matches("192.0.2.10")).IsTrue();
+        await Assert.That(KnownHostsFile.Parse(entry.ToLine()).Check("a.example.com", key)).IsEqualTo(KnownHostsCheckResult.Revoked);
+
+        // ForHost: the host as ssh stores it, or hashed with a fresh salt each time, as HashKnownHosts does.
+        var plain = KnownHostsEntry.ForHost("Srv.Example.com", 22, key);
+        await Assert.That(plain.HostPatterns).IsEqualTo("srv.example.com");
+        await Assert.That(plain.Comment).IsNull();
+        var hashed = KnownHostsEntry.ForHost("srv.example.com", 2200, key, hash: true, comment: "c", KnownHostsMarker.CertAuthority);
+        await Assert.That(hashed.IsHashed).IsTrue();
+        await Assert.That(hashed.Matches("srv.example.com", 2200)).IsTrue();
+        await Assert.That(hashed.Matches("srv.example.com")).IsFalse();
+        await Assert.That(hashed.Marker).IsEqualTo(KnownHostsMarker.CertAuthority);
+        await Assert.That(KnownHostsEntry.ForHost("srv.example.com", 2200, key, hash: true).HostPatterns).IsNotEqualTo(
+            KnownHostsEntry.ForHost("srv.example.com", 2200, key, hash: true).HostPatterns);
+        var reparsed = KnownHostsFile.Parse(hashed.ToLine()).Entries.Single();
+        await Assert.That((reparsed.HostPatterns, reparsed.Comment, reparsed.Marker)).IsEqualTo((hashed.HostPatterns, "c", KnownHostsMarker.CertAuthority));
+
+        await Assert.That(() => new KnownHostsEntry("a.example.com", (SshPublicKey)null!)).Throws<ArgumentNullException>();
+        await Assert.That(() => KnownHostsEntry.ForHost("a.example.com", 22, null!)).Throws<ArgumentNullException>();
+        await Assert.That(() => KnownHostsEntry.ForHost("a b", 22, key)).Throws<ArgumentException>();
+        await Assert.That(() => KnownHostsEntry.ForHost("a.example.com\n", 22, key)).Throws<ArgumentException>();
+        await Assert.That(() => KnownHostsEntry.ForHost(" ", 22, key)).Throws<ArgumentException>();
+        await Assert.That(() => KnownHostsEntry.ForHost("a.example.com", 0, key)).Throws<ArgumentOutOfRangeException>();
+    }
+
+    [Test]
     public async Task AProtocolException_CanCarryItsCause()
     {
         var cause = new FormatException("bad field");

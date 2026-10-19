@@ -31,7 +31,8 @@ Console.WriteLine(result.StandardOutputText);
   OpenSSH user certificates, ssh-agent (Unix sockets, the Windows OpenSSH agent and PuTTY's Pageant), FIDO security keys
   held by the agent, agent forwarding (also of an agent served in-process from your keys or KMS signers, with a filter on what the server may sign), keyboard-interactive (one-time codes, PAM), and multi-factor chains. Key generation, saved as `ssh-keygen` does, and export to PKCS#8 and PuTTY `.ppk`; signing and verifying
   files and git commits with SSH keys (`ssh-keygen -Y`). Issuing and checking user and host certificates as a certificate
-  authority (`ssh-keygen -s`), with the CA key in an agent or a KMS if you like.
+  authority (`ssh-keygen -s`), with the CA key in an agent or a KMS if you like, and checking keys and certificates against a
+  revocation list (OpenSSH KRLs, `ssh-keygen -Q`).
 - **Host verification:** `StrictHostKeyChecking` policies, host certificates, `UpdateHostKeys`, key pinning, or your own
   verifier. There is no "accept anything" default. Host key scanning, as `ssh-keyscan` does it.
 - **Connections:** ProxyJump chains (from `ssh_config` or typed `JumpHosts` with per-hop credentials), ProxyCommand, HTTP and SOCKS
@@ -90,7 +91,7 @@ Console.WriteLine(result.StandardOutputText);
 | Agent key management (`ssh-add`: add with lifetime, confirmation or destination constraints (`-h`), remove, lock; `AddKeysToAgent`), and signing with destination-constrained keys | ✅ | ❌ |
 | Password, public key, keyboard-interactive, multi-factor | ✅ | ✅ |
 | Kerberos (GSSAPI, `gssapi-with-mic`; .NET 10) | ✅ | ❌ |
-| OpenSSH certificates | User and host; issuing them as a CA | User (authentication) |
+| OpenSSH certificates | User and host; issuing them as a CA; checking them against a KRL | User (authentication) |
 | Private key formats | OpenSSH, PKCS#1/#8, SEC1, PuTTY `.ppk` | OpenSSH, PKCS#1/#8, PuTTY `.ppk`, ssh.com |
 | Key generation (Ed25519, ECDSA, RSA) and export (OpenSSH, PKCS#8, PuTTY `.ppk`) | ✅ | ❌ |
 | Signing and verifying files and git commits (`ssh-keygen -Y`, SSHSIG, allowed-signers files) | ✅ | ❌ |

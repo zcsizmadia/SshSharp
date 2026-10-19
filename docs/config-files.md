@@ -69,10 +69,11 @@ foreach (var entry in knownHosts.Find("example.com", 22))
     Console.WriteLine($"{entry.Marker} {entry.KeyType}");
 }
 
-KnownHostsCheckResult check = knownHosts.Check("example.com", 22, client.HostKey.KeyType, client.HostKey.PublicKey.Span);
+var key = client.HostKey.GetPublicKey();
+KnownHostsCheckResult check = knownHosts.Check("example.com", 22, key);
 // Match, Unknown, Changed or Revoked
 
-await KnownHostsFile.AppendAsync(path, "new.example.com", 22, client.HostKey.KeyType, client.HostKey.PublicKey, hash: true);
+await KnownHostsFile.AppendAsync(path, "new.example.com", 22, key, hash: true);
 ```
 
 Hashed host names (`|1|salt|hash`), `[host]:port`, wildcards and negation, `@cert-authority` and `@revoked` are supported.

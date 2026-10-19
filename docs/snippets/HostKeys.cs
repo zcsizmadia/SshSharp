@@ -115,14 +115,29 @@ internal static class HostKeys
         // </scan>
     }
 
-    public static void RecordKey(KnownHostsFile knownHosts, SshPublicKey key)
+    public static async Task RecordKeyAsync(KnownHostsFile knownHosts, SshPublicKey key, string knownHostsPath, CancellationToken cancellationToken)
     {
         // <record-key>
         // A key you trust, for example one read with SshPublicKey.Parse from the server's .pub file.
         knownHosts.Add("new-host.example.com", 22, key, hash: true);
         var result = knownHosts.Check("new-host.example.com", key);   // KnownHostsCheckResult.Match
+
+        // Or straight into the file, as ssh records a new key: one line appended, nothing else rewritten.
+        await KnownHostsFile.AppendAsync(knownHostsPath, "new-host.example.com", 22, key, hash: true, cancellationToken: cancellationToken);
         // </record-key>
         _ = result;
+    }
+
+    public static void Entries(SshPublicKey hostKey, SshPublicKey hostCa)
+    {
+        // <known-hosts-entry>
+        // One line, without a file: the host as ssh writes it ([host]:port off port 22), hashed as HashKnownHosts does ...
+        var line = KnownHostsEntry.ForHost("db.example.com", 2222, hostKey, hash: true).ToLine();
+
+        // ... or any host patterns, with a marker: "@cert-authority *.example.com ssh-ed25519 AAAA... corp CA".
+        var caLine = new KnownHostsEntry("*.example.com", hostCa, KnownHostsMarker.CertAuthority, comment: "corp CA").ToLine();
+        // </known-hosts-entry>
+        _ = (line, caLine);
     }
 
     public static async Task HandleRejectionAsync(SshClientOptions options, CancellationToken cancellationToken)

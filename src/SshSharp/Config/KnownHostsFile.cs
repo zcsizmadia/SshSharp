@@ -169,9 +169,7 @@ public sealed class KnownHostsFile
     public KnownHostsEntry Add(string host, int port, string keyType, ReadOnlySpan<byte> publicKey, bool hash = false,
         string? comment = null, KnownHostsMarker marker = KnownHostsMarker.None)
     {
-        KnownHostsEntry.RequireSingleField(host);
-        var field = hash ? KnownHostsEntry.HashHost(host, port) : KnownHostsEntry.FormatHost(host, port);
-        var entry = new KnownHostsEntry(field, keyType, publicKey.ToArray(), marker, comment);
+        var entry = KnownHostsEntry.ForHost(host, port, keyType, publicKey.ToArray(), hash, comment, marker);
         _lines.Add(new Line(entry.ToLine(), entry, false));
         return entry;
     }
@@ -334,10 +332,34 @@ public sealed class KnownHostsFile
         bool hash, string? comment, KnownHostsMarker marker = KnownHostsMarker.None, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
-        ArgumentException.ThrowIfNullOrWhiteSpace(host);
-        KnownHostsEntry.RequireSingleField(host);
-        var field = hash ? KnownHostsEntry.HashHost(host, port) : KnownHostsEntry.FormatHost(host, port);
-        var entry = new KnownHostsEntry(field, keyType, publicKey.ToArray(), marker, comment);
+        var entry = KnownHostsEntry.ForHost(host, port, keyType, publicKey.ToArray(), hash, comment, marker);
+        return await AppendAsync(path, entry, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Appends one entry for a host's key to a file without rewriting it, as
+    /// <see cref="AppendAsync(string, string, int, string, ReadOnlyMemory{byte}, bool, string?, KnownHostsMarker, CancellationToken)"/> does
+    /// with the key's type and blob. The key's own <see cref="SshPublicKey.Comment"/> is not written; pass <paramref name="comment"/> for one.
+    /// </summary>
+    /// <param name="path">The known_hosts file.</param>
+    /// <param name="host">The host name or address.</param>
+    /// <param name="port">The port.</param>
+    /// <param name="key">The host's key.</param>
+    /// <param name="hash">Whether to store the host hashed (<c>HashKnownHosts</c>).</param>
+    /// <param name="comment">A comment for the line, or null.</param>
+    /// <param name="marker">A marker (<c>@cert-authority</c>, <c>@revoked</c>), or none.</param>
+    /// <param name="cancellationToken">Cancels the write.</param>
+    /// <returns>The entry that was written.</returns>
+    public static Task<KnownHostsEntry> AppendAsync(string path, string host, int port, SshPublicKey key, bool hash = false, string? comment = null,
+        KnownHostsMarker marker = KnownHostsMarker.None, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        ArgumentNullException.ThrowIfNull(key);
+        return AppendAsync(path, KnownHostsEntry.ForHost(host, port, key.KeyType, key.Blob, hash, comment, marker), cancellationToken);
+    }
+
+    private static async Task<KnownHostsEntry> AppendAsync(string path, KnownHostsEntry entry, CancellationToken cancellationToken)
+    {
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
 
         // Start on a new line if the file does not end with one (a hand-edited file).

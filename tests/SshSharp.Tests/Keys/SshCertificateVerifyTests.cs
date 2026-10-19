@@ -59,6 +59,21 @@ public sealed class SshCertificateVerifyTests
     }
 
     [Test]
+    public async Task ExtensionValues_ReadAVendorExtensionsValue_AsSshKeygenWroteIt()
+    {
+        // ssh-keygen -O extension:login@example.com=deploy (make-krl.sh); ssh-keygen -L lists the extensions in this order.
+        var certificate = Fixture("not_revoked-cert.pub");
+        await Assert.That(string.Join(",", certificate.Extensions)).IsEqualTo(
+            "login@example.com,permit-X11-forwarding,permit-agent-forwarding,permit-port-forwarding,permit-pty,permit-user-rc");
+        await Assert.That(certificate.ExtensionValues.Keys).IsEquivalentTo(certificate.Extensions);
+        await Assert.That(certificate.ExtensionValues["login@example.com"]).IsEqualTo("deploy");
+        await Assert.That(certificate.ExtensionValues.Where(e => e.Key != "login@example.com").All(e => e.Value.Length == 0)).IsTrue();
+        await Assert.That(certificate.ExtensionValues.ContainsKey("LOGIN@example.com")).IsFalse(); // names are exact
+
+        await Assert.That(Fixture("host_ecdsa-cert.pub").ExtensionValues).IsEmpty();
+    }
+
+    [Test]
     public async Task ToAuthorizedKeysLine_WritesTheLineBack()
     {
         var path = Path.Combine(AppContext.BaseDirectory, "Fixtures", "certificates", "user_ed25519-cert.pub");

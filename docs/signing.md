@@ -46,8 +46,11 @@ if (!await signers.VerifyAsync(signature, "release@example.com", file, "file"))
 
 `signers.FindPrincipals(signature)` returns who the signing key may sign as (`ssh-keygen -Y find-principals`), from the first
 line that matches it, as `ssh-keygen` does. For example, it finds the principal to check before verifying. `signature.Verify(message, namespace)` checks only the signature itself.
-Use it when you compare the signer's key with the key you expect: `signature.GetPublicKey()` is that key as an `SshPublicKey` (the
-certified key, for a certificate), equal to the one you hold when the key bytes are.
+
+When one key must have signed (a release key, a deploy tool's key), pass it: `signature.Verify(message, namespace, expectedKey)` and
+`VerifyAsync(stream, namespace, expectedKey)` check the signature and that `expectedKey` made it, without an allowed-signers file. A
+signature made with a certificate counts as its certified key's; the certificate itself is not checked. `signature.GetPublicKey()`
+is the signer's key as an `SshPublicKey`, for other comparisons.
 
 [!code-csharp[](snippets/Keys.cs#signer-key)]
 

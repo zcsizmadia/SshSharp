@@ -41,10 +41,19 @@ public abstract class SshKeySigner
 
         PublicKey = publicKey.ToArray();
         KeyType = key.KeyType;
+        _publicKey = SshPublicKey.FromVerifyingKey(key);
     }
+
+    private readonly SshPublicKey _publicKey;
 
     /// <summary>The public key in SSH wire format.</summary>
     public ReadOnlyMemory<byte> PublicKey { get; }
+
+    /// <summary>
+    /// <see cref="PublicKey"/> as an <see cref="SshPublicKey"/>, for example to write the <c>authorized_keys</c> line for a key held in a
+    /// key service (<see cref="SshPublicKey.ToAuthorizedKeysLine"/>). It has no comment.
+    /// </summary>
+    public SshPublicKey GetPublicKey() => _publicKey;
 
     /// <summary>The key type: <c>ssh-ed25519</c>, <c>ecdsa-sha2-nistp256</c> (or 384, 521) or <c>ssh-rsa</c>.</summary>
     public string KeyType { get; }

@@ -58,6 +58,50 @@ public sealed class KnownHostsEntry
         Comment = comment;
     }
 
+    /// <summary>Creates an entry for <paramref name="key"/>, with its type and blob. The key's own <see cref="SshPublicKey.Comment"/> is not used.</summary>
+    /// <param name="hostPatterns">Comma-separated host patterns, or a single hashed host (<see cref="HashHost"/>).</param>
+    /// <param name="key">The key.</param>
+    /// <param name="marker">The optional marker.</param>
+    /// <param name="comment">The optional trailing comment.</param>
+    public KnownHostsEntry(string hostPatterns, SshPublicKey key, KnownHostsMarker marker = KnownHostsMarker.None, string? comment = null)
+        : this(hostPatterns, (key ?? throw new ArgumentNullException(nameof(key))).KeyType, key.Blob, marker, comment)
+    {
+    }
+
+    /// <summary>
+    /// Creates the entry <c>ssh</c> writes for one host's key: the host as <see cref="FormatHost"/> stores it (<c>[host]:port</c> for a
+    /// port other than 22), or hashed (<see cref="HashHost"/>, with a random salt) as with <c>HashKnownHosts yes</c>.
+    /// <see cref="KnownHostsFile.Add(string, int, SshPublicKey, bool, string?, KnownHostsMarker)"/> and
+    /// <see cref="KnownHostsFile.AppendAsync(string, string, int, SshPublicKey, bool, string?, KnownHostsMarker, CancellationToken)"/>
+    /// write the same.
+    /// </summary>
+    /// <param name="host">The host name or address.</param>
+    /// <param name="port">The port.</param>
+    /// <param name="key">The host's key. Its own comment is not used.</param>
+    /// <param name="hash">Whether to store the host hashed.</param>
+    /// <param name="comment">An optional comment.</param>
+    /// <param name="marker">An optional marker.</param>
+    /// <exception cref="ArgumentException"><paramref name="host"/> contains white space or control characters.</exception>
+    public static KnownHostsEntry ForHost(string host, int port, SshPublicKey key, bool hash = false, string? comment = null,
+        KnownHostsMarker marker = KnownHostsMarker.None)
+    {
+        ArgumentNullException.ThrowIfNull(key);
+        return ForHost(host, port, key.KeyType, key.Blob, hash, comment, marker);
+    }
+
+    /// <summary>
+    /// The entry for one host's key, as <see cref="ForHost(string, int, SshPublicKey, bool, string?, KnownHostsMarker)"/>. The entry keeps
+    /// <paramref name="publicKey"/> as it is: the caller passes memory nothing else changes.
+    /// </summary>
+    internal static KnownHostsEntry ForHost(string host, int port, string keyType, ReadOnlyMemory<byte> publicKey, bool hash, string? comment,
+        KnownHostsMarker marker)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(host);
+        RequireSingleField(host);
+        var field = hash ? HashHost(host, port) : FormatHost(host, port);
+        return new KnownHostsEntry(field, keyType, publicKey, marker, comment);
+    }
+
     /// <summary>The marker (<c>@cert-authority</c>, <c>@revoked</c>) or <see cref="KnownHostsMarker.None"/>.</summary>
     public KnownHostsMarker Marker { get; }
 

@@ -108,6 +108,13 @@ before removing the old line (`ssh-keygen -R host`). `UpdateHostKeys` avoids thi
 
 A connection over your own `Stream` has no host name. Set `SshClientOptions.HostKeyAlias`.
 
+### "The RSA public key has ... bits; at most 16384 are accepted"
+
+The server's RSA host key (or a key you parsed with `SshPublicKey`, or a certificate's) is larger than 16384 bits, the most OpenSSH
+accepts too. A connection fails with `ProtocolError` (`HostKeyRejected` for a host certificate), `SshPublicKey.Parse` with
+`FormatException`. Give the server an Ed25519 or
+ECDSA host key, or an RSA key of 3072 or 4096 bits.
+
 ## Authentication
 
 ### `AuthenticationFailed` ("Permission denied")

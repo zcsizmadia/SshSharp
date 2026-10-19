@@ -74,6 +74,70 @@ public class SshSignatureTests
     }
 
     [Test]
+    [MethodDataSource(nameof(Types))]
+    public async Task Verify_WithTheExpectedKey_AcceptsOnlyThatKeysSignature(SshKeyType type, int bits)
+    {
+        using var key = Generate(type, bits);
+        using var other = Generate(type, bits);
+        var signature = SshSignature.Parse((await SshSignature.SignAsync(key, Message, "file")).ToString());
+        var expected = SshPublicKey.Parse(key.GetPublicKey().ToAuthorizedKeysLine() + " a comment is ignored");
+
+        await Assert.That(signature.Verify(Message, "file", expected)).IsTrue();
+        await Assert.That(await signature.VerifyAsync(new MemoryStream(Message), "file", expected)).IsTrue();
+        await Assert.That(signature.Verify(Message, "file", other.GetPublicKey())).IsFalse();
+        await Assert.That(await signature.VerifyAsync(new MemoryStream(Message), "file", other.GetPublicKey())).IsFalse();
+
+        // The key alone does not make it valid: the namespace and the message must still match.
+        await Assert.That(signature.Verify(Message, "git", expected)).IsFalse();
+        await Assert.That(signature.Verify(Message.AsSpan(1), "file", expected)).IsFalse();
+        await Assert.That(await signature.VerifyAsync(new MemoryStream(Message, 1, Message.Length - 1), "file", expected)).IsFalse();
+
+        await Assert.That(() => signature.Verify(Message, "file", null!)).Throws<ArgumentNullException>();
+        await Assert.That(() => signature.Verify(Message, null!, expected)).Throws<ArgumentNullException>();
+        await Assert.That(async () => await signature.VerifyAsync(null!, "file", expected)).Throws<ArgumentNullException>();
+        await Assert.That(async () => await signature.VerifyAsync(new MemoryStream(Message), null!, expected)).Throws<ArgumentNullException>();
+        await Assert.That(async () => await signature.VerifyAsync(new MemoryStream(Message), "file", null!)).Throws<ArgumentNullException>();
+    }
+
+    [Test]
+    public async Task Verify_WithTheExpectedKey_AcceptsSshKeygensSignatures()
+    {
+        // Signatures ssh-keygen -Y sign made over Fixtures/hostkey_message.txt in the namespace "sshsharp" (Fixtures/hostkeys_openssh.txt).
+        var lines = File.ReadAllLines(Path.Combine(AppContext.BaseDirectory, "Fixtures", "hostkeys_openssh.txt"));
+        var message = File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "Fixtures", "hostkey_message.txt"));
+        (SshPublicKey Key, SshSignature Signature) Load(string name)
+        {
+            var start = Array.IndexOf(lines, $"[{name}]");
+            var end = Array.IndexOf(lines, ">>", start);
+            return (SshPublicKey.Parse(lines[start + 1]["pub=".Length..]), SshSignature.Parse(string.Join('\n', lines[(start + 4)..end])));
+        }
+
+        var (ed25519, ed25519Signature) = Load("ed25519");
+        var (rsa, rsaSignature) = Load("rsa");
+        await Assert.That(ed25519Signature.Verify(message, "sshsharp", ed25519)).IsTrue();
+        await Assert.That(rsaSignature.Verify(message, "sshsharp", rsa)).IsTrue();
+        await Assert.That(ed25519Signature.Verify(message, "sshsharp", rsa)).IsFalse();
+        await Assert.That(rsaSignature.Verify(message, "sshsharp", ed25519)).IsFalse();
+    }
+
+    [Test]
+    public async Task Verify_WithTheExpectedKey_TakesACertificateSignatureAsItsCertifiedKeys()
+    {
+        using var key = Generate(SshKeyType.Ed25519, 0);
+        using var authority = Generate(SshKeyType.Ed25519, 0);
+        var blob = TestKeys.Certificate(authority, key.PublicKey.ToArray(), SshCertificateType.User, ["dev@example.com"]);
+        using var certified = key.WithCertificate(SshCertificate.Parse(TestKeys.CertificateLine(blob)));
+        var signature = SshSignature.Parse((await SshSignature.SignAsync(certified, Message, "git")).ToString());
+
+        await Assert.That(signature.Certificate).IsNotNull();
+        await Assert.That(signature.Verify(Message, "git", key.GetPublicKey())).IsTrue();
+        await Assert.That(await signature.VerifyAsync(new MemoryStream(Message), "git", key.GetPublicKey())).IsTrue();
+
+        // The authority signed the certificate, not the message.
+        await Assert.That(signature.Verify(Message, "git", authority.GetPublicKey())).IsFalse();
+    }
+
+    [Test]
     public async Task MalformedSignatures_AreRejected()
     {
         using var key = Generate(SshKeyType.Ed25519, 0);

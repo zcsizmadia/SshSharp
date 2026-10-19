@@ -36,7 +36,7 @@ public sealed class SshCertificate
 
     private SshCertificate(string certificateType, byte[] blob, VerifyingKey key, byte[] publicKeyBlob, ulong serial, SshCertificateType type,
         string keyId, IReadOnlyList<string> principals, ulong validAfter, ulong validBefore, IReadOnlyDictionary<string, string> criticalOptions,
-        IReadOnlyList<string> extensions, byte[] authorityKey, byte[] signedData, byte[] signature, string? comment)
+        IReadOnlyDictionary<string, string> extensions, byte[] authorityKey, byte[] signedData, byte[] signature, string? comment)
     {
         Comment = comment;
         Algorithm = certificateType;
@@ -50,7 +50,8 @@ public sealed class SshCertificate
         ValidAfterSeconds = validAfter;
         ValidBeforeSeconds = validBefore;
         CriticalOptions = criticalOptions;
-        Extensions = extensions;
+        ExtensionValues = extensions;
+        Extensions = [.. extensions.Keys];
         AuthorityKey = authorityKey;
         SignedData = signedData;
         Signature = signature;
@@ -99,8 +100,15 @@ public sealed class SshCertificate
     /// <summary>Critical options (for example <c>force-command</c>, <c>source-address</c>); a verifier must refuse ones it does not understand.</summary>
     public IReadOnlyDictionary<string, string> CriticalOptions { get; }
 
-    /// <summary>Extensions (for example <c>permit-pty</c>).</summary>
+    /// <summary>The extensions' names (for example <c>permit-pty</c>), in the certificate's order; <see cref="ExtensionValues"/> has their values.</summary>
     public IReadOnlyList<string> Extensions { get; }
+
+    /// <summary>
+    /// The extensions by name, with their values: an empty string for one without a value, as the standard ones are (<c>permit-pty</c>),
+    /// and the value a vendor's own extension carries (<c>login@github.com</c>), as <see cref="SshCertificateBuilder.Extensions"/> writes
+    /// it. Names are compared as written (ordinal).
+    /// </summary>
+    public IReadOnlyDictionary<string, string> ExtensionValues { get; }
 
     /// <summary>The certificate authority's public key, in SSH wire format (what <c>@cert-authority</c> lines hold).</summary>
     public ReadOnlyMemory<byte> AuthorityKey { get; }
@@ -244,7 +252,7 @@ public sealed class SshCertificate
         var validAfter = reader.ReadUInt64();
         var validBefore = reader.ReadUInt64();
         var criticalOptions = ReadOptions(reader.ReadString());
-        var extensions = ReadOptions(reader.ReadString()).Keys.ToList();
+        var extensions = ReadOptions(reader.ReadString());
         reader.ReadString(); // reserved
         var authorityKey = reader.ReadString().ToArray();
         var signedLength = blob.Length - reader.Remaining.Length;

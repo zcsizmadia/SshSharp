@@ -84,6 +84,9 @@ not know, refuses every host key ("Error checking host key ... in revoked keys f
 checked must not let a revoked key through. A KRL's signature sections are read but not verified; the file is trusted as local
 configuration. `UpdateHostKeys` never learns a revoked key.
 
+To check a key or certificate against such a file yourself (a user's, in a bastion or a portal, as sshd's `RevokedKeys` does), use
+`SshKeyRevocationList`; see [Certificates: check revocation](how-to/certificates.md#check-revocation).
+
 ## Pinning
 
 ```csharp
@@ -115,7 +118,7 @@ var keys = await SshClient.ScanHostKeysAsync("new-server.example.com");
 foreach (var key in keys)
 {
     Console.WriteLine($"{key.KeyType} {key.Fingerprint}");
-    await KnownHostsFile.AppendAsync(knownHostsPath, "new-server.example.com", 22, key.KeyType, key.PublicKey, hash: true);
+    await KnownHostsFile.AppendAsync(knownHostsPath, "new-server.example.com", 22, key.GetPublicKey(), hash: true);
 }
 ```
 
@@ -135,8 +138,9 @@ the key's type (`ssh-rsa`).
 
 `client.HostKey.GetPublicKey()` gives the key as an `SshPublicKey`: equal to another `SshPublicKey` when the key bytes are, with
 `ToAuthorizedKeysLine()` for the `<type> <base64>` text and `GetFingerprint(HashAlgorithmName.MD5)` for the legacy `MD5:aa:bb:...`
-form. `KnownHostsEntry.GetPublicKey()`, `KnownHostsFile.Add(host, port, key)` and `KnownHostsFile.Check(host, port, key)` work with
-the same type, and `SshCertificate.GetPublicKey()` and `GetAuthorityKey()` give a certificate's two keys. To check a host
+form. `KnownHostsEntry.GetPublicKey()`, `KnownHostsEntry.ForHost(host, port, key)` and `new KnownHostsEntry(patterns, key)`,
+`KnownHostsFile.Add(host, port, key)`, `KnownHostsFile.AppendAsync(path, host, port, key)` and `KnownHostsFile.Check(host, port, key)`
+work with the same type, and `SshCertificate.GetPublicKey()` and `GetAuthorityKey()` give a certificate's two keys. To check a host
 certificate outside a connection, as `KnownHostsVerifier` does, use
 `certificate.IsValidFor(ca, SshCertificateType.Host, hostName, now, out var reason)`; to issue one, see
 [Certificates](how-to/certificates.md#act-as-a-certificate-authority).

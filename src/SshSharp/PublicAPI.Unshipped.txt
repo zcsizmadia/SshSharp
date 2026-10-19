@@ -47,6 +47,20 @@ SshSharp.Config.KnownHostsEntry.GetPublicKey() -> SshSharp.SshPublicKey!
 SshSharp.Config.KnownHostsFile.Add(string! host, int port, SshSharp.SshPublicKey! key, bool hash = false, string? comment = null, SshSharp.Config.KnownHostsMarker marker = SshSharp.Config.KnownHostsMarker.None) -> SshSharp.Config.KnownHostsEntry!
 SshSharp.Config.KnownHostsFile.Check(string! host, SshSharp.SshPublicKey! key) -> SshSharp.Config.KnownHostsCheckResult
 SshSharp.Config.KnownHostsFile.Check(string! host, int port, SshSharp.SshPublicKey! key) -> SshSharp.Config.KnownHostsCheckResult
+SshSharp.Config.KnownHostsEntry.KnownHostsEntry(string! hostPatterns, SshSharp.SshPublicKey! key, SshSharp.Config.KnownHostsMarker marker = SshSharp.Config.KnownHostsMarker.None, string? comment = null) -> void
+static SshSharp.Config.KnownHostsEntry.ForHost(string! host, int port, SshSharp.SshPublicKey! key, bool hash = false, string? comment = null, SshSharp.Config.KnownHostsMarker marker = SshSharp.Config.KnownHostsMarker.None) -> SshSharp.Config.KnownHostsEntry!
+static SshSharp.Config.KnownHostsFile.AppendAsync(string! path, string! host, int port, SshSharp.SshPublicKey! key, bool hash = false, string? comment = null, SshSharp.Config.KnownHostsMarker marker = SshSharp.Config.KnownHostsMarker.None, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SshSharp.Config.KnownHostsEntry!>!
+SshSharp.SshKeySigner.GetPublicKey() -> SshSharp.SshPublicKey!
+SshSharp.SshAgentHostKey.SshAgentHostKey(SshSharp.SshPublicKey! key, bool isCertificateAuthority = false) -> void
+SshSharp.SshSignature.Verify(System.ReadOnlySpan<byte> message, string! namespace, SshSharp.SshPublicKey! expectedKey) -> bool
+SshSharp.SshSignature.VerifyAsync(System.IO.Stream! message, string! namespace, SshSharp.SshPublicKey! expectedKey, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
+SshSharp.SshCertificate.ExtensionValues.get -> System.Collections.Generic.IReadOnlyDictionary<string!, string!>!
+SshSharp.SshKeyRevocationList
+SshSharp.SshKeyRevocationList.IsKrl.get -> bool
+SshSharp.SshKeyRevocationList.IsRevoked(SshSharp.SshCertificate! certificate) -> bool
+SshSharp.SshKeyRevocationList.IsRevoked(SshSharp.SshPublicKey! key) -> bool
+static SshSharp.SshKeyRevocationList.LoadAsync(string! path, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SshSharp.SshKeyRevocationList!>!
+static SshSharp.SshKeyRevocationList.Parse(System.ReadOnlySpan<byte> data) -> SshSharp.SshKeyRevocationList!
 static SshSharp.SshHostKeyVerifier.Pinned(params SshSharp.SshPublicKey![]! keys) -> SshSharp.SshHostKeyVerifier!
 SshSharp.SshCertificate.Comment.get -> string?
 SshSharp.SshCertificate.IsValidAt(System.DateTimeOffset time) -> bool

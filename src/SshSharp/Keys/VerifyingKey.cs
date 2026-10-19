@@ -12,6 +12,12 @@ namespace SshSharp.Keys;
 /// </summary>
 internal abstract class VerifyingKey
 {
+    /// <summary>
+    /// The largest RSA modulus accepted, in bits, as OpenSSH's <c>SSH_RSA_MAXIMUM_MODULUS_SIZE</c>. Without it only the 8 KiB blob cap
+    /// bounds a key, and a verification with a 64000-bit modulus that a server or a file chose costs far more than with any real key.
+    /// </summary>
+    internal const int MaxRsaBits = 16384;
+
     protected VerifyingKey(string keyType, ReadOnlyMemory<byte> blob)
     {
         KeyType = keyType;
@@ -131,6 +137,12 @@ internal abstract class VerifyingKey
         if (modulus.Length < 64 || (modulus[^1] & 1) == 0)
         {
             throw new SshProtocolException("The RSA public key is too small or malformed.");
+        }
+
+        var bits = (modulus.Length * 8) - System.Numerics.BitOperations.LeadingZeroCount((uint)modulus[0]) + 24;
+        if (bits > MaxRsaBits)
+        {
+            throw new SshProtocolException($"The RSA public key has {bits} bits; at most {MaxRsaBits} are accepted.");
         }
 
         // e = 1 makes every signature trivially forgeable; e must be odd and at least 3 (OpenSSH checks the same), and far below n.
