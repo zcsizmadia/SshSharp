@@ -214,7 +214,11 @@ public sealed class ConfigForwardingTests : IDisposable
         public void Dispose() => _listener.Dispose();
     }
 
-    /// <summary>Asks the remote dynamic forwarding for <paramref name="host"/>:<paramref name="port"/> (SOCKS 4a, by name); true when granted.</summary>
+    /// <summary>
+    /// Asks the remote dynamic forwarding for <paramref name="host"/>:<paramref name="port"/> (SOCKS 4a, by name); true when granted.
+    /// A grant is followed by reading the service's "OK": the grant comes once the TCP connection is made, which the kernel completes
+    /// from the listen backlog before the service has accepted (and counted) it, so only the service's own reply proves it was reached.
+    /// </summary>
     private static async Task<bool> SocksConnectAsync(FakeSessionServer server, int remotePort, string host, int port)
     {
         await using var remote = (await server.ConnectForwardedAsync(remotePort))!;
@@ -222,7 +226,15 @@ public sealed class ConfigForwardingTests : IDisposable
         await remote.WriteAsync(request, Timeout());
         var reply = new byte[8];
         await remote.ReadExactlyAsync(reply, Timeout());
-        return reply[1] == 0x5A;
+        if (reply[1] != 0x5A)
+        {
+            return false;
+        }
+
+        var ok = new byte[2];
+        await remote.ReadExactlyAsync(ok, Timeout());
+        await Assert.That(Encoding.ASCII.GetString(ok)).IsEqualTo("OK");
+        return true;
     }
 
     [Test]
