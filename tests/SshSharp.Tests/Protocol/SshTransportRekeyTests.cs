@@ -186,6 +186,30 @@ public class SshTransportRekeyTests
     }
 
     [Test]
+    public async Task BytesSent_CountsEveryPacket_KeyExchangeMessagesIncluded()
+    {
+        // As BytesReceived counts every packet the client reads, BytesSent counts every one it sends: the KEXINITs of a re-exchange we
+        // start and of one the server starts, NEWKEYS and EXT_INFO too. What the server decoded is the reference.
+        var (client, server, clientPump, serverPump) = await StartAsync();
+        await using (client)
+        await using (server)
+        {
+            await client.RekeyAsync(Timeout());
+            await server.RekeyAsync(Timeout());
+            await WaitUntilAsync(() => client.KeyExchangeCount == 3 && server.KeyExchangeCount == 3);
+
+            // Once the server has this message, it has decoded everything sent before it.
+            await client.SendAsync(Message(90, 1, 100), Timeout());
+            await serverPump.NextAsync();
+
+            await Assert.That(server.ClientExtensions.Count).IsGreaterThan(0); // EXT_INFO was among them
+            await Assert.That(client.BytesSent).IsEqualTo(server.PayloadBytesReceived);
+            await clientPump.StopAsync();
+            await serverPump.StopAsync();
+        }
+    }
+
+    [Test]
     public async Task TimeThreshold_TriggersARekey()
     {
         var time = new ManualTimeProvider();

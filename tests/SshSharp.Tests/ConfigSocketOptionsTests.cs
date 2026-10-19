@@ -53,12 +53,20 @@ public sealed class ConfigSocketOptionsTests : IDisposable
         return seen!;
     }
 
-    /// <summary>IPV6_TCLASS as the platform reports it, where the test knows how to read it (Linux and macOS); null elsewhere.</summary>
+    /// <summary>
+    /// IP_TOS or IPV6_TCLASS, whichever the socket's family has, as the platform reports it, where the test knows how to read it (Linux
+    /// and macOS; Windows accepts IP_TOS but ignores it); null elsewhere.
+    /// </summary>
     private static int? TrafficClass(Socket socket)
     {
-        if (socket.AddressFamily != AddressFamily.InterNetworkV6 || !(OperatingSystem.IsLinux() || OperatingSystem.IsMacOS()))
+        if (!(OperatingSystem.IsLinux() || OperatingSystem.IsMacOS()))
         {
             return null;
+        }
+
+        if (socket.AddressFamily == AddressFamily.InterNetwork)
+        {
+            return (int)socket.GetSocketOption(SocketOptionLevel.IP, SocketOptionName.TypeOfService)!;
         }
 
         var value = new byte[4];

@@ -283,6 +283,11 @@ internal sealed class FakeSshServer : IAsyncDisposable
     /// <summary>How many key exchanges have completed on the server side, including the first.</summary>
     public int KeyExchangeCount { get; private set; }
 
+    /// <summary>The payload bytes of every packet received from the client, key exchange messages included.</summary>
+    public long PayloadBytesReceived => Interlocked.Read(ref _payloadBytesReceived);
+
+    private long _payloadBytesReceived;
+
     /// <summary>Runs the server side of the handshake. Await it together with the client's ConnectAsync.</summary>
     /// <summary>How far the initial handshake got, for tests that time out waiting for it (#188).</summary>
     public string Stage
@@ -735,6 +740,7 @@ internal sealed class FakeSshServer : IAsyncDisposable
             {
                 _reader.AdvanceTo(buffer.GetPosition(consumed));
                 _receiveSeq++;
+                Interlocked.Add(ref _payloadBytesReceived, packet!.Payload.Length);
                 return packet!;
             }
 

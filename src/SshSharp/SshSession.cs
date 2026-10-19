@@ -9,7 +9,7 @@ namespace SshSharp;
 /// </summary>
 /// <remarks>
 /// Read <see cref="StandardOutput"/> and <see cref="StandardError"/> as the program produces them: output that is not read holds the
-/// channel's receive window (2 MiB), and once it is full the server sends nothing more on either stream, as with redirected process
+/// channel's receive window (<see cref="SshClientOptions.ChannelWindowSize"/>, 2 MiB by default), and once it is full the server sends nothing more on either stream, as with redirected process
 /// streams. With a terminal, the server merges stderr into stdout.
 /// </remarks>
 public sealed class SshSession : IAsyncDisposable
