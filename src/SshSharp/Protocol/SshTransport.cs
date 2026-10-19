@@ -489,6 +489,7 @@ internal sealed class SshTransport : IAsyncDisposable
         {
             PacketCodec.Encode(_writer, [], [SshMessage.NewKeys], _sendProtector, _sendSequence++, _padding);
             TraceKexMessage("sent", SshMessage.NewKeys, _sendSequence - 1);
+            CountSent(1);
             await _writer.FlushAsync(_lifetime.Token).ConfigureAwait(false);
             _sendProtector.Dispose();
             _sendProtector = newSend;
@@ -504,6 +505,7 @@ internal sealed class SshTransport : IAsyncDisposable
                 // send server-sig-algs again during authentication, for example when a Match block changes them for this user; the
                 // authentication reads the current list before each key.
                 PacketCodec.Encode(_writer, [], ClientExtInfo, _sendProtector, _sendSequence++, _padding);
+                CountSent(ClientExtInfo.Length);
                 await _writer.FlushAsync(_lifetime.Token).ConfigureAwait(false);
             }
 
@@ -598,9 +600,12 @@ internal sealed class SshTransport : IAsyncDisposable
                 throw failed;
             }
 
-            // The task before the flag. An exchange that completes in between replaces the task first, so a flag still set means this
-            // task is that exchange's, and it completes. A clear flag means the last exchange has replaced its task already, so this one
-            // belongs to the exchange started here: none can start without the send lock, which this holds.
+            // The task before the flag; an exchange that completes replaces the task, then clears the flag, and neither needs the send
+            // lock. A flag still set means this task is the running exchange's, so it completes once keys newer than
+            // this call are in use. A clear flag usually means the task is the one for the exchange started here, since none can start
+            // without the send lock, which this holds. But an exchange can complete between the two reads: then the task is that one's,
+            // already complete, and the clear flag starts one more exchange, which this call does not wait for. Both outcomes keep the
+            // promise (an exchange that ran during the call has finished); the second costs an extra exchange.
             done = Volatile.Read(ref _exchangeDone).Task;
             if (!Volatile.Read(ref _exchangePending))
             {
@@ -666,6 +671,7 @@ internal sealed class SshTransport : IAsyncDisposable
         _pendingClientInitPayload = payload;
         PacketCodec.Encode(_writer, [], payload, _sendProtector, _sendSequence++, _padding);
         TraceKexMessage("sent", payload[0], _sendSequence - 1);
+        CountSent(payload.Length);
         await _writer.FlushAsync(_lifetime.Token).ConfigureAwait(false);
     }
 
@@ -720,10 +726,7 @@ internal sealed class SshTransport : IAsyncDisposable
                     var length = EncodeLocked(header, payload);
                     TraceKexMessage("sent", MessageType(header, payload), _sendSequence - 1);
                     onCommitted?.Invoke();
-                    Interlocked.Add(ref _bytesSinceKex, length);
-                    Interlocked.Increment(ref _packetsSentSinceKex);
-                    Interlocked.Add(ref _bytesSent, length);
-                    SshTelemetry.BytesSent.Add(length);
+                    CountSent(length);
                     var flush = _writer.FlushAsync(_lifetime.Token);
                     if (flush.IsCompleted)
                     {
@@ -790,6 +793,18 @@ internal sealed class SshTransport : IAsyncDisposable
 
         PacketCodec.Encode(_writer, [], payload.Span, _sendProtector, _sendSequence++, _padding);
         return payload.Length;
+    }
+
+    /// <summary>
+    /// Counts a packet of <paramref name="length"/> payload bytes that was sent, as <see cref="ReadPacketAsync"/> counts each one received:
+    /// every packet, key exchange messages included. The caller holds <see cref="_sendLock"/>.
+    /// </summary>
+    private void CountSent(int length)
+    {
+        Interlocked.Add(ref _bytesSinceKex, length);
+        Interlocked.Increment(ref _packetsSentSinceKex);
+        Interlocked.Add(ref _bytesSent, length);
+        SshTelemetry.BytesSent.Add(length);
     }
 
     private static byte MessageType(ChannelDataHeader? header, ReadOnlyMemory<byte> payload) => header is null ? payload.Span[0] : SshMessage.ChannelData;

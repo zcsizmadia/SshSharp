@@ -37,6 +37,10 @@ Over a stream it bounds the key exchange and authentication. See [Cancellation a
 An address literal of the other family, or a name with no address of the allowed one, fails with `ConnectFailed`. Through a `Proxy`
 it does not apply, since the proxy resolves the name. With `LocalEndPoint`, both restrictions apply.
 
+A name's addresses are tried in the order the system's resolver returns them, each with a new socket of its family, until one
+connects. Socket options set by `ConfigureSocket` or `ssh_config`'s `IPQoS` are set again on each one. When none connects, the
+error of the last is reported.
+
 ## Over any stream
 
 SSH can run over anything duplex: a WebSocket wrapper, a named pipe, a tunnel of your own. Without a host name there is

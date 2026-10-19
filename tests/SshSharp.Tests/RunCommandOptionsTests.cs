@@ -309,6 +309,54 @@ public class RunCommandOptionsTests
     }
 
     [Test]
+    public async Task ACommandThatEnds_WhileAStreamIgnoringCancellationIsRead_Returns_WithoutWaitingForTheRead()
+    {
+        // The review's hang: the command exited, and the call waited for a read that cancelling could not end.
+        var stream = new DeafStream();
+        await using var server = Server(async script =>
+        {
+            await stream.Reading.Task;
+            await script.StdoutAsync("done"u8.ToArray());
+            await script.FinishAsync(5);
+        });
+        await using var client = await ConnectAsync(server);
+
+        var result = await client.RunCommandAsync("true", null, SshCommandInput.FromStream(stream), Timeout());
+
+        await Assert.That(result.ExitStatus).IsEqualTo(5);
+        await Assert.That(result.StandardOutputText).IsEqualTo("done");
+        await Assert.That(stream.Reads).IsEqualTo(1); // still in progress: the call did not wait for it
+
+        // When the read does return, its data goes nowhere (the channel is closed) and the stream is not read again.
+        stream.Release(5);
+        await stream.Returned.Task.WaitAsync(Timeout());
+        server.OnExec = CatAsync;
+        var next = await client.RunCommandAsync("cat", null, SshCommandInput.FromText("after"), Timeout());
+        await Assert.That(next.StandardOutputText).IsEqualTo("after");
+        await Assert.That(stream.Reads).IsEqualTo(1);
+    }
+
+    [Test]
+    public async Task Cancellation_WhileAStreamIgnoringCancellationIsRead_EndsTheCall()
+    {
+        var stream = new DeafStream();
+        var hang = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var server = Server(async script => await hang.Task); // reads nothing, does not exit until the test ends
+        using var release = new Disposer(() => hang.TrySetResult());
+        await using var client = await ConnectAsync(server);
+        using var cts = new CancellationTokenSource();
+
+        var running = client.RunCommandAsync("hang", null, SshCommandInput.FromStream(stream), cts.Token);
+        await stream.Reading.Task.WaitAsync(Timeout());
+        await cts.CancelAsync();
+        await Assert.That(async () => await running.WaitAsync(Timeout())).Throws<OperationCanceledException>();
+
+        // A failure of the abandoned read afterwards is not reported to anyone.
+        stream.Fail(new ObjectDisposedException(nameof(DeafStream)));
+        await stream.Returned.Task.WaitAsync(Timeout());
+    }
+
+    [Test]
     public async Task TheOutputLimit_AppliesToTheOverloadToo()
     {
         await using var server = Server(async script => { await script.StdoutAsync(new byte[100_000]); await script.FinishAsync(0); });
@@ -470,6 +518,74 @@ public class RunCommandOptionsTests
             _served = true;
             buffer.Span[0] = (byte)'a';
             return ValueTask.FromResult(1);
+        }
+
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+
+        public override void SetLength(long value) => throw new NotSupportedException();
+
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    }
+
+    /// <summary>Runs an action when disposed.</summary>
+    private sealed class Disposer(Action action) : IDisposable
+    {
+        public void Dispose() => action();
+    }
+
+    /// <summary>
+    /// A stream whose read ignores its cancellation token, as some pipes and network streams do: a read ends only when the test releases
+    /// or fails it.
+    /// </summary>
+    private sealed class DeafStream : Stream
+    {
+        private readonly TaskCompletionSource<int> _result = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _reads;
+
+        /// <summary>Completes when the first read starts.</summary>
+        public TaskCompletionSource Reading { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        /// <summary>Completes when the first read has returned or thrown.</summary>
+        public TaskCompletionSource Returned { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public int Reads => Volatile.Read(ref _reads);
+
+        public void Release(int count) => _result.TrySetResult(count);
+
+        public void Fail(Exception exception) => _result.TrySetException(exception);
+
+        public override bool CanRead => true;
+
+        public override bool CanSeek => false;
+
+        public override bool CanWrite => false;
+
+        public override long Length => throw new NotSupportedException();
+
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+
+        public override void Flush()
+        {
+        }
+
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            if (Interlocked.Increment(ref _reads) > 1)
+            {
+                throw new InvalidOperationException("Read again after the command ended.");
+            }
+
+            Reading.TrySetResult();
+            try
+            {
+                return await _result.Task; // the token is ignored on purpose
+            }
+            finally
+            {
+                Returned.TrySetResult();
+            }
         }
 
         public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();

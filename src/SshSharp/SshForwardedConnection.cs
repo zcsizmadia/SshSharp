@@ -32,7 +32,8 @@ public sealed class SshForwardedConnection
     /// <summary>
     /// The connection as a duplex stream (asynchronous only): reads return what the remote program sends, and reads end (return 0) when
     /// it has finished sending. Writes go to it. Disposing the stream closes the connection. While nothing reads it, the server is not
-    /// allowed to send more than the channel's window (2 MiB), so a handler that stops reading slows the remote program down rather than
+    /// allowed to send more than the channel's window (<see cref="SshClientOptions.ChannelWindowSize"/>, 2 MiB by default), so a handler
+    /// that stops reading slows the remote program down rather than
     /// buffering without limit. <see cref="ShutdownSendAsync"/> ends the writing side only.
     /// </summary>
     public Stream Stream { get; }

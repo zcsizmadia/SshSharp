@@ -167,6 +167,57 @@ public sealed class TypedConnectionAttemptsTests
         await Assert.That(calls).IsEquivalentTo(new[] { "jump.example.com:22", "jump.example.com:22" });
     }
 
+    [Test]
+    public async Task AJumpHostsConnectTimeout_IsOnTheSameClock_AsTheWaitsBetweenAttempts()
+    {
+        // The first hop's own ConnectTimeout (1.5 s) bounds its attempts at 0 s and 1 s, on the destination's clock: a deadline on the
+        // system clock would never pass here, and the attempts would go on.
+        var time = new TimerCountingTimeProvider(new FakeTimeProvider());
+        var calls = new List<string>();
+        var hop = new SshJumpHost("jump.example.com", 22, new SshClientOptions
+        {
+            UserName = "tester",
+            Password = Password,
+            HostKeyVerifier = SshHostKeyVerifier.FromDelegate((_, _) => ValueTask.FromResult(true)),
+            ConnectTimeout = TimeSpan.FromMilliseconds(1500),
+        });
+        var connect = SshClient.ConnectAsync("target.example.com", 22,
+            Options(FailingThen(int.MaxValue, () => Unreachable(SocketError.ConnectionRefused), null, calls), 100, time, jumpHosts: [hop]), Timeout());
+
+        await time.WaitForTimersAsync(2); // the hop's deadline, and the wait after the first attempt
+        time.Advance(TimeSpan.FromSeconds(1));
+        await time.WaitForTimersAsync(3);
+        time.Advance(TimeSpan.FromMilliseconds(500));
+
+        var ex = await Assert.ThrowsAsync<SshException>(async () => await connect);
+        await Assert.That(ex!.Reason).IsEqualTo(SshFailureReason.Timeout);
+        await Assert.That(calls.Count).IsEqualTo(2);
+    }
+
+    [Test]
+    public async Task ConnectTimeout_OverAStream_IsOnTheOptionsClock()
+    {
+        // A server that never sends its identification: only the deadline, on the fake clock, ends the handshake.
+        await using var server = new FakeSessionServer { Password = Password };
+        var time = new TimerCountingTimeProvider(new FakeTimeProvider());
+        var options = new SshClientOptions
+        {
+            UserName = "tester",
+            Password = Password,
+            HostKeyVerifier = SshHostKeyVerifier.FromDelegate((_, _) => ValueTask.FromResult(true)),
+            ConnectTimeout = TimeSpan.FromSeconds(10),
+            TimeProvider = time,
+        };
+        var connect = SshClient.ConnectAsync(server.ClientStream, options, leaveOpen: true, Timeout());
+
+        await time.WaitForTimersAsync(1);
+        time.Advance(TimeSpan.FromSeconds(10));
+
+        var ex = await Assert.ThrowsAsync<SshException>(async () => await connect);
+        await Assert.That(ex!.Reason).IsEqualTo(SshFailureReason.Timeout);
+        await Assert.That(ex.InnerException).IsTypeOf<TimeoutException>();
+    }
+
     /// <summary>A <see cref="FakeTimeProvider"/> that counts the timers created on it, so a test can advance it once they are set.</summary>
     private sealed class TimerCountingTimeProvider(FakeTimeProvider inner) : TimeProvider
     {

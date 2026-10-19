@@ -80,8 +80,9 @@ public sealed partial class SshClient : IAsyncDisposable
     public System.Net.EndPoint? LocalEndPoint { get; private init; }
 
     /// <summary>
-    /// SSH message bytes sent over the connection so far, from the key exchange on: the payload of each packet, before
-    /// encryption, padding and MAC, as the <c>sshsharp.bytes.sent</c> metric counts them. Safe to read from any thread.
+    /// SSH message bytes sent over the connection so far, from the key exchange on: the payload of each packet, key exchange messages
+    /// (KEXINIT, NEWKEYS, EXT_INFO) included, before encryption, padding and MAC, as the <c>sshsharp.bytes.sent</c> metric counts them.
+    /// Safe to read from any thread.
     /// </summary>
     public long BytesSent => _connection.BytesSent;
 
@@ -217,7 +218,7 @@ public sealed partial class SshClient : IAsyncDisposable
     public static async Task<SshClient> ConnectAsync(Stream stream, SshClientOptions options, bool leaveOpen = false, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(options);
-        using var deadline = new ConnectDeadline(options.ConnectTimeout, cancellationToken);
+        using var deadline = new ConnectDeadline(options.ConnectTimeout, cancellationToken, options.TimeProvider);
         try
         {
             return await ConnectCoreAsync(stream, options, leaveOpen, owner: null, host: null, port: 22, measurement: null, deadline.Token).ConfigureAwait(false);
@@ -320,18 +321,36 @@ public sealed partial class SshClient : IAsyncDisposable
             // The exit status arrives before the server's CLOSE.
             await channel.WaitClosedAsync(stop.Token).ConfigureAwait(false);
 
-            // Input the command never read is no failure; a local error reading the input stream is.
+            // Input the command never read is no failure; a local error reading the input stream is. Only the writer cancels stop on its
+            // own (the caller's token cancels it too, but then the read above throws): it failed, and is about to throw, so wait for it.
+            if (stop.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+            {
+                await writing.ConfigureAwait(false);
+            }
+
             await stop.CancelAsync().ConfigureAwait(false);
-            await writing.ConfigureAwait(false);
+            if (writing.IsCompleted)
+            {
+                await writing.ConfigureAwait(false);
+            }
             int? exitStatus = channel.ExitStatus is { } status ? (int)status : null;
             outcome = exitStatus == 0 ? "success" : "failure";
             activity?.SetTag("ssh.command.exit_status", exitStatus);
             SshLog.CommandFinished(_logger, channel.LocalId, exitStatus, channel.ExitSignal?.Name);
             return new SshCommandResult(exitStatus, channel.ExitSignal, stdout.WrittenMemory, stderr?.WrittenMemory ?? ReadOnlyMemory<byte>.Empty);
         }
-        catch (OperationCanceledException) when (writing.IsFaulted && !cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException ex) when (stop.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
         {
-            // Writing the input failed (the stream threw, or the connection failed), which stopped the output reader: report that error.
+            // Only the writer cancels stop while the output is read (the caller's token cancels it too, but that is excluded here): writing
+            // the input failed (the stream threw, or the connection failed), which stopped the output reader, so report that error. The
+            // writer cancels stop just before it throws, so it is finishing: wait for it rather than race it.
+            await writing.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+            if (!writing.IsFaulted)
+            {
+                errorType = SshTelemetry.Failed(activity, ex);
+                throw;
+            }
+
             var failure = System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(writing.Exception!.InnerException!);
             errorType = SshTelemetry.Failed(activity, failure.SourceException);
             failure.Throw();
@@ -345,8 +364,12 @@ public sealed partial class SshClient : IAsyncDisposable
         finally
         {
             await stop.CancelAsync().ConfigureAwait(false);
-            // The writer's failure was already reported above, or the run failed first and that is what the caller sees.
-            await writing.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+
+            // The writer is not waited for: a stream whose ReadAsync ignores cancellation would hold the call after the command ended.
+            // Stopped, it sends nothing more (the channel is closed below) and returns its buffer itself whenever the read returns. Its
+            // failure was already reported above, or the run failed first and that is what the caller sees; either way it is observed.
+            _ = writing.ContinueWith(static t => _ = t.Exception, CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+                TaskScheduler.Default);
 
             var tags = new TagList { { "result", outcome } };
             if (errorType is not null)
@@ -405,14 +428,16 @@ public sealed partial class SshClient : IAsyncDisposable
     /// </summary>
     private static async Task WriteInputAsync(SshChannel channel, SshCommandInput? input, CancellationTokenSource stop)
     {
+        // Taken now: the run may end, and dispose stop, while this writer still waits on a stream that ignores cancellation.
+        var token = stop.Token;
         try
         {
             if (input is not null)
             {
-                await input.WriteToAsync(channel, stop.Token).ConfigureAwait(false);
+                await input.WriteToAsync(channel, token).ConfigureAwait(false);
             }
 
-            await channel.SendEofAsync(stop.Token).ConfigureAwait(false);
+            await channel.SendEofAsync(token).ConfigureAwait(false);
         }
         catch (SshException ex) when (ex.Reason == SshFailureReason.ChannelClosed)
         {
@@ -424,7 +449,12 @@ public sealed partial class SshClient : IAsyncDisposable
         }
         catch (Exception)
         {
-            await stop.CancelAsync().ConfigureAwait(false);
+            // Once stopped, RunCommandAsync may have returned without waiting for this writer and disposed stop: cancel only before that.
+            if (!stop.IsCancellationRequested)
+            {
+                await stop.CancelAsync().ConfigureAwait(false);
+            }
+
             throw;
         }
     }
@@ -747,7 +777,8 @@ public sealed partial class SshClient : IAsyncDisposable
             return (null, null); // already closed: the connection fails on its own
         }
 
-        // A dual-mode socket (the default, for a host name) reports an IPv4 peer as ::ffff:a.b.c.d: give the address that was reached.
+        // A dual-mode socket (a NetworkStream the caller passed may have one; SshSharp's own sockets have the address's family) reports
+        // an IPv4 peer as ::ffff:a.b.c.d: give the address that was reached.
         static System.Net.EndPoint? Unmapped(System.Net.EndPoint? endPoint) =>
             endPoint is System.Net.IPEndPoint { Address.IsIPv4MappedToIPv6: true } ip ? new System.Net.IPEndPoint(ip.Address.MapToIPv4(), ip.Port) : endPoint;
     }
