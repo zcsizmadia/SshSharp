@@ -18,14 +18,19 @@ internal sealed class SftpFileSystemStream : FileSystemStream
     public static SftpFileSystemStream Open(SftpFileSystem fileSystem, string path, FileMode mode, FileAccess access, int bufferSize)
     {
         var full = fileSystem.Full(path);
-        var remote = fileSystem.Run(full, mode is FileMode.Create or FileMode.CreateNew or FileMode.OpenOrCreate or FileMode.Append,
-            ct => fileSystem.Sftp.OpenAsync(full, mode, access, ct));
-        return Wrap(fileSystem, remote, full, bufferSize);
+        // Opening to read changes nothing on the server, so after a dropped connection it is tried again on a new session.
+        var (sftp, remote) = fileSystem.Run(full, mode is FileMode.Create or FileMode.CreateNew or FileMode.OpenOrCreate or FileMode.Append,
+            async (sftp, ct) => (sftp, await sftp.OpenAsync(full, mode, access, ct).ConfigureAwait(false)),
+            retry: mode == FileMode.Open && access == FileAccess.Read);
+        return Wrap(fileSystem, sftp, remote, full, bufferSize);
     }
 
-    /// <summary>An open SFTP stream as a file system stream: errors, synchronous or asynchronous, are <c>System.IO</c> exceptions.</summary>
-    public static SftpFileSystemStream Wrap(SftpFileSystem fileSystem, Stream remote, string full, int bufferSize) =>
-        new(new BufferedStream(new IOStream(remote, full, fileSystem.Sftp, fileSystem.Options.OperationTimeout), Math.Max(bufferSize, 64 * 1024)), full);
+    /// <summary>
+    /// An open SFTP stream as a file system stream: errors, synchronous or asynchronous, are <c>System.IO</c> exceptions. The stream
+    /// stays on <paramref name="sftp"/>, the session that opened it.
+    /// </summary>
+    public static SftpFileSystemStream Wrap(SftpFileSystem fileSystem, SftpClient sftp, Stream remote, string full, int bufferSize) =>
+        new(new BufferedStream(new IOStream(remote, full, sftp, fileSystem.Options.OperationTimeout), Math.Max(bufferSize, 64 * 1024)), full);
 
     /// <summary>
     /// The SFTP stream with synchronous calls added (each bounded by the timeout) and every failure, synchronous or asynchronous,

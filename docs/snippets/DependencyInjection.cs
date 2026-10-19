@@ -1,9 +1,11 @@
+using System.IO.Abstractions;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using SshSharp;
 using SshSharp.Extensions.DependencyInjection;
+using SshSharp.IO.Abstractions;
 
 namespace SshSharp.Docs.Snippets;
 
@@ -62,6 +64,32 @@ internal static class DependencyInjection
         }
     }
     // </provider>
+
+    // <sftp>
+    /// <summary>A service that reads files: an SFTP session of its own for each call, on the shared connection.</summary>
+    public sealed class ReportReader(ISshConnectionProvider connections)
+    {
+        public async Task<long> SizeAsync(string path, CancellationToken cancellationToken)
+        {
+            await using var sftp = await connections.OpenSftpAsync("deploy", cancellationToken);   // the session is ours to dispose
+            return (await sftp.GetAttributesAsync(path, cancellationToken: cancellationToken)).Size ?? 0;
+        }
+    }
+    // </sftp>
+
+    public static void RegisterFileSystem(IServiceCollection services)
+    {
+        // <file-system>
+        // An IFileSystem over the shared connection, for services that take one. It keeps one SFTP session and opens a new one after
+        // the connection drops. The container owns it and disposes it (and its session) with the application; the connection under
+        // it stays the provider's.
+        services.AddSingleton<IFileSystem>(sp =>
+        {
+            var connections = sp.GetRequiredService<ISshConnectionProvider>();
+            return new SftpFileSystem(ct => connections.OpenSftpAsync("deploy", ct));
+        });
+        // </file-system>
+    }
 
     public static void Containers(WebApplicationBuilder builder)
     {

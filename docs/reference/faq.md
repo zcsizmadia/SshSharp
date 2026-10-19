@@ -42,6 +42,8 @@ Yes, and you should: commands, shells, SFTP sessions and tunnels all run as chan
 **Does it reconnect automatically?**
 No. A connection that ends stays ended, and `ConnectionClosed` tells you. Open a new one yourself, or use the dependency injection
 package's `ISshConnectionProvider`, which reconnects on the next call. See [Keep-alive and reconnecting](../how-to/keepalive-and-reconnect.md).
+The file adapters follow a reconnecting connection when built from a session factory; see
+[Follow a connection that drops](../how-to/file-system-adapters.md#follow-a-connection-that-drops).
 
 **Does it support `ControlMaster` / connection multiplexing between processes?**
 No. Within a process, one `SshClient` already multiplexes any number of channels.

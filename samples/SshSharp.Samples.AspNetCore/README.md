@@ -36,5 +36,5 @@ See [Dependency injection: containers and Kubernetes](https://zcsizmadia.github.
 
 The settings are checked when the application starts (`ValidateOnStart`), so a missing host or user name fails at once.
 
-The static file provider keeps one SFTP session for the application's lifetime, on a connection of its own; it does not reconnect
-by itself, unlike the shared connection the other endpoints use.
+The static file provider keeps one SFTP session on the shared connection (`ISshConnectionProvider.OpenSftpAsync` as its session
+factory), and opens a new one after the connection drops, so `/static` keeps working when the server comes back.

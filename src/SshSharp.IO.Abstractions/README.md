@@ -22,6 +22,10 @@ foreach (var path in fs.Directory.EnumerateFiles("reports", "*.txt", SearchOptio
 }
 ```
 
+Built from a session factory instead (`new SftpFileSystem(ct => connections.OpenSftpAsync("files", ct))` with
+`SshSharp.Extensions.DependencyInjection`), the file system opens a session on first use and a new one after the session or its
+connection fails, and owns those sessions.
+
 Paths are POSIX paths on the server (`fs.Path` uses `/` on every OS), relative to the login directory. Errors are the usual
 `System.IO` exceptions, from synchronous and asynchronous calls alike, and `Exists` never throws. The synchronous calls wait for
 the server, bounded by `SftpFileSystemOptions.OperationTimeout`; whole-file reads, writes and copies are bounded by the time

@@ -37,9 +37,65 @@ dotnet add package SshSharp.FileProviders
 
 [!code-csharp[](../snippets/FileSystems.cs#file-provider)]
 
+The provider above gets its sessions from a factory, so it keeps serving after the connection drops (see
+[Follow a connection that drops](#follow-a-connection-that-drops)). It can also use one session you give it, for as long as that
+session lives:
+
+[!code-csharp[](../snippets/FileSystems.cs#file-provider-session)]
+
 It also feeds configuration:
 
 [!code-csharp[](../snippets/FileSystems.cs#configuration)]
+
+## Follow a connection that drops
+
+Both adapters take either one `SftpClient` or a **session factory**, `Func<CancellationToken, Task<SftpClient>>`. With one
+`SftpClient`, the adapter uses it for its lifetime: when its connection drops, every later call fails until you build a new adapter,
+which `UseStaticFiles` and a container's singletons have no way to do. With a factory, the adapter follows the connection:
+
+- It opens a session on first use and shares it between all its callers.
+- When the session or the connection under it fails, it disposes that session and opens a new one. Ordinary SFTP errors (a missing
+  file, a denied request) and timeouts do not count: the session stays.
+- Callers that find no session share one call to the factory, so a drop is followed by one reconnect, not one per request.
+- A call that only reads (a lookup, a listing, a whole-file read, opening a file to read) and meets the dropped connection is tried once
+  more on the new session. A call that writes is not, because the server may have done it before the connection dropped: it fails, and
+  the next call uses the new session.
+
+```mermaid
+sequenceDiagram
+    participant App as Callers
+    participant A as SftpFileProvider / SftpFileSystem
+    participant F as Session factory
+    participant S as SFTP server
+    App->>A: GetFileInfo / ReadAllText
+    A->>F: first use: open a session
+    F-->>A: session 1
+    A->>S: request on session 1
+    Note over A,S: the connection drops
+    App->>A: next call
+    A->>S: request on session 1
+    S--xA: connection closed
+    A->>A: dispose session 1
+    A->>F: open a new session (one, for every waiting caller)
+    F-->>A: session 2
+    A->>S: a read is tried again on session 2
+    A-->>App: the answer
+```
+
+With dependency injection, `ISshConnectionProvider.OpenSftpAsync(name)` is the factory: it opens a session on the endpoint's shared
+connection, which the provider itself opens again after a drop (the static files example above uses it). Without it, open the session
+on a connection you keep alive, such as the wrapper from [Keep-alive and reconnecting](keepalive-and-reconnect.md#reconnect):
+
+[!code-csharp[](../snippets/FileSystems.cs#file-system-reconnecting)]
+
+- **The adapter owns what the factory returns.** It disposes each session it replaces, and the last one when it is disposed, so
+  dispose the adapter (`Dispose` or `DisposeAsync`) when the application stops, or register it with the container, which does. The
+  connection under the sessions stays yours (or the provider's).
+- **The factory is not called concurrently** by one adapter, and is called again after it fails: the next call tries again, so the
+  factory (or the connection behind it) decides how often to connect. `ISshConnectionProvider` waits longer after each failed attempt.
+- **Opening counts against the timeout.** Each open is bounded by the adapter's `OperationTimeout`; a call that waits for an open
+  fails when its own timeout passes.
+- **Open streams stay on their session.** A stream opened before a drop fails; open the file again.
 
 ## Notes and pitfalls
 
@@ -54,7 +110,12 @@ It also feeds configuration:
   `UnauthorizedAccessException`, `IOException`). `SftpFileProvider` reports a missing or unreadable file as `Exists == false`.
 - **No change notifications.** SFTP has none: `FileSystemWatcher` is not supported, and the provider's `Watch` never fires, so
   `reloadOnChange` has no effect.
-- **Ownership.** Neither adapter owns the `SftpClient`. Dispose it (and the `SshClient`) after the adapter is no longer used.
+- **Ownership.** An adapter built from one `SftpClient` does not own it: dispose it (and the `SshClient`) after the adapter is no
+  longer used, and disposing the adapter leaves it open. An adapter built from a session factory owns the sessions it opens, and
+  disposes them when it is disposed.
+- **Errors after a drop.** With one `SftpClient`, a dropped connection is an `SshException` from the provider and an `IOException`
+  from the file system, on every call. With a session factory, a failed open is reported the same way, with the factory's exception
+  inside, and the next call tries again.
 - **Not supported** by `SftpFileSystem`: `DriveInfo`, `FileVersionInfo`, `RandomAccess`, encryption, `Replace`; SFTP has no creation
   times. The [SFTP guide](../sftp.md#using-ifilesystem-systemioabstractions) has the full table.
 
@@ -62,4 +123,5 @@ It also feeds configuration:
 
 - [File transfer (SFTP)](../sftp.md#serving-files-with-ifileprovider) (in-depth guide)
 - [ASP.NET Core and dependency injection](aspnetcore-and-di.md)
+- [Keep-alive and reconnecting](keepalive-and-reconnect.md)
 - <xref:SshSharp.IO.Abstractions.SftpFileSystem> and <xref:SshSharp.FileProviders.SftpFileProvider> in the API reference

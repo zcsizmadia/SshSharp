@@ -59,7 +59,9 @@ Then retry the work, not the connection: only you know whether an operation is s
 
 - **Nothing is retried for you.** A command that was running when the connection dropped fails with `ConnectionClosed`. It may or
   may not have run on the server.
-- **Sessions, SFTP clients and forwarders die with their connection.** After reconnecting, open them again.
+- **Sessions, SFTP clients and forwarders die with their connection.** After reconnecting, open them again. The file adapters
+  (`SftpFileProvider`, `SftpFileSystem`) can do it for you: give them a session factory instead of an `SftpClient`; see
+  [Follow a connection that drops](file-system-adapters.md#follow-a-connection-that-drops).
 - **OpenSSH for Windows.** The server built into Windows (OpenSSH for Windows 9.5) often fails to answer keep-alives, so connections
   to it end after `KeepAliveCountMax` intervals; `ssh -o ServerAliveInterval` sees the same. Against it, leave `KeepAliveInterval`
   unset or use a long interval with a generous count.

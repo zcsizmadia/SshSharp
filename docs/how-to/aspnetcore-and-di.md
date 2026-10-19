@@ -23,6 +23,7 @@ flowchart TB
     factory --> provider["ISshConnectionProvider<br/>GetClientAsync('deploy')"]
     provider -->|"one shared connection,<br/>reopened when it drops"| api["Endpoints and services"]
     provider --> health["Health check<br/>AddSsh('deploy'): PingAsync"]
+    provider -->|"OpenSftpAsync('deploy'):<br/>SFTP sessions on it"| files["SftpFileProvider,<br/>SftpFileSystem"]
 ```
 
 ## Register endpoints
@@ -111,6 +112,28 @@ connection at once), opened on first use and again after it drops.
 
 [!code-csharp[](../snippets/DependencyInjection.cs#endpoint)]
 
+## Use SFTP on the shared connection
+
+`OpenSftpAsync(name)`, an extension method on `ISshConnectionProvider`, opens a new SFTP session on the endpoint's shared connection,
+connecting first if it is down. The session is yours to dispose; the connection stays the provider's.
+
+[!code-csharp[](../snippets/DependencyInjection.cs#sftp)]
+
+It is also the session factory that lets the [file adapters](file-system-adapters.md#follow-a-connection-that-drops) follow the
+shared connection: they keep one session, and open a new one on the reconnected connection after a drop. Static files from the server:
+
+[!code-csharp[](../snippets/FileSystems.cs#file-provider)]
+
+An `IFileSystem` for services that take one, owned by the container:
+
+[!code-csharp[](../snippets/DependencyInjection.cs#file-system)]
+
+- **Lifetime.** A provider or file system built this way owns its SFTP session: register it as a singleton (the container disposes
+  it), or dispose it when the application stops. Register it with a factory delegate, as above, so the container owns it; an instance
+  passed to `AddSingleton(instance)` is not disposed by the container.
+- **One session per adapter.** Each adapter keeps its own SFTP session on the shared connection; SSH runs them side by side with the
+  commands and other sessions on that connection.
+
 ## Open a connection of your own
 
 `ISshClientFactory` opens a new connection on each call, which the caller owns. Use it for long jobs that should not share, or
@@ -132,7 +155,8 @@ code: they are settings.
   container. Dispose clients from `ISshClientFactory`.
 - **No automatic retries.** After a drop, the next `GetClientAsync` reconnects (with a growing delay after failures; a call during
   the delay fails at once with the last error). A command that was running when the connection dropped fails, and your code
-  decides whether to run it again.
+  decides whether to run it again. The file adapters are the exception: built on `OpenSftpAsync`, they try a read that met the
+  dropped connection once more on a new session (never a write).
 - **Host keys.** Without `ConfigAlias`, the endpoint verifies against `KnownHostsFiles` (default `~/.ssh/known_hosts`) with
   `StrictHostKeyChecking yes`; `AcceptNewHostKeys` switches to `accept-new`. In a container, pin `HostKeyFingerprints` or mount a
   `known_hosts` file.

@@ -181,6 +181,14 @@ and channels over one connection at once.
   running it again is safe.
 - The provider disposes the clients when the container is disposed.
 
+`OpenSftpAsync(name)` opens an SFTP session on the shared connection, connecting first if needed; the caller disposes the session,
+never the connection. As the session factory of `SftpFileProvider` or `SftpFileSystem`, it makes the adapter follow the shared
+connection across drops:
+
+[!code-csharp[](snippets/DependencyInjection.cs#file-system)]
+
+See [IFileSystem and IFileProvider: follow a connection that drops](how-to/file-system-adapters.md#follow-a-connection-that-drops).
+
 ## Health checks
 
 ```csharp

@@ -33,6 +33,8 @@
     <PackageReference Include="Microsoft.Extensions.FileProviders.Abstractions" VersionOverride="8.0.0" Condition="'$(TargetFramework)' == 'net8.0'" />
     <PackageReference Include="Microsoft.Extensions.FileProviders.Abstractions" Condition="'$(TargetFramework)' != 'net8.0'" />
     <ProjectReference Include="../SshSharp/SshSharp.csproj" />
+    <!-- The session handling both adapters share (the caller's session, or a factory's, opened again after a failure). -->
+    <Compile Include="../Shared/SftpSessions.cs" Link="Shared/SftpSessions.cs" />
     <None Include="README.md" Pack="true" PackagePath="/" />
     <None Include="../../assets/logo/sshsharp-128.png" Pack="true" PackagePath="/icon.png" Visible="false" />
   </ItemGroup>

@@ -4,6 +4,9 @@ using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
 using SshSharp.Extensions.DependencyInjection;
+using SshSharp.FileProviders;
+using SshSharp.Sftp;
+using SshSharp.Tests.Sftp;
 
 namespace SshSharp.Tests.DependencyInjection;
 
@@ -242,6 +245,43 @@ public sealed class DependencyInjectionTests : IDisposable
         {
             listener.Stop();
         }
+    }
+
+    [Test]
+    public async Task OpenSftpAsync_OpensSessionsOnTheSharedConnection_SoAFileProviderFollowsItAcrossADrop()
+    {
+        var files = new FakeSftpServer();
+        files.AddDirectory(FakeSftpServer.Home + "/site");
+        files.AddFile(FakeSftpServer.Home + "/site/index.html", "<h1>hello</h1>"u8.ToArray());
+        await using var server = new TcpFakeSshServer { Configure = files.Install };
+        var services = new ServiceCollection();
+        services.AddSshClient("box", Endpoint(server));
+        await using var provider = services.BuildServiceProvider();
+        var connections = provider.GetRequiredService<ISshConnectionProvider>();
+        await using var fileProvider = new SftpFileProvider(ct => connections.OpenSftpAsync("box", ct), "site",
+            new SftpFileProviderOptions { CacheDuration = TimeSpan.Zero });
+
+        await Assert.That(fileProvider.GetFileInfo("index.html").Exists).IsTrue();
+        await using (var sftp = await connections.OpenSftpAsync("box", Timeout())) // the caller's own session, on the same connection
+        {
+            await Assert.That(await sftp.ExistsAsync("site/index.html", Timeout())).IsTrue();
+        }
+
+        await Assert.That(server.Connections).IsEqualTo(1);
+        await Assert.That(files.Sessions).IsEqualTo(2);
+
+        var first = await connections.GetClientAsync("box", Timeout());
+        server.DropAll();
+        for (var i = 0; i < 500 && first.IsConnected; i++)
+        {
+            await Task.Delay(10);
+        }
+
+        // The provider meets the dropped session, opens a new one on the reconnected shared connection, and answers.
+        await Assert.That(fileProvider.GetFileInfo("index.html").Exists).IsTrue();
+        await Assert.That(server.Connections).IsEqualTo(2);
+        await Assert.That(files.Sessions).IsEqualTo(3);
+        await Assert.That(async () => await connections.OpenSftpAsync("", Timeout())).Throws<ArgumentException>();
     }
 
     [Test]

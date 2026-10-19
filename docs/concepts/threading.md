@@ -13,7 +13,7 @@ may be used from several tasks at once, and what may not.
 | `SshExpect` | One caller at a time. It reads `StandardOutput` itself; nothing else may read it. |
 | Tunnel streams | As for any `Stream`: one reader and one writer at a time, which may run concurrently. |
 | SFTP file streams (`OpenAsync`) | One call at a time, as for `FileStream`. Writes in flight are answered in the background, but the stream looks at their replies only during your calls, so nothing races with you. |
-| `SftpFileSystem`, `SftpFileProvider` | Yes, through their shared `SftpClient`. |
+| `SftpFileSystem`, `SftpFileProvider` | Yes, through their shared `SftpClient`. Built from a session factory, concurrent callers share one session and one reopen after a drop. |
 | `SshClientOptions`, `SshConfigConnectOptions`, `SshConfig` | Immutable once built; one instance can serve many connections. |
 | `ISshClientFactory`, `ISshConnectionProvider` | Yes; singletons in the container. |
 

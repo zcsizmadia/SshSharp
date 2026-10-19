@@ -233,7 +233,11 @@ builder.Configuration.AddJsonFile(provider, "appsettings.json", optional: false,
 - **No change notifications.** SFTP has none, so `Watch` returns a token that never fires (`reloadOnChange` has no effect).
 - A missing file, or one the server will not let you read, has `Exists` false. A broken session or connection throws
   `SshException`.
-- The provider does not own the `SftpClient`: dispose that after the provider is no longer used.
+- **One session, or a factory.** Built from an `SftpClient`, the provider uses that session for its lifetime and does not own it:
+  dispose it after the provider is no longer used. Built from a session factory (`new SftpFileProvider(ct => ..., "/srv/www")`), it
+  opens a session on first use and a new one after the session or its connection fails, trying the failed lookup once more; it owns
+  those sessions, so dispose the provider. With dependency injection, `ct => connections.OpenSftpAsync("name", ct)` is the factory.
+  See [Follow a connection that drops](how-to/file-system-adapters.md#follow-a-connection-that-drops).
 
 ## Using `IFileSystem` (System.IO.Abstractions)
 
@@ -261,6 +265,7 @@ var reports = fs.Directory.GetFiles("reports", "*.txt", SearchOption.AllDirector
 | Streams | Buffered (64 KiB), sync and async, seekable; read-only streams read ahead, and writes are written behind, so a failed write is thrown (as an `IOException`) by a later call, at the latest by `Flush` or `Dispose`. |
 | Errors | The `System.IO` exceptions, from sync and async methods alike: `FileNotFoundException`, `DirectoryNotFoundException`, `UnauthorizedAccessException`, `IOException` (also a failed session or a timeout). `Exists` never throws: it is false when the answer cannot be had. `Copy` onto the same file is an `IOException`. |
 | Timeouts | `SftpFileSystemOptions.OperationTimeout` (60 s; `Timeout.InfiniteTimeSpan` for none) bounds each request, and for whole-file reads, writes and copies the time without progress, so large files are not cut off. |
+| Sessions | Built from an `SftpClient`, the file system uses that session for its lifetime and does not own it. Built from a session factory (`new SftpFileSystem(ct => ...)`), it opens a session on first use and a new one after the session or its connection fails; reads that met the drop are tried once more, writes are not. It owns those sessions: dispose it. See [Follow a connection that drops](how-to/file-system-adapters.md#follow-a-connection-that-drops). |
 | Not supported | `FileSystemWatcher`, `DriveInfo`, `FileVersionInfo`, `RandomAccess`, `SafeFileHandle` overloads, encryption, `Replace`: they throw `NotSupportedException`. SFTP has no creation times: they read as the last write time, and setting one does nothing. |
 
 The synchronous methods wait for SFTP round trips; the `...Async` ones do not block. `IFile`'s Unix-mode methods are marked
