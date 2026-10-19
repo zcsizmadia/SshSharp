@@ -16,7 +16,7 @@ var result = await client.RunCommandAsync("uptime");
 Console.WriteLine(result.StandardOutputText);
 ```
 
-> **Status:** 1.0: the public API follows semantic versioning, so breaking changes wait for a major version. The managed
+> **Status:** 1.x: the public API follows semantic versioning, so breaking changes wait for a major version. The managed
 > cryptography has had an internal constant-time review but not yet an outside one. See [SECURITY.md](https://github.com/zcsizmadia/SshSharp/blob/main/SECURITY.md).
 
 ## Features
@@ -103,13 +103,14 @@ Console.WriteLine(result.StandardOutputText);
 | Post-quantum key exchange `mlkem768x25519-sha256` (OpenSSH 9.9+) | ✅ (.NET 10 with platform ML-KEM) | ✅ |
 | FIPS-compatible post-quantum key exchange (`mlkem768nistp256-sha256`, `mlkem1024nistp384-sha384`) | ✅ (.NET 10 with platform ML-KEM) | ❌ |
 | Strict key exchange (Terrapin fix) | ✅ | ✅ |
-| Legacy algorithms (CBC, 3DES, SHA-1, `ssh-rsa`, DH group 1, pre-authentication `zlib`) | — (by design) | ✅ |
+| Legacy algorithms (CBC, 3DES, SHA-1, `ssh-rsa`, DH group 1, pre-authentication `zlib`) | — (by design) | ✅ (plain `zlib` only when you add it to `CompressionAlgorithms`) |
 | Commands, shells with a terminal, `expect`-style scripting | ✅ | ✅ |
 | Environment variables for a session (`env` requests, as ssh's `SetEnv` and `SendEnv`) | ✅ | ❌ |
 | Any signal to a running session, including extension signals (`INFO@openssh.com`) | ✅ | ❌ (TERM or KILL, when cancelling a command) |
 | BREAK (RFC 4335, for serial consoles) | ✅ | ❌ |
 | Any subsystem (`ssh -s`) | ✅ | ❌ (SFTP and NETCONF only) |
 | Local, remote and dynamic port forwarding | ✅ (also started from `ssh_config`) | ✅ |
+| A SOCKS proxy (`ssh -D`) that asks for a user name and password (SOCKS 5, RFC 1929), so it can listen beyond loopback | ✅ | ❌ (SOCKS 4 and 5 without authentication only) |
 | Remote dynamic forwarding (`ssh -R port`, a SOCKS proxy on the client side) | ✅ | ❌ |
 | Unix-socket tunnels (Docker or database sockets on the server) | ✅ | ❌ |
 | Remote Unix-socket forwarding (`ssh -R /remote.sock:target`, for example gpg-agent forwarding) | ✅ | ❌ |
@@ -119,17 +120,19 @@ Console.WriteLine(result.StandardOutputText);
 | FIPS mode (FIPS-approved algorithms only) | ✅ | ❌ |
 | SCP | ✅ | ✅ |
 | SFTP | ✅ (version 3 with OpenSSH extensions, pipelined transfers) | ✅ |
+| SFTP directory trees: recursive uploads and downloads (several files at once, a filter, skipping unchanged files), recursive listings with patterns, `rm -r` and `mkdir -p` | ✅ | ❌ (`SynchronizeDirectories` uploads the files of one local directory, without its subdirectories) |
 | Segmented SFTP downloads and uploads (one file in parallel ranges over several sessions) | ✅ | ❌ |
 | SFTP file hashes computed by the server (`check-file`, to verify a transfer) and raw extended requests | ✅ | ❌ |
 | SFTP `fsync@openssh.com` (durable uploads), `hardlink@openssh.com` and `limits@openssh.com` | ✅ | ❌ |
 | Remote files as an `IFileSystem` (System.IO.Abstractions: `File`, `Directory`, `Path`, streams) | ✅ (`SshSharp.IO.Abstractions`) | ❌ |
 | Remote files as an `IFileProvider` (ASP.NET Core static files, Razor, configuration) | ✅ (`SshSharp.FileProviders`) | ❌ |
+| Dependency injection: named endpoints from configuration, a shared connection that reconnects, health checks, `HttpClient` through an endpoint | ✅ (`SshSharp.Extensions.DependencyInjection`) | ❌ |
 | Native AOT | ✅ (an AOT-compiled binary connects to a real server in CI) | ✅ (AOT-compatible; an AOT publish is checked in CI) |
 | Diagnostics | `ILogger`, `ActivitySource` tracing, `Meter` metrics (OpenTelemetry semantic conventions) | `ILogger` |
 | Fuzzing | ✅ (coverage-guided, nightly; every parser in each test run) | ❌ |
 | Fault-injection tests against real servers (cuts at any byte, either way; silent or one-way stalled networks; latency, tiny segments, low bandwidth; sessions killed on the server) | ✅ | Partial (sessions killed on the server) |
 | Mutation testing | ✅ (Stryker.NET, weekly) | ❌ |
-| Maturity | New (1.0); managed crypto awaiting an outside review | More than a decade of production use |
+| Maturity | New (1.0 in October 2026); managed crypto awaiting an outside review | More than a decade of production use |
 
 **Use SSH.NET instead** when you need .NET Framework or .NET Standard, servers that only speak legacy algorithms,
 or a long track record. Moving from SSH.NET? See the
@@ -173,6 +176,7 @@ Checked on 2026-10-19 against Tmds.Ssh 0.26.0 ([NuGet](https://www.nuget.org/pac
 | Dependency injection package, file system adapters | ✅ | ❌ |
 
 Tmds.Ssh has X11 forwarding and .NET 9 and .NET 11 builds, which SshSharp does not.
+
 ## Install
 
 ```
@@ -229,7 +233,8 @@ latest release.
   [tutorial](https://github.com/zcsizmadia/SshSharp/blob/main/docs/tutorial.md)
 - On the documentation site: task-oriented [how-to guides](https://github.com/zcsizmadia/SshSharp/blob/main/docs/how-to/index.md),
   complete [scenarios](https://github.com/zcsizmadia/SshSharp/blob/main/docs/scenarios/index.md) (a deployment script, a fleet
-  health check, a file sync job, a database through a jump host, a background worker), concept pages
+  health check, a file sync job, a database through a jump host, a webhook receiver behind NAT, a background worker,
+  short-lived certificates for CI jobs, a KMS-held key forwarded through a bastion), concept pages
   ([architecture](https://github.com/zcsizmadia/SshSharp/blob/main/docs/concepts/architecture.md),
   [security model](https://github.com/zcsizmadia/SshSharp/blob/main/docs/concepts/security-model.md)), and reference pages
   ([ssh_config directives](https://github.com/zcsizmadia/SshSharp/blob/main/docs/reference/ssh-config.md),
@@ -256,7 +261,8 @@ latest release.
   side by side
 - [Samples](https://github.com/zcsizmadia/SshSharp/tree/main/samples): an `ssh`-like tool (commands, streaming, shell, port
   forwarding, SOCKS, SCP, SFTP, `IFileSystem`, a Windows CNG key), ASP.NET Core with dependency injection, static files and a health
-  check, and a worker service that survives dropped connections
+  check, a worker service that survives dropped connections, OpenTelemetry traces and metrics, a raw-mode terminal that follows
+  the window's size, a jump host in code with a short-lived issued certificate, and a Native AOT tool
 - [API reference](https://zcsizmadia.github.io/SshSharp/api/SshSharp.html): generated from the XML documentation with DocFX
   (to build it locally: `dotnet tool restore`, then `dotnet docfx docs/docfx.json --serve`); every public member is documented,
   and IntelliSense shows the same text.

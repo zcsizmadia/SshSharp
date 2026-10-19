@@ -28,8 +28,9 @@ receive buffer the socket has then. Keep-alive and the type of service can be se
 earliest point.
 
 `ConfigureSocket` is called once for each socket SshSharp creates, and each address of the server that is tried gets a new socket,
-of that address's family (IPv4 or IPv6, not dual-mode). For an IP address, or a name with one address, that is once. When a name
-has several addresses and the first cannot be reached, the callback runs again for the socket of each further address tried, so set
+of that address's family (IPv4 or IPv6, not dual-mode). For an IP address, or a name with one address, that is once per attempt. When a
+name has several addresses and the first cannot be reached, the callback runs again for the socket of each further address tried,
+and each retry that `ConnectionAttempts` makes starts with new sockets too, so set
 the same options every time. Anything the callback throws ends the connection attempt and is thrown from `ConnectAsync` unchanged,
 not wrapped as a failure to connect.
 

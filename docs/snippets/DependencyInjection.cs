@@ -150,6 +150,7 @@ internal static partial class DependencyInjection
                 AddressFamily = built.AddressFamily,
                 KeepAliveInterval = built.KeepAliveInterval,
                 ConnectTimeout = built.ConnectTimeout,
+                Compression = built.Compression,
                 Logger = built.Logger,
                 // Changed: host keys checked by a service from the container instead of known_hosts or pinned fingerprints.
                 HostKeyVerifier = SshHostKeyVerifier.FromDelegate((context, cancellationToken) =>

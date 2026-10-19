@@ -221,7 +221,7 @@ current user and the public key next to it (`path` + `.pub`, an `authorized_keys
 
 `SshPublicKey.Parse` reads the plain `<type> <base64> [comment]` form. It refuses `authorized_keys` options in front of the key
 (`restrict,command="..." ssh-ed25519 ...`) rather than drop them, so a key you write back out never loses its restrictions; pass the
-key part of the line. `FromBlob` reads the SSH wire format (what the `PublicKey` members hold). A malformed key, a type name that does
+key part of the line. `FromBlob` reads the SSH wire format (what the `PublicKey` members hold), and `Blob` gives it back. A malformed key, a type name that does
 not match the key, or a type SshSharp does not read fails with `FormatException`; `TryParse` returns false instead.
 
 The types it reads are Ed25519, ECDSA (nistp256, nistp384, nistp521), RSA (up to 16384 bits, the most OpenSSH accepts; a larger

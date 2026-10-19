@@ -304,7 +304,7 @@ internal static class Keys
     {
         // <signer-public-key>
         var signer = new KmsSigner(service, "ssh-deploy", publicKeyBlob);
-        var line = signer.GetPublicKey().ToAuthorizedKeysLine() + " kms:ssh-deploy";   // "ssh-ed25519 AAAA... kms:ssh-deploy"
+        var line = signer.GetPublicKey().ToAuthorizedKeysLine() + " kms:ssh-deploy";   // "ecdsa-sha2-nistp256 AAAA... kms:ssh-deploy"
         await File.AppendAllTextAsync("authorized_keys.d/deploy", line + "\n", cancellationToken);
         // </signer-public-key>
     }

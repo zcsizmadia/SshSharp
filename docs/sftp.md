@@ -262,7 +262,7 @@ A write the server refuses is never lost. Which call reports it depends on when 
 |---|---|---|
 | `WriteAsync` | Only the oldest, when 16 are outstanding, and all of them after a seek. | Any that has failed by then. |
 | `FlushAsync` | All of them, then asks the server to write the file to disk (`fsync@openssh.com`) when it can. | Any. |
-| `ReadAsync` (read-write stream), `GetLengthAsync`, `SetLength` | All of them, so they see (or change) what was written. | Any. |
+| `ReadAsync` (read-write stream), `SetLength` | All of them, so they see (or change) what was written. | Any. |
 | `Seek`, `Position` set, `Flush` | No. | Any that has failed by then. |
 | `DisposeAsync`, `Dispose` | All of them, then close the handle (also after a failure). | Any not reported yet. |
 
@@ -395,7 +395,7 @@ var reports = fs.Directory.GetFiles("reports", "*.txt", SearchOption.AllDirector
 | `FileInfo`, `DirectoryInfo` | Attributes are read on first use and kept until `Refresh()`, as in `System.IO`; enumerations carry each entry's attributes, so no request per entry. |
 | Streams | Buffered (64 KiB), sync and async, seekable; read-only streams read ahead, and writes are written behind, so a failed write is thrown (as an `IOException`) by a later call, at the latest by `Flush` or `Dispose`. |
 | Errors | The `System.IO` exceptions, from sync and async methods alike: `FileNotFoundException`, `DirectoryNotFoundException`, `UnauthorizedAccessException`, `IOException` (also a failed session or a timeout). `Exists` never throws: it is false when the answer cannot be had. `Copy` onto the same file is an `IOException`. |
-| Timeouts | `SftpFileSystemOptions.OperationTimeout` (60 s; `Timeout.InfiniteTimeSpan` for none) bounds each request, and for whole-file reads, writes and copies the time without progress, so large files are not cut off. |
+| Timeouts | `SftpFileSystemOptions.OperationTimeout` (60 s; `Timeout.InfiniteTimeSpan` for none) bounds each request, and for whole-file reads, writes and copies the time without progress, so large files are not cut off. A server-side copy (`copy-data`) reports no progress and has no limit. |
 | Sessions | Built from an `SftpClient`, the file system uses that session for its lifetime and does not own it. Built from a session factory (`new SftpFileSystem(ct => ...)`), it opens a session on first use and a new one after the session or its connection fails; reads that met the drop are tried once more, writes are not. It owns those sessions: dispose it. See [Follow a connection that drops](how-to/file-system-adapters.md#follow-a-connection-that-drops). |
 | Not supported | `FileSystemWatcher`, `DriveInfo`, `FileVersionInfo`, `RandomAccess`, `SafeFileHandle` overloads, encryption, `Replace`: they throw `NotSupportedException`. SFTP has no creation times: they read as the last write time, and setting one does nothing. |
 

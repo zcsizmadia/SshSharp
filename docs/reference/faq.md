@@ -29,7 +29,7 @@ It is tested against OpenSSH (old and new, on Linux and Windows), Dropbear, Asyn
 SFTP-only servers; see [Testing and validation](../testing.md). Any server that speaks a modern algorithm should work.
 
 **Is it production-ready?**
-1.0 follows semantic versioning, and the library is extensively tested (unit, interop, fault injection, fuzzing, mutation testing).
+Since 1.0 the public API follows semantic versioning, and the library is extensively tested (unit, interop, fault injection, fuzzing, mutation testing).
 The managed cryptography has had an internal constant-time review but not yet an outside one. SSH.NET has a much longer track
 record. Read the [cryptography review](../crypto-review.md) and decide for your risk profile.
 

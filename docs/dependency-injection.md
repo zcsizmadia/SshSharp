@@ -211,7 +211,8 @@ See [IFileSystem and IFileProvider: follow a connection that drops](how-to/file-
 ### Watching the shared connection
 
 `WatchAsync(name)` is an `IAsyncEnumerable<SshConnectionEvent>` of the shared connection's changes, for an application that keeps
-something on the connection (a forwarding, a long-running command) and must set it up again on a new one:
+something on the connection (a forwarding, a long-running command) and must set it up again on a new one. Each event also has the
+`EndpointName` and a `Timestamp`, and `Kind` is an `SshConnectionEventKind`:
 
 | `Kind` | When | `Client` | `Error` |
 |---|---|---|---|

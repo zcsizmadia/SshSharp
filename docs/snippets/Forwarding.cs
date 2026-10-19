@@ -150,7 +150,7 @@ internal static class Forwarding
     public static async Task DynamicWithPasswordAsync(SshClient client, CancellationToken cancellationToken)
     {
         // <dynamic-auth>
-        // A SOCKS proxy for other machines on the build network: beyond loopback, so it requires a user name and password
+        // A SOCKS proxy for other machines on the build network: it listens beyond loopback, so give it a user name and password
         // (SOCKS 5, RFC 1929). SOCKS 4 and clients without credentials are refused.
         var credentials = new NetworkCredential("builds",
             Environment.GetEnvironmentVariable("SOCKS_PASSWORD") ?? throw new InvalidOperationException("Set SOCKS_PASSWORD."));

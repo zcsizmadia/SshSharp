@@ -79,7 +79,7 @@ Servers ignore extensions they do not know, so a vendor extension means only wha
 ### Check revocation
 
 `SshKeyRevocationList` reads the revocation list sshd's `RevokedKeys` names: an OpenSSH KRL (the binary file `ssh-keygen -k` writes)
-or a text file of public keys. It answers for a certificate (revoked by serial or key id for its authority, or because its key or its
+or a text file of public keys (`IsKrl` says which it read). It answers for a certificate (revoked by serial or key id for its authority, or because its key or its
 authority's key is) and for a plain key (listed, or listed by fingerprint), as `ssh-keygen -Q` does:
 
 [!code-csharp[](../snippets/Keys.cs#certificate-revocation)]
