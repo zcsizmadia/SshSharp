@@ -59,6 +59,28 @@ The verifier `ssh` would use for that host comes from the same resolution:
 
 [!code-csharp[](../snippets/Connecting.cs#verifier-from-config)]
 
+## Canonicalize host names
+
+`CanonicalizeHostname yes` turns a short name into a fully qualified one before connecting: `ssh web` becomes
+`web.corp.example.com`, and `Host` blocks written for full names apply. Turn on the built-in DNS canonicalizer with
+`SshConfigResolveOptions.UseDnsCanonicalizer`:
+
+[!code-csharp[](../snippets/Connecting.cs#canonicalize)]
+
+- **It follows `ssh`.** `CanonicalDomains` are tried in order, each as an absolute name (`web.corp.example.com.`, so the system's
+  search list does not apply), and `none` among them stops the list. A name with more dots than `CanonicalizeMaxDots` (default 1),
+  a name ending in a dot (looked up as it is), and an IP address are handled as `ssh` handles them. `CanonicalizeFallbackLocal no`
+  fails when nothing is found. Through `ProxyJump` or `ProxyCommand`, only `CanonicalizeHostname always` canonicalizes.
+- **CNAMEs are followed only when `CanonicalizePermittedCNAMEs` allows the pair**, as in `ssh`: a found name becomes its CNAME
+  target if a rule's source domains match the name and its target domains match the target.
+- **Limits.** The lookups use the system resolver (`System.Net.Dns`): the hosts file and DNS, as `getaddrinfo` does for `ssh`. It
+  reports the end of a CNAME chain, not the names in between, so rules are checked against the final target. When the platform
+  reports no canonical name, there is nothing for a rule to act on and the name stays as found. `CanonicalizePermittedCNAMEs` with
+  `CanonicalizeHostname no` does not follow CNAMEs (`ssh` does).
+- **Off by default.** Resolving then makes DNS queries, which the application should choose. `Resolve` throws
+  `NotSupportedException` when lookups are needed; use `ResolveAsync`, as connecting by alias does. `HostCanonicalizer` still
+  replaces the built-in one, for a resolver of your own.
+
 ## Read and update known_hosts
 
 [!code-csharp[](../snippets/Connecting.cs#known-hosts)]
@@ -72,7 +94,8 @@ Hashed host names (`|1|salt|hash`), `[host]:port`, wildcards and negation, `@cer
   `AllowProxyCommand = false`). `KnownHostsCommand` decides which host keys are trusted, so it runs only with
   `AllowKnownHostsCommand = true`. `Match exec` runs only when `SshConfigResolveOptions.ExecMatcher` is set. Only enable these for
   configuration files you trust.
-- **`Match exec` and canonicalization are asynchronous.** A configuration that needs them must be resolved with `ResolveAsync`;
+- **`Match exec` and canonicalization are asynchronous** (`HostCanonicalizer`, or the DNS lookups of `UseDnsCanonicalizer`). A
+  configuration that needs them must be resolved with `ResolveAsync`;
   `Resolve` throws `NotSupportedException`. Connecting by alias always resolves asynchronously.
 - **`BatchMode yes`** turns off every prompt: `AskHostKey`, `ConfirmHostKeyUpdate`, `PassphraseProvider` and the
   keyboard-interactive handler are not used.

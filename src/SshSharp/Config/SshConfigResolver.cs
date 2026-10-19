@@ -268,7 +268,8 @@ internal sealed class SshConfigResolver(IReadOnlyList<SshConfigDocument> documen
 
     private string? TryCanonicalize()
     {
-        if (options.HostCanonicalizer is null || !_values.TryGetValue("canonicalizehostname", out var setting) || setting.Count == 0)
+        if ((options.HostCanonicalizer is null && !options.UseDnsCanonicalizer)
+            || !_values.TryGetValue("canonicalizehostname", out var setting) || setting.Count == 0)
         {
             return null;
         }
@@ -284,20 +285,158 @@ internal sealed class SshConfigResolver(IReadOnlyList<SshConfigDocument> documen
         var host = CurrentHost();
         var maxDots = _values.TryGetValue("canonicalizemaxdots", out var dots) && dots.Count > 0
             && int.TryParse(dots[0], NumberStyles.None, CultureInfo.InvariantCulture, out var d) ? d : 1;
-        if ((!always && viaProxy) || host.Count(c => c == '.') > maxDots)
+        var domains = _values.TryGetValue("canonicaldomains", out var list) ? list : [];
+        if (!always && viaProxy)
         {
             return null;
         }
 
-        var domains = _values.TryGetValue("canonicaldomains", out var list) ? list : [];
-        var canonical = answers.Canonical(host, domains);
-        if (canonical is null && _values.TryGetValue("canonicalizefallbacklocal", out var fallback) && fallback.Count > 0
-            && fallback[0].ToLowerInvariant() is "no" or "false")
+        if (options.HostCanonicalizer is null)
         {
-            throw new InvalidOperationException($"Could not canonicalize host name '{host}' and CanonicalizeFallbackLocal is off.");
+            return CanonicalizeWithDns(host, maxDots, domains);
+        }
+
+        if (host.Count(c => c == '.') > maxDots)
+        {
+            return null;
+        }
+
+        var canonical = answers.Canonical(host, domains);
+        if (canonical is null)
+        {
+            RequireFallbackLocal(host);
         }
 
         return canonical;
+    }
+
+    /// <summary>
+    /// <c>CanonicalizeFallbackLocal</c>, after no canonical name was found: on (the default), the name is used as it is; <c>no</c> fails.
+    /// </summary>
+    /// <exception cref="InvalidOperationException"><c>CanonicalizeFallbackLocal no</c>.</exception>
+    private void RequireFallbackLocal(string host)
+    {
+        if (_values.TryGetValue("canonicalizefallbacklocal", out var fallback) && fallback.Count > 0 && fallback[0].ToLowerInvariant() is "no" or "false")
+        {
+            throw new InvalidOperationException($"Could not canonicalize host name '{host}' and CanonicalizeFallbackLocal is off.");
+        }
+    }
+
+    /// <summary>
+    /// The built-in canonicalizer (<see cref="SshConfigResolveOptions.UseDnsCanonicalizer"/>), as OpenSSH's <c>resolve_canonicalize</c>
+    /// and <c>check_follow_cname</c> do it: a name ending in a dot is looked up as it is; otherwise, unless it has more than
+    /// <paramref name="maxDots"/> dots, it is looked up with each domain appended (as an absolute name, so no search list applies) until
+    /// one resolves, stopping at <c>none</c>. A found name becomes its CNAME target when <c>CanonicalizePermittedCNAMEs</c> allows the
+    /// pair. When nothing is found (and the fallback allows going on), or the name has too many dots to try, the name is still
+    /// looked up as the system resolves it and its CNAME target taken if a rule allows it, as ssh's main does after canonicalizing.
+    /// Each lookup goes through the answers, so it runs once per resolution.
+    /// </summary>
+    private string? CanonicalizeWithDns(string host, int maxDots, IReadOnlyList<string> domains)
+    {
+        // An address is never a name to canonicalize; nor is anything with a colon (an address with a scope, which ssh skips too).
+        if (host.Length == 0 || host.Contains(':', StringComparison.Ordinal) || System.Net.IPAddress.TryParse(host, out _))
+        {
+            return null;
+        }
+
+        var family = _values.TryGetValue("addressfamily", out var af) && af.Count > 0
+            ? af[0].ToLowerInvariant() switch { "inet" => SshAddressFamily.Inet, "inet6" => SshAddressFamily.Inet6, _ => SshAddressFamily.Any }
+            : SshAddressFamily.Any;
+        if (host.EndsWith('.'))
+        {
+            if (answers.Lookup(host, family) is { } anchored)
+            {
+                return FollowCname(host[..^1], anchored);
+            }
+
+            RequireFallbackLocal(host);
+            return null;
+        }
+
+        if (host.Count(c => c == '.') > maxDots)
+        {
+            return FollowBareName(host, family);
+        }
+
+        foreach (var domain in domains)
+        {
+            if (domain.Equals("none", StringComparison.OrdinalIgnoreCase))
+            {
+                break;
+            }
+
+            var candidate = $"{host}.{domain}.";
+            if (answers.Lookup(candidate, family) is { } canonicalName)
+            {
+                return FollowCname(candidate[..^1], canonicalName);
+            }
+        }
+
+        RequireFallbackLocal(host);
+        return FollowBareName(host, family);
+    }
+
+    /// <summary>
+    /// No canonical name under the domains: with CNAME rules configured, the name as the system resolves it (search list included)
+    /// becomes its CNAME target if a rule allows that pair; otherwise nothing changes (null).
+    /// </summary>
+    private string? FollowBareName(string host, SshAddressFamily family)
+    {
+        if (PermittedCnames().Count == 0 || answers.Lookup(host, family) is not { } canonicalName)
+        {
+            return null;
+        }
+
+        var followed = FollowCname(host, canonicalName);
+        return string.Equals(followed, host, StringComparison.Ordinal) ? null : followed;
+    }
+
+    /// <summary>
+    /// ssh's <c>check_follow_cname</c>: <paramref name="name"/>, or the canonical name the resolver reported for it when a
+    /// <c>CanonicalizePermittedCNAMEs</c> rule matches both (the name against its source domains, the target against its targets).
+    /// </summary>
+    private string FollowCname(string name, string canonicalName)
+    {
+        var target = canonicalName.TrimEnd('.');
+        if (target.Length == 0 || string.Equals(name, target, StringComparison.Ordinal))
+        {
+            return name;
+        }
+
+        foreach (var (sources, targets) in PermittedCnames())
+        {
+            if (Glob.IsMatchList(sources, name) && Glob.IsMatchList(targets, target))
+            {
+                return target;
+            }
+        }
+
+        return name;
+    }
+
+    /// <summary>
+    /// <c>CanonicalizePermittedCNAMEs source_domains:target_domains ...</c>: each rule a pair of comma-separated pattern lists; <c>none</c>
+    /// or unset for no rules. A rule without a colon or with an empty side, which ssh rejects, is left out.
+    /// </summary>
+    private List<(string Sources, string Targets)> PermittedCnames()
+    {
+        var rules = new List<(string, string)>();
+        if (!_values.TryGetValue("canonicalizepermittedcnames", out var arguments)
+            || (arguments.Count == 1 && arguments[0].Equals("none", StringComparison.OrdinalIgnoreCase)))
+        {
+            return rules;
+        }
+
+        foreach (var argument in arguments)
+        {
+            var colon = argument.IndexOf(':', StringComparison.Ordinal);
+            if (colon > 0 && colon < argument.Length - 1)
+            {
+                rules.Add((argument[..colon], argument[(colon + 1)..]));
+            }
+        }
+
+        return rules;
     }
 }
 /// <summary>
@@ -310,6 +449,7 @@ internal sealed class SshConfigCallbackAnswers
 {
     private readonly Dictionary<string, bool> _exec = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string?> _canonical = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string?> _lookups = new(StringComparer.OrdinalIgnoreCase);
 
     public bool Exec(string command) =>
         _exec.TryGetValue(command, out var matched) ? matched : throw new SshConfigCallbackNeeded(command, null);
@@ -317,18 +457,46 @@ internal sealed class SshConfigCallbackAnswers
     public string? Canonical(string host, IReadOnlyList<string> domains) =>
         _canonical.TryGetValue(Key(host, domains), out var name) ? name : throw new SshConfigCallbackNeeded(host, domains);
 
+    /// <summary>The canonical name <paramref name="name"/> resolves to, or null when it does not resolve (<see cref="SshConfigResolveOptions.UseDnsCanonicalizer"/>).</summary>
+    public string? Lookup(string name, SshAddressFamily family) =>
+        _lookups.TryGetValue(LookupKey(name, family), out var canonical) ? canonical : throw new SshConfigCallbackNeeded(name, family);
+
     public void RecordExec(string command, bool matched) => _exec[command] = matched;
 
     public void RecordCanonical(string host, IReadOnlyList<string> domains, string? name) => _canonical[Key(host, domains)] = name;
 
+    public void RecordLookup(string name, SshAddressFamily family, string? canonical) => _lookups[LookupKey(name, family)] = canonical;
+
     private static string Key(string host, IReadOnlyList<string> domains) => host + "\0" + string.Join("\0", domains);
+
+    private static string LookupKey(string name, SshAddressFamily family) => name + "\0" + family.ToString();
 }
 
-/// <summary>A callback answer the resolver needs and does not have yet: an exec command, or a host and its canonical domains.</summary>
-internal sealed class SshConfigCallbackNeeded(string argument, IReadOnlyList<string>? domains) : Exception
+/// <summary>
+/// A callback answer the resolver needs and does not have yet: an exec command, a host and its canonical domains, or a name to look
+/// up in DNS.
+/// </summary>
+internal sealed class SshConfigCallbackNeeded : Exception
 {
-    public string Argument { get; } = argument;
+    /// <summary>An exec command (<paramref name="domains"/> null), or a host to canonicalize and its domains.</summary>
+    public SshConfigCallbackNeeded(string argument, IReadOnlyList<string>? domains)
+    {
+        Argument = argument;
+        Domains = domains;
+    }
 
-    /// <summary>The canonical domains, for a host to canonicalize; null for an exec command.</summary>
-    public IReadOnlyList<string>? Domains { get; } = domains;
+    /// <summary>A name to look up, restricted to <paramref name="family"/>.</summary>
+    public SshConfigCallbackNeeded(string name, SshAddressFamily family)
+    {
+        Argument = name;
+        LookupFamily = family;
+    }
+
+    public string Argument { get; }
+
+    /// <summary>The canonical domains, for a host to canonicalize; null for an exec command or a lookup.</summary>
+    public IReadOnlyList<string>? Domains { get; }
+
+    /// <summary>The address family, for a name to look up; null for an exec command or a host to canonicalize.</summary>
+    public SshAddressFamily? LookupFamily { get; }
 }

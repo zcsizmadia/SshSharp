@@ -327,6 +327,15 @@ connection, but not read or change it: each host's key is verified end to end, b
   `.cmd`) is refused, because Windows runs it through `cmd.exe`, which would reparse the arguments.
 - `Match localnetwork` reads the local interface addresses. As ssh_config(5) warns, a network address is not a trustworthy
   criterion: anyone who controls the network can choose which block applies.
+- Host name canonicalization (`CanonicalizeHostname`) with the built-in DNS canonicalizer (`UseDnsCanonicalizer`, off by default)
+  sends a lookup for each candidate name (the host with each `CanonicalDomains` entry) to the system's resolver, and so to its DNS
+  servers, usually unencrypted: they learn the names tried, as with `ssh`. The answers decide the `HostName` and, through the second
+  pass, which `Host` and `Match` blocks apply (an `IdentityFile`, a `ProxyJump`, a `User`), so whoever can answer those queries can
+  choose among the names tried and the blocks written for them. The host key is still checked for the name connected to, so a
+  forged answer cannot impersonate a host whose key is known; with `StrictHostKeyChecking` other than `yes`, a new name may be
+  accepted as for any new host. A CNAME target replaces the name only when `CanonicalizePermittedCNAMEs` allows that pair, which
+  keeps a forged CNAME from moving the connection (and its known_hosts lookup) to an arbitrary name. Canonicalization makes no
+  lookups for a host reached through `ProxyJump` or `ProxyCommand` unless the configuration says `always`.
 - Host and user names supplied by the caller are substituted into those commands (`%h`, `%n`, `%r`), so they are refused when
   they contain shell metacharacters, control characters or a leading `-` (the CVE-2023-51385 pattern). Host names may not
   contain white space either, which would split `%h` into extra arguments. User names may (Windows account names can).

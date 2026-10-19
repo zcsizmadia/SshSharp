@@ -295,3 +295,5 @@ SshSharp.SshConfigConnectOptions.ConfigureSocket.get -> System.Action<System.Net
 SshSharp.SshConfigConnectOptions.ConfigureSocket.init -> void
 SshSharp.SshConfigConnectOptions.ConfirmAddKeyToAgent.get -> System.Func<SshSharp.SshAddKeyToAgentPrompt!, System.Threading.CancellationToken, System.Threading.Tasks.ValueTask<bool>>?
 SshSharp.SshConfigConnectOptions.ConfirmAddKeyToAgent.init -> void
+SshSharp.Config.SshConfigResolveOptions.UseDnsCanonicalizer.get -> bool
+SshSharp.Config.SshConfigResolveOptions.UseDnsCanonicalizer.init -> void
