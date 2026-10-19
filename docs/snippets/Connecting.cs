@@ -180,14 +180,14 @@ internal static class Connecting
         var path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".ssh", "known_hosts");
         var knownHosts = await KnownHostsFile.LoadAsync(path, cancellationToken);
 
-        switch (knownHosts.Check("example.com", 22, client.HostKey.KeyType, client.HostKey.PublicKey.Span))
+        var key = client.HostKey.GetPublicKey();
+        switch (knownHosts.Check("example.com", 22, key))
         {
             case KnownHostsCheckResult.Match:
                 Console.WriteLine("known");
                 break;
             case KnownHostsCheckResult.Unknown:
-                await KnownHostsFile.AppendAsync(path, "example.com", 22, client.HostKey.KeyType, client.HostKey.PublicKey, hash: true,
-                    cancellationToken: cancellationToken);
+                await KnownHostsFile.AppendAsync(path, "example.com", 22, key, hash: true, cancellationToken: cancellationToken);
                 break;
             case KnownHostsCheckResult.Changed or KnownHostsCheckResult.Revoked:
                 throw new InvalidOperationException("The host key does not match known_hosts.");

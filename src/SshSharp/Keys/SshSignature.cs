@@ -12,7 +12,8 @@ namespace SshSharp;
 /// </summary>
 /// <remarks>
 /// <see cref="Verify(ReadOnlySpan{byte}, string)"/> proves only that the holder of <see cref="PublicKey"/> signed the message; whether that
-/// key belongs to whom it claims is a separate question, answered by <see cref="SshAllowedSigners"/> (<c>ssh-keygen -Y verify</c>).
+/// key belongs to whom it claims is a separate question, answered by <see cref="SshAllowedSigners"/> (<c>ssh-keygen -Y verify</c>), or
+/// by <see cref="Verify(ReadOnlySpan{byte}, string, SshPublicKey)"/> when you know the one key that must have signed.
 /// The namespace (<c>git</c>, <c>file</c>, or your application's own, such as <c>backup@example.com</c>) keeps a signature made for one
 /// purpose from being accepted for another.
 /// </remarks>
@@ -181,6 +182,42 @@ public sealed class SshSignature
         ArgumentNullException.ThrowIfNull(@namespace);
         return VerifyHash(await HashAsync(HashAlgorithm, message, cancellationToken).ConfigureAwait(false), @namespace);
     }
+
+    /// <summary>
+    /// Whether this is a valid signature over <paramref name="message"/>, for <paramref name="namespace"/>, by <paramref name="expectedKey"/>:
+    /// <see cref="Verify(ReadOnlySpan{byte}, string)"/>, and the signer's key is the one you trust, as <c>ssh-keygen -Y check-novalidate</c>
+    /// with a known key. A signature made with a certificate counts as its certified key's (<see cref="GetPublicKey"/>); the certificate
+    /// itself is not checked.
+    /// </summary>
+    /// <param name="message">The message that was signed.</param>
+    /// <param name="namespace">What the signature must be for, for example <c>git</c> or <c>file</c>.</param>
+    /// <param name="expectedKey">The key that must have signed. Its comment is ignored.</param>
+    /// <returns>True when <paramref name="expectedKey"/> made this signature over the message for the namespace; false otherwise.</returns>
+    public bool Verify(ReadOnlySpan<byte> message, string @namespace, SshPublicKey expectedKey)
+    {
+        ArgumentNullException.ThrowIfNull(@namespace);
+        ArgumentNullException.ThrowIfNull(expectedKey);
+        return IsBy(expectedKey) && VerifyHash(Hash(HashAlgorithm, message), @namespace);
+    }
+
+    /// <summary>Like <see cref="Verify(ReadOnlySpan{byte}, string, SshPublicKey)"/>, over what <paramref name="message"/> reads to its end.</summary>
+    /// <param name="message">The message that was signed, read to its end.</param>
+    /// <param name="namespace">What the signature must be for.</param>
+    /// <param name="expectedKey">The key that must have signed.</param>
+    /// <param name="cancellationToken">Cancels reading the message.</param>
+    public async Task<bool> VerifyAsync(Stream message, string @namespace, SshPublicKey expectedKey, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(message);
+        ArgumentNullException.ThrowIfNull(@namespace);
+        ArgumentNullException.ThrowIfNull(expectedKey);
+
+        // Checked first: a signature by another key needs no hash of the message.
+        return IsBy(expectedKey)
+            && VerifyHash(await HashAsync(HashAlgorithm, message, cancellationToken).ConfigureAwait(false), @namespace);
+    }
+
+    /// <summary>Whether the signer's key (the certified key, for a certificate) is <paramref name="key"/>.</summary>
+    private bool IsBy(SshPublicKey key) => (Certificate?.PublicKey ?? PublicKey).Span.SequenceEqual(key.Blob.Span);
 
     /// <summary>The armored signature, as <c>ssh-keygen -Y sign</c> writes it (base64 in lines of 70 characters).</summary>
     public override string ToString()

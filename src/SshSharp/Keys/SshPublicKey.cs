@@ -22,7 +22,8 @@ namespace SshSharp;
 /// </para>
 /// <para>
 /// Parsing checks what verifying a signature relies on, as for a server's host key: an ECDSA point must be on its curve, an RSA key's
-/// modulus and exponent must be sane. Hostile input fails with <see cref="FormatException"/>.
+/// modulus and exponent must be sane, and its modulus at most 16384 bits (the most OpenSSH accepts). Hostile input fails with
+/// <see cref="FormatException"/>.
 /// </para>
 /// </remarks>
 public sealed class SshPublicKey : IEquatable<SshPublicKey>

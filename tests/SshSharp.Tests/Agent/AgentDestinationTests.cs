@@ -28,6 +28,20 @@ public class AgentDestinationTests
         await Assert.That(constraints.Destinations.Count).IsEqualTo(1);
     }
 
+    [Test]
+    public async Task AHostKey_CanBeMadeFromAnSshPublicKey()
+    {
+        var key = SshPublicKey.Parse("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOkewh434iIbqbv/KuJZxwFyWK/+6jAL9JHNyL0kRfBT dest");
+
+        var hostKey = new SshAgentHostKey(key);
+        await Assert.That(hostKey).IsEqualTo(new SshAgentHostKey(key.Blob.ToArray()));
+        await Assert.That(hostKey.IsCertificateAuthority).IsFalse();
+        await Assert.That(hostKey.GetPublicKey()).IsEqualTo(key);
+        await Assert.That(new SshAgentHostKey(key, isCertificateAuthority: true))
+            .IsEqualTo(new SshAgentHostKey(key.Blob, IsCertificateAuthority: true));
+        await Assert.That(() => new SshAgentHostKey((SshPublicKey)null!)).Throws<ArgumentNullException>();
+    }
+
     // Throwaway host keys and the restrict-destination constraint bodies OpenSSH 10.6's ssh-add sent for them, captured from
     // "ssh-add -H known_hosts -h dest.example id" and
     // "ssh-add -H known_hosts -h 'jump.example>alice@dest.example' -h bob@host1.corp.test -t 600 -c id".

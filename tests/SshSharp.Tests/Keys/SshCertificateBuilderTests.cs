@@ -151,6 +151,13 @@ public sealed class SshCertificateBuilderTests
         await Assert.That(nonce.Length).IsEqualTo(32);
         await Assert.That(Convert.ToHexString(certificate.Blob.Span)).IsEqualTo(Convert.ToHexString(expected)); // in order, byte for byte
         await Assert.That(SignatureAlgorithm(certificate)).IsEqualTo("ssh-ed25519");
+
+        // The values read back, a vendor extension's included, as the builder took them.
+        var parsed = SshCertificate.Parse(certificate.ToAuthorizedKeysLine());
+        await Assert.That(parsed.ExtensionValues).IsEquivalentTo(builder.Extensions);
+        await Assert.That(parsed.ExtensionValues["login@example.com"]).IsEqualTo("deploy");
+        await Assert.That(parsed.ExtensionValues["permit-pty"]).IsEqualTo(string.Empty);
+        await Assert.That(string.Join(",", parsed.Extensions)).IsEqualTo(string.Join(",", parsed.ExtensionValues.Keys));
     }
 
     /// <summary>The nonce (the second field) and the signature (the last).</summary>

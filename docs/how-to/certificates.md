@@ -64,7 +64,30 @@ What they mean, as OpenSSH has it:
 | Principals | A user certificate must list the user name exactly. A host certificate's principals are patterns (`*.example.com`), matched without regard to case. A certificate with no principals is refused, as sshd refuses one from `TrustedUserCAKeys` and ssh a host's; only an `authorized_keys` `cert-authority` line without `principals=` takes it as any user. |
 | Critical options | `IsValidFor` refuses a certificate with any (`force-command`, `source-address`, `verify-required`): they restrict what it allows, and only your code can enforce them. |
 
-`IsValidFor` does not check revocation.
+`IsValidFor` does not check revocation; see [Check revocation](#check-revocation).
+
+### Read extension values
+
+`Extensions` lists the extensions' names; `ExtensionValues` has their values too. The standard ones (`permit-pty` and the rest) have
+an empty value; a vendor's own extension (`login@example.com`, written with `ssh-keygen -O extension:login@example.com=deploy` or the
+builder's `Extensions`) carries what its CA put there:
+
+[!code-csharp[](../snippets/Keys.cs#certificate-extension-values)]
+
+Servers ignore extensions they do not know, so a vendor extension means only what your application makes of it, on the CA's word.
+
+### Check revocation
+
+`SshKeyRevocationList` reads the revocation list sshd's `RevokedKeys` names: an OpenSSH KRL (the binary file `ssh-keygen -k` writes)
+or a text file of public keys. It answers for a certificate (revoked by serial or key id for its authority, or because its key or its
+authority's key is) and for a plain key (listed, or listed by fingerprint), as `ssh-keygen -Q` does:
+
+[!code-csharp[](../snippets/Keys.cs#certificate-revocation)]
+
+A malformed KRL, or one with a section or critical extension this library does not know, throws `FormatException` rather than being
+read in part: treat that as "everything is revoked", as ssh does for `RevokedHostKeys`. The KRL's signature is not verified; the file
+is trusted as local configuration. Serial 0 (a certificate issued without one) is never revoked by serial: give each certificate its
+own `Serial`.
 
 ## Act as a certificate authority
 
@@ -134,7 +157,7 @@ using var ca = SshPrivateKey.FromSigner(new CertificateAuthoritySigner(caPublicK
 - **Critical options** such as `force-command` or `source-address` are enforced by the server (`certificate.CriticalOptions` lists
   them).
 - **Revocation.** Servers revoke user certificates with `RevokedKeys`; on the client side, `RevokedHostKeys` can revoke host
-  certificates by serial or key id. Give each certificate you issue its own `Serial` so that a revocation list can name it; better
+  certificates by serial or key id, and an application checks either kind with `SshKeyRevocationList`. Give each certificate you issue its own `Serial` so that a revocation list can name it; better
   still, issue certificates short enough that revoking them is rarely needed.
 - **The CA key is the keys to the kingdom.** Whoever can sign with it can log in as any principal on every server that trusts it.
   Keep it in an agent or a key service, allow it to sign certificates only, issue for the shortest time that works, and name
@@ -148,4 +171,4 @@ using var ca = SshPrivateKey.FromSigner(new CertificateAuthoritySigner(caPublicK
 - [Authentication: certificates](../authentication.md#certificates)
 - [Keys held elsewhere](../authentication.md#keys-held-elsewhere-key-vaults-hsms-tpm)
 - [Host keys](../host-keys.md)
-- <xref:SshSharp.SshCertificate> and <xref:SshSharp.SshCertificateBuilder> in the API reference
+- <xref:SshSharp.SshCertificate>, <xref:SshSharp.SshCertificateBuilder> and <xref:SshSharp.SshKeyRevocationList> in the API reference

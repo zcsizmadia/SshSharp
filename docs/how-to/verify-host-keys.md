@@ -100,6 +100,15 @@ To record a key you trust in a `known_hosts` file, or check one against it, `Kno
 
 [!code-csharp[](../snippets/HostKeys.cs#record-key)]
 
+To write a `known_hosts` line without a file (for a configuration template, a provisioning tool, or a file you build in memory),
+make a `KnownHostsEntry` from the key. `KnownHostsEntry.ForHost` writes the host as `ssh` does, hashed if you ask (as
+`HashKnownHosts yes`, with a fresh salt each time); the constructor takes any host patterns and a marker:
+
+[!code-csharp[](../snippets/HostKeys.cs#known-hosts-entry)]
+
+`KnownHostsFile.Parse` reads these lines back, as `ssh` does. Neither writes the key's own comment (`SshPublicKey.Comment`, often a
+user and machine name): pass `comment` for one.
+
 ## Notes and pitfalls
 
 - **Connections over a stream** (a tunnel, `ProxyCommand`) have no host name: set `HostKeyAlias` so `known_hosts` can be consulted.

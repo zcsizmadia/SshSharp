@@ -82,7 +82,7 @@ Yes: FIDO keys through the agent; Windows key stores and the TPM through `SshPri
 `Fingerprint` on a key, a host key or a certificate is the `SHA256:...` form `ssh-keygen -lf` prints. For a `.pub` file or an
 `authorized_keys` line, read it with `SshPublicKey.Parse(line)` first. `GetFingerprint(HashAlgorithmName.MD5)` gives the legacy
 `MD5:aa:bb:...` form (`ssh-keygen -l -E md5`) for inventories that still list it. `SshPrivateKey`, `SshHostKey`,
-`KnownHostsEntry`, `SshCertificate` and `SshSignature` all have `GetPublicKey()`. See
+`KnownHostsEntry`, `SshCertificate`, `SshSignature`, `SshKeySigner` and `SshAgentHostKey` all have `GetPublicKey()`. See
 [Read a public key and its fingerprint](../how-to/agent-and-keys.md#read-a-public-key-and-its-fingerprint).
 
 **Can my application issue SSH certificates, as `ssh-keygen -s` does?**

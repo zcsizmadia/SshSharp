@@ -54,7 +54,8 @@ A man in the middle can read, change, drop and inject bytes. The server itself m
   device, as `ssh` allows, and never less.
 - **Malformed input:** every parser treats its input as hostile, rejecting it with a protocol error, never with an
   unexpected exception (mutation-fuzzed in every test run). Peer public keys are validated: points on the curve,
-  no small-order Ed25519 keys, an RSA exponent ≥ 3. Public keys the application reads itself (`SshPublicKey.Parse` and
+  no small-order Ed25519 keys, an RSA exponent ≥ 3, and an RSA modulus of at most 16384 bits (OpenSSH's limit), so a server or a
+  file cannot make each verification cost what a 64000-bit key would. Public keys the application reads itself (`SshPublicKey.Parse` and
   `FromBlob`: `.pub` and `authorized_keys` lines, key blobs) get the same checks, are bounded to 8 KiB, and are refused with
   `FormatException`; a line with `authorized_keys` options is refused rather than read without its restrictions.
 - **What the client says before encryption:** the identification line (`SSH-2.0-SshSharp_x.y.z`) is sent in the clear, as every
@@ -242,7 +243,15 @@ connection, but not read or change it: each host's key is verified end to end, b
   (exact for users, a pattern for hosts; a certificate without principals is no one's) and refuses any critical option, since only
   the application can enforce `force-command` or `source-address`. The CA's signature must be SHA-2 or Ed25519 (never SHA-1
   `ssh-rsa`), from an RSA key of 2048 bits or more; the same rules apply to host certificates in `known_hosts` and to certificates
-  in allowed-signers files. Revocation is not part of these checks.
+  in allowed-signers files. Revocation is not part of these checks: check it with `SshKeyRevocationList` (a KRL or a key list, as
+  sshd's `RevokedKeys`), which revokes a certificate by serial or key id for its authority, and when its certified key or its
+  authority's key is revoked. The list is parsed with the same bounds and strictness as `RevokedHostKeys` (a malformed KRL, or one
+  with a section this library does not know, throws rather than being read in part) and its signatures are not verified: it is
+  local configuration, as trusted as the code that loads it. Vendor extension values (`ExtensionValues`) are what the CA wrote;
+  servers ignore extensions they do not know, and an application that acts on one is trusting the CA for it.
+- **Signatures by an expected key** (`SshSignature.Verify(message, namespace, expectedKey)`): accepted when that key, or a
+  certificate for it, made the signature; such a certificate's authority, validity and principals are not checked, since the key
+  itself is what is trusted.
 - **Issuing** (`SshCertificateBuilder`): the application is then the certificate authority, and **whoever can sign with the CA key
   can log in as any principal on every server that trusts it**. Keep the key out of the process: in an SSH agent, or in a key vault,
   KMS or HSM through an `SshKeySigner` that allows `SshSignaturePurpose.Certificate` and nothing else (and, the other way round,

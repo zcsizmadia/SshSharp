@@ -339,7 +339,8 @@ A forwarded key needs a destination for every hop, as in the example: from here 
 application server, as `deploy` only. The agent enforces the constraints through the session binding (`session-bind@openssh.com`)
 that SshSharp sends with every agent signature, as ssh does; a signature on an unbound agent connection (for example
 `SshSignature.SignAsync` with that key) is refused. `SshAgentDestination`, `SshAgentHost` and `SshAgentHostKey` can also be built
-directly, with host keys from anywhere.
+directly, with host keys from anywhere: `new SshAgentHostKey(key)` takes an `SshPublicKey` (a server's `.pub` file, or
+`client.HostKey.GetPublicKey()`), and `new SshAgentHostKey(caKey, isCertificateAuthority: true)` a host CA's key.
 
 With `ssh_config`, `AddKeysToAgent yes` (or `confirm`, optionally with a lifetime such as `AddKeysToAgent confirm 1h`) adds an
 identity file's key to the agent once the server has accepted it, so the next connection uses the agent. The identity file is

@@ -62,6 +62,12 @@ jobs:
           - scope: certificates
             mutate: -m "**/SshCertificate.cs" -m "**/SshCertificateBuilder.cs"
             tests: CertificateTests.cs;Keys/SshCertificate*Tests.cs;Keys/ExternalKeyTests.cs;Keys/SshSignatureTests.cs;KnownHostsVerifierTests.cs;Fuzz/ParserRobustnessTests.cs
+          - scope: signatures
+            mutate: -m "**/Keys/SshSignature.cs" -m "**/Keys/SshAllowedSigners.cs"
+            tests: Keys/SshSignatureTests.cs;Keys/ExternalKeyTests.cs;Fuzz/ParserRobustnessTests.cs
+          - scope: krl
+            mutate: -m "**/Config/RevokedKeyList.cs" -m "**/Keys/SshKeyRevocationList.cs"
+            tests: Keys/SshKeyRevocationListTests.cs;Config/RevokedHostKeysTests.cs;Fuzz/ParserRobustnessTests.cs
           - scope: agent-server
             mutate: -m "**/Protocol/AgentServer.cs"
             tests: Agent/AgentServerTests.cs;Agent/InProcessAgentTests.cs

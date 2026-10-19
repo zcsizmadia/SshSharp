@@ -217,7 +217,7 @@ internal static class Keys
         var releaseKey = SshPublicKey.Parse(await File.ReadAllTextAsync("release_ed25519.pub", cancellationToken));
         var signature = SshSignature.Parse(await File.ReadAllTextAsync("release.tar.gz.sig", cancellationToken));
         await using var file = File.OpenRead("release.tar.gz");
-        var valid = signature.GetPublicKey() == releaseKey && await signature.VerifyAsync(file, "file", cancellationToken);
+        var valid = await signature.VerifyAsync(file, "file", releaseKey, cancellationToken);   // signed by releaseKey, for "file"
         // </signer-key>
         return valid;
     }
@@ -281,6 +281,15 @@ internal static class Keys
         using var key = SshPrivateKey.FromSigner(new KmsSigner(service, "ssh-deploy", publicKeyBlob), comment: "kms:ssh-deploy");
         // Use it like any other key: PrivateKeys = [key]. Each signature is checked against the public key before it is sent.
         // </use-signer>
+    }
+
+    public static async Task SignerPublicKeyAsync(IKeyService service, ReadOnlyMemory<byte> publicKeyBlob, CancellationToken cancellationToken)
+    {
+        // <signer-public-key>
+        var signer = new KmsSigner(service, "ssh-deploy", publicKeyBlob);
+        var line = signer.GetPublicKey().ToAuthorizedKeysLine() + " kms:ssh-deploy";   // "ssh-ed25519 AAAA... kms:ssh-deploy"
+        await File.AppendAllTextAsync("authorized_keys.d/deploy", line + "\n", cancellationToken);
+        // </signer-public-key>
     }
 
     public static async Task CertificateAsync(SshHostKeyVerifier verifier, CancellationToken cancellationToken)
@@ -359,6 +368,32 @@ internal static class Keys
             throw new InvalidOperationException($"Certificate {certificate.KeyId} is not acceptable: {reason}.");
         }
         // </certificate-check>
+    }
+
+    public static string? ExtensionValue(SshCertificate certificate)
+    {
+        // <certificate-extension-values>
+        // A vendor extension's value: null when the CA did not write the extension.
+        var login = certificate.ExtensionValues.TryGetValue("login@example.com", out var value) ? value : null;
+        var canPty = certificate.ExtensionValues.ContainsKey("permit-pty");   // the standard ones have no value
+        // </certificate-extension-values>
+        return canPty ? login : null;
+    }
+
+    public static async Task CheckRevocationAsync(SshCertificate certificate, SshPublicKey userKey, CancellationToken cancellationToken)
+    {
+        // <certificate-revocation>
+        // The file sshd's RevokedKeys names: a KRL from ssh-keygen -k, or one public key per line.
+        var revoked = await SshKeyRevocationList.LoadAsync("/etc/ssh/revoked_keys", cancellationToken);
+
+        if (revoked.IsRevoked(certificate))   // its serial, its key id, its key, or its authority's key
+        {
+            throw new InvalidOperationException($"Certificate {certificate.KeyId} (serial {certificate.Serial}) is revoked.");
+        }
+
+        var keyRevoked = revoked.IsRevoked(userKey);   // a plain key, from an authorized_keys line, say
+        // </certificate-revocation>
+        _ = keyRevoked;
     }
 
     public static async Task CheckCertificatePartsAsync(SshPublicKey trustedCa, SshCertificate certificate)

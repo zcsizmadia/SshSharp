@@ -378,6 +378,35 @@ public class VerifyingKeyTests
     }
 
     [Test]
+    public async Task Parse_AcceptsRsaKeysUpTo16384Bits_AndRefusesLarger()
+    {
+        // Only the size is checked when parsing, so the moduli need not be products of primes: odd, with the top bit where it counts.
+        static byte[] RsaBlob(int bits)
+        {
+            var modulus = new byte[(bits + 7) / 8];
+            RandomNumberGenerator.Fill(modulus);
+            modulus[0] = (byte)(1 << ((bits - 1) % 8));
+            modulus[^1] |= 1;
+            return Blob(w =>
+            {
+                w.WriteString("ssh-rsa");
+                w.WriteMpint([1, 0, 1]);
+                w.WriteMpint(modulus);
+            });
+        }
+
+        await Assert.That(VerifyingKey.Parse(RsaBlob(16384)).KeySizeBits).IsEqualTo(16384);
+        await Assert.That(VerifyingKey.Parse(RsaBlob(16383)).KeySizeBits).IsEqualTo(16383);
+        await Assert.That(() => VerifyingKey.Parse(RsaBlob(16385))).Throws<SshProtocolException>().WithMessageContaining("16384");
+        await Assert.That(() => VerifyingKey.Parse(RsaBlob(16392))).Throws<SshProtocolException>();
+        await Assert.That(() => VerifyingKey.Parse(RsaBlob(32768))).Throws<SshProtocolException>();
+
+        // The public type refuses it as malformed input, within the 8 KiB blob cap that alone bounded it before.
+        await Assert.That(() => SshPublicKey.FromBlob(RsaBlob(16385))).Throws<FormatException>().WithMessageContaining("16384");
+        await Assert.That(SshPublicKey.FromBlob(RsaBlob(16384)).KeySizeBits).IsEqualTo(16384);
+    }
+
+    [Test]
     public async Task Parse_RejectsTinyRsaKeys()
     {
         var tiny = Blob(w =>

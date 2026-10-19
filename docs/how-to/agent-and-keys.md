@@ -196,7 +196,8 @@ current user and the public key next to it (`path` + `.pub`, an `authorized_keys
 key part of the line. `FromBlob` reads the SSH wire format (what the `PublicKey` members hold). A malformed key, a type name that does
 not match the key, or a type SshSharp does not read fails with `FormatException`; `TryParse` returns false instead.
 
-The types it reads are Ed25519, ECDSA (nistp256, nistp384, nistp521), RSA, and the FIDO security-key types
+The types it reads are Ed25519, ECDSA (nistp256, nistp384, nistp521), RSA (up to 16384 bits, the most OpenSSH accepts; a larger
+key fails with `FormatException`), and the FIDO security-key types
 `sk-ssh-ed25519@openssh.com` and `sk-ecdsa-sha2-nistp256@openssh.com`. Certificates (`-cert.pub`) are `SshCertificate.Parse`'s.
 
 To check a signature that the key's holder made (an agent's, or one from your `SshKeySigner`):
@@ -222,6 +223,11 @@ the answer against the public key before using it.
 [!code-csharp[](../snippets/Keys.cs#signer)]
 
 [!code-csharp[](../snippets/Keys.cs#use-signer)]
+
+The signer's public half is `signer.GetPublicKey()`, an `SshPublicKey`: write its `authorized_keys` line for the servers the key
+should log in to, or compare it with a key you expect.
+
+[!code-csharp[](../snippets/Keys.cs#signer-public-key)]
 
 ## Notes and pitfalls
 

@@ -259,6 +259,24 @@ public class ExternalKeyTests
     }
 
     [Test]
+    [Arguments(SshKeyType.Ed25519)]
+    [Arguments(SshKeyType.EcdsaNistp384)]
+    [Arguments(SshKeyType.Rsa)]
+    public async Task GetPublicKey_IsTheSignersKey_ForItsAuthorizedKeysLine(SshKeyType type)
+    {
+        using var key = SshPrivateKey.Generate(type, "in-a-vault");
+        var signer = new RawSigner(key.PublicKey.ToArray());
+
+        var publicKey = signer.GetPublicKey();
+        await Assert.That(publicKey).IsEqualTo(key.GetPublicKey());
+        await Assert.That(publicKey.KeyType).IsEqualTo(signer.KeyType);
+        await Assert.That(publicKey.Blob.ToArray()).IsEquivalentTo(signer.PublicKey.ToArray());
+        await Assert.That(publicKey.Comment).IsNull(); // a signer's key has no comment of its own
+        await Assert.That(publicKey.ToAuthorizedKeysLine()).IsEqualTo($"{key.KeyType} {Convert.ToBase64String(key.PublicKey.Span)}");
+        await Assert.That(signer.GetPublicKey()).IsSameReferenceAs(publicKey);
+    }
+
+    [Test]
     public async Task ASignerNeedsASupportedPublicKey()
     {
         using var small = RSA.Create(1024);
