@@ -275,6 +275,57 @@ public sealed class DnsCanonicalizerTests
     }
 
     [Test]
+    public async Task AHostReachedThroughAProxyJumpHop_IsNotLookedUpHere()
+    {
+        // ProxyJump j1,j2: j1 is reached from here, and canonicalized as ssh would; j2 is reached through j1's direct-tcpip, which
+        // resolves the name, so this machine's DNS is never asked about it (nor about the destination, whose ProxyJump says the same).
+        using var hopKey = SshPrivateKey.Generate(SshKeyType.Ed25519);
+        static FakeSessionServer Hop(SshPrivateKey key) => new() { AuthorizedKeys = [key.PublicKey.ToArray()], AdvertisedMethods = ["publickey"] };
+        static Func<string, int, Stream?> Route(string name, FakeSessionServer next) => (host, port) =>
+        {
+            if (host != name || port != 22)
+            {
+                return null;
+            }
+
+            _ = next.StartAsync();
+            return next.ClientStream;
+        };
+
+        var password = Guid.NewGuid().ToString("N");
+        await using var jump1 = Hop(hopKey);
+        await using var jump2 = Hop(hopKey);
+        await using var target = new FakeSessionServer { Password = password };
+        jump1.DirectTcpIp = Route("j2", jump2);
+        jump2.DirectTcpIp = Route("t", target);
+        var dns = new FakeDns(("j1.corp.example.com.", "j1.corp.example.com"), ("j2.corp.example.com.", "j2.corp.example.com"),
+            ("t.corp.example.com.", "t.corp.example.com"));
+
+        await using var client = await SshClient.ConnectAsync("t", new SshConfigConnectOptions
+        {
+            Config = SshConfig.Parse(Canonicalize + "Host t\n ProxyJump j1,j2\nHost *\n User tester\n StrictHostKeyChecking no\n UserKnownHostsFile none\n"),
+            ResolveOptions = Options(dns),
+            Agent = SshAgent.FromKeys(hopKey), // the hops' key; also keeps the developer's agent out
+            Password = password,
+            TcpConnector = (host, _, _, _) =>
+            {
+                if (host != "j1.corp.example.com")
+                {
+                    throw new SshException(SshFailureReason.ConnectFailed, "No route.");
+                }
+
+                _ = jump1.StartAsync();
+                return ValueTask.FromResult<(Stream, IAsyncDisposable?)>((jump1.ClientStream, null));
+            },
+        }, new CancellationTokenSource(TimeSpan.FromSeconds(60)).Token);
+
+        await Assert.That(client.IsConnected).IsTrue();
+        await Assert.That(dns.Names).Contains("j1.corp.example.com.");
+        await Assert.That(dns.Names.All(n => n.StartsWith("j1.", StringComparison.Ordinal))).IsTrue();
+        await Assert.That(jump1.DirectTcpIpRequests).IsEquivalentTo(new[] { "j2:22" });
+    }
+
+    [Test]
     public async Task TheAddressFamilyOverride_IsTheLookupsFamily()
     {
         var dns = new FakeDns(("build.corp.example.com.", "build.corp.example.com"));

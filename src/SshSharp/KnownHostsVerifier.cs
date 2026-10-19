@@ -390,20 +390,35 @@ public sealed class KnownHostsVerifier : SshHostKeyVerifier
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or FormatException)
         {
-            return SshHostKeyVerdict.Reject($"Error checking host key {key.KeyType} {key.Fingerprint} in revoked keys file {path}: {ex.Message}");
+            return SshHostKeyVerdict.Reject($"Error checking host key {key.KeyType} {key.Fingerprint} in the revoked keys file (RevokedHostKeys): {RevokedFileProblem(ex)}.");
         }
 
+        // The path stays out of the message, as with known_hosts: it comes from ssh_config, often with %h or %u expanded into it, or the
+        // home directory, which holds the user's name.
         return list.IsRevoked(key.PublicKey.Span, key.Certificate)
-            ? SshHostKeyVerdict.Reject($"Host key {key.KeyType} {key.Fingerprint} revoked by file {path}.")
+            ? SshHostKeyVerdict.Reject($"Host key {key.KeyType} {key.Fingerprint} revoked by file (RevokedHostKeys).")
             : null;
     }
+
+    /// <summary>
+    /// Why the revoked keys file could not be checked, without its path: a system error's message quotes it, so only the kind of error
+    /// is given. The list's own errors (a malformed KRL, a file too large) say nothing of the path, and are given as they are.
+    /// </summary>
+    private static string RevokedFileProblem(Exception ex) => ex switch
+    {
+        FormatException => ex.Message.TrimEnd('.'),
+        IOException { Message: RevokedKeyList.TooLargeMessage } => ex.Message.TrimEnd('.'),
+        FileNotFoundException or DirectoryNotFoundException => "the file does not exist",
+        UnauthorizedAccessException => "access to the file is denied",
+        _ => ex.GetType().Name,
+    };
 
     private async ValueTask<SshHostKeyVerdict> RecordAsync(string name, int port, SshHostKey key, CancellationToken cancellationToken)
     {
         if (!KnownHostsEntry.IsLiteralHost(name))
         {
             // Recorded as is, the name would be a pattern (or extra hosts or lines) trusting this key for other hosts.
-            return SshHostKeyVerdict.Reject("The host name cannot be recorded in known_hosts (it contains white space, ',', '*', '?' or '!').");
+            return SshHostKeyVerdict.Reject("The host name cannot be recorded in known_hosts (it contains white space, ',', '*', '?' or '!', or starts with '@' or '#').");
         }
 
         if (_userFiles.Count > 0)

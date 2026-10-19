@@ -217,18 +217,19 @@ public sealed class SshConfigConnectOptions
 
     /// <summary>
     /// Overrides ssh_config's <c>ServerAliveInterval</c> for the destination and every ProxyJump hop (see
-    /// <see cref="SshClientOptions.KeepAliveInterval"/>). <see cref="TimeSpan.Zero"/> sends no keep-alives whatever the configuration
-    /// says; null (the default) leaves it to ssh_config.
+    /// <see cref="SshClientOptions.KeepAliveInterval"/>). <see cref="TimeSpan.Zero"/> and <see cref="System.Threading.Timeout.InfiniteTimeSpan"/>
+    /// send no keep-alives whatever the configuration says; null (the default) leaves it to ssh_config.
     /// </summary>
-    /// <exception cref="ArgumentOutOfRangeException">The value is negative.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">The value is negative (other than infinite).</exception>
     public TimeSpan? KeepAliveInterval
     {
         get => _keepAliveInterval;
         init
         {
-            if (value is { } interval && interval < TimeSpan.Zero)
+            // As SshClientOptions.KeepAliveInterval takes it: infinite is off, like zero.
+            if (value is { } interval && interval < TimeSpan.Zero && interval != System.Threading.Timeout.InfiniteTimeSpan)
             {
-                throw new ArgumentOutOfRangeException(nameof(value), interval, "The keep-alive interval must not be negative.");
+                throw new ArgumentOutOfRangeException(nameof(value), interval, "The keep-alive interval must not be negative (zero or infinite sends none).");
             }
 
             _keepAliveInterval = value;

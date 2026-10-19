@@ -91,8 +91,11 @@ own `Serial`.
 
 In a text file, a certificate line revokes the key it certifies, as in sshd. That includes FIDO security-key certificates
 (`sk-ssh-ed25519-cert-v01@openssh.com`, `sk-ecdsa-sha2-nistp256-cert-v01@openssh.com`): the security key itself is revoked. A
-certificate line whose key cannot be read throws `FormatException` for the whole file instead of being skipped, so a key the list
-means to revoke is never accepted. Other lines that do not parse are skipped, as in OpenSSH.
+certificate line of a type SshSharp accepts (Ed25519, ECDSA, RSA, FIDO) whose key cannot be read (bad base64, a truncated
+certificate) throws `FormatException` for the whole file instead of being skipped, so a key the list means to revoke is never
+accepted. A certificate line of a type SshSharp never accepts (`ssh-dss-cert-v01@openssh.com`, or one it does not know) is skipped,
+and so are other lines that do not parse, as in OpenSSH. The certificate's authority is not checked: the line revokes its key
+whoever signed it.
 
 ## Act as a certificate authority
 

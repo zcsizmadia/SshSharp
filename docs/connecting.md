@@ -75,7 +75,8 @@ await using var client = await SshClient.ConnectAsync("deploy@prod-db", new SshC
 What is taken from the configuration: `HostName`, `Port`, `User`, `IdentityFile`, `CertificateFile`, `IdentityAgent`,
 `IdentitiesOnly`, `UserKnownHostsFile`, `GlobalKnownHostsFile`, `RevokedHostKeys`, `StrictHostKeyChecking`, `HashKnownHosts`,
 `UpdateHostKeys`, `HostKeyAlias`, `KexAlgorithms`, `HostKeyAlgorithms`, `Ciphers`, `MACs`, `PubkeyAcceptedAlgorithms` (which
-keys are offered, and how RSA keys sign), `RequiredRSASize`, `PreferredAuthentications`, `PubkeyAuthentication`, `PasswordAuthentication`, `KbdInteractiveAuthentication`,
+keys are offered, and how RSA keys sign; one that allows nothing SshSharp uses, such as `PubkeyAcceptedKeyTypes ssh-rsa`, offers
+no key but leaves passwords working), `RequiredRSASize`, `PreferredAuthentications`, `PubkeyAuthentication`, `PasswordAuthentication`, `KbdInteractiveAuthentication`,
 `NumberOfPasswordPrompts`, `BatchMode`, `ProxyJump`, `ProxyCommand`, `ServerAliveInterval`, `ServerAliveCountMax`,
 `ConnectTimeout`, `ConnectionAttempts`, `AddressFamily`, `BindAddress`, `BindInterface`, `TCPKeepAlive`, `IPQoS`, `Compression`, `ForwardAgent`,
 `AddKeysToAgent` (`ask` with `ConfirmAddKeyToAgent`), `GSSAPIAuthentication`, `GSSAPIDelegateCredentials`, `ChannelTimeout`,
@@ -99,7 +100,9 @@ configured one, `AskHostKey` and `ConfirmHostKeyUpdate`, `ConfirmAddKeyToAgent` 
 `ProxyJump a,b` connects to `a`, then to `b` through `a`, then to the target through `b`; each hop is verified and
 authenticated with its own configuration: its identity files and the agent. What the caller gives in `SshConfigConnectOptions`
 (`Password`, `PasswordProvider`, `KeyboardInteractive`, `ChangePassword` and `PrivateKeys`) is the destination's and never reaches
-a hop. (Before 1.1, `PrivateKeys` were offered to every hop too.) `ProxyCommand` runs a local command and speaks SSH over its standard input and
+a hop. (Before 1.1, `PrivateKeys` were offered to every hop too.) A hop that refuses to log in fails with "Authentication to
+ProxyJump hop N failed" (an `SshAuthenticationException` wrapping the hop's own), so it is not mistaken for the destination's
+refusal. `ProxyCommand` runs a local command and speaks SSH over its standard input and
 output, as `ssh` does; set `AllowProxyCommand = false` to refuse configurations that name one.
 
 Without `ssh_config`, `SshClientOptions.JumpHosts` builds the same chain: a list of `SshJumpHost`, each with its own host, port and

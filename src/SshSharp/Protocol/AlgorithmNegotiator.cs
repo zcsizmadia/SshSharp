@@ -22,6 +22,15 @@ internal sealed class AlgorithmPreferences
     public IReadOnlyList<string>? PublicKeys { get; init; }
 
     /// <summary>
+    /// Whether <see cref="PublicKeys"/> allows nothing (an ssh_config <c>PubkeyAcceptedAlgorithms</c> that names only algorithms SshSharp
+    /// does not implement): no key is offered.
+    /// </summary>
+    public bool NoPublicKeyAlgorithm => PublicKeys is { Count: 0 };
+
+    /// <summary>Whether the lists were restricted to FIPS-approved algorithms, which certificate host key algorithms added later must be too.</summary>
+    public bool FipsMode { get; init; }
+
+    /// <summary>
     /// The host key list as configured, which decides whether <see cref="WithCertificateHostKeysFirst"/> may reorder it; null for the
     /// defaults.
     /// </summary>
@@ -34,14 +43,19 @@ internal sealed class AlgorithmPreferences
         HostKeys = SshAlgorithms.FilterFips(SshAlgorithms.DefaultHostKeys, AlgorithmKind.HostKey),
         Ciphers = SshAlgorithms.FilterFips(SshAlgorithms.DefaultCiphers, AlgorithmKind.Cipher),
         Macs = SshAlgorithms.FilterFips(SshAlgorithms.DefaultMacs, AlgorithmKind.Mac),
+        FipsMode = true,
     };
 
     /// <summary>
     /// Builds preferences from the algorithm specifications of a resolved <c>ssh_config</c> host (<c>+</c>, <c>-</c>, <c>^</c> and plain
     /// lists, with wildcards, as ssh applies them) applied to the defaults, optionally restricted to FIPS-approved algorithms. Names this
     /// library does not implement are dropped. <paramref name="compression"/>, when set, takes the place of the host's <c>Compression</c>.
+    /// A <c>PubkeyAcceptedAlgorithms</c> that leaves nothing (<c>PubkeyAcceptedKeyTypes ssh-rsa</c>, common in older configurations, names
+    /// only SHA-1 RSA, which SshSharp never uses) is not an error: no key is offered (<see cref="NoPublicKeyAlgorithm"/>), and the other
+    /// authentication methods still work.
     /// </summary>
-    /// <exception cref="SshException">A directive leaves no algorithm of its kind that SshSharp can use (<see cref="SshFailureReason.ConnectFailed"/>).</exception>
+    /// <exception cref="SshException"><c>KexAlgorithms</c>, <c>HostKeyAlgorithms</c>, <c>Ciphers</c> or <c>MACs</c> leaves no algorithm of its
+    /// kind that SshSharp can use (<see cref="SshFailureReason.ConnectFailed"/>).</exception>
     public static AlgorithmPreferences FromConfig(SshHostConfig config, bool fipsMode = false, bool? compression = null)
     {
         ArgumentNullException.ThrowIfNull(config);
@@ -49,9 +63,10 @@ internal sealed class AlgorithmPreferences
             SshAlgorithmList.FromConfig(config.Ciphers), SshAlgorithmList.FromConfig(config.Macs), SshAlgorithmList.FromConfig(config.PubkeyAcceptedAlgorithms),
             compression ?? config.Compression, fipsMode);
 
-        // As ssh refuses such a configuration: said now, naming the directive, rather than as a negotiation failure that looks like the
-        // server's doing (or, for PubkeyAcceptedAlgorithms, as keys that are silently never offered).
-        if (Empty(preferences, "KexAlgorithms", "HostKeyAlgorithms", "Ciphers", "MACs", "PubkeyAcceptedAlgorithms") is { } problem)
+        // Said now, naming the directive, rather than as a negotiation failure that looks like the server's doing. An empty
+        // PubkeyAcceptedAlgorithms is left out: it only means no key is offered (the connection logs that), and failing every connection
+        // for it would turn away password logins that worked before the list was applied.
+        if (Empty(preferences, "KexAlgorithms", "HostKeyAlgorithms", "Ciphers", "MACs", publicKeys: null) is { } problem)
         {
             throw new SshException(SshFailureReason.ConnectFailed, $"ssh_config's {problem} that SshSharp can use{(fipsMode ? " in FIPS mode" : string.Empty)}.");
         }
@@ -80,10 +95,13 @@ internal sealed class AlgorithmPreferences
         return preferences;
     }
 
-    /// <summary>The first list that is empty, as "<c>name</c> leaves no <c>kind</c> algorithm", or null when none is.</summary>
-    private static string? Empty(AlgorithmPreferences preferences, string kex, string hostKeys, string ciphers, string macs, string publicKeys)
+    /// <summary>
+    /// The first list that is empty, as "<c>name</c> leaves no <c>kind</c> algorithm", or null when none is. The public key list is
+    /// checked only when <paramref name="publicKeys"/> names it.
+    /// </summary>
+    private static string? Empty(AlgorithmPreferences preferences, string kex, string hostKeys, string ciphers, string macs, string? publicKeys)
     {
-        foreach (var (list, name, kind) in new (IReadOnlyList<string>?, string, string)[]
+        foreach (var (list, name, kind) in new (IReadOnlyList<string>?, string?, string)[]
         {
             (preferences.Kex, kex, "key exchange"),
             (preferences.HostKeys, hostKeys, "host key"),
@@ -92,7 +110,7 @@ internal sealed class AlgorithmPreferences
             (preferences.PublicKeys, publicKeys, "public key signature"),
         })
         {
-            if (list is { Count: 0 })
+            if (name is not null && list is { Count: 0 })
             {
                 return $"{name} leaves no {kind} algorithm";
             }
@@ -129,6 +147,7 @@ internal sealed class AlgorithmPreferences
             // FIPS mode does not restrict the client's own keys (FilterFips keeps them all), as before this list was applied.
             PublicKeys = publicKeys is null ? null : Resolve(publicKeys, SshAlgorithms.PublicKeySignatures, AlgorithmKind.PublicKey),
             HostKeySpecification = hostKeys,
+            FipsMode = fipsMode,
         };
     }
 
@@ -184,8 +203,9 @@ internal sealed class AlgorithmPreferences
     /// These preferences with the certificate versions of the allowed host key algorithms in front, for a host whose certificate authority
     /// is trusted. ssh orders host key algorithms by what known_hosts holds only when <c>HostKeyAlgorithms</c> is the default or a
     /// <c>+</c> or <c>-</c> change to it, so a list that sets the order itself (a plain list, or <c>^</c>) is kept as written, with the
-    /// certificate algorithms it names, if any. A <c>-</c> list's patterns remove certificate algorithms too, as they would from ssh's
-    /// defaults, which include them.
+    /// certificate algorithms it names, if any. ssh's defaults include the certificate algorithms, so a <c>-</c> list removes one only
+    /// when one of its patterns matches it: <c>-ssh-ed25519</c> leaves <c>ssh-ed25519-cert-v01@openssh.com</c>, as in ssh, and
+    /// <c>-*-cert-v01@openssh.com</c> removes them all. In FIPS mode only approved ones are added.
     /// </summary>
     public AlgorithmPreferences WithCertificateHostKeysFirst()
     {
@@ -198,13 +218,14 @@ internal sealed class AlgorithmPreferences
         {
             Kex = Kex,
             HostKeys = [.. SshAlgorithms.CertificateHostKeys.Where(c => HostKeys.Contains(c)
-                    || (HostKeys.Contains(SshCertificate.BaseAlgorithm(c)) && HostKeySpecification?.Removes(c) != true)),
+                    || (HostKeySpecification?.Removes(c) != true && (!FipsMode || SshAlgorithms.FilterFips([c], AlgorithmKind.HostKey).Count > 0))),
                 .. HostKeys.Where(h => !SshCertificate.IsCertificateAlgorithm(h))],
             Ciphers = Ciphers,
             Macs = Macs,
             Compression = Compression,
             PublicKeys = PublicKeys,
             HostKeySpecification = HostKeySpecification,
+            FipsMode = FipsMode,
         };
     }
 

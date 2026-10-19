@@ -24,8 +24,11 @@ public sealed class KnownHostsEntry
 
     private static readonly System.Buffers.SearchValues<char> PatternCharacters = System.Buffers.SearchValues.Create(",*?!");
 
-    /// <summary>Refuses a host field that would add fields or lines to known_hosts (white space, a newline, control characters).</summary>
-    internal static void RequireSingleField(string host) => RequireField(host, nameof(host));
+    /// <summary>
+    /// Refuses a host field that would add fields or lines to known_hosts (white space, a newline, control characters), or change what
+    /// the line is (a leading <c>@</c> or <c>#</c>).
+    /// </summary>
+    internal static void RequireSingleField(string host) => RequireHostField(host, nameof(host));
 
     /// <summary>Refuses a field (host patterns, a key type) that would add fields or lines to known_hosts.</summary>
     private static void RequireField(string field, string parameterName)
@@ -35,6 +38,22 @@ public sealed class KnownHostsEntry
             throw new ArgumentException("A known_hosts field must not contain white space or control characters.", parameterName);
         }
     }
+
+    /// <summary>
+    /// Refuses a host field as <see cref="RequireField"/> does, and one that starts with <c>@</c> or <c>#</c>: the first field of a line is
+    /// read as a marker (<c>@cert-authority</c> would make the next field the host patterns and the key a trusted authority) or makes the
+    /// line a comment.
+    /// </summary>
+    private static void RequireHostField(string field, string parameterName)
+    {
+        RequireField(field, parameterName);
+        if (StartsAsMarkerOrComment(field))
+        {
+            throw new ArgumentException("A known_hosts host field must not start with '@' or '#'.", parameterName);
+        }
+    }
+
+    private static bool StartsAsMarkerOrComment(string field) => field.Length > 0 && field[0] is '@' or '#';
 
     /// <summary>
     /// Refuses a comment that would end the line (CR, LF) or carries other control characters. Spaces and tabs are allowed: the comment
@@ -54,10 +73,11 @@ public sealed class KnownHostsEntry
 
     /// <summary>
     /// Whether a host name would be recorded as exactly that host: besides what <see cref="RequireSingleField"/> refuses, a comma would add
-    /// another host, and <c>*</c>, <c>?</c> or <c>!</c> would make it a pattern that trusts the key for other hosts too.
+    /// another host, <c>*</c>, <c>?</c> or <c>!</c> would make it a pattern that trusts the key for other hosts too, and a leading <c>@</c>
+    /// or <c>#</c> would make the line a marker line or a comment.
     /// </summary>
     internal static bool IsLiteralHost(string host) =>
-        !host.Any(char.IsWhiteSpace) && !host.Any(char.IsControl) && host.AsSpan().IndexOfAny(PatternCharacters) < 0;
+        !host.Any(char.IsWhiteSpace) && !host.Any(char.IsControl) && host.AsSpan().IndexOfAny(PatternCharacters) < 0 && !StartsAsMarkerOrComment(host);
 
     /// <summary>Creates an entry.</summary>
     /// <param name="hostPatterns">Comma-separated host patterns, or a single hashed host (<c>|1|salt|hash</c>).</param>
@@ -66,7 +86,8 @@ public sealed class KnownHostsEntry
     /// <param name="marker">The optional marker.</param>
     /// <param name="comment">The optional trailing comment.</param>
     /// <exception cref="ArgumentException"><paramref name="hostPatterns"/> or <paramref name="keyType"/> is empty or contains white space or
-    /// control characters, or <paramref name="comment"/> contains control characters other than a tab. Any of them would let
+    /// control characters, <paramref name="hostPatterns"/> starts with <c>@</c> or <c>#</c> (the line would be read as a marker line or a
+    /// comment), or <paramref name="comment"/> contains control characters other than a tab. Any of them would let
     /// <see cref="ToLine"/> write extra fields or extra lines (a <c>@cert-authority</c> line, say) into <c>known_hosts</c>.</exception>
     public KnownHostsEntry(string hostPatterns, string keyType, ReadOnlyMemory<byte> publicKey,
         KnownHostsMarker marker = KnownHostsMarker.None, string? comment = null)
@@ -85,7 +106,7 @@ public sealed class KnownHostsEntry
         ArgumentException.ThrowIfNullOrWhiteSpace(keyType);
         if (validate)
         {
-            RequireField(hostPatterns, nameof(hostPatterns));
+            RequireHostField(hostPatterns, nameof(hostPatterns));
             RequireField(keyType, nameof(keyType));
             RequireComment(comment);
         }

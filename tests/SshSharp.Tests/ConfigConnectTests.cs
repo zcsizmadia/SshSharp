@@ -179,6 +179,12 @@ public sealed class ConfigConnectTests : IDisposable
         }, Timeout()));
 
         await Assert.That(error!.Reason).IsEqualTo(SshFailureReason.AuthenticationFailed);
+
+        // The failure says it was the hop's (by position, not by name), and keeps the hop's own failure inside.
+        await Assert.That(error).IsTypeOf<SshAuthenticationException>();
+        await Assert.That(error.Message).StartsWith("Authentication to ProxyJump hop 1 failed.");
+        await Assert.That(error.InnerException).IsTypeOf<SshAuthenticationException>();
+        await Assert.That(((SshAuthenticationException)error).Attempts).IsEquivalentTo(((SshAuthenticationException)error.InnerException!).Attempts);
         int requests;
         lock (jump.PublicKeyRequests)
         {

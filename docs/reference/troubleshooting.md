@@ -59,13 +59,20 @@ key fails the same way. See [Algorithms](algorithms.md).
 nothing in common with a server that offers only those. The same goes for the other lists.
 
 **"ssh_config's Ciphers leaves no cipher algorithm that SshSharp can use"** (`ConnectFailed`, before anything is sent): every
-name in that directive is one SshSharp does not implement (`Ciphers aes128-cbc`), or a `-` list removed them all. `ssh` refuses
-such a configuration too. The message names the directive (`KexAlgorithms`, `HostKeyAlgorithms`, `Ciphers`, `MACs` or
-`PubkeyAcceptedAlgorithms`).
+name in that directive is one SshSharp does not implement, or a `-` list removed them all. `Ciphers aes128-cbc` is the usual case:
+`ssh` still supports CBC ciphers, but SshSharp leaves them out by design, so a host that `ssh` reaches with that line fails here.
+Add a cipher SshSharp implements (`Ciphers aes128-cbc,aes128-ctr`), in a `Host` block SshSharp's connections use. The message
+names the directive (`KexAlgorithms`, `HostKeyAlgorithms`, `Ciphers` or `MACs`).
 
 **A key is never offered** (`NoAcceptedAlgorithm` in `SshAuthenticationException.Attempts`): the server's `server-sig-algs` has
 none of its algorithms, or `PubkeyAcceptedAlgorithms` allows none of them. A key with a certificate needs the certificate's
 algorithm (`ssh-ed25519-cert-v01@openssh.com`) in that list, not only the plain one.
+
+**Every key is `NoAcceptedAlgorithm`, and the log warns "ssh_config's PubkeyAcceptedAlgorithms leaves no public key signature
+algorithm that SshSharp can use".** The list (or its old name, `PubkeyAcceptedKeyTypes`) names only algorithms SshSharp never uses,
+typically `PubkeyAcceptedKeyTypes ssh-rsa` from an older configuration: SHA-1 RSA. No key is offered; a password,
+keyboard-interactive or GSSAPI login still works. To log in with an RSA key, list `rsa-sha2-512,rsa-sha2-256` (the same RSA key
+signs with them), or remove the line.
 
 **`ArgumentException` naming `SshClientOptions.Ciphers` (or another list).** The list leaves no algorithm SshSharp can use here:
 `FipsMode` removed everything in it, or it names only `mlkem*` methods on a platform without ML-KEM. It is thrown before anything
@@ -145,7 +152,7 @@ What `ssh` reports as "Permission denied (publickey,password)" is an `SshAuthent
 |---|---|
 | `publickey <fingerprint> (Rejected)` for every key | The server does not know these keys for this user. Check `authorized_keys` against the fingerprints (`ssh-keygen -lf`). |
 | `publickey (NotOffered)`, `password (NotOffered)` | You gave credentials the server does not take; `AllowedMethods` says what it does take. |
-| `publickey <fingerprint> (NoAcceptedAlgorithm)` | The server accepts no signature algorithm the key makes (an RSA key, and a server without `rsa-sha2-*`). |
+| `publickey <fingerprint> (NoAcceptedAlgorithm)` | The server accepts no signature algorithm the key makes (an RSA key, and a server without `rsa-sha2-*`), or `PubkeyAcceptedAlgorithms` allows none (see [Connecting](#connecting)). |
 | `publickey <fingerprint> (SigningFailed)` | The agent did not sign: the key was removed, or a confirmation was declined. |
 | `password (PasswordChangeRequired)` | The password is right but has expired: set `ChangePassword`, or change it another way. See [Change an expired password](../how-to/passwords.md#change-an-expired-password). |
 | `password (Declined)` | `PasswordProvider` returned null. |
@@ -153,6 +160,20 @@ What `ssh` reports as "Permission denied (publickey,password)" is an `SshAuthent
 | nothing | No credentials for any method the client tries were given. |
 
 Also check the user name, and the server's log (`journalctl -u ssh` / `/var/log/auth.log`), which says why it refused.
+
+### "Authentication to ProxyJump hop N failed"
+
+A jump host refused to log in, not the destination: N is its place in the `ProxyJump` list (1 for the first), or in the list of the
+host that names it, for a hop with a `ProxyJump` of its own. The exception is still an `SshAuthenticationException`, with the hop's
+`AllowedMethods` and `Attempts`; its `InnerException` is the hop's own failure. Host names stay out of the message.
+
+A hop never gets the destination's credentials: `SshConfigConnectOptions.Password`, the keyboard-interactive handler and
+`SshConfigConnectOptions.PrivateKeys` are offered to the destination only, as `ssh` asks for each host's password separately. A hop
+logs in with its own `IdentityFile`s and the agent. To give a hop a key the application holds, serve it as an agent
+(`SshConfigConnectOptions.Agent = SshAgent.FromKeys(key)`). A hop with `IdentitiesOnly yes` takes from the agent only keys that
+match one of its `IdentityFile` lines, by the public key in `<file>.pub`: write the key's public key to a file (`key.PublicKey`) and
+name it in the hop's `IdentityFile` (without the `.pub`), or the agent's key is not offered. See
+[Jump hosts](../how-to/jump-hosts.md#notes-and-pitfalls).
 
 ### An encrypted key file is skipped
 

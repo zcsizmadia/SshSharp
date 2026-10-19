@@ -24,7 +24,7 @@ value.
 | `HostName` | `HostName` | Yes, with `%h` and other tokens. |
 | `Port` | `Port` | Yes. |
 | `User` | `User` | Yes; `user@` in the destination wins. |
-| `ProxyJump` | `ProxyJump` | Yes: each hop resolved, verified and authenticated with its own settings. |
+| `ProxyJump` | `ProxyJump` | Yes: each hop resolved, verified and authenticated with its own settings. A hop that refuses to log in fails with "Authentication to ProxyJump hop N failed", N being its place in the list. Names after the first hop are resolved by the hop before them, so `CanonicalizeHostname` does not look them up here. |
 | `ProxyCommand` | `ProxyCommand` | Yes, unless `SshConfigConnectOptions.AllowProxyCommand = false`. |
 | `ConnectTimeout` | `ConnectTimeout` | Yes, per hop, from before the identity files are loaded through authentication; fails with `SshFailureReason.Timeout`, as `SshClientOptions.ConnectTimeout` does. `0` means no limit, as in OpenSSH, and so does a time longer than a timer can wait (about 49.7 days). |
 | `ConnectionAttempts` | `ConnectionAttempts` | Yes: the host's TCP connection (or its connection to a proxy) is tried this many times, one second apart (default 1). Only failures to reach it are tried again (refused, unreachable, timed out), never a failed handshake or authentication, and `ConnectTimeout` bounds all the attempts together, as in OpenSSH. A host reached through `ProxyJump` makes no TCP connection of its own (the first hop's setting applies to the first hop), and a `ProxyCommand` is not run again. |
@@ -50,7 +50,7 @@ them to it):
 | `ConnectionAttempts` | `ConnectionAttempts` | Every host. |
 | `AddressFamily` | `AddressFamily` | The connection this machine makes (the destination, or the first `ProxyJump` hop). |
 | `ConfigureSocket` | `TCPKeepAlive`, `IPQoS` | The same connection: it runs after those two are applied, so what it sets wins. |
-| `KeepAliveInterval`, `KeepAliveCountMax` | `ServerAliveInterval`, `ServerAliveCountMax` | Every host; `TimeSpan.Zero` turns keep-alives off (as it does in `SshClientOptions.KeepAliveInterval`). |
+| `KeepAliveInterval`, `KeepAliveCountMax` | `ServerAliveInterval`, `ServerAliveCountMax` | Every host; `TimeSpan.Zero` or `Timeout.InfiniteTimeSpan` turns keep-alives off (as in `SshClientOptions.KeepAliveInterval`). |
 | `PrivateKeys` | (adds to `IdentityFile`) | The destination only: offered before its identity files, never to a `ProxyJump` hop, which logs in with its own identity files and the agent. |
 | `Compression` | `Compression` | The destination only, as `ssh -C`; each `ProxyJump` hop keeps its own. |
 
@@ -62,18 +62,19 @@ them to it):
 | Directive | Property | Applied |
 |---|---|---|
 | `KexAlgorithms` | `KexAlgorithms` | Yes, applied to the [defaults](algorithms.md); names SshSharp does not implement are dropped. `SshClientOptions.KexAlgorithms` in code. |
-| `HostKeyAlgorithms` | `HostKeyAlgorithms` | Yes. When a certificate authority is trusted for the host, the certificate algorithms are asked for first with the defaults or a `+` or `-` list, as `ssh` orders them by known_hosts; a plain or `^` list is used as written, so list the certificate algorithms in it (`HostKeyAlgorithms ssh-ed25519-cert-v01@openssh.com` accepts only the host's certificate). `SshClientOptions.HostKeyAlgorithms` in code. |
+| `HostKeyAlgorithms` | `HostKeyAlgorithms` | Yes. When a certificate authority is trusted for the host, the certificate algorithms are asked for first with the defaults or a `+` or `-` list, as `ssh` orders them by known_hosts; a plain or `^` list is used as written, so list the certificate algorithms in it (`HostKeyAlgorithms ssh-ed25519-cert-v01@openssh.com` accepts only the host's certificate). As in `ssh`, whose defaults hold the certificate algorithms, a `-` pattern removes a certificate algorithm only when it matches it: `-ssh-ed25519` keeps `ssh-ed25519-cert-v01@openssh.com`, `-ssh-ed25519*` removes both. `SshClientOptions.HostKeyAlgorithms` in code. |
 | `Ciphers` | `Ciphers` | Yes. `SshClientOptions.Ciphers` in code. |
 | `MACs` | `Macs` | Yes. `SshClientOptions.Macs` in code. |
-| `PubkeyAcceptedAlgorithms` (`PubkeyAcceptedKeyTypes`) | `PubkeyAcceptedAlgorithms` | Yes, as in `ssh`: a key (an identity file's, the agent's, or one in `SshConfigConnectOptions.PrivateKeys`) is offered only with an algorithm the list allows, and is skipped when it allows none of the key's (a key with a certificate needs the certificate's algorithm, such as `ssh-ed25519-cert-v01@openssh.com`). An RSA key signs with the list's first RSA algorithm (`rsa-sha2-512` or `rsa-sha2-256`) that the server lists in `server-sig-algs` (RFC 8308). SHA-1 `ssh-rsa` is never used, so `+ssh-rsa` changes nothing. Unset, every key is offered with its own algorithms. `SshClientOptions.PubkeyAcceptedAlgorithms` in code. |
+| `PubkeyAcceptedAlgorithms` (`PubkeyAcceptedKeyTypes`) | `PubkeyAcceptedAlgorithms` | Yes, as in `ssh`: a key (an identity file's, the agent's, or one in `SshConfigConnectOptions.PrivateKeys`) is offered only with an algorithm the list allows, and is skipped when it allows none of the key's (a key with a certificate needs the certificate's algorithm, such as `ssh-ed25519-cert-v01@openssh.com`). An RSA key signs with the list's first RSA algorithm (`rsa-sha2-512` or `rsa-sha2-256`) that the server lists in `server-sig-algs` (RFC 8308). SHA-1 `ssh-rsa` is never used, so `+ssh-rsa` changes nothing. A list that leaves nothing SshSharp can use (`PubkeyAcceptedKeyTypes ssh-rsa`, common in older configurations) offers no key: each is reported as `NoAcceptedAlgorithm`, a warning names the directive, and password, keyboard-interactive and GSSAPI logins still work. Unset, every key is offered with its own algorithms. `SshClientOptions.PubkeyAcceptedAlgorithms` in code. |
 | `RequiredRSASize` | `RequiredRsaSize` | Yes: the smallest RSA host key accepted (default 2048; values under 1024 are ignored, as `ssh` refuses them). `SshClientOptions.RequiredRsaSize` in code. |
 | `Compression` | `Compression` | Yes: `yes` offers `zlib@openssh.com` (OpenSSH's delayed compression, which starts after authentication) before `none`; `no`, the default, offers only `none`. `SshClientOptions.Compression` in code. See [Compress a slow link](../how-to/tune-and-inspect-connections.md#compress-a-slow-link). |
 
 Each list is applied as `ssh` applies it: `+` adds names after the defaults (one that is already a default stays where it is),
 `^` puts them first, `-` removes what its patterns match, and in every form a wildcard stands for the names it matches
-(`Ciphers aes*-ctr` is `aes256-ctr,aes192-ctr,aes128-ctr`). A list that leaves no algorithm SshSharp can use fails the connection
-before anything is sent, with an `SshException` (`ConnectFailed`) that names the directive, as `ssh` refuses such a
-configuration.
+(`Ciphers aes*-ctr` is `aes256-ctr,aes192-ctr,aes128-ctr`). A `KexAlgorithms`, `HostKeyAlgorithms`, `Ciphers` or `MACs` list that
+leaves no algorithm SshSharp can use fails the connection before anything is sent (right after the configuration is read), with an
+`SshException` (`ConnectFailed`) that names the directive: the connection could not work. A `PubkeyAcceptedAlgorithms` list that
+leaves nothing only means no key is offered, as above, since the other authentication methods may still log in.
 
 The `SshClientOptions` lists take an `SshAlgorithmList` in the same `+`, `-`, `^` and plain forms (wildcards in `Remove` only); see
 [Choose algorithms and authentication methods](../how-to/algorithms-and-authentication-order.md).
@@ -87,7 +88,7 @@ The `SshClientOptions` lists take an `SshAlgorithmList` in the same `+`, `-`, `^
 | `HashKnownHosts` | `HashKnownHosts` | Yes, for entries the client adds. |
 | `UpdateHostKeys` | `UpdateHostKeys` | Yes; `ask` uses `ConfirmHostKeyUpdate`. |
 | `HostKeyAlias` | `HostKeyAlias` | Yes. |
-| `RevokedHostKeys` | `RevokedHostKeys` | Yes: key lists and OpenSSH KRLs. |
+| `RevokedHostKeys` | `RevokedHostKeys` | Yes: key lists and OpenSSH KRLs. In a key list, certificate lines of types SshSharp never accepts (DSA) are skipped, and a malformed certificate of an accepted type refuses the list (see [Host keys](../host-keys.md)). |
 | `KnownHostsCommand` | `KnownHostsCommand` | Only with `AllowKnownHostsCommand = true`; otherwise the connection fails (unless `HostKeyVerifier` is given). |
 
 ## Authentication

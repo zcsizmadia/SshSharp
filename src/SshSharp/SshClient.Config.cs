@@ -27,26 +27,39 @@ public sealed partial class SshClient
         options ??= new SshConfigConnectOptions();
         var config = options.Config ?? SshConfig.LoadDefault(options.ResolveOptions?.HomeDirectory);
         var (user, host, port) = ParseDestination(destination);
-        return await ConnectHopAsync(host, user, port ?? options.Port, config, options, via: null, depth: 0, cancellationToken).ConfigureAwait(false);
+        return await ConnectHopAsync(host, user, port ?? options.Port, config, options, via: null, depth: 0, hopNumber: 0, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
     /// Connects to one host of a chain. With <paramref name="via"/>, the connection is tunnelled through that client (the hop's own
     /// proxy settings are ignored, as an explicit ProxyJump chain overrides them); otherwise the host's ProxyJump, ProxyCommand or TCP is used.
+    /// <paramref name="hopNumber"/> is the host's position (from 1) in the ProxyJump list that names it, or 0 for the destination.
     /// </summary>
     private static async Task<SshClient> ConnectHopAsync(string host, string? user, int? port, SshConfig config, SshConfigConnectOptions options,
-        SshClient? via, int depth, CancellationToken cancellationToken)
+        SshClient? via, int depth, int hopNumber, CancellationToken cancellationToken)
     {
         if (depth > MaxProxyDepth)
         {
             throw new SshException(SshFailureReason.ConnectFailed, "ProxyJump/ProxyCommand chains nest too deeply (is there a loop in ssh_config?).");
         }
 
-        // A Proxy resolves names itself (socks5h, HTTP CONNECT), so canonicalization does not ask this machine's DNS, as with ProxyCommand.
+        // A Proxy resolves names itself (socks5h, HTTP CONNECT), and so does the hop a tunnel goes through (the host after it in a ProxyJump
+        // chain is reached through the hop's direct-tcpip), so canonicalization does not ask this machine's DNS, as with ProxyCommand.
         var resolveOptions = (options.ResolveOptions ?? new SshConfigResolveOptions())
-            .With(user, port, jumpHost: depth > 0, viaProxy: options.Proxy is not null, addressFamily: options.AddressFamily);
+            .With(user, port, jumpHost: depth > 0, viaProxy: options.Proxy is not null || via is not null, addressFamily: options.AddressFamily);
         var hostConfig = await config.ResolveAsync(host, resolveOptions, cancellationToken).ConfigureAwait(false);
         var logger = options.Logger ?? NullLogger.Instance;
+
+        // The password, the keyboard-interactive answers and the caller's own keys are the destination's: a ProxyJump hop (depth > 0),
+        // perhaps run by someone else, is never offered them, as ssh asks for each host's password separately. Hops log in with their
+        // own configuration's identity files and the agent.
+        var destination = depth == 0;
+
+        // As ssh -C: the override is the destination's. A hop would compress the destination's packets, already encrypted, for nothing.
+        var compression = destination && options.Compression is { } compress ? compress : hostConfig.Compression;
+
+        // Before anything is sent, as ssh checks its configuration: an algorithm list that leaves nothing fails here, naming the directive.
+        var preferences = AlgorithmPreferences.FromConfig(hostConfig, compression: compression);
         if (hostConfig.RefuseConnection)
         {
             // OpenSSH 10.0's RefuseConnection: a Match block rules this connection out; nothing touches the network.
@@ -97,7 +110,7 @@ public sealed partial class SshClient
                 (stream, tunnel) = await ConnectChainAsync(hostConfig.ProxyJump.Count, (index, hop, hopToken) =>
                 {
                     var (jumpUser, jumpHost, jumpPort) = ParseDestination(hostConfig.ProxyJump[index]);
-                    return ConnectHopAsync(jumpHost, jumpUser, jumpPort, config, options, hop, depth + 1, hopToken);
+                    return ConnectHopAsync(jumpHost, jumpUser, jumpPort, config, options, hop, depth + 1, index + 1, hopToken);
                 }, hostConfig.HostName, hostConfig.Port, token).ConfigureAwait(false);
                 owner.Add(tunnel);
             }
@@ -128,13 +141,6 @@ public sealed partial class SshClient
                 stream = tcpStream;
             }
 
-            // The password, the keyboard-interactive answers and the caller's own keys are the destination's: a ProxyJump hop (depth > 0),
-            // perhaps run by someone else, is never offered them, as ssh asks for each host's password separately. Hops log in with their
-            // own configuration's identity files and the agent.
-            var destination = depth == 0;
-
-            // As ssh -C: the override is the destination's. A hop would compress the destination's packets, already encrypted, for nothing.
-            var compression = destination && options.Compression is { } compress ? compress : hostConfig.Compression;
             var clientOptions = new SshClientOptions
             {
                 UserName = hostConfig.User,
@@ -167,14 +173,31 @@ public sealed partial class SshClient
                 ChannelTimeouts = hostConfig.ChannelTimeouts,
                 ObscureKeystrokeTiming = hostConfig.ObscureKeystrokeTiming,
                 Compression = compression,
-                AlgorithmPreferences = AlgorithmPreferences.FromConfig(hostConfig, compression: compression),
+                AlgorithmPreferences = preferences,
                 RequiredRsaSize = hostConfig.RequiredRsaSize ?? SshClientOptions.DefaultMinimumRsaBits,
                 Logger = options.Logger,
                 TimeProvider = options.TimeProvider,
             };
 
-            var client = await ConnectCoreAsync(stream, clientOptions, leaveOpen: false, owner, hostConfig.HostName, hostConfig.Port, measurement, token)
-                .ConfigureAwait(false);
+            if (preferences.NoPublicKeyAlgorithm && clientOptions.PrivateKeys.Count > 0)
+            {
+                // Each key is reported as NoAcceptedAlgorithm in SshAuthenticationException.Attempts; this says why, once.
+                SshLog.NoPublicKeyAlgorithm(logger, "ssh_config's PubkeyAcceptedAlgorithms");
+            }
+
+            SshClient client;
+            try
+            {
+                client = await ConnectCoreAsync(stream, clientOptions, leaveOpen: false, owner, hostConfig.HostName, hostConfig.Port, measurement, token)
+                    .ConfigureAwait(false);
+            }
+            catch (SshAuthenticationException ex) when (hopNumber > 0)
+            {
+                // A hop logs in with its own configuration (the caller's keys and password are the destination's), so its refusal would
+                // otherwise read as the destination's. Said by position: host names stay out of exception messages.
+                throw new SshAuthenticationException($"Authentication to ProxyJump hop {hopNumber} failed. {ex.Message}", ex.AllowedMethods, ex.Attempts, ex);
+            }
+
             owner = null; // the client owns it now
             try
             {

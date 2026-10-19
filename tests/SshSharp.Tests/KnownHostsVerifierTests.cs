@@ -112,6 +112,8 @@ public sealed class KnownHostsVerifierTests : IDisposable
     [Arguments("ser?er.example")]
     [Arguments("server.example\n* ssh-ed25519 AAAA")]
     [Arguments("server example")]
+    [Arguments("@cert-authority")] // a marker in the host field: the line would be read as a marker line
+    [Arguments("#server.example")] // the line would be a comment
     public async Task AHostNameThatWouldBeRecordedAsAPattern_IsRefused_NotRecorded(string host)
     {
         // Written as is, these would trust the key for other hosts, or add hosts, fields or lines.
@@ -131,6 +133,21 @@ public sealed class KnownHostsVerifierTests : IDisposable
         var key = Ed25519Key();
         await Assert.That(async () => await KnownHostsFile.AppendAsync(UserFile, "a b", 22, key.KeyType, key.PublicKey)).Throws<ArgumentException>();
         await Assert.That(() => new KnownHostsFile().Add("a\nb", 22, key.KeyType, key.PublicKey.Span)).Throws<ArgumentException>();
+
+        // A host field starting with '@' would make the line a marker line: written as "@cert-authority * <key> <comment>", the comment
+        // (a key of the caller's choosing) would be read back as a certificate authority trusted for every host. '#' would make it a comment.
+        var authority = Convert.ToBase64String(EcdsaKey().PublicKey.Span);
+        foreach (var host in new[] { "@cert-authority", "@revoked", "#comment" })
+        {
+            await Assert.That(() => new KnownHostsEntry(host, "*", key.PublicKey, KnownHostsMarker.None, comment: authority)).Throws<ArgumentException>();
+            await Assert.That(() => KnownHostsEntry.ForHost(host, 22, key.KeyType, key.PublicKey, hash: false, comment: null, KnownHostsMarker.None))
+                .Throws<ArgumentException>();
+            await Assert.That(() => new KnownHostsFile().Add(host, 22, key.KeyType, key.PublicKey.Span)).Throws<ArgumentException>();
+        }
+
+        // Elsewhere in the field, '@' is only a character (OpenSSH matches it literally); hashed hosts start with '|'.
+        await Assert.That(new KnownHostsEntry("a@b.example", key.KeyType, key.PublicKey).HostPatterns).IsEqualTo("a@b.example");
+        await Assert.That(new KnownHostsEntry(KnownHostsEntry.HashHost("server.example", 22), key.KeyType, key.PublicKey).Marker).IsEqualTo(KnownHostsMarker.None);
 
         // Patterns stay possible when written on purpose (for @cert-authority lines, for example).
         await Assert.That(new KnownHostsFile().Add("*.example.com", 22, key.KeyType, key.PublicKey.Span, marker: KnownHostsMarker.CertAuthority).HostPatterns)

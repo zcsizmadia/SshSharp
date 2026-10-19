@@ -78,6 +78,42 @@ public class SshObservabilityTests
         });
     }
 
+    /// <summary>Records the structured state of each entry, as a sink such as Serilog or OpenTelemetry does.</summary>
+    private sealed class StateLogger : ILogger
+    {
+        public List<KeyValuePair<string, object?>> Values { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            if (state is IEnumerable<KeyValuePair<string, object?>> values)
+            {
+                Values.AddRange(values);
+            }
+        }
+    }
+
+    [Test]
+    public async Task AgentFailures_DoNotHandTheExceptionToStructuredSinks()
+    {
+        // A structured sink records a logged value's public properties (Serilog's destructuring, say): the exception, whose message (or
+        // an inner IOException's) can quote the agent's path, must not be one of them.
+        const string Path = @"\\.\pipe\pageant.alice.0123456789";
+        var logger = new StateLogger();
+        SshLog.AgentUnavailable(logger, new(new IOException("The agent failed.", new IOException($"Could not open '{Path}'."))));
+
+        var reason = logger.Values.Single(v => v.Key == "Reason").Value!;
+        var type = reason.GetType();
+        var exposed = type.GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance).Select(p => p.GetValue(reason))
+            .Concat(type.GetFields(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance).Select(f => f.GetValue(reason)));
+        await Assert.That(exposed.OfType<Exception>()).IsEmpty();
+        await Assert.That(reason.ToString()).IsEqualTo("IOException");
+    }
+
     [Test]
     public async Task LogsTheLifecycle_ButNeverASecret()
     {

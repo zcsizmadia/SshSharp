@@ -295,11 +295,20 @@ public sealed class RevokedHostKeysTests : IDisposable
             await Assert.That(() => RevokedKeyList.Parse(krl)).Throws<FormatException>();
         }
 
+        // The refusal names the directive and what is wrong, never the path (ssh_config's, often with the user's home or %u in it).
+        var folder = Path.GetFileName(_dir);
         File.WriteAllBytes(RevokedFile, unusable[1]);
-        await Assert.That(await RefusalAsync(new FakeServerOptions { HostKey = key })).Contains("Error checking host key");
+        var malformed = await RefusalAsync(new FakeServerOptions { HostKey = key });
+        await Assert.That(malformed).Contains("Error checking host key").And.Contains("(RevokedHostKeys): KRL section type 9 is not supported");
+        await Assert.That(malformed).DoesNotContain(folder);
 
         File.Delete(RevokedFile);
-        await Assert.That(await RefusalAsync(new FakeServerOptions { HostKey = key })).Contains("Error checking host key");
+        var missing = await RefusalAsync(new FakeServerOptions { HostKey = key });
+        await Assert.That(missing).Contains("Error checking host key").And.Contains("the file does not exist");
+        await Assert.That(missing).DoesNotContain(folder);
+
+        File.WriteAllBytes(RevokedFile, new Krl().Section(2, w => w.WriteString(key.Blob)).Build());
+        await Assert.That(await RefusalAsync(new FakeServerOptions { HostKey = key })).Contains("revoked by file (RevokedHostKeys)").And.DoesNotContain(folder);
 
         // A non-critical extension and a trailing signature section (not verified) are fine.
         var usable = new Krl()

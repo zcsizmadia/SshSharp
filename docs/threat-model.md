@@ -91,15 +91,19 @@ A man in the middle can read, change, drop and inject bytes. The server itself m
   real keys removed as stale. Only exact, plain host lines in the first user file are ever removed.
 - **Recording host keys:** the host name is written into `known_hosts` only if it is a literal name. White space, control
   characters, commas, `*`, `?` and `!` are refused, since they would add lines or hosts, or turn the entry into a pattern that
-  trusts the key for other hosts. Every line the library writes for the application (`KnownHostsEntry`, `KnownHostsFile.Add`,
-  `AppendAsync`) is checked the same way: host patterns and the key type must be single fields, and the comment must not contain
-  CR, LF or other control characters (a tab is allowed), so a value from the application, such as a comment taken from user input,
-  cannot add a line (an `@cert-authority` line, say) to the file.
+  trusts the key for other hosts, and so is a leading `@` or `#`. Every line the library writes for the application
+  (`KnownHostsEntry`, `KnownHostsFile.Add`, `AppendAsync`) is checked the same way: host patterns and the key type must be single
+  fields, the host patterns must not start with `@` (the line would be read as a marker line: `@cert-authority * <key> <comment>`
+  would trust the key in the comment as an authority for every host) or `#` (a comment), and the comment must not contain CR, LF or
+  other control characters (a tab is allowed), so a value from the application, such as a comment taken from user input, cannot add
+  a line (an `@cert-authority` line, say) to the file or turn the line into one.
 - **Revoked host keys (`RevokedHostKeys`):** checked before anything else, in every `StrictHostKeyChecking` mode, for the plain key
   and a certificate's authority, serial and key id. A file that cannot be read, or a KRL that is malformed or has a section or
-  critical extension this library does not know, refuses every host key, as ssh does, rather than let a revoked key through. The
-  KRL parser is bounded (16 MiB files, 1 MiB per serial bitmap) and fuzzed. KRL signatures are not verified: the file is local
-  configuration, trusted like `known_hosts`.
+  critical extension this library does not know, refuses every host key, as ssh does, rather than let a revoked key through. In a
+  text key list, a malformed certificate line of a type SshSharp accepts (Ed25519, ECDSA, RSA, FIDO) does the same; a certificate
+  line of a type it never accepts (DSA, or one it does not know) is skipped, as OpenSSH skips it, since no key it could name is ever
+  accepted. The KRL parser is bounded (16 MiB files, 1 MiB per serial bitmap) and fuzzed. KRL signatures are not verified: the file
+  is local configuration, trusted like `known_hosts`. Refusals name the directive (`RevokedHostKeys`), not the file's path.
 
 ### Compression
 
@@ -347,7 +351,8 @@ connection, but not read or change it: each host's key is verified end to end, b
   authority's key is revoked. The list is parsed with the same bounds and strictness as `RevokedHostKeys` (a malformed KRL, or one
   with a section this library does not know, throws rather than being read in part). In a text key list, a certificate line
   revokes the key it certifies, FIDO security-key certificates (`sk-...-cert-v01@openssh.com`) included, and a certificate line
-  whose key cannot be read throws for the whole list rather than being skipped, so it cannot leave a revoked key accepted. Its
+  of an accepted type whose key cannot be read throws for the whole list rather than being skipped, so it cannot leave a revoked key
+  accepted (a DSA or unknown certificate line is skipped: its key is never accepted). Its
   signatures are not verified: it is
   local configuration, as trusted as the code that loads it. Vendor extension values (`ExtensionValues`) are what the CA wrote;
   servers ignore extensions they do not know, and an application that acts on one is trusting the CA for it.
@@ -382,7 +387,11 @@ connection, but not read or change it: each host's key is verified end to end, b
   are there for the application to read, and are never logged or recorded in telemetry.
 - Exception messages, which applications log, follow the same rule: no user names, host names (the canonicalizer's failure
   included) or names that usually are user names (a certificate's principals, the agent's path). A file or SFTP path the
-  application passed to the failing call can appear, as in .NET's own I/O exceptions.
+  application passed to the failing call can appear, as in .NET's own I/O exceptions; a path that comes from ssh_config does not
+  (an `Include`d file is named by its file name only, a `RevokedHostKeys` file by the directive), nor does an agent destination's
+  `[user@]host`. A ProxyJump hop that refuses to log in is named by its place in the list ("ProxyJump hop 2"), not by its name.
+- Log values that carry an exception (an agent failure, say) are formatted to a sanitized reason and expose no public property
+  holding the exception, so a structured log sink that records properties cannot record the agent's path from it either.
 - `SshAuthenticationException` (its message and `Attempts`) names methods, outcomes and the SHA-256 fingerprints of the keys
   offered, which identify public keys only. It never holds a password, a keyboard-interactive answer or the user name. A key
   fingerprint can link a failed login to its owner, as it can in the server's own log; treat it as you treat host key fingerprints.
@@ -429,7 +438,9 @@ connection, but not read or change it: each host's key is verified end to end, b
   accepted as for any new host. A CNAME target replaces the name only when `CanonicalizePermittedCNAMEs` allows that pair, which
   keeps a forged CNAME from moving the connection (and its known_hosts lookup) to an arbitrary name. Canonicalization makes no
   lookups for a host reached through `ProxyJump`, `ProxyCommand` or `SshConfigConnectOptions.Proxy` unless the configuration says
-  `always`, so with a proxy that resolves names itself (`socks5h`, HTTP), the names are not sent to this machine's DNS.
+  `always`, so with a proxy that resolves names itself (`socks5h`, HTTP), the names are not sent to this machine's DNS. That
+  includes the hops of a `ProxyJump` chain after the first: each is reached through the hop before it, which resolves its name, so
+  internal names behind a bastion are not looked up here.
 - Host and user names supplied by the caller are substituted into those commands (`%h`, `%n`, `%r`), so they are refused when
   they contain shell metacharacters, control characters or a leading `-` (the CVE-2023-51385 pattern). Host names may not
   contain white space either, which would split `%h` into extra arguments. User names may (Windows account names can).

@@ -269,6 +269,18 @@ public sealed class EndpointSecretsTests : IDisposable
         });
         using var provider = services.BuildServiceProvider();
         await Assert.That(provider.GetRequiredService<IOptionsMonitor<SshEndpointOptions>>().Get("deploy").KeepAliveInterval).IsEqualTo(TimeSpan.Zero);
+
+        // Infinite is off too, as SshClientOptions and SshConfigConnectOptions take it.
+        var infinite = new ServiceCollection();
+        infinite.AddSshClient("deploy", o =>
+        {
+            o.Host = "ssh.example.com";
+            o.UserName = "deploy";
+            o.KeepAliveInterval = System.Threading.Timeout.InfiniteTimeSpan;
+        });
+        using var infiniteProvider = infinite.BuildServiceProvider();
+        await Assert.That(infiniteProvider.GetRequiredService<IOptionsMonitor<SshEndpointOptions>>().Get("deploy").KeepAliveInterval)
+            .IsEqualTo(System.Threading.Timeout.InfiniteTimeSpan);
     }
 
     [Test]

@@ -79,7 +79,8 @@ public sealed record SshAgentDestination
         var parts = specification.Split('>');
         if (parts.Length > 2)
         {
-            throw new FormatException($"'{specification}' has more than one '>': give each hop as its own destination.");
+            // The messages name no host or user: exception messages end up in logs.
+            throw new FormatException("The destination has more than one '>': give each hop as its own destination.");
         }
 
         SshAgentHost? from = null;
@@ -88,7 +89,7 @@ public sealed record SshAgentDestination
             from = Host(parts[0], knownHosts);
             if (from.UserName is not null)
             {
-                throw new FormatException($"The host a hop comes from ('{parts[0]}') cannot name a user.");
+                throw new FormatException("The host a hop comes from (before '>') cannot name a user.");
             }
         }
 
@@ -102,7 +103,7 @@ public sealed record SshAgentDestination
         var host = text[(at + 1)..];
         if (host.Length == 0 || at == 0)
         {
-            throw new FormatException($"'{text}' is not [user@]host.");
+            throw new FormatException("A host in the destination is not [user@]host.");
         }
 
         var keys = knownHosts.SelectMany(file => file.Find(host))
@@ -111,7 +112,7 @@ public sealed record SshAgentDestination
             .ToList();
         if (keys.Count == 0)
         {
-            throw new FormatException($"No host keys for '{host}' in known_hosts: the agent needs them to tell the host apart.");
+            throw new FormatException("A host in the destination has no host keys in known_hosts: the agent needs them to tell the host apart.");
         }
 
         return new SshAgentHost(host, keys) { UserName = user };

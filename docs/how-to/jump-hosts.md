@@ -123,7 +123,12 @@ pinned key).
   to it.
 - **Upgrading from 1.0:** `SshConfigConnectOptions.PrivateKeys` used to be offered to every hop as well. A hop that logged in with
   one of them now needs that key in its own `IdentityFile` (in the configuration) or in the agent (`SshConfigConnectOptions.Agent`,
-  for example `SshAgent.FromKeys(key)` for a key held in the application).
+  for example `SshAgent.FromKeys(key)` for a key held in the application). With `IdentitiesOnly yes` for the hop, the agent's keys
+  are offered only when they match one of its `IdentityFile` lines (by the public key in `<file>.pub`), so also name a file holding
+  the key's public key there, or leave `IdentitiesOnly` off for that hop.
+- **Which host refused.** A hop that refuses to log in fails with `SshAuthenticationException` "Authentication to ProxyJump hop N
+  failed", N being its place in the `ProxyJump` list; the hop's own failure is the `InnerException`. Without it, a hop's refusal
+  looks like the destination's. See [Troubleshooting](../reference/troubleshooting.md#authentication-to-proxyjump-hop-n-failed).
 - **Reusing one options object** for a hop and the destination offers its credentials to both. Give each host its own options
   unless they really share a login.
 - **Disposal.** Disposing the destination client tears down the whole chain, and a connection that fails partway closes the hops
