@@ -291,6 +291,77 @@ public class ForwardingInteropTests
         }, () => $"The local service {(accepted ? "accepted a connection" : "saw no connection")}; connected {client.IsConnected}.");
     }
 
+    /// <summary>Exchanges a line with whatever listens on <paramref name="endPoint"/> here: sends one if given, and reads one back.</summary>
+    private static async Task<string> LocalLineAsync(EndPoint endPoint, string? send)
+    {
+        using var socket = endPoint is UnixDomainSocketEndPoint
+            ? new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified)
+            : new Socket(endPoint.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
+        await socket.ConnectAsync(endPoint, Timeout());
+        if (send is not null)
+        {
+            await socket.SendAsync(Encoding.ASCII.GetBytes(send + "\n"), SocketFlags.None, Timeout());
+        }
+
+        return await ReadLineAsync(buffer => socket.ReceiveAsync(buffer, SocketFlags.None, Timeout()));
+    }
+
+    [Test]
+    public async Task LocalForwardingFromAUnixSocket_ReachesTheServersOwnSshd()
+    {
+        await using var client = await ConnectAsync();
+        if (client is null)
+        {
+            Skip.Test("SSHSHARP_TEST_SSHD and SSHSHARP_TEST_USER with a password or key are needed.");
+            return;
+        }
+
+        // ssh -L /here.sock:127.0.0.1:22: a Unix socket on this machine (Windows 10 and later have them too), forwarded over TCP.
+        var directory = Directory.CreateTempSubdirectory("ssl");
+        try
+        {
+            var path = Path.Combine(directory.FullName, "fwd.sock");
+            await using var forwarder = await client.ForwardLocalUnixSocketAsync(path, "127.0.0.1", ServerSidePort, Timeout());
+            await Assert.That(await LocalLineAsync(new UnixDomainSocketEndPoint(path), send: null)).StartsWith("SSH-2.0-");
+        }
+        finally
+        {
+            directory.Delete(recursive: true);
+        }
+    }
+
+    [Test]
+    public async Task LocalForwardingToAUnixSocketOnTheServer_FromAPortAndFromASocket()
+    {
+        await using var client = await ConnectAsync();
+        if (client is null || !(RealServer.IsOpenSsh || RealServer.IsAsyncSsh) || RealServer.IsWindows)
+        {
+            Skip.Test("SSHSHARP_TEST_SSHD and SSHSHARP_TEST_USER with a password or key are needed, on an OpenSSH or AsyncSSH server with Unix sockets.");
+            return;
+        }
+
+        // A socket on the server, served by a handler here; ssh -L port:/that.sock and -L /here.sock:/that.sock then reach it through
+        // direct-streamlocal channels: here -> server -> its socket -> back to the handler here.
+        var socketPath = $"/tmp/sshsharp-{Guid.NewGuid():N}.sock";
+        var directory = Directory.CreateTempSubdirectory("ssl");
+        try
+        {
+            await using var served = await client.ForwardRemoteUnixSocketAsync(socketPath, UpperCaseLineAsync, cancellationToken: Timeout());
+
+            await using var fromPort = await client.ForwardLocalPortAsync(new IPEndPoint(IPAddress.Loopback, 0), socketPath, Timeout());
+            await Assert.That(await LocalLineAsync(fromPort.LocalEndPoint, "from a port")).IsEqualTo("FROM A PORT");
+
+            var localPath = Path.Combine(directory.FullName, "fwd.sock");
+            await using var fromSocket = await client.ForwardLocalUnixSocketAsync(localPath, socketPath, Timeout());
+            await Assert.That(await LocalLineAsync(new UnixDomainSocketEndPoint(localPath), "from a socket")).IsEqualTo("FROM A SOCKET");
+        }
+        finally
+        {
+            await client.RunCommandAsync($"rm -f {socketPath}", Timeout());
+            directory.Delete(recursive: true);
+        }
+    }
+
     [Test]
     public async Task RemoteSocketForwarding_BringsConnectionsToTheServersSocketBackHere()
     {

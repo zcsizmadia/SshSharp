@@ -10,7 +10,7 @@ operations run in parallel, why unread output stalls a program, and what the ser
 |---|---|---|
 | `session` | client | `RunCommandAsync`, `StartCommandAsync`, `StartShellAsync`, `StartSubsystemAsync`, `OpenSftpAsync`, SCP transfers |
 | `direct-tcpip` | client | `OpenTcpTunnelAsync`, each connection to a local forwarder or SOCKS proxy, `CreateHttpConnectCallback`, ProxyJump hops |
-| `direct-streamlocal@openssh.com` | client | `OpenUnixSocketTunnelAsync` |
+| `direct-streamlocal@openssh.com` | client | `OpenUnixSocketTunnelAsync`, and each connection to a local forwarding to a Unix socket on the server |
 | `forwarded-tcpip` | server | each connection to a remote forwarding (`ForwardRemotePortAsync`, to a host and port or to a handler, `ForwardRemoteDynamicPortAsync`) |
 | `forwarded-streamlocal@openssh.com` | server | each connection to a remote Unix-socket forwarding |
 | `auth-agent@openssh.com` | server | each use of a forwarded agent: relayed to the agent, or answered request by request for an in-process agent (`SshAgent.FromKeys`) or behind `ForwardAgentFilter` |

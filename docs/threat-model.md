@@ -165,6 +165,11 @@ A man in the middle can read, change, drop and inject bytes. The server itself m
 
 - `ForwardLocalPortAsync` and `ForwardDynamicPortAsync` bind where the application says. Forwardings from `ssh_config` bind
   to loopback unless the configuration names an address or sets `GatewayPorts`, as with `ssh`.
+- `ForwardLocalUnixSocketAsync` (and `LocalForward /path ...`) listens on a Unix socket file it creates, owner-only: mode 0600 on
+  Unix (`ssh`'s default `StreamLocalBindMask 0177`), an ACL with only the current user on Windows. The permission is set between
+  `bind` and `listen`, while the socket refuses connections, so no other local user can connect in between. It never replaces an
+  existing file unless `ssh_config` says `StreamLocalBindUnlink yes` (then whatever file is at that path is deleted, as `ssh` does),
+  and it removes its socket file when it stops. The paths come from the application or the configuration; they are not logged.
 - The SOCKS proxy has no authentication (like `ssh -D`) and supports only CONNECT (SOCKS 4, 4a and 5). Anyone who can reach
   its address can use the SSH connection, so it should listen on loopback.
 - Remote forwarding to a handler opens no listener on this machine: its connections reach the application's code only through

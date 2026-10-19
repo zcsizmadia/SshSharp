@@ -51,7 +51,8 @@ flowchart LR
   ([Run a command](../how-to/run-a-command.md#pass-arguments-safely)).
 - **Agent forwarding** lets anyone with enough rights on the server use your agent while you are connected. Forward only to trusted
   servers, and prefer destination-constrained keys.
-- **Listeners.** Local forwarders and SOCKS proxies have no authentication; bind them to loopback. Remote dynamic forwarding lets
+- **Listeners.** Local forwarders and SOCKS proxies have no authentication; bind them to loopback. A local Unix-socket forwarder's
+  socket file is owner-only. Remote dynamic forwarding lets
   the server's side reach your network; pass an `allowDestination` filter.
 - **Configuration from elsewhere.** `ProxyCommand` is allowed by default (as in `ssh`); `KnownHostsCommand` and `Match exec` are
   opt-in. For configuration files you do not control, set `AllowProxyCommand = false` and leave the others off.

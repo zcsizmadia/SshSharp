@@ -29,6 +29,22 @@ internal static class Forwarding
         _ = url;
     }
 
+    public static async Task LocalUnixSocketsAsync(SshClient client, CancellationToken cancellationToken)
+    {
+        // <local-unix-socket>
+        // ssh -L 15432:/run/postgresql/.s.PGSQL.5432: a port here, the server's PostgreSQL socket there.
+        await using var database = await client.ForwardLocalPortAsync(
+            new IPEndPoint(IPAddress.Loopback, 15432), "/run/postgresql/.s.PGSQL.5432", cancellationToken);
+
+        // ssh -L /tmp/docker.sock:/var/run/docker.sock: a socket here for the local Docker CLI, the server's daemon there
+        // (DOCKER_HOST=unix:///tmp/docker.sock). The socket file is owner-only, and removed when the forwarder is disposed.
+        await using var docker = await client.ForwardLocalUnixSocketAsync("/tmp/docker.sock", "/var/run/docker.sock", cancellationToken);
+
+        // ssh -L /tmp/db.sock:db.internal:5432: a socket here, a host and port the server reaches.
+        await using var socketToTcp = await client.ForwardLocalUnixSocketAsync("/tmp/db.sock", "db.internal", 5432, cancellationToken);
+        // </local-unix-socket>
+    }
+
     public static async Task TunnelAsync(SshClient client, CancellationToken cancellationToken)
     {
         // <tunnel>

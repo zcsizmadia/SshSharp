@@ -4,8 +4,8 @@ using SshSharp.Protocol;
 namespace SshSharp;
 
 /// <summary>
-/// A local port forwarding (<c>ssh -L</c>) started by <see cref="SshClient.ForwardLocalPortAsync"/>: connections to
-/// <see cref="LocalEndPoint"/> are relayed through the server to <see cref="RemoteHost"/>:<see cref="RemotePort"/>. Dispose it to stop
+/// A local port forwarding (<c>ssh -L</c>) started by <see cref="SshClient.ForwardLocalPortAsync(IPEndPoint, string, int, CancellationToken)"/> or its overload: connections to
+/// <see cref="LocalEndPoint"/> are relayed through the server to <see cref="RemoteHost"/>:<see cref="RemotePort"/>, or to the Unix socket <see cref="RemoteSocketPath"/> there. Dispose it to stop
 /// listening and close the forwarded connections.
 /// </summary>
 public sealed class SshLocalPortForwarder : IAsyncDisposable
@@ -19,14 +19,27 @@ public sealed class SshLocalPortForwarder : IAsyncDisposable
         RemotePort = remotePort;
     }
 
+    /// <summary>A forwarding to the Unix socket <paramref name="remoteSocketPath"/> on the server.</summary>
+    internal SshLocalPortForwarder(LocalListener listener, string remoteSocketPath)
+        : this(listener, string.Empty, 0)
+    {
+        RemoteSocketPath = remoteSocketPath;
+    }
+
     /// <summary>The local address and port being listened on (with the actual port when 0 was asked for).</summary>
     public IPEndPoint LocalEndPoint => _listener.LocalEndPoint;
 
-    /// <summary>Where the server connects each forwarded connection to.</summary>
+    /// <summary>Where the server connects each forwarded connection to; empty when it connects to <see cref="RemoteSocketPath"/>.</summary>
     public string RemoteHost { get; }
 
-    /// <summary>The port on <see cref="RemoteHost"/>.</summary>
+    /// <summary>The port on <see cref="RemoteHost"/>; 0 when the server connects to <see cref="RemoteSocketPath"/>.</summary>
     public int RemotePort { get; }
+
+    /// <summary>
+    /// The Unix socket on the server each forwarded connection goes to (<c>ssh -L port:/remote/socket</c>), or null when it goes to
+    /// <see cref="RemoteHost"/>:<see cref="RemotePort"/>.
+    /// </summary>
+    public string? RemoteSocketPath { get; }
 
     /// <summary>How many forwarded connections are open now.</summary>
     public int ActiveConnections => _listener.ActiveConnections;
@@ -34,6 +47,46 @@ public sealed class SshLocalPortForwarder : IAsyncDisposable
     internal bool IsListening => _listener.IsListening;
 
     /// <summary>Stops listening and closes every forwarded connection.</summary>
+    public ValueTask DisposeAsync() => _listener.DisposeAsync();
+}
+
+/// <summary>
+/// A local forwarding that listens on a Unix socket (<c>ssh -L /local/socket:host:port</c> or <c>ssh -L /local/socket:/remote/socket</c>),
+/// started by <see cref="SshClient.ForwardLocalUnixSocketAsync(string, string, int, CancellationToken)"/> or its overload: connections to
+/// the socket <see cref="LocalSocketPath"/> are relayed through the server to <see cref="RemoteHost"/>:<see cref="RemotePort"/>, or to
+/// the Unix socket <see cref="RemoteSocketPath"/> on the server. The socket file is owner-only. Dispose it to stop listening, close the
+/// forwarded connections and remove the socket file.
+/// </summary>
+public sealed class SshLocalSocketForwarder : IAsyncDisposable
+{
+    private readonly LocalListener _listener;
+
+    internal SshLocalSocketForwarder(LocalListener listener, string? remoteHost, int remotePort, string? remoteSocketPath)
+    {
+        _listener = listener;
+        RemoteHost = remoteHost;
+        RemotePort = remotePort;
+        RemoteSocketPath = remoteSocketPath;
+    }
+
+    /// <summary>The Unix socket being listened on, which this forwarder created.</summary>
+    public string LocalSocketPath => _listener.SocketPath!;
+
+    /// <summary>Where the server connects each forwarded connection to; null when it connects to <see cref="RemoteSocketPath"/>.</summary>
+    public string? RemoteHost { get; }
+
+    /// <summary>The port on <see cref="RemoteHost"/>; 0 when the server connects to <see cref="RemoteSocketPath"/>.</summary>
+    public int RemotePort { get; }
+
+    /// <summary>The Unix socket on the server each forwarded connection goes to; null when it goes to <see cref="RemoteHost"/>.</summary>
+    public string? RemoteSocketPath { get; }
+
+    /// <summary>How many forwarded connections are open now.</summary>
+    public int ActiveConnections => _listener.ActiveConnections;
+
+    internal bool IsListening => _listener.IsListening;
+
+    /// <summary>Stops listening, closes every forwarded connection, and removes the socket file.</summary>
     public ValueTask DisposeAsync() => _listener.DisposeAsync();
 }
 

@@ -9,6 +9,7 @@ a tunnel as a plain `Stream` or plugs it into `HttpClient`.
 | You want to | Use |
 |---|---|
 | Reach a service behind the server from a program that connects to a port (a database client, a browser) | [Local forwarding](#local-forwarding-ssh--l), `ssh -L` |
+| Reach a Unix socket on the server (Docker, PostgreSQL), or offer a Unix socket here | [Local forwarding with Unix sockets](#local-forwarding-with-unix-sockets) |
 | Reach it from your own code, without opening a port | [A tunnel stream](#tunnels-without-a-local-port) or [`HttpClient`](#httpclient-through-the-server) |
 | Let programs reach many destinations through the server | [Dynamic forwarding](#dynamic-forwarding-a-socks-proxy-ssh--d), `ssh -D` |
 | Let the server reach a service on your side | [Remote forwarding](#remote-forwarding-ssh--r), `ssh -R` |
@@ -45,6 +46,21 @@ Port 0 lets the system pick a free port, which avoids collisions when several jo
 [!code-csharp[](../snippets/Forwarding.cs#local-ephemeral)]
 
 The server resolves `db.internal`, so names that only the server's network knows work.
+
+### Local forwarding with Unix sockets
+
+Either end can be a Unix socket instead, as with `ssh -L`: a port here to a socket on the server (`-L port:/remote.sock`), a
+socket here to a host and port (`-L /local.sock:host:port`), or a socket to a socket (`-L /local.sock:/remote.sock`):
+
+[!code-csharp[](../snippets/Forwarding.cs#local-unix-socket)]
+
+- **The socket file here is owner-only**: mode 0600 on Linux and macOS, as `ssh`'s default `StreamLocalBindMask 0177` gives, and on
+  Windows an ACL with only the current user. It is set before the socket accepts connections, so nobody else gets in first.
+- **An existing file is not replaced**: `ForwardLocalUnixSocketAsync` throws a `SocketException`, as `ssh` fails without
+  `StreamLocalBindUnlink yes`. The forwarder removes its socket file when it is disposed.
+- **The server decides** with sshd's `AllowStreamLocalForwarding`; a refused connection is closed, and the forwarding goes on.
+- **Platforms.** Unix sockets work on Linux, macOS and Windows 10 and later. A socket path is limited to about 104 bytes (macOS) or
+  108 (Linux, Windows); a longer one throws `ArgumentOutOfRangeException`.
 
 ## Tunnels without a local port
 
@@ -152,7 +168,7 @@ requested; its `LocalHost` is empty and `LocalPort` 0.
 - **Limits.** The server can open at most `SshClientOptions.MaxForwardedConnections` (1,000) forwarded connections at a time, and a
   forwarding to a handler at most its `maxConnections`.
 - **From `ssh_config`.** `LocalForward`, `RemoteForward` and `DynamicForward` start with the connection when
-  `SshConfigConnectOptions.StartForwardings` is true.
+  `SshConfigConnectOptions.StartForwardings` is true, Unix-socket forms included (`LocalForward /tmp/docker.sock /var/run/docker.sock`).
 
 ## See also
 

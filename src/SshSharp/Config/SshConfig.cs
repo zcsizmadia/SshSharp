@@ -326,6 +326,7 @@ public sealed class SshConfig
             DynamicForwards = Bool(First("clearallforwardings"), false) ? [] : All("dynamicforward"),
             GatewayPorts = Bool(First("gatewayports"), false),
             ExitOnForwardFailure = Bool(First("exitonforwardfailure"), false),
+            StreamLocalBindUnlink = Bool(First("streamlocalbindunlink"), false),
             Options = values.ToDictionary(kv => kv.Key, kv => (IReadOnlyList<string>)kv.Value, StringComparer.OrdinalIgnoreCase),
         };
     }

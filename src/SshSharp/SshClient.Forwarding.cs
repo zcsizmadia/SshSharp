@@ -77,6 +77,87 @@ public sealed partial class SshClient
     }
 
     /// <summary>
+    /// Local forwarding to a Unix socket on the server (<c>ssh -L port:/remote/socket</c>): listens on <paramref name="localEndPoint"/> and
+    /// forwards every connection made to it to the Unix socket <paramref name="remoteSocketPath"/> on the server
+    /// (<c>direct-streamlocal@openssh.com</c>), for example a database or Docker socket there. The forwarder's
+    /// <see cref="SshLocalPortForwarder.RemoteSocketPath"/> is the path; its <see cref="SshLocalPortForwarder.RemoteHost"/> is empty and
+    /// <see cref="SshLocalPortForwarder.RemotePort"/> 0. sshd's <c>AllowStreamLocalForwarding</c> decides whether the server connects.
+    /// </summary>
+    /// <exception cref="SocketException">The local endpoint could not be bound (for example the port is in use).</exception>
+    public Task<SshLocalPortForwarder> ForwardLocalPortAsync(IPEndPoint localEndPoint, string remoteSocketPath, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(localEndPoint);
+        ValidateSocketPath(remoteSocketPath, nameof(remoteSocketPath));
+        ObjectDisposedException.ThrowIf(_disposed != 0, this);
+        cancellationToken.ThrowIfCancellationRequested();
+        ThrowIfConnectionFailed();
+        var listener = LocalListener.Start(localEndPoint, (_, ct) => OpenForwardedSocketAsync(remoteSocketPath, ct), _connection.Closed);
+        var bound = listener.LocalEndPoint.ToString();
+        SshLog.ForwardingToSocketStarted(_logger, bound);
+        return Task.FromResult(new SshLocalPortForwarder(listener, remoteSocketPath));
+    }
+
+    /// <summary>
+    /// Local forwarding from a Unix socket (<c>ssh -L /local/socket:host:port</c>): creates the Unix socket
+    /// <paramref name="localSocketPath"/> here and forwards every connection made to it through the server to
+    /// <paramref name="remoteHost"/>:<paramref name="remotePort"/>. The socket file is created owner-only (mode 0600, as ssh's default
+    /// <c>StreamLocalBindMask</c> gives; on Windows an ACL with only the current user), and removed when the forwarder stops. Unix
+    /// sockets work on Linux, macOS and Windows 10 and later.
+    /// </summary>
+    /// <exception cref="SocketException">The socket could not be created: a file exists at the path, or its directory does not.</exception>
+    /// <exception cref="ArgumentException">The path is longer than the platform allows for a socket (about 104 to 108 bytes).</exception>
+    public Task<SshLocalSocketForwarder> ForwardLocalUnixSocketAsync(string localSocketPath, string remoteHost, int remotePort, CancellationToken cancellationToken = default)
+    {
+        ValidateSocketPath(localSocketPath, nameof(localSocketPath));
+        ValidateDestination(remoteHost, remotePort);
+        return StartLocalSocketForwardAsync(localSocketPath, unlinkExisting: false, remoteHost, remotePort, remoteSocketPath: null, cancellationToken);
+    }
+
+    /// <summary>
+    /// Local forwarding from a Unix socket to a Unix socket on the server (<c>ssh -L /local/socket:/remote/socket</c>): creates the Unix
+    /// socket <paramref name="localSocketPath"/> here (owner-only, removed when the forwarder stops) and forwards every connection made to
+    /// it to <paramref name="remoteSocketPath"/> on the server, for example to use the server's Docker socket with a local client.
+    /// </summary>
+    /// <exception cref="SocketException">The socket could not be created: a file exists at the path, or its directory does not.</exception>
+    /// <exception cref="ArgumentException">The path is longer than the platform allows for a socket (about 104 to 108 bytes).</exception>
+    public Task<SshLocalSocketForwarder> ForwardLocalUnixSocketAsync(string localSocketPath, string remoteSocketPath, CancellationToken cancellationToken = default)
+    {
+        ValidateSocketPath(localSocketPath, nameof(localSocketPath));
+        ValidateSocketPath(remoteSocketPath, nameof(remoteSocketPath));
+        return StartLocalSocketForwardAsync(localSocketPath, unlinkExisting: false, null, 0, remoteSocketPath, cancellationToken);
+    }
+
+    private Task<SshLocalSocketForwarder> StartLocalSocketForwardAsync(string localSocketPath, bool unlinkExisting, string? remoteHost, int remotePort,
+        string? remoteSocketPath, CancellationToken cancellationToken)
+    {
+        ObjectDisposedException.ThrowIf(_disposed != 0, this);
+        cancellationToken.ThrowIfCancellationRequested();
+        ThrowIfConnectionFailed();
+        var listener = LocalListener.StartUnix(localSocketPath, unlinkExisting,
+            remoteSocketPath is null
+                ? (socket, ct) => OpenForwardedAsync(socket, remoteHost!, remotePort, ct)
+                : (_, ct) => OpenForwardedSocketAsync(remoteSocketPath, ct),
+            _connection.Closed);
+        SshLog.LocalSocketForwardingStarted(_logger, remotePort);
+        return Task.FromResult(new SshLocalSocketForwarder(listener, remoteHost, remotePort, remoteSocketPath));
+    }
+
+    /// <summary>The <c>direct-streamlocal</c> channel for one locally forwarded connection, or null (logged) when the server refuses it.</summary>
+    private async Task<SshChannel?> OpenForwardedSocketAsync(string path, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await _connection.OpenDirectStreamLocalAsync(path, cancellationToken).ConfigureAwait(false);
+        }
+        catch (SshException ex) when (ex.Reason == SshFailureReason.ChannelClosed)
+        {
+            // Nothing listens there, or stream-local forwarding is not allowed: drop this connection only. Port 0: a socket path.
+            SshLog.ForwardingRefused(_logger, 0, ex.Message);
+            return null;
+        }
+    }
+
+    /// <summary>
     /// Dynamic port forwarding (<c>ssh -D</c>): runs a SOCKS proxy on <paramref name="localEndPoint"/> (SOCKS 4, 4a and 5, CONNECT,
     /// no authentication). Each application connection names its destination, and the server makes the connection, so host names are
     /// resolved on the server's side. Use a loopback address: the proxy has no authentication, so anyone who can reach it can use the
@@ -110,10 +191,11 @@ public sealed partial class SshClient
     /// <summary>The channel for one locally forwarded connection, or null (logged) when the server refuses it.</summary>
     private async Task<SshChannel?> OpenForwardedAsync(Socket socket, string host, int port, CancellationToken cancellationToken)
     {
-        var origin = (IPEndPoint)socket.RemoteEndPoint!;
+        // A Unix socket has no address: ssh sends 127.0.0.1 and port 65535 then, for servers that check the originator.
+        var (originAddress, originPort) = socket.RemoteEndPoint is IPEndPoint origin ? (origin.Address.ToString(), origin.Port) : ("127.0.0.1", 65535);
         try
         {
-            return await _connection.OpenDirectTcpIpAsync(host, port, origin.Address.ToString(), origin.Port, cancellationToken).ConfigureAwait(false);
+            return await _connection.OpenDirectTcpIpAsync(host, port, originAddress, originPort, cancellationToken).ConfigureAwait(false);
         }
         catch (SshException ex) when (ex.Reason == SshFailureReason.ChannelClosed)
         {
@@ -623,9 +705,21 @@ public sealed partial class SshClient
     /// <summary>The <c>DynamicForward</c> SOCKS proxies started from ssh_config; disposed with the client.</summary>
     public IReadOnlyList<SshDynamicPortForwarder> DynamicForwardings => _dynamicForwardings.AsReadOnly();
 
+    private readonly List<SshLocalSocketForwarder> _localSocketForwardings = [];
+
     /// <summary>
-    /// Starts the forwardings ssh_config names for this host. One that cannot be set up (a port in use, refused by the server, a form
-    /// this library does not support such as Unix sockets) is logged and skipped, or fails the connection with <c>ExitOnForwardFailure</c>.
+    /// The <c>LocalForward</c> forwardings that listen on a Unix socket here (<c>LocalForward /path target</c>) started from ssh_config;
+    /// disposed with the client. Those that listen on a port, to a Unix socket on the server too, are in <see cref="LocalForwardings"/>.
+    /// </summary>
+    public IReadOnlyList<SshLocalSocketForwarder> LocalSocketForwardings => _localSocketForwardings.AsReadOnly();
+
+    /// <summary>A Unix socket path from a forwarding specification, with ssh_config's tokens, <c>~</c> and <c>${VAR}</c> expanded, as ssh does.</summary>
+    private static string ExpandSocketPath(string path, SshHostConfig hostConfig) =>
+        hostConfig.Tokens is { } tokens ? tokens.ExpandPath(tokens.ExpandTokens(path)) : path;
+
+    /// <summary>
+    /// Starts the forwardings ssh_config names for this host. One that cannot be set up (a port or socket path in use, refused by the
+    /// server, a form this library does not support) is logged and skipped, or fails the connection with <c>ExitOnForwardFailure</c>.
     /// </summary>
     internal async Task StartConfiguredForwardingsAsync(SshHostConfig hostConfig, CancellationToken cancellationToken)
     {
@@ -633,6 +727,34 @@ public sealed partial class SshClient
         {
             await TryForwardAsync("LocalForward", spec, async () =>
             {
+                // As in ssh, a field with a '/' in it is a Unix socket path: /local/socket host:hostport, [bind:]port /remote/socket, or
+                // /local/socket /remote/socket. The local one may be written with '\' too, as Windows paths are (no bind address or
+                // port has either). Paths take ssh_config's tokens, ~ and ${VAR}, as ssh expands them.
+                var parts = spec.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+                var localIsSocket = parts.Length == 2 && parts[0].AsSpan().IndexOfAny('/', '\\') >= 0;
+                if (parts.Length == 2 && (localIsSocket || parts[1].Contains('/')))
+                {
+                    var remoteSocket = parts[1].Contains('/') ? ExpandSocketPath(parts[1], hostConfig) : null;
+                    var socketTarget = remoteSocket is null
+                        ? ForwardSpec.ParseTarget(parts[1]) ?? throw new FormatException("the target must be host:hostport or a socket path")
+                        : default;
+                    if (localIsSocket)
+                    {
+                        var localSocket = ExpandSocketPath(parts[0], hostConfig);
+                        ValidateSocketPath(localSocket, nameof(spec));
+                        _localSocketForwardings.Add(await StartLocalSocketForwardAsync(localSocket, hostConfig.StreamLocalBindUnlink,
+                            remoteSocket is null ? socketTarget.Host : null, socketTarget.Port, remoteSocket, cancellationToken).ConfigureAwait(false));
+                    }
+                    else
+                    {
+                        var socketListen = ForwardSpec.ParseListen(parts[0]) ?? throw new FormatException("the listening side must be [bind:]port or a socket path");
+                        _localForwardings.Add(await ForwardLocalPortAsync(LocalBind(socketListen, hostConfig.GatewayPorts), remoteSocket!, cancellationToken)
+                            .ConfigureAwait(false));
+                    }
+
+                    return;
+                }
+
                 var (listen, target) = ForwardSpec.ParseForward(spec) ?? throw new FormatException("only [bind:]port host:hostport is supported");
                 _localForwardings.Add(await ForwardLocalPortAsync(LocalBind(listen, hostConfig.GatewayPorts), target.Host, target.Port, cancellationToken).ConfigureAwait(false));
             }).ConfigureAwait(false);
@@ -691,13 +813,14 @@ public sealed partial class SshClient
             {
                 await start().ConfigureAwait(false);
             }
-            catch (Exception ex) when (ex is FormatException or SocketException or SshException or ArgumentException)
+            catch (Exception ex) when (ex is FormatException or SocketException or SshException or ArgumentException or IOException or UnauthorizedAccessException)
             {
                 var reason = ex switch
                 {
                     FormatException => "this form is not supported",
                     SocketException socketError => "the local address could not be used (" + socketError.SocketErrorCode + ")",
                     SshException sshError => "the server did not set it up (" + sshError.Reason + ")",
+                    IOException or UnauthorizedAccessException => "the local socket file could not be created or replaced",
                     _ => "the specification is invalid",
                 };
                 if (hostConfig.ExitOnForwardFailure)
@@ -731,6 +854,11 @@ public sealed partial class SshClient
     private async Task DisposeConfiguredForwardingsAsync()
     {
         foreach (var forwarding in _localForwardings)
+        {
+            await forwarding.DisposeAsync().ConfigureAwait(false);
+        }
+
+        foreach (var forwarding in _localSocketForwardings)
         {
             await forwarding.DisposeAsync().ConfigureAwait(false);
         }

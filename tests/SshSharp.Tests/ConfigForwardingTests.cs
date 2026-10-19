@@ -146,11 +146,11 @@ public sealed class ConfigForwardingTests : IDisposable
     [Test]
     public async Task AForwardingThatCannotStart_IsSkipped_OrFailsTheConnectionWithExitOnForwardFailure()
     {
-        var (server, client) = await ConnectAsync(" LocalForward 0 /var/run/db.sock\n DynamicForward 127.0.0.1:0\n");
+        var (server, client) = await ConnectAsync(" LocalForward 0 db\n LocalForward 0 db:5432\n DynamicForward 127.0.0.1:0\n");
         await using (server)
         await using (client)
         {
-            await Assert.That(client.LocalForwardings).IsEmpty(); // a Unix-socket target is not supported
+            await Assert.That(client.LocalForwardings.Count).IsEqualTo(1); // a target without a port is not a forwarding
             await Assert.That(client.DynamicForwardings.Count).IsEqualTo(1); // the rest still start
         }
 
@@ -183,5 +183,15 @@ public sealed class ConfigForwardingTests : IDisposable
         await Assert.That(resolved.DynamicForwards).IsEmpty();
         await Assert.That(resolved.GatewayPorts).IsTrue();
         await Assert.That(resolved.ExitOnForwardFailure).IsTrue();
+        await Assert.That(resolved.StreamLocalBindUnlink).IsFalse();
     }
+
+    [Test]
+    [Arguments("", false)]
+    [Arguments("StreamLocalBindUnlink yes\n", true)]
+    [Arguments("StreamLocalBindUnlink no\n", false)]
+    [Arguments("StreamLocalBindUnlink yes\nStreamLocalBindUnlink no\n", true)] // the first value wins
+    public async Task StreamLocalBindUnlink_Resolves(string config, bool expected) =>
+        await Assert.That(SshConfig.Parse(config).Resolve("h", new SshConfigResolveOptions { LocalUser = "l", HomeDirectory = _dir }).StreamLocalBindUnlink)
+            .IsEqualTo(expected);
 }
