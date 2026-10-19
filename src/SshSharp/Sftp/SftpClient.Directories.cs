@@ -639,21 +639,13 @@ public sealed partial class SftpClient
             await CreateDirectoryAsync(path, cancellationToken: cancellationToken).ConfigureAwait(false);
             return true;
         }
-        catch (SftpException ex) when (ex.Status is SftpStatusCode.Failure or SftpStatusCode.PermissionDenied)
+        catch (SftpException)
         {
-            // Probably there already (OpenSSH says "Failure" for an existing directory); anything else is the original error.
-            SftpFileAttributes attributes;
-            try
-            {
-                attributes = await GetAttributesAsync(path, cancellationToken: cancellationToken).ConfigureAwait(false);
-            }
-            catch (SftpException)
-            {
-                System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(ex).Throw();
-                throw; // not reached
-            }
-
-            if (!attributes.IsDirectory)
+            // The status does not say whether it is there already: OpenSSH answers Failure, Apache MINA SSHD
+            // SSH_FX_FILE_ALREADY_EXISTS (11, a later draft's code), Erlang/OTP a status outside version 3's list too, and others
+            // PermissionDenied. What is at the path does, as for
+            // CreateDirectoryAsync(createParents: true); anything but a directory is the original error.
+            if (await DirectoryStateAsync(path, cancellationToken).ConfigureAwait(false) != DirectoryState.Directory)
             {
                 throw;
             }

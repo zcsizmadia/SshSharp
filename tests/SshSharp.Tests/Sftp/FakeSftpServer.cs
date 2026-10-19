@@ -244,6 +244,12 @@ internal sealed class FakeSftpServer
     /// </summary>
     public bool ReverseListing { get; set; }
 
+    /// <summary>
+    /// What MKDIR of an existing path answers: Failure with "File exists" by default, as OpenSSH does; Apache MINA SSHD answers
+    /// SSH_FX_FILE_ALREADY_EXISTS (11) with a message, and Erlang/OTP 11 with none.
+    /// </summary>
+    public (uint Code, string Message) MkdirExistingStatus { get; set; } = (4, "File exists");
+
     /// <summary>Answers a READDIR after the one that said EOF with Failure, instead of EOF again.</summary>
     public bool FailReaddirAfterEof { get; set; }
 
@@ -955,7 +961,7 @@ internal sealed class FakeSftpServer
                 var path = Resolve(r.ReadUtf8String());
                 if (_nodes.ContainsKey(path))
                 {
-                    return Status(id, 4, "File exists");
+                    return Status(id, MkdirExistingStatus.Code, MkdirExistingStatus.Message);
                 }
 
                 if (!ParentExists(path))

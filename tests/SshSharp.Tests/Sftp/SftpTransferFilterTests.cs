@@ -289,6 +289,46 @@ public sealed class SftpTransferFilterTests : IDisposable
     }
 
     [Test]
+    [Arguments(4u, "File exists", 1)] // OpenSSH
+    [Arguments(11u, "File/Directory already exists", 1)] // Apache MINA SSHD: SSH_FX_FILE_ALREADY_EXISTS, a later draft's code
+    [Arguments(11u, "", 4)] // the same without a message
+    [Arguments(3u, "Permission denied", 4)]
+    public async Task UploadDirectory_IntoExistingDirectories_WhateverStatusMkdirAnswers(uint code, string message, int concurrentFiles)
+    {
+        // A second upload of a tree finds every remote directory there already. Servers say so differently; the upload looks at what
+        // is at the path rather than trusting the status, and goes on into a directory.
+        var source = Path.Combine(_dir, "up");
+        Directory.CreateDirectory(Path.Combine(source, "sub"));
+        await File.WriteAllTextAsync(Path.Combine(source, "a.txt"), "a");
+        await File.WriteAllTextAsync(Path.Combine(source, "sub", "b.txt"), "bb");
+        await using var rig = await Rig.StartAsync(f => f.MkdirExistingStatus = (code, message));
+        var options = new SftpTransferOptions { Preserve = true, MaxConcurrentFiles = concurrentFiles };
+        await rig.Sftp.UploadDirectoryAsync(source, "up", options, Timeout());
+
+        var again = await rig.Sftp.UploadDirectoryAsync(source, "up", options, Timeout());
+        var unchanged = await rig.Sftp.UploadDirectoryAsync(source, "up", new SftpTransferOptions { Preserve = true, SkipUnchanged = true, MaxConcurrentFiles = concurrentFiles }, Timeout());
+
+        await Assert.That(again).IsEqualTo(new SftpTransferSummary(2, 1, 3, 0));
+        await Assert.That(unchanged).IsEqualTo(new SftpTransferSummary(0, 1, 0, 0) { Unchanged = 2 });
+    }
+
+    [Test]
+    public async Task UploadDirectory_OntoAFile_StillFailsWithTheServersError()
+    {
+        await using var rig = await Rig.StartAsync(f =>
+        {
+            f.MkdirExistingStatus = (11, "File/Directory already exists");
+            f.AddFile(Home + "/up", [1]);
+        });
+        var source = Path.Combine(_dir, "up");
+        Directory.CreateDirectory(source);
+        await File.WriteAllTextAsync(Path.Combine(source, "a.txt"), "a");
+
+        var thrown = await Assert.That(async () => await rig.Sftp.UploadDirectoryAsync(source, "up", cancellationToken: Timeout())).Throws<SftpException>();
+        await Assert.That((uint)thrown!.Status).IsEqualTo(11u);
+    }
+
+    [Test]
     [Arguments(1600000000L, 1600000000L, 10L, 10L, true)]
     [Arguments(1600000000L, 1600000001L, 10L, 10L, false)]
     [Arguments(1600000000L, 1600000000L, 10L, 11L, false)]
