@@ -358,9 +358,13 @@ connection, but not read or change it: each host's key is verified end to end, b
 - `Match exec` runs nothing unless the application opts in with an exec runner.
 - `ProxyCommand` runs by default, as with `ssh`. Applications that load configurations they do not control can turn it off
   with `SshConfigConnectOptions.AllowProxyCommand = false`.
-- The password and keyboard-interactive answers given in `SshConfigConnectOptions` go to the destination only: a `ProxyJump`
-  hop, perhaps run by someone else, is never offered them, and logs in with keys or the agent. The same holds for
-  `PasswordProvider` and `ChangePassword`: they are never called for a hop, nor in `BatchMode`.
+- The password, keyboard-interactive answers and keys given in `SshConfigConnectOptions` (`Password`, `KeyboardInteractive`,
+  `PrivateKeys`) go to the destination only: a `ProxyJump` hop, perhaps run by someone else, is never offered them, and logs in
+  with its own configuration's identity files and the agent. The same holds for `PasswordProvider` and `ChangePassword`: they are
+  never called for a hop, nor in `BatchMode`. (Before 1.1, `PrivateKeys` were offered to every hop as well: a hop learned the
+  public keys, and could have accepted one of them.)
+- `PubkeyAcceptedAlgorithms` narrows which keys are offered, as in `ssh`; it only ever removes keys from what would otherwise be
+  offered, and never brings SHA-1 `ssh-rsa` signatures back.
 - `Include` is bounded: at most 16 levels deep and 1,024 files in all, so a configuration cannot make resolution parse without end.
 - `KnownHostsCommand` runs only with `SshConfigConnectOptions.AllowKnownHostsCommand = true`. It is off by default, unlike
   `ProxyCommand`, because its output is trusted as known_hosts lines: a configuration the application does not control must not
@@ -379,13 +383,15 @@ connection, but not read or change it: each host's key is verified end to end, b
   forged answer cannot impersonate a host whose key is known; with `StrictHostKeyChecking` other than `yes`, a new name may be
   accepted as for any new host. A CNAME target replaces the name only when `CanonicalizePermittedCNAMEs` allows that pair, which
   keeps a forged CNAME from moving the connection (and its known_hosts lookup) to an arbitrary name. Canonicalization makes no
-  lookups for a host reached through `ProxyJump` or `ProxyCommand` unless the configuration says `always`.
+  lookups for a host reached through `ProxyJump`, `ProxyCommand` or `SshConfigConnectOptions.Proxy` unless the configuration says
+  `always`, so with a proxy that resolves names itself (`socks5h`, HTTP), the names are not sent to this machine's DNS.
 - Host and user names supplied by the caller are substituted into those commands (`%h`, `%n`, `%r`), so they are refused when
   they contain shell metacharacters, control characters or a leading `-` (the CVE-2023-51385 pattern). Host names may not
   contain white space either, which would split `%h` into extra arguments. User names may (Windows account names can).
 - The config file itself is trusted to the same degree OpenSSH trusts it: whoever can edit it can run commands as the user.
   Values it sets (`HostName`, `User`) are used as written.
-- Socket paths in `LocalForward` and `RemoteForward` take `%` tokens and `${VAR}`, as in `ssh`. A `RemoteForward` path is expanded
+- Socket paths in `LocalForward` and `RemoteForward` take `%` tokens and `${VAR}`, as in `ssh`; only paths on this machine take
+  `~`, so a path on the server never carries this machine's home directory (and user name). A server-side path is expanded
   on this machine and sent to the server as one string (no shell is involved on either side), so a caller-supplied host or user
   name in `%h` or `%r` can only change which path is asked for; the server's own `StreamLocalBindMask` and permissions apply there.
   `StreamLocalBindMask` can widen a local socket's permissions (see [Local listeners](#local-listeners-port-forwarding-and-socks)).
@@ -410,7 +416,7 @@ connection, but not read or change it: each host's key is verified end to end, b
   `AcceptNewHostKeys`); behind an endpoint that pins its keys, a hop without its own fails validation rather than falling back to
   files a pinned deployment does not have.
 - `UseAgent` lets the endpoint (or a hop) sign with the agent's keys: an `SshAgent` registered in the container, else the user's
-  agent. Every key the agent holds is offered to that server, as with ssh; an application that should offer one key only registers
+  agent (with `ConfigAlias` too, in place of ssh_config's `IdentityAgent`). Every key the agent holds is offered to that server, as with ssh; an application that should offer one key only registers
   an in-process agent (`SshAgent.FromKeys`) with it. Nothing is added to the agent.
 - `UseSshTunnel` sends an `HttpClient`'s connections through the endpoint's server, which resolves the host names and connects to
   them (`direct-tcpip`): the server sees which services are called, but not the traffic when it is HTTPS, as TLS runs end to end.

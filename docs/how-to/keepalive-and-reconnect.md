@@ -18,6 +18,9 @@ announces it, `keepalive@openssh.com` otherwise); any packet from the server cou
 intervals without one, the connection fails with `SshFailureReason.Timeout`. The probes do not wait behind pending writes, so a
 server that stops reading is detected too.
 
+Null (the default) or `TimeSpan.Zero` sends no keep-alives, as `ServerAliveInterval 0` does, and so does an interval longer than
+about 49.7 days, the longest a timer waits. A negative interval or count throws `ArgumentOutOfRangeException` when it is set.
+
 With `ssh_config`, `ServerAliveInterval` and `ServerAliveCountMax` do the same when connecting by alias.
 
 ## Check a connection on demand
