@@ -317,7 +317,8 @@ await sftp.UploadFileAsync("report.pdf", "incoming/report.pdf");
 | `new SftpClient(...)`, `Connect()` | `await client.OpenSftpAsync()` on a connected `SshClient` (one connection for SFTP, commands and forwarding) |
 | `UploadFile(stream, path)`, `UploadFileAsync` | `UploadAsync(stream, path)`, or `UploadFileAsync(localPath, path)` |
 | `DownloadFile(path, stream)`, `DownloadFileAsync` | `DownloadAsync(path, stream)`, or `DownloadFileAsync(path, localPath)` |
-| `ListDirectory(path)`, `ListDirectoryAsync` | `ListDirectoryAsync(path)`: `IAsyncEnumerable<SftpFileInfo>`, without `.` and `..` |
+| `ListDirectory(path)`, `ListDirectoryAsync` | `ListDirectoryAsync(path)`: `IAsyncEnumerable<SftpFileInfo>`, without `.` and `..`; with `SftpListOptions`, a name `Pattern` and `Recursive` listings |
+| `SynchronizeDirectories(source, destination, searchPattern)` | `UploadDirectoryAsync(source, destination, new SftpTransferOptions { Preserve = true, SkipUnchanged = true, Filter = ... })`: new and changed files by size and modification time, a whole tree, in either direction |
 | `Exists`, `Get`, `GetAttributes` | `ExistsAsync`, `GetAttributesAsync` |
 | `CreateDirectory`, `DeleteDirectory`, `DeleteFile`, `Delete` | `CreateDirectoryAsync`, `DeleteDirectoryAsync`, `DeleteFileAsync`; also `CreateDirectoryAsync(path, createParents: true)` (`mkdir -p`) and `DeleteDirectoryAsync(path, recursive: true)` (`rm -r`) |
 | `ReadAllBytes`, `ReadAllText`, `WriteAllBytes`, `WriteAllText` | `ReadAllBytesAsync`, `ReadAllTextAsync`, `WriteAllBytesAsync`, `WriteAllTextAsync` |

@@ -145,9 +145,129 @@ several files at once over the same session:
 - The single-file methods ignore `MaxConcurrentFiles`. To transfer your own list of files at once, call `UploadFileAsync` or
   `DownloadFileAsync` from several tasks on one `SftpClient`, which is safe.
 
+## Choose what a directory transfer copies
+
+`Filter` decides, entry by entry, what `UploadDirectoryAsync` and `DownloadDirectoryAsync` transfer:
+
+[!code-csharp[](../snippets/FileTransfer.cs#sftp-filter)]
+
+### When to use
+
+- Leave build output, caches, temporary or editor files out of an upload.
+- Fetch only some files of a remote tree: one kind of file, or files newer than a date (`entry.Attributes.LastWriteTime`).
+
+### How it works
+
+- The filter gets an `SftpTransferEntry` for every regular file and directory of the source tree: `RelativePath` (below the top
+  directory, `/`-separated on every system, for example `logs/2026/app.log`), `Name`, and `Attributes`. In a download those are the
+  server's, from the listing; in an upload, the local file's (size, times in whole seconds, permissions where the system has Unix
+  modes, and the type).
+- Returning false leaves the entry out. A directory left out is neither created nor entered, so its contents are never asked about.
+- Symbolic links, special files and unsafe names are skipped before the filter is asked, as they always are, and counted in
+  `Skipped`. What the filter leaves out is counted in `Excluded`.
+- The filter is called for one entry at a time, never concurrently, also with `MaxConcurrentFiles`. An exception it throws fails
+  the transfer.
+
+### Notes and pitfalls
+
+- Nothing is deleted at the destination: a filter that now leaves out a file does not remove an earlier copy of it.
+- The filter sees the tree's directories as well as its files. A filter on file names (`entry.Name.EndsWith(".log")`) also declines
+  every directory whose name does not end that way, and with it everything below. Test `entry.Attributes.IsDirectory` to let
+  directories through.
+- To match a wildcard pattern, `System.IO.Enumeration.FileSystemName.MatchesSimpleExpression("*.log", entry.Name)` works on any
+  system.
+
+## Skip files that have not changed
+
+With `SkipUnchanged`, a directory transfer leaves a file alone when the destination already has a regular file of the same name,
+size and modification time, as rsync's quick check does:
+
+[!code-csharp[](../snippets/FileTransfer.cs#sftp-skip-unchanged)]
+
+### When to use
+
+- Mirroring or backing up a tree again and again, when most files have not changed since the last run.
+
+### How it decides
+
+- Both sizes and both modification times must be known, the sizes equal and the times equal **to the second**: SFTP version 3
+  carries whole seconds, so the local time's fraction is dropped. Anything else (a time or size the server does not send, a
+  directory or link at the destination) counts as a change, and the file is transferred.
+- A download compares the server's listing with the local files, at no extra cost. An upload lists each remote directory that
+  already existed once, when its first file is reached; a directory the transfer creates is empty, so nothing is listed for it.
+- Files left alone are counted in `Unchanged`, report no progress, and keep their attributes.
+
+### Notes and pitfalls
+
+- **Use it with `Preserve`, on every run.** The times only match when the earlier transfer copied them; without `Preserve` each copy
+  carries the time it was written, and every file is transferred again (as rsync without `-t`).
+- **It is not a content check.** A file changed without changing its size, whose time was then set back or that changed within the
+  same second, is taken as unchanged. When that matters, compare the contents yourself.
+- A file system with coarser times than a second (FAT's 2 seconds) may never match, so every file is transferred, as without the
+  option.
+- In a download, a server could make you keep stale local files by reporting the sizes and times they have. It cannot make anything
+  be written that it did not send; see the [threat model](../threat-model.md).
+- `SkipUnchanged` and `Filter` apply to the directory methods only; the single-file methods ignore them.
+
+## List files that match a pattern, or a whole tree
+
+`ListDirectoryAsync` with `SftpListOptions` lists only the names that match a `Pattern`, and with `Recursive` everything below the
+directory as well:
+
+[!code-csharp[](../snippets/FileTransfer.cs#sftp-list-pattern)]
+
+[!code-csharp[](../snippets/FileTransfer.cs#sftp-list-recursive)]
+
+### Patterns
+
+| Pattern | Matches |
+|---|---|
+| `*` | Any run of characters, including none. |
+| `?` | Any one character (an emoji counts as one). |
+| `[abc]`, `[a-z]`, `[0-9a-f]` | One character of the set; `-` between two characters is a range. |
+| `[!a-z]` or `[^a-z]` | One character not in the set. |
+| `\*`, `\?`, `\[` | The character itself. |
+
+The pattern matches the whole name, not the path, and is case-sensitive, as on the POSIX file systems most servers have. Unlike a
+shell, `*` and `?` match a leading dot, so `*` includes hidden files. A `]` first in a set is part of it (`[]a]`), a `-` first or last
+is itself, and a `[` without its `]` matches itself, as in fnmatch(3). Named classes such as `[[:digit:]]` are not supported.
+
+### Recursive listings
+
+- **Order**: depth first, unsorted. Within a directory the entries come in the server's order, which is often the file system's
+  and need not be alphabetical; a subdirectory's whole subtree follows its own entry, before the entries the server listed after
+  it. So a file can come before or after a sibling directory's contents, depending on the server. The same listings give the same
+  order every time; sort the results when you need a fixed order.
+- **The pattern selects entries, not directories**: every directory is entered whether or not its name matches, so `*.log` finds the
+  log files at every level, as `find -name` does.
+- **Depth**: `MaxDepth` (default 64) is how many levels are listed: 1 is the directory's own entries, 2 adds its subdirectories', and
+  so on. Directories at the last level are listed but not entered. Unlike a directory transfer, a listing just stops descending.
+- **Links**: symbolic links are listed (described by their own attributes) and not entered. With `FollowSymbolicLinks`, a link to a
+  directory is entered; a link back to a directory the listing is already inside is not, and a dangling link is listed only. Loops
+  are recognized by the path the server resolves the link to: OpenSSH resolves links there, a server that does not leaves a loop to
+  `MaxDepth`.
+- **Concurrency**: up to `MaxConcurrentDirectories` (default 4) subdirectories are read ahead while your loop works through the
+  entries already listed, each holding a directory handle while it is read (fewer when the server limits open handles).
+- **Stopping**: leaving the `await foreach` or cancelling stops the listings read ahead and closes their handles. A subdirectory that
+  cannot be listed (permission denied) throws its `SftpException` when the listing reaches it, after everything before it.
+
+```mermaid
+flowchart TD
+    A["tree: entries in the server's order"] --> B["a.log (listed before sub)"]
+    A --> C["sub/ (its entry)"]
+    C --> D["sub/c.log"]
+    C --> E["sub/deeper/"]
+    E --> F["sub/deeper/d.log"]
+    A --> G["z.txt (listed after sub: comes after all of sub)"]
+```
+
 ## Browse and change the remote file system
 
 [!code-csharp[](../snippets/FileTransfer.cs#sftp-browse)]
+
+Every listing is pipelined: `ListDirectoryAsync` asks for up to 8 batches of entries at once (two to begin with, doubling with each
+batch), so a large directory costs a round trip per 8 batches, and a small one a single round trip. The entries still come in the
+server's order.
 
 ## Read and write whole files
 

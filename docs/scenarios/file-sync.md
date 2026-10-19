@@ -19,6 +19,10 @@ failure: files already in place are skipped.
 
 ## For production
 
+- **Without atomic replacement or deletion.** When readers may see a file being replaced and nothing needs deleting,
+  `UploadDirectoryAsync` with `Preserve`, `SkipUnchanged` and `MaxConcurrentFiles` does the whole job in one call: it uploads only
+  new and changed files, by the same size and time check, and `Filter` leaves out what should not travel. See
+  [Skip files that have not changed](../how-to/transfer-files-sftp.md#skip-files-that-have-not-changed).
 - **Large files on flaky links.** Upload large files with `Resume = true` to a fixed temporary name (not a new one per attempt),
   so a retry continues where it stopped.
 - **Content changes with the same size and time** are not detected. When that matters, compare checksums: run `sha256sum` on the

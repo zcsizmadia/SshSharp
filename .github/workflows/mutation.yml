@@ -89,6 +89,9 @@ jobs:
           - scope: config-tokens-glob
             mutate: -m "**/Config/SshTokens.cs" -m "**/Config/Glob.cs"
             tests: Config/*Tests.cs;Fuzz/ParserRobustnessTests.cs;ConfigConnectTests.cs
+          - scope: sftp-glob
+            mutate: -m "**/Sftp/SftpGlob.cs"
+            tests: Sftp/SftpGlobTests.cs
           - scope: config-resolver
             mutate: -m "**/Config/SshConfigResolver.cs" -m "**/Config/SshConfigResolveOptions.cs" -m "**/Config/SshHostConfig.cs" -m "**/Config/SshDnsLookup.cs" -m "**/SshAlgorithmList.cs"
             tests: Config/*Tests.cs;ConfigConnectTests.cs;ConfigForwardingTests.cs;AlgorithmOptionsTests.cs

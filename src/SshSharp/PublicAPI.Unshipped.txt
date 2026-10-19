@@ -155,6 +155,42 @@ SshSharp.Sftp.SftpClient.ReadAllBytesAsync(string! path, System.Threading.Cancel
 SshSharp.Sftp.SftpClient.ReadAllTextAsync(string! path, System.Text.Encoding? encoding = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<string!>!
 SshSharp.Sftp.SftpClient.WriteAllBytesAsync(string! path, System.ReadOnlyMemory<byte> bytes, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
 SshSharp.Sftp.SftpClient.WriteAllTextAsync(string! path, string! contents, System.Text.Encoding? encoding = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+SshSharp.Sftp.SftpClient.ListDirectoryAsync(string! path, SshSharp.Sftp.SftpListOptions! options, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IAsyncEnumerable<SshSharp.Sftp.SftpFileInfo!>!
+SshSharp.Sftp.SftpListOptions
+SshSharp.Sftp.SftpListOptions.SftpListOptions() -> void
+SshSharp.Sftp.SftpListOptions.Pattern.get -> string?
+SshSharp.Sftp.SftpListOptions.Pattern.init -> void
+SshSharp.Sftp.SftpListOptions.Recursive.get -> bool
+SshSharp.Sftp.SftpListOptions.Recursive.init -> void
+SshSharp.Sftp.SftpListOptions.MaxDepth.get -> int
+SshSharp.Sftp.SftpListOptions.MaxDepth.init -> void
+SshSharp.Sftp.SftpListOptions.FollowSymbolicLinks.get -> bool
+SshSharp.Sftp.SftpListOptions.FollowSymbolicLinks.init -> void
+SshSharp.Sftp.SftpListOptions.MaxConcurrentDirectories.get -> int
+SshSharp.Sftp.SftpListOptions.MaxConcurrentDirectories.init -> void
+SshSharp.Sftp.SftpTransferOptions.Filter.get -> System.Func<SshSharp.Sftp.SftpTransferEntry!, bool>?
+SshSharp.Sftp.SftpTransferOptions.Filter.init -> void
+SshSharp.Sftp.SftpTransferOptions.SkipUnchanged.get -> bool
+SshSharp.Sftp.SftpTransferOptions.SkipUnchanged.init -> void
+SshSharp.Sftp.SftpTransferSummary.Excluded.get -> int
+SshSharp.Sftp.SftpTransferSummary.Excluded.init -> void
+SshSharp.Sftp.SftpTransferSummary.Unchanged.get -> int
+SshSharp.Sftp.SftpTransferSummary.Unchanged.init -> void
+SshSharp.Sftp.SftpTransferEntry
+SshSharp.Sftp.SftpTransferEntry.<Clone>$() -> SshSharp.Sftp.SftpTransferEntry!
+SshSharp.Sftp.SftpTransferEntry.Attributes.get -> SshSharp.Sftp.SftpFileAttributes!
+SshSharp.Sftp.SftpTransferEntry.Attributes.init -> void
+SshSharp.Sftp.SftpTransferEntry.Deconstruct(out string! RelativePath, out SshSharp.Sftp.SftpFileAttributes! Attributes) -> void
+SshSharp.Sftp.SftpTransferEntry.Equals(SshSharp.Sftp.SftpTransferEntry? other) -> bool
+SshSharp.Sftp.SftpTransferEntry.Name.get -> string!
+SshSharp.Sftp.SftpTransferEntry.RelativePath.get -> string!
+SshSharp.Sftp.SftpTransferEntry.RelativePath.init -> void
+SshSharp.Sftp.SftpTransferEntry.SftpTransferEntry(string! RelativePath, SshSharp.Sftp.SftpFileAttributes! Attributes) -> void
+override SshSharp.Sftp.SftpTransferEntry.Equals(object? obj) -> bool
+override SshSharp.Sftp.SftpTransferEntry.GetHashCode() -> int
+override SshSharp.Sftp.SftpTransferEntry.ToString() -> string!
+static SshSharp.Sftp.SftpTransferEntry.operator !=(SshSharp.Sftp.SftpTransferEntry? left, SshSharp.Sftp.SftpTransferEntry? right) -> bool
+static SshSharp.Sftp.SftpTransferEntry.operator ==(SshSharp.Sftp.SftpTransferEntry? left, SshSharp.Sftp.SftpTransferEntry? right) -> bool
 SshSharp.SshPrivateKey.SaveAsync(string! path, SshSharp.SshPrivateKeyFormat format, string? passphrase = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
 SshSharp.SshPrivateKey.SaveAsync(string! path, string? passphrase, int kdfRounds, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
 SshSharp.SshPrivateKey.ToPkcs8PrivateKey(string? passphrase = null) -> string!
