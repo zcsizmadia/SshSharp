@@ -238,6 +238,12 @@ internal sealed class FakeSftpServer
     /// <summary>Answers OPENDIR of the paths this matches with PERMISSION_DENIED (a directory the user may not read).</summary>
     public Func<string, bool>? DenyOpenDir { get; set; }
 
+    /// <summary>
+    /// List each directory in reverse name order, as a server whose order is the file system's (not alphabetical) may: listings are
+    /// otherwise sorted, which would hide a client that sorts, or a test that expects sorted entries.
+    /// </summary>
+    public bool ReverseListing { get; set; }
+
     /// <summary>Answers a READDIR after the one that said EOF with Failure, instead of EOF again.</summary>
     public bool FailReaddirAfterEof { get; set; }
 
@@ -902,7 +908,7 @@ internal sealed class FakeSftpServer
                 var entries = new List<(string Name, Node Node)> { (".", _nodes[open.Path]), ("..", _nodes[open.Path]) };
                 entries.AddRange(_nodes
                     .Where(n => n.Key.StartsWith(prefix, StringComparison.Ordinal) && n.Key.Length > prefix.Length && !n.Key[prefix.Length..].Contains('/'))
-                    .OrderBy(n => n.Key, StringComparer.Ordinal)
+                    .OrderBy(n => n.Key, ReverseListing ? Comparer<string>.Create((x, y) => string.CompareOrdinal(y, x)) : StringComparer.Ordinal)
                     .Select(n => (n.Key[prefix.Length..], n.Value)));
                 if (ListEntriesTwice)
                 {

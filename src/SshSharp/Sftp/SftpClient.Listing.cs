@@ -6,10 +6,12 @@ public sealed partial class SftpClient
 {
     /// <summary>
     /// Lists a directory with <paramref name="options"/>: only the names that match <see cref="SftpListOptions.Pattern"/>, and with
-    /// <see cref="SftpListOptions.Recursive"/> everything below it as well, depth first: each subdirectory's entries follow the
-    /// subdirectory's own entry, before its next sibling. Each directory is listed as
-    /// <see cref="ListDirectoryAsync(string, CancellationToken)"/> lists it (pipelined, in the server's order, without <c>.</c> and
-    /// <c>..</c>), so the order is the same every time the server returns the same listings.
+    /// <see cref="SftpListOptions.Recursive"/> everything below it as well, depth first: a subdirectory's whole subtree follows the
+    /// subdirectory's own entry, before the entries the server listed after it. Each directory is listed as
+    /// <see cref="ListDirectoryAsync(string, CancellationToken)"/> lists it (pipelined, without <c>.</c> and <c>..</c>) and nothing is
+    /// sorted: within a directory the entries come in the server's order, which is often the file system's and need not be
+    /// alphabetical, so a file may come before or after a sibling directory's subtree. The order is the same every time the server
+    /// returns the same listings; sort the results when you need a fixed one.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -267,8 +269,8 @@ public sealed class SftpListOptions
     public string? Pattern { get; init; }
 
     /// <summary>
-    /// List the subdirectories too, and theirs, depth first: a directory's entries follow its own entry (default false: the directory's
-    /// entries only).
+    /// List the subdirectories too, and theirs, depth first: a directory's subtree follows its own entry, before its later siblings,
+    /// with each directory's entries in the server's order, unsorted (default false: the directory's entries only).
     /// </summary>
     public bool Recursive { get; init; }
 

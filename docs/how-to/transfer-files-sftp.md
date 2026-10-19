@@ -210,8 +210,10 @@ is itself, and a `[` without its `]` matches itself, as in fnmatch(3). Named cla
 
 ### Recursive listings
 
-- **Order**: depth first. A subdirectory's entries follow its own entry and come before its next sibling; within a directory, the
-  entries come in the server's order. The same listings give the same order every time.
+- **Order**: depth first, unsorted. Within a directory the entries come in the server's order, which is often the file system's
+  and need not be alphabetical; a subdirectory's whole subtree follows its own entry, before the entries the server listed after
+  it. So a file can come before or after a sibling directory's contents, depending on the server. The same listings give the same
+  order every time; sort the results when you need a fixed order.
 - **The pattern selects entries, not directories**: every directory is entered whether or not its name matches, so `*.log` finds the
   log files at every level, as `find -name` does.
 - **Depth**: `MaxDepth` (default 64) is how many levels are listed: 1 is the directory's own entries, 2 adds its subdirectories', and
@@ -227,12 +229,12 @@ is itself, and a `[` without its `]` matches itself, as in fnmatch(3). Named cla
 
 ```mermaid
 flowchart TD
-    A["tree (listed first)"] --> B["a.log"]
+    A["tree: entries in the server's order"] --> B["a.log (listed before sub)"]
     A --> C["sub/ (its entry)"]
     C --> D["sub/c.log"]
     C --> E["sub/deeper/"]
     E --> F["sub/deeper/d.log"]
-    A --> G["z.txt (after all of sub)"]
+    A --> G["z.txt (listed after sub: comes after all of sub)"]
 ```
 
 ## Browse and change the remote file system

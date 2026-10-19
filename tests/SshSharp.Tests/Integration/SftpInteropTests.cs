@@ -776,7 +776,19 @@ public class SftpInteropTests
             await Assert.That(logs.Count).IsEqualTo(102);
             await Assert.That(logs).Contains("a/top.log");
             await Assert.That(logs).Contains("a/b/deep.log");
-            await Assert.That(logs.IndexOf("a/top.log")).IsLessThan(logs.IndexOf("a/b/deep.log")); // depth first, a's entries before b's
+
+            // The order within a directory is the server's own (OpenSSH's is the file system's, which need not be alphabetical), so
+            // only what depth first guarantees is checked: every entry once, each directory's entry before its contents, and its
+            // contents together, right after it.
+            var tree = new List<string>();
+            await foreach (var entry in sftp.ListDirectoryAsync(root + "/a", new SftpListOptions { Recursive = true }, Timeout()))
+            {
+                tree.Add(entry.FullPath[(root.Length + 3)..]);
+            }
+
+            await Assert.That(tree.Order(StringComparer.Ordinal)).IsEquivalentTo(new[] { "b", "b/deep.log", "b/skip.tmp", "top.log" });
+            var b = tree.IndexOf("b");
+            await Assert.That(tree.Skip(b + 1).Take(2).Order(StringComparer.Ordinal)).IsEquivalentTo(new[] { "b/deep.log", "b/skip.tmp" });
 
             // A link to a directory outside the tree: listed, and entered only when links are followed.
             if (!RealServer.IsWindows)

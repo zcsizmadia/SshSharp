@@ -241,6 +241,30 @@ public sealed class SftpListingTests
     }
 
     [Test]
+    public async Task Recursive_FollowsTheServersOrder_NotTheAlphabet_EachSubtreeRightAfterItsDirectory()
+    {
+        // A server whose order is not alphabetical (here: reversed). Nothing is sorted: each directory's entries come as the server
+        // listed them, and a subdirectory's whole subtree follows its own entry, before the entries listed after it. So a file listed
+        // after a subdirectory comes after everything below that subdirectory.
+        await using var rig = await Rig.StartAsync(f =>
+        {
+            f.ReverseListing = true;
+            AddTree(f);
+        });
+
+        var paths = await ListAsync(rig.Sftp, "tree", new SftpListOptions { Recursive = true });
+
+        await AssertInOrder(paths, new[]
+        {
+            "tree/sub", "tree/sub/deeper", "tree/sub/deeper/d.log", "tree/sub/c.log", "tree/sub/back",
+            "tree/link", "tree/empty", "tree/dangling", "tree/b.txt", "tree/a.log",
+        });
+
+        var logs = await ListAsync(rig.Sftp, "tree", new SftpListOptions { Recursive = true, Pattern = "*.log" });
+        await AssertInOrder(logs, new[] { "tree/sub/deeper/d.log", "tree/sub/c.log", "tree/a.log" });
+    }
+
+    [Test]
     public async Task Recursive_WithAPattern_SelectsEntries_ButDescendsIntoEveryDirectory()
     {
         await using var rig = await Rig.StartAsync(AddTree);
