@@ -107,7 +107,9 @@ public sealed class ConnectTimeoutTests
         await Assert.That(ex!.Reason).IsEqualTo(SshFailureReason.Timeout);
         await Assert.That(ex.InnerException).IsTypeOf<TimeoutException>();
         await Assert.That(ex.Message).Contains("ConnectTimeout");
-        await Assert.That(silent.Accepted.IsCompleted).IsTrue(); // the TCP connection was made: the handshake is what timed out
+        // The TCP connection was made: the handshake is what timed out. Awaited, not checked at once: the client's connect completes in
+        // the listen backlog, and the listener's accept continuation, which completes Accepted, may not have run yet on a busy thread pool.
+        await silent.Accepted.WaitAsync(Timeout());
         await Assert.That(watch.Elapsed).IsLessThan(TimeSpan.FromSeconds(20));
     }
 
