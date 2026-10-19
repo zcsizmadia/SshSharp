@@ -41,9 +41,16 @@ public class CompressionInteropTests
             return null;
         }
 
-        var expected = SshAlgorithms.CanCompressOutgoing ? SshAlgorithms.CompressionZlibOpenSsh : SshAlgorithms.CompressionNone;
-        if (client.Algorithms.CompressionClientToServer != expected)
+        // Client to server: never on .NET 8 (SshSharp does not offer it there). Otherwise the server's choice: OpenSSH accepts it, but
+        // Dropbear 2025.88 disabled decompression on the server ("Decompression is disabled on the server, compression is still
+        // supported", its CHANGES) and offers only none for that direction.
+        var toServer = client.Algorithms.CompressionClientToServer;
+        var allowed = !SshAlgorithms.CanCompressOutgoing
+            ? toServer == SshAlgorithms.CompressionNone
+            : toServer == SshAlgorithms.CompressionZlibOpenSsh || (!MustOffer && toServer == SshAlgorithms.CompressionNone);
+        if (!allowed)
         {
+            var expected = SshAlgorithms.CanCompressOutgoing ? SshAlgorithms.CompressionZlibOpenSsh : SshAlgorithms.CompressionNone;
             await client.DisposeAsync();
             throw new InvalidOperationException($"Client-to-server compression is {client.Algorithms.CompressionClientToServer}, expected {expected}.");
         }
