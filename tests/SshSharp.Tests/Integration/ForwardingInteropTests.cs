@@ -93,6 +93,13 @@ public class ForwardingInteropTests
             return;
         }
 
+        // Erlang/OTP's ssh (5.3.3) opens a forwarded-tcpip channel from its acceptor process and only afterwards hands the channel to
+        // the process that relays it (ssh_tcpip_forward_acceptor.erl, ssh_connection_handler.erl's fwd_connect_received). Data and EOF
+        // the client sends in between go to the acceptor's mailbox and are lost, so a service that speaks first can hang the tunnel
+        // (about 1 run in 60 in CI). Against Erlang the tunnel speaks first: Erlang reads its side only after the handover, so once the
+        // service has the tunnel's line, its reply cannot be lost.
+        var tunnelFirst = RealServer.IsErlang;
+
         // A local service; the server listens on a port of its own and sends its connections back to it.
         using var service = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
         service.Bind(new IPEndPoint(IPAddress.Loopback, 0));
@@ -102,6 +109,12 @@ public class ForwardingInteropTests
         {
             using var connection = await service.AcceptAsync(Timeout());
             accepted = true;
+            if (tunnelFirst)
+            {
+                var greeting = await ReadLineAsync(buffer => connection.ReceiveAsync(buffer, SocketFlags.None, Timeout()));
+                await Assert.That(greeting).IsEqualTo("hello from there");
+            }
+
             await connection.SendAsync("hello from here\n"u8.ToArray(), SocketFlags.None, Timeout());
             connection.Shutdown(SocketShutdown.Send);
         });
@@ -116,6 +129,13 @@ public class ForwardingInteropTests
             // "localhost", not 127.0.0.1: when another process holds that port on 127.0.0.1, sshd may have bound only ::1 for "localhost".
             stages.Step($"opening a tunnel to the server's localhost:{forwarder.RemotePort}");
             await using var tunnel = await client.OpenTcpTunnelAsync("localhost", forwarder.RemotePort, Timeout());
+            if (tunnelFirst)
+            {
+                stages.Step("sending a line to the local service through the forwarding");
+                await tunnel.WriteAsync("hello from there\n"u8.ToArray(), Timeout());
+                await tunnel.FlushAsync(Timeout());
+            }
+
             stages.Step("reading the line the local service sends back through the forwarding");
             var line = await ReadLineAsync(buffer => tunnel.ReadAsync(buffer, Timeout()));
             await Assert.That(line).IsEqualTo("hello from here");
