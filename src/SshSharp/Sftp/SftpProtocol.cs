@@ -61,6 +61,14 @@ internal static class SftpProtocol
     public const string LSetStatExtension = "lsetstat@openssh.com";
     public const string UsersGroupsByIdExtension = "users-groups-by-id@openssh.com";
 
+    // File hashes (draft-ietf-secsh-filexfer-extensions-00 "check-file"; filexfer-06 to -09 "md5-hash"). A server announces
+    // "check-file", or the request names themselves.
+    public const string CheckFileExtension = "check-file";
+    public const string CheckFileNameRequest = "check-file-name";
+    public const string CheckFileHandleRequest = "check-file-handle";
+    public const string Md5HashRequest = "md5-hash";
+    public const string Md5HashHandleRequest = "md5-hash-handle";
+
     /// <summary>The largest packet accepted from the server: OpenSSH's sftp-server sends at most 256 KiB, so this leaves room.</summary>
     public const int MaxPacket = 1024 * 1024;
 

@@ -333,3 +333,18 @@ SshSharp.SshConfigConnectOptions.ConfirmAddKeyToAgent.get -> System.Func<SshShar
 SshSharp.SshConfigConnectOptions.ConfirmAddKeyToAgent.init -> void
 SshSharp.Config.SshConfigResolveOptions.UseDnsCanonicalizer.get -> bool
 SshSharp.Config.SshConfigResolveOptions.UseDnsCanonicalizer.init -> void
+SshSharp.Sftp.SftpClient.GetFileHashAsync(string! path, System.Collections.Generic.IReadOnlyList<string!>? algorithms = null, long offset = 0, long? length = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SshSharp.Sftp.SftpFileHash!>!
+SshSharp.Sftp.SftpClient.SendExtendedRequestAsync(string! name, System.ReadOnlyMemory<byte> data = default(System.ReadOnlyMemory<byte>), System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SshSharp.Sftp.SftpExtendedReply!>!
+SshSharp.Sftp.SftpClient.SupportsFileHash.get -> bool
+SshSharp.Sftp.SftpExtendedReply
+SshSharp.Sftp.SftpExtendedReply.Data.get -> System.ReadOnlyMemory<byte>
+SshSharp.Sftp.SftpExtendedReply.EnsureSuccess() -> SshSharp.Sftp.SftpExtendedReply!
+SshSharp.Sftp.SftpExtendedReply.IsExtendedReply.get -> bool
+SshSharp.Sftp.SftpExtendedReply.PacketType.get -> byte
+SshSharp.Sftp.SftpExtendedReply.Status.get -> SshSharp.Sftp.SftpStatusCode?
+SshSharp.Sftp.SftpExtendedReply.StatusMessage.get -> string?
+SshSharp.Sftp.SftpFileHash
+SshSharp.Sftp.SftpFileHash.Algorithm.get -> string!
+SshSharp.Sftp.SftpFileHash.Hash.get -> System.ReadOnlyMemory<byte>
+SshSharp.Sftp.SftpFileHash.Matches(System.ReadOnlySpan<byte> hash) -> bool
+const SshSharp.Sftp.SftpClient.UploadCleanupIncompleteKey = "SshSharp.Sftp.UploadCleanupIncomplete" -> string!

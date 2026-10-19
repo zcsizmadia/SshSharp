@@ -36,7 +36,7 @@ latency. Each request is as large as the server allows (`limits@openssh.com`; 32
 | `Progress` | An `IProgress<SftpTransferProgress>`: for each file, its remote `Path`, `BytesTransferred` so far (including what a resumed transfer found there) and `TotalBytes`, when known. |
 | `MaxRequestsInFlight` | The window of outstanding requests (1 to 1024), for the whole transfer: a directory transfer's files share it. |
 | `Resume` | Continue an interrupted transfer, as `reget` and `reput` do: only the part the destination lacks is sent. |
-| `Segments` (default 1) | Download one file in up to 16 parallel ranges, each over its own SFTP session (see below). |
+| `Segments` (default 1) | Download or upload one file in up to 16 parallel ranges, each over its own SFTP session (see [Segmented transfers](#segmented-transfers)). |
 | `MaxConcurrentFiles` (default 1) | Transfer up to 64 files of a directory at once over the same session (see [Several files at once](#several-files-at-once)). |
 | `Filter` | Directory transfers: a predicate on each file and directory (`SftpTransferEntry`: path relative to the top, attributes) that leaves out what it declines (see [Filters and unchanged files](#filters-and-unchanged-files)). |
 | `SkipUnchanged` | Directory transfers: leave a file alone when the destination's size and modification time already match, as rsync's quick check (see [Filters and unchanged files](#filters-and-unchanged-files)). |
@@ -62,27 +62,69 @@ Both streams must follow the `Stream` contract. `UploadAsync` reads into a buffe
 writes from a buffer that is reused once `WriteAsync` completes. A stream that keeps the buffer it was given after the call returns
 would see other data later. `MemoryStream`, `FileStream` and the BCL's other streams copy what they keep.
 
-### Segmented downloads
+### Segmented transfers
 
 One SFTP session is one SSH channel, and the data in flight on a channel is bounded by its flow-control window (2 MiB unless `SshClientOptions.ChannelWindowSize` raises it), so
-a single download moves at most about 2 MiB per round trip: some 20 MiB/s at 100 ms of latency, however many requests are in
-flight. `Segments` splits a file into ranges and fetches each over its own session on the same connection, each with its own
-window (and, on OpenSSH, its own `sftp-server` process), writing them into the local file at their offsets:
+a single transfer moves at most about 2 MiB per round trip: some 20 MiB/s at 100 ms of latency, however many requests are in
+flight. `Segments` splits a file into ranges and moves each over its own session on the same connection, each with its own
+window (and, on OpenSSH, its own `sftp-server` process):
 
-```csharp
-await sftp.DownloadFileAsync("backups/db.tar.zst", "db.tar.zst", new SftpTransferOptions { Segments = 4 });
-```
+[!code-csharp[](snippets/FileTransfer.cs#sftp-segments)]
+
+[!code-csharp[](snippets/FileTransfer.cs#sftp-segments-upload)]
 
 It helps on links with high latency, or where a single session's server process is the limit. It does not help where the
-bandwidth is the limit (the sessions share one TCP connection), and it costs a few extra round trips to open the sessions, so
-files smaller than 1 MiB per segment use fewer segments. The server may allow fewer sessions than asked (sshd's `MaxSessions`,
-10 per connection by default); then the ranges are shared among the sessions it opens. `Progress` reports the file's total over all
-segments. The first range that fails stops the others and the local file is removed. A file that grows during the download is
-fetched to its new end; one that shrinks fails the download rather than leave a gap.
+bandwidth is the limit (the sessions share one TCP connection), on a fast local network (one session already fills it), or for
+small files: opening the sessions costs a few round trips, so files smaller than 1 MiB per segment use fewer segments. The server
+may allow fewer sessions than asked (sshd's `MaxSessions`, 10 per connection by default); then the ranges are shared among the
+sessions it opens. `Progress` reports the file's total over all segments. `DownloadFileAsync`, `UploadFileAsync` and the directory
+transfers (per file) use segments; `DownloadAsync` and `UploadAsync` use a stream in order, and `Resume` needs a sequential
+transfer (only that leaves a prefix to resume from), so with `Resume` set a file moves over one session.
 
-Only `DownloadFileAsync` (and `DownloadDirectoryAsync`, per file) uses segments; `DownloadAsync` writes a stream in order, and
-`Resume` needs a sequential download (only that leaves a prefix to resume from), so with `Resume` set a file is fetched over one
-session. Uploads use one session.
+**Downloads.** Each range is written into the local file at its offset. The first range that fails stops the others and the local
+file is removed. A file that grows during the download is fetched to its new end; one that shrinks, or is replaced, fails the
+download rather than leave a gap or mix two files.
+
+**Uploads.** The first session creates the remote file (or truncates it), and each other session opens it for writing too, without
+truncating it; each writes its range at its offset. Nothing is allocated in advance: a range written past the current end extends
+the file, so until the upload ends the file may read as zeros in the parts still on their way (upload to a temporary name and
+rename it, as in [Replace a file atomically](how-to/transfer-files-sftp.md#replace-a-file-atomically), if others read it
+meanwhile). Not every server takes this, and the upload adapts:
+
+```mermaid
+flowchart TD
+    A[Open the remote file over the first session<br/>create or truncate] --> B{Open another session?}
+    B -- refused, MaxSessions --> F[Split the ranges among the sessions open]
+    B -- opened --> C{It opens the file for writing too?}
+    C -- yes --> B
+    C -- no: one writer per file --> F
+    F --> G[Write each range over its session]
+    G --> H{A later range's first write refused?}
+    H -- no --> I{All ranges written?}
+    H -- yes: writes in order only --> J[Write the rest in order over the first session,<br/>from where the file is unbroken]
+    J --> I
+    I -- yes --> K[Done]
+    I -- no: failed or cancelled --> L[Cut the file to its unbroken start,<br/>or delete it if the server cannot cut]
+```
+
+- **A server with one writer per file** refuses the second open: the ranges go to the sessions that have the file open, down to
+  one.
+- **A server that takes writes in order only** (one that stores files as objects, written from the start) refuses the first write
+  of a later range: the rest of the file is then written in order over the first session, from as far as the server holds it
+  without a gap, so nothing is sent twice that the server already has.
+- **A failure or cancellation** stops the other ranges; the replies to writes already sent are awaited, then the remote file is
+  cut to the start the server holds without a gap. A resumed upload (`Resume`) then continues it correctly. A server that cannot
+  cut a file has it deleted instead, since a file with gaps must not be taken for a partial upload.
+- **The cleanup is bounded.** Each of its waits (the replies, then the cut or the delete) lasts at most `OperationTimeout` when it
+  is set, otherwise 5 s, so a cancelled upload returns promptly even from a server that stopped answering. The upload always throws
+  its own exception (a cancellation stays an `OperationCanceledException`). When the cleanup could not finish, that exception's
+  `Data[SftpClient.UploadCleanupIncompleteKey]` is `true`, and the remote file may have gaps.
+
+> [!WARNING]
+> Do not continue with `Resume` a segmented upload whose exception has `SftpClient.UploadCleanupIncompleteKey` set: the remote
+> file may hold gaps of zeros that a resume would keep. Delete it, or upload it again without `Resume`.
+
+[!code-csharp[](snippets/FileTransfer.cs#sftp-segments-upload-cleanup)]
 
 ### Directories
 
@@ -130,9 +172,9 @@ faster. It does not speed up a few large files, which already keep the request w
   they may be the same file on the receiving side.
 - **Open handles.** When the server announces a limit on open files (`limits@openssh.com`), fewer files go at once if needed, one
   handle kept for listings.
-- **Segments.** With `Segments` as well, each large file may open sessions of its own, so a download can ask for up to
+- **Segments.** With `Segments` as well, each large file may open sessions of its own, so a transfer can ask for up to
   `MaxConcurrentFiles × (Segments − 1)` extra sessions; the server's `MaxSessions` (10 by default) caps them, and a file that gets
-  none downloads over the main session. All their reads still share `MaxRequestsInFlight`.
+  none moves over the main session. All their reads and writes still share `MaxRequestsInFlight`.
 - **Errors and cancellation.** The first failure cancels the files still in flight and is the exception the transfer throws (not an
   `AggregateException`). Each stopped file is left as a failed single-file transfer leaves it: a download is deleted (unless `Resume`
   is set), an upload keeps what was written. Cancelling the token stops every file.
@@ -235,6 +277,40 @@ On a writable stream, `FlushAsync` waits for the writes in flight, then asks the
 Remote paths are passed to the server as they are: relative paths are relative to the login directory, and `/` is the
 separator whatever this machine uses. `Extensions` lists what the server supports, and `Limits` the sizes it accepts.
 
+## File hashes and other extensions
+
+### Hashes computed by the server
+
+Some servers hash a file where it is, so a transfer can be checked without reading the file back: the `check-file` extension
+(draft-ietf-secsh-filexfer-extensions), which ProFTPD, Bitvise and Tectia announce, or the older `md5-hash`. OpenSSH has neither.
+`SupportsFileHash` says whether the server announces one, and `GetFileHashAsync` asks for the hash of a file, or of a range of it:
+
+[!code-csharp[](snippets/FileTransfer.cs#sftp-verify-hash)]
+
+| Parameter | Meaning |
+|---|---|
+| `algorithms` | The algorithms to accept, best first, by their `check-file` names. By default `sha256`, `sha512`, `sha384`, `sha224`: SHA-2 only. The server uses the first it has; `SftpFileHash.Algorithm` says which. |
+| `offset`, `length` | A range of the file (`length` null: to its end), for example to check the part of an interrupted transfer that arrived. |
+
+- **Legacy algorithms are opt-in.** `md5`, `sha1` and `crc32` are used only when named, for servers that offer nothing better.
+  They catch accidental damage (a truncated or corrupted file), not a deliberate change, and a server with only `md5-hash` is used
+  only when `md5` is named.
+- **The server computes the hash.** A match shows that the server holds the bytes it was sent, as far as the server can be trusted;
+  it does not protect against a server that lies. The SSH connection already protects the data on its way.
+- **Feature detection.** Without an announced extension, or when the server lists its algorithms and none of those asked for is
+  among them, `GetFileHashAsync` throws `NotSupportedException` before anything is sent. A server that cannot hash with any of them
+  answers `SftpException` (`OperationUnsupported`). A reply with an algorithm that was not asked for, or a hash of the wrong length,
+  is a protocol error.
+
+### Raw extended requests
+
+For a vendor extension this library has no method for, `SendExtendedRequestAsync(name, data)` sends `SSH_FXP_EXTENDED` with the
+request's fields (encoded as the extension defines them) and returns the reply as it came: an `SftpExtendedReply` with its
+`PacketType`, its fields (`Data`), and for a status its `Status` and `StatusMessage`. A server error is returned, not thrown;
+`EnsureSuccess()` throws it as an `SftpException`. Most servers answer `OperationUnsupported` to a request they do not know, but
+some end the whole SFTP session instead (Erlang/OTP's `ssh_sftpd` does), failing every request on it with `ChannelClosed`: send only
+extensions the server announces in `Extensions`. See [Call a vendor extension](how-to/transfer-files-sftp.md#call-a-vendor-extension).
+
 ## Serving files with `IFileProvider`
 
 The `SshSharp.FileProviders` package (`dotnet add package SshSharp.FileProviders`) turns a directory on the server into an
@@ -315,7 +391,8 @@ both, and the adapters report its timeout as they report a failed session.
 A request the server refuses throws `SftpException`, an `SshException` with `Reason = SftpFailed`, `Status` (the SFTP status
 code, such as `NoSuchFile`, `PermissionDenied` or `Failure`) and the `Path` concerned. A broken SFTP session or connection is an
 `SshException` with `ChannelClosed` or `ConnectionClosed`, and a passed `OperationTimeout` one with `Timeout`. An operation needing
-an extension the server lacks (an overwriting rename, a hard link) throws `NotSupportedException`.
+an extension the server lacks (an overwriting rename, a hard link, a file hash) throws `NotSupportedException`. `SendExtendedRequestAsync`
+returns the server's status instead of throwing it; `EnsureSuccess()` throws it.
 
 ## SFTP or SCP?
 

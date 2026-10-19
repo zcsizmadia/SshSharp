@@ -874,6 +874,177 @@ public class SftpInteropTests
         }
     }
 
+    [Test]
+    public async Task ASegmentedUpload_WritesTheFileOverSeveralSessions()
+    {
+        if (RealServer.Endpoint is not var (host, port) || await RealServer.OptionsAsync() is not { } options)
+        {
+            Skip.Test("SSHSHARP_TEST_SSHD and SSHSHARP_TEST_USER with a password or key are needed.");
+            return;
+        }
+
+        if (!RealServer.HasSftp)
+        {
+            Skip.Test("This server has no sftp-server.");
+            return;
+        }
+
+        var local = Directory.CreateTempSubdirectory("sshsharp-upload-segments-");
+        await using var client = await SshClient.ConnectAsync(host, port, options, Timeout());
+        await using var sftp = await client.OpenSftpAsync(Timeout());
+        var remote = RealServer.SftpPath(".sshsharp-upload-segments-" + Guid.NewGuid().ToString("N")[..12]);
+        try
+        {
+            // Six MiB in four ranges, each written over its own session; a server with one writer per file, or one that takes writes in
+            // order only, gets the file anyway (fewer sessions, or the rest in order), so the result is the same everywhere.
+            var data = RandomNumberGenerator.GetBytes((6 * 1024 * 1024) + 4321);
+            var source = Path.Combine(local.FullName, "source.bin");
+            await File.WriteAllBytesAsync(source, data);
+            long reported = 0;
+            var progress = new SynchronousProgress(value => reported = value);
+
+            var total = await sftp.UploadFileAsync(source, remote, new SftpTransferOptions { Segments = 4, Progress = progress }, Timeout());
+
+            await Assert.That(total).IsEqualTo(data.Length);
+            await Assert.That(reported).IsEqualTo(data.Length);
+            await Assert.That((await sftp.GetAttributesAsync(remote, cancellationToken: Timeout())).Size).IsEqualTo(data.Length);
+            var copy = new MemoryStream();
+            await sftp.DownloadAsync(remote, copy, cancellationToken: Timeout());
+            await Assert.That(copy.ToArray().AsSpan().SequenceEqual(data)).IsTrue();
+
+            // Again over the same file, which is truncated first: a shorter file must not keep the old tail.
+            var shorter = data.AsSpan(0, (3 * 1024 * 1024) + 11).ToArray();
+            await File.WriteAllBytesAsync(source, shorter);
+            await sftp.UploadFileAsync(source, remote, new SftpTransferOptions { Segments = 3 }, Timeout());
+            copy.SetLength(0);
+            await sftp.DownloadAsync(remote, copy, cancellationToken: Timeout());
+            await Assert.That(copy.ToArray().AsSpan().SequenceEqual(shorter)).IsTrue();
+        }
+        finally
+        {
+            try
+            {
+                await sftp.DeleteFileAsync(remote, Timeout());
+            }
+            catch (SftpException)
+            {
+                // Not created.
+            }
+
+            local.Delete(recursive: true);
+        }
+    }
+
+    [Test]
+    public async Task AFileHash_FromTheServer_MatchesTheLocalOne()
+    {
+        if (RealServer.Endpoint is not var (host, port) || await RealServer.OptionsAsync() is not { } options)
+        {
+            Skip.Test("SSHSHARP_TEST_SSHD and SSHSHARP_TEST_USER with a password or key are needed.");
+            return;
+        }
+
+        if (!RealServer.HasSftp)
+        {
+            Skip.Test("This server has no sftp-server.");
+            return;
+        }
+
+        await using var client = await SshClient.ConnectAsync(host, port, options, Timeout());
+        await using var sftp = await client.OpenSftpAsync(Timeout());
+        if (!sftp.SupportsFileHash)
+        {
+            Skip.Test("This server announces no file hash extension (check-file or md5-hash).");
+            return;
+        }
+
+        var remote = RealServer.SftpPath(".sshsharp-hash-" + Guid.NewGuid().ToString("N")[..12]);
+        try
+        {
+            var data = RandomNumberGenerator.GetBytes(200_000);
+            await sftp.WriteAllBytesAsync(remote, data, Timeout());
+
+            // Whatever the server offers, best first; the legacy ones are named so a server with only those is still tested.
+            string[] algorithms = ["sha256", "sha512", "sha384", "sha1", "md5"];
+            var whole = await sftp.GetFileHashAsync(remote, algorithms, cancellationToken: Timeout());
+            await Assert.That(whole.Matches(LocalHash(whole.Algorithm, data))).IsTrue().Because($"the server's {whole.Algorithm} hash");
+
+            var range = await sftp.GetFileHashAsync(remote, algorithms, offset: 1000, length: 50_000, Timeout());
+            await Assert.That(range.Matches(LocalHash(range.Algorithm, data.AsSpan(1000, 50_000).ToArray()))).IsTrue();
+        }
+        finally
+        {
+            try
+            {
+                await sftp.DeleteFileAsync(remote, Timeout());
+            }
+            catch (SftpException)
+            {
+                // Not created.
+            }
+        }
+
+        static byte[] LocalHash(string algorithm, byte[] data) => algorithm switch
+        {
+            "sha256" => SHA256.HashData(data),
+            "sha512" => SHA512.HashData(data),
+            "sha384" => SHA384.HashData(data),
+#pragma warning disable CA5350, CA5351 // checking the interop hashes a server offers, not security
+            "sha1" => SHA1.HashData(data),
+            _ => MD5.HashData(data),
+#pragma warning restore CA5350, CA5351
+        };
+    }
+
+    [Test]
+    public async Task RawExtendedRequests_GetTheServersReplyAsItIs()
+    {
+        if (RealServer.Endpoint is not var (host, port) || await RealServer.OptionsAsync() is not { } options)
+        {
+            Skip.Test("SSHSHARP_TEST_SSHD and SSHSHARP_TEST_USER with a password or key are needed.");
+            return;
+        }
+
+        if (!RealServer.HasSftp)
+        {
+            Skip.Test("This server has no sftp-server.");
+            return;
+        }
+
+        await using var client = await SshClient.ConnectAsync(host, port, options, Timeout());
+        await using var sftp = await client.OpenSftpAsync(Timeout());
+
+        // limits@openssh.com where the server has it: four uint64 values.
+        var advertised = sftp.Extensions.ContainsKey("limits@openssh.com");
+        if (advertised)
+        {
+            var limits = await sftp.SendExtendedRequestAsync("limits@openssh.com", cancellationToken: Timeout());
+            await Assert.That(limits.IsExtendedReply).IsTrue();
+            await Assert.That(limits.Data.Length).IsEqualTo(32);
+        }
+
+        // An extension no server has: a status that is not OK, never a broken session. Erlang/OTP's ssh_sftpd ends the session on a
+        // request it does not know instead of answering OP_UNSUPPORTED (seen in CI), which is why the docs say to call only extensions
+        // the server announces.
+        if (RealServer.IsErlang)
+        {
+            if (!advertised)
+            {
+                Skip.Test("Erlang/OTP's SFTP server ends the session on an unknown extended request, and announces no extension to call instead.");
+            }
+
+            return;
+        }
+
+        var unknown = await sftp.SendExtendedRequestAsync("sshsharp-test-unknown@example.com", "\0\0\0\0"u8.ToArray(), Timeout());
+        await Assert.That(unknown.Status).IsNotNull();
+        await Assert.That(unknown.Status).IsNotEqualTo(SftpStatusCode.Ok);
+        await Assert.That(() => unknown.EnsureSuccess()).Throws<SftpException>();
+
+        // The session still works.
+        await Assert.That(await sftp.ExistsAsync(".", Timeout())).IsTrue();
+    }
+
     private sealed class SynchronousProgress(Action<long> report) : IProgress<SftpTransferProgress>
     {
         public void Report(SftpTransferProgress value) => report(value.BytesTransferred);

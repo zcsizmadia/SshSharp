@@ -43,7 +43,7 @@ restarts, and the worker carries on.
 - **Health.** Add `builder.Services.AddHealthChecks().AddSsh("partner")` and expose it to your orchestrator.
 - **Partial files.** The example skips names ending in `.partial`; agree on a convention with the partner (upload under a temporary
   name, then rename), or wait for a file's size to stop changing.
-- **Large files.** Add `Resume = true` to continue interrupted downloads, or `Segments` for faster downloads over long distances.
+- **Large files.** Add `Resume = true` to continue interrupted downloads, or `Segments` for faster downloads and uploads over long distances.
 
 ## See also
 

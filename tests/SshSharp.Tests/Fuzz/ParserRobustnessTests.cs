@@ -255,6 +255,9 @@ public class ParserRobustnessTests
         }),
         Reply(w => { w.WriteByte(105); w.WriteUInt32(7); SftpAttributes(w); }),
         Reply(w => { w.WriteByte(201); w.WriteUInt32(7); w.WriteUInt64(262144); w.WriteUInt64(261120); w.WriteUInt64(261120); w.WriteUInt64(0); }),
+        Reply(w => { w.WriteByte(201); w.WriteUInt32(7); w.WriteString("check-file"); w.WriteString("sha256"); w.WriteBytes(new byte[32]); }),
+        Reply(w => { w.WriteByte(201); w.WriteUInt32(7); w.WriteString("check-file"); w.WriteString("vendor@example.com"); w.WriteBytes([1, 2, 3]); }),
+        Reply(w => { w.WriteByte(201); w.WriteUInt32(7); w.WriteString("md5-hash"); w.WriteString(new byte[16]); }),
     ];
 
     private static void SftpAttributes(SshWriter w)
