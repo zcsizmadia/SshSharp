@@ -146,8 +146,8 @@ several files at once over the same session:
 - **`MaxRequestsInFlight`** is the window of the whole transfer: the files share it. Memory stays at most `MaxRequestsInFlight`
   requests (2 MiB by default, about 16 MiB with OpenSSH's larger requests) plus 64 KiB per file in flight, whatever
   `MaxConcurrentFiles` is. Raise `MaxRequestsInFlight` if larger files in the tree should keep a full window while others run.
-- **`Segments`** still splits each large file of a download over sessions of its own, so the sessions add up across files. The
-  server's `MaxSessions` (10 by default) caps them; a file that gets no extra session downloads over the main one.
+- **`Segments`** still splits each large file, downloaded or uploaded, over sessions of its own, so the sessions add up across files. The
+  server's `MaxSessions` (10 by default) caps them; a file that gets no extra session is transferred over the main one.
 - **`Preserve`** sets directory times and permissions after every file is in, the deepest first.
 - **`Progress`** reports each file by its path, interleaved, but never from two threads at once.
 
@@ -359,9 +359,11 @@ drops packets without closing the connection) then hangs your code too. Set `Ope
 - **Sends are bounded too.** When `sftp-server` stops reading while sshd stays up, the channel's window fills and an upload's
   next write cannot go out. Once the server has sent nothing for `OperationTimeout`, that send is cut off and the SFTP session is
   closed (half a request may be on its way, and nothing could follow it): every waiting request fails with `Timeout`, so the
-  upload, its cleanup and a write stream's `DisposeAsync` all return, and `sftp.IsConnected` is false. Open a new session.
+  upload, its cleanup and a write stream's `DisposeAsync` all return, and `sftp.IsConnected` is false. Open a new session. This
+  holds even when you cancelled the request whose send was stuck: cancelling returns at once, and the send left behind is still
+  bounded.
 - It applies to every request of the `SftpClient`, including those of streams, listings and transfers, and to the extra sessions
-  of a segmented download. Change it at any time.
+  of a segmented download or upload. Change it at any time.
 - [Keep-alives](keepalive-and-reconnect.md) (`KeepAliveInterval`) detect a dead connection; `OperationTimeout` also catches a
   server that is connected but no longer answering SFTP requests.
 

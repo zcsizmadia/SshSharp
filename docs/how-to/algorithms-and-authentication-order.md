@@ -121,7 +121,7 @@ replacing the key.
 - **No algorithm in common.** A list that leaves nothing the server offers fails the connection with
   `SshFailureReason.KeyExchangeFailed`, and the message lists what each side offered. A list that leaves nothing at all (for
   example `Only` with a cipher `FipsMode` excludes) throws `ArgumentException` before anything is sent.
-- **FIPS mode still applies.** With `FipsMode = true`, the algorithms it excludes are removed from your lists too; see
+- **FIPS mode still applies.** With `FipsMode = true`, the algorithms it excludes are removed from your transport lists too (not from `PubkeyAcceptedAlgorithms`); see
   [FIPS mode](fips-mode.md).
 - **ML-KEM needs the platform.** The `mlkem*` methods are accepted everywhere but offered only on .NET 10 with platform ML-KEM, so
   the same options work on .NET 8.

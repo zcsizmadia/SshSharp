@@ -42,7 +42,8 @@ No `ssh_config`? Pass the host, the credentials and a host key policy in [`SshCl
   <div class="col"><div class="card h-100"><div class="card-body">
     <h5 class="card-title">Connects like <code>ssh</code></h5>
     <p class="card-text"><code>ssh_config</code> aliases with <code>Match</code> and <code>Include</code>, <code>ProxyJump</code> chains,
-    <code>ProxyCommand</code>, HTTP and SOCKS proxies, or any <code>Stream</code>.</p>
+    <code>ProxyCommand</code>, HTTP and SOCKS proxies, your own transport, or any <code>Stream</code>. Jump hosts, algorithms
+    and timeouts as typed options too, and the connection's endpoints, byte counts and re-keying in code.</p>
     <a href="how-to/ssh-config-and-known-hosts.md" class="card-link">ssh_config and known_hosts</a>
     <a href="how-to/jump-hosts.md" class="card-link">Jump hosts</a>
   </div></div></div>
@@ -61,33 +62,36 @@ No `ssh_config`? Pass the host, the credentials and a host key policy in [`SshCl
   </div></div></div>
   <div class="col"><div class="card h-100"><div class="card-body">
     <h5 class="card-title">SFTP and SCP</h5>
-    <p class="card-text">Pipelined transfers, resume, segmented downloads and uploads, server-side hashes, directories, remote file streams, and SCP for servers
-    without SFTP.</p>
+    <p class="card-text">Pipelined transfers, resume, segmented downloads and uploads, directory trees with filters and skipping
+    of unchanged files, recursive listings, server-side hashes, remote file streams, and SCP for servers without SFTP.</p>
     <a href="how-to/transfer-files-sftp.md" class="card-link">SFTP</a>
     <a href="how-to/transfer-files-scp.md" class="card-link">SCP</a>
   </div></div></div>
   <div class="col"><div class="card h-100"><div class="card-body">
     <h5 class="card-title">Tunnels and forwarding</h5>
-    <p class="card-text">Local, remote and dynamic (SOCKS) forwarding, Unix-socket tunnels, and <code>HttpClient</code> through the
-    connection.</p>
+    <p class="card-text">Local, remote and dynamic (SOCKS, optionally with a SOCKS 5 password) forwarding, Unix sockets on either
+    end, remote forwarding to a handler in your code, and <code>HttpClient</code> through the connection.</p>
     <a href="how-to/port-forwarding.md" class="card-link">Port forwarding</a>
   </div></div></div>
   <div class="col"><div class="card h-100"><div class="card-body">
     <h5 class="card-title">Keys, agents, certificates</h5>
-    <p class="card-text">OpenSSH, PEM and PuTTY keys, <code>ssh-agent</code> and Pageant, FIDO keys through the agent, keys in a
-    TPM or KMS, OpenSSH certificates and Kerberos.</p>
+    <p class="card-text">OpenSSH, PEM and PuTTY keys, export to PKCS#8 and PuTTY, <code>ssh-agent</code> and Pageant, an
+    in-process agent, FIDO keys through the agent, keys in a TPM or KMS, password prompts and changes, OpenSSH certificates (issued
+    as a CA too), revocation lists and Kerberos.</p>
     <a href="how-to/agent-and-keys.md" class="card-link">Keys and the agent</a>
+    <a href="how-to/certificates.md" class="card-link">Certificates</a>
   </div></div></div>
   <div class="col"><div class="card h-100"><div class="card-body">
     <h5 class="card-title">Modern cryptography</h5>
-    <p class="card-text">Post-quantum hybrid key exchange, ChaCha20-Poly1305 and AES-GCM, strict key exchange always on, and a FIPS
-    mode. No legacy algorithms.</p>
+    <p class="card-text">Post-quantum hybrid key exchange, ChaCha20-Poly1305 and AES-GCM, strict key exchange always on, a FIPS
+    mode, and OpenSSH's delayed compression. Typed algorithm lists in code. No legacy algorithms.</p>
     <a href="reference/algorithms.md" class="card-link">Algorithms</a>
   </div></div></div>
   <div class="col"><div class="card h-100"><div class="card-body">
     <h5 class="card-title">Fits .NET applications</h5>
-    <p class="card-text">Dependency injection with a shared reconnecting connection and health checks; SFTP as
-    <code>IFileSystem</code> or <code>IFileProvider</code>; trimming and Native AOT.</p>
+    <p class="card-text">Dependency injection with keyed endpoints, a shared reconnecting connection, connection events,
+    <code>HttpClient</code> tunnels and health checks; SFTP as <code>IFileSystem</code> or <code>IFileProvider</code>; trimming and
+    Native AOT.</p>
     <a href="how-to/aspnetcore-and-di.md" class="card-link">ASP.NET Core</a>
     <a href="how-to/file-system-adapters.md" class="card-link">IFileSystem</a>
   </div></div></div>
@@ -98,6 +102,8 @@ No `ssh_config`? Pass the host, the credentials and a host key policy in [`SshCl
     <a href="how-to/logging-and-diagnostics.md" class="card-link">Logging and diagnostics</a>
   </div></div></div>
 </div>
+
+<p class="text-center"><a class="btn btn-outline-primary" href="features.md">See all features</a></p>
 
 ## Packages
 
@@ -122,6 +128,6 @@ All four are released together with the same version, target .NET 8 and .NET 10,
 - **Something is wrong:** [troubleshooting](reference/troubleshooting.md) and the [FAQ](reference/faq.md).
 
 > [!NOTE]
-> SshSharp 1.0 follows semantic versioning: breaking changes wait for a major version. The managed cryptography has had an
+> SshSharp 1.x follows semantic versioning: breaking changes wait for a major version. The managed cryptography has had an
 > internal constant-time review but not yet an outside one; see the [cryptography review](crypto-review.md) and the
 > [security policy](https://github.com/zcsizmadia/SshSharp/blob/main/SECURITY.md).

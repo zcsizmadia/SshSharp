@@ -51,8 +51,9 @@ public sealed partial class SftpClient : IAsyncDisposable
 
     /// <summary>
     /// Whether the session is still usable: false once its channel or the connection under it ended or failed (the server closed it, a
-    /// missed keep-alive, a broken protocol message, a request that could not be sent within <see cref="OperationTimeout"/>), or the
-    /// client was disposed. Every request fails from then on; open a new session. A request that fails on its own (an error status, or
+    /// missed keep-alive, a broken protocol message, a request that could not be sent within <see cref="OperationTimeout"/> whether or
+    /// not its caller still waited, a send that failed), or the client was disposed. A request that failed because the session ended
+    /// finds it false already. Every request fails from then on; open a new session. A request that fails on its own (an error status, or
     /// a reply that timed out) leaves it true.
     /// </summary>
     public bool IsConnected => !_channel.IsClosed;
@@ -85,7 +86,8 @@ public sealed partial class SftpClient : IAsyncDisposable
     /// A request that timed out waiting for its reply is abandoned, not undone: the server may still carry it out, and its late reply is
     /// dropped (a handle it opens is closed). The session stays usable. A request that timed out while it was being sent closes the
     /// session instead (<see cref="IsConnected"/> becomes false), since part of it may have gone out and nothing could follow it: every
-    /// request waiting on the session fails with the timeout, and a new session is needed. It can be changed at any time; requests
+    /// request waiting on the session fails with the timeout, and a new session is needed. That holds for a send whose caller cancelled
+    /// too: the caller stops waiting, and the send left in the background is still bounded. It can be changed at any time; requests
     /// already waiting keep the value they started with. A segmented transfer's extra sessions (<see cref="SftpTransferOptions.Segments"/>)
     /// take this session's value.
     /// </para>
@@ -824,6 +826,7 @@ public sealed partial class SftpClient : IAsyncDisposable
         options ??= new SftpTransferOptions();
         var mode = options.Resume ? FileMode.OpenOrCreate : options.Overwrite ? FileMode.Create : FileMode.CreateNew;
         var (handle, _) = await OpenHandleAsync(remotePath, mode, FileAccess.Write, cancellationToken).ConfigureAwait(false);
+        var failing = false;
         try
         {
             long start = 0;
@@ -854,11 +857,12 @@ public sealed partial class SftpClient : IAsyncDisposable
             {
                 return await UploadHandleAsync(handle, remotePath, source, start, options, state, cancellationToken, replies.Token).ConfigureAwait(false);
             }
-            catch (Exception ex) when (state.LandedPastGap)
+            catch (Exception ex) when (state.LandedPastGap || (state.Refused && state.Unsettled))
             {
                 // A write failed (or went unanswered) while later ones landed: the file reaches past a gap, and a resumed upload, taking
-                // its size for what was sent, would keep the gap. It is cut to its unbroken start, as a segmented upload does; when that
-                // cannot be done, or an unanswered write may still land after the cut, the exception says so (UploadCleanupIncompleteKey).
+                // its size for what was sent, would keep the gap. The same holds when the server refused a write and later ones went
+                // unanswered: they may land yet. It is cut to its unbroken start, as a segmented upload does; when that cannot be done,
+                // or an unanswered write may still land after the cut, the exception says so (UploadCleanupIncompleteKey).
                 if (!await TryCutAsync(handle, remotePath, start + state.Confirmed).ConfigureAwait(false) || state.Unsettled)
                 {
                     ex.Data[UploadCleanupIncompleteKey] = true;
@@ -867,9 +871,16 @@ public sealed partial class SftpClient : IAsyncDisposable
                 throw;
             }
         }
+        catch
+        {
+            failing = true;
+            throw;
+        }
         finally
         {
-            await CloseHandleAsync(handle).ConfigureAwait(false);
+            // After a failure (a cancellation included) the server may have stopped answering, and the CLOSE may wait behind a write
+            // that cannot be sent: closing waits no longer than the cleanup does.
+            await CloseHandleAsync(handle, failing ? CleanupWait : null).ConfigureAwait(false);
         }
     }
 
@@ -1363,9 +1374,10 @@ public sealed partial class SftpClient : IAsyncDisposable
                 try
                 {
                     var landed = IsOkStatus(await reply.ConfigureAwait(false));
-                    if (landed && !unbroken && confirmed is not null)
+                    if (confirmed is not null)
                     {
-                        confirmed.LandedPastGap = true;
+                        confirmed.LandedPastGap |= landed && !unbroken;
+                        confirmed.Refused |= !landed;
                     }
 
                     unbroken &= landed;
@@ -1398,6 +1410,11 @@ public sealed partial class SftpClient : IAsyncDisposable
                 var response = await reply.ConfigureAwait(false);
                 answered = true;
                 unbroken = IsOkStatus(response);
+                if (!unbroken && confirmed is not null)
+                {
+                    confirmed.Refused = true;
+                }
+
                 ExpectWritten(response, path);
             }
             catch
@@ -1449,6 +1466,12 @@ public sealed partial class SftpClient : IAsyncDisposable
 
         /// <summary>Whether a write landed after one that failed or went unanswered: the file may then reach past a gap.</summary>
         public bool LandedPastGap { get; set; }
+
+        /// <summary>
+        /// Whether the server answered a write with anything but OK (it wrote nothing there): with writes after it unanswered, which may
+        /// still land, the file may reach past a gap.
+        /// </summary>
+        public bool Refused { get; set; }
     }
 
     /// <summary>Whether a reply is a well-formed status of OK.</summary>

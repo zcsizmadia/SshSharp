@@ -24,7 +24,15 @@ Features that SSH.NET users have asked for in its issue tracker, and that SshSha
 | Request | SshSharp |
 |---|---|
 | Verify host keys against `known_hosts` | `KnownHostsVerifier`, with hashed hosts, `@cert-authority`, `@revoked` and `StrictHostKeyChecking` (see [Host keys](host-keys.md)) |
-| Jump hosts / bastions | `ProxyJump` chains and `ProxyCommand` from `ssh_config`, or by hand: `OpenTcpTunnelAsync` to the next host and `SshClient.ConnectAsync(stream, ...)` over it (see [Connecting](connecting.md)) |
+| Jump hosts / bastions | `SshClientOptions.JumpHosts`, one `SshJumpHost` per hop with its own credentials and host key check; `ProxyJump` chains and `ProxyCommand` from `ssh_config`; or by hand: `OpenTcpTunnelAsync` to the next host and `SshClient.ConnectAsync(stream, ...)` over it (see [Jump hosts](how-to/jump-hosts.md)) |
+| Connect through your own transport (a cloud tunnel, a WebSocket) | `SshProxy.FromConnector((host, port, ct) => ...)` returns the stream; it works wherever a proxy does, including the first jump host (see [Jump hosts](how-to/jump-hosts.md)) |
+| Keys held by your application or a KMS, offered through an agent | `SshAgent.FromKeys(...)`, an in-process agent for any keys SshSharp holds, including keys behind an `SshKeySigner` (a KMS or HSM); `SshClientOptions.ForwardAgentFilter` decides each request a forwarded agent gets (see [Keys and the SSH agent](how-to/agent-and-keys.md)) |
+| Directory trees over SFTP | `UploadDirectoryAsync` and `DownloadDirectoryAsync` with several files at once, a `Filter` and `SkipUnchanged`; recursive `ListDirectoryAsync` with a `Pattern`; `DeleteDirectoryAsync(path, recursive: true)` (see [Transfer files with SFTP](how-to/transfer-files-sftp.md)) |
+| Check a transfer with a hash the server computes | `sftp.GetFileHashAsync(path)` (`check-file` or `md5-hash`, when the server offers one); `SendExtendedRequestAsync` for other vendor extensions (see [SFTP](sftp.md)) |
+| A SOCKS proxy with a password | `client.ForwardDynamicPortAsync(localEndPoint, new NetworkCredential(user, password))` (SOCKS 5, RFC 1929) |
+| Forward to a Unix socket on the server from a local port or socket (`ssh -L port:/remote.sock`) | `client.ForwardLocalPortAsync(localEndPoint, remoteSocketPath)` and `ForwardLocalUnixSocketAsync(localSocketPath, ...)` (see [Port forwarding](how-to/port-forwarding.md)) |
+| Remote forwarding without a local listener | `client.ForwardRemotePortAsync(bindAddress, port, handler)`: each connection reaches your code as a `Stream` |
+| Named SSH connections in ASP.NET Core | `SshSharp.Extensions.DependencyInjection`: endpoints from configuration, a shared connection that reconnects, keyed `ISshEndpoint` services, `UseSshTunnel` for `HttpClient`, and a health check (see [Dependency injection](dependency-injection.md)) |
 | Use the keys in `ssh-agent`; agent forwarding | `SshAgent` and `ForwardAgent`, on Unix sockets, the Windows OpenSSH agent and PuTTY's Pageant (`SshAgent.FromPageant()`) |
 | Add, remove and lock agent keys (`ssh-add`) | `agent.AddKeyAsync(key, constraints)` (lifetime, confirmation), `RemoveKeyAsync`, `RemoveAllKeysAsync`, `LockAsync` and `UnlockAsync`; `AddKeysToAgent` in `ssh_config` (see [Authentication](authentication.md)) |
 | A subsystem other than `sftp` | `client.StartSubsystemAsync(name)` |
@@ -94,7 +102,10 @@ See [Connecting](connecting.md) for streams, jump hosts and timeouts.
 | `client.Disconnect()`, `Dispose()` | `await client.DisposeAsync()` |
 | `ConnectionInfo.Timeout` | `SshClientOptions.ConnectTimeout` (`ConnectTimeout` in `ssh_config`); it covers the TCP connection, key exchange and authentication. A `CancellationToken` works too |
 | `client.KeepAliveInterval` | `SshClientOptions.KeepAliveInterval` and `KeepAliveCountMax` (`ServerAliveInterval` in `ssh_config`) |
-| `ConnectionInfo.Encryptions` / `KeyExchangeAlgorithms` / `HostKeyAlgorithms` (removing entries) | `SshClientOptions.Ciphers`, `KexAlgorithms`, `HostKeyAlgorithms` and `Macs`, for example `Ciphers = SshAlgorithmList.Remove("aes*-ctr")`; or the same directives in `ssh_config` (the defaults are modern only; `SshClientOptions.FipsMode` restricts them to FIPS algorithms) || `ConnectionInfo.ProxyType`, `ProxyHost`, `ProxyPort`, `ProxyUsername`, `ProxyPassword` | `SshClientOptions.Proxy = SshProxy.Http(host, port, credentials)` (or `Socks5`, `Socks4`, or `SshProxy.FromUri(new Uri("socks5://proxy:1080"))`) |
+| `ConnectionInfo.Encryptions` / `KeyExchangeAlgorithms` / `HostKeyAlgorithms` / `HmacAlgorithms` (removing or reordering entries) | `SshClientOptions.Ciphers`, `KexAlgorithms`, `HostKeyAlgorithms` and `Macs`, for example `Ciphers = SshAlgorithmList.Remove("aes*-ctr")`; or the same directives in `ssh_config` (the defaults are modern only; `SshClientOptions.FipsMode` restricts them to FIPS algorithms; see [Choose algorithms](how-to/algorithms-and-authentication-order.md)) |
+| `ConnectionInfo.CompressionAlgorithms` (moving `zlib@openssh.com` before `none`) | `SshClientOptions.Compression = true` (`Compression yes` in `ssh_config`); off by default, as in `ssh` |
+| `ConnectionInfo.CurrentClientEncryption`, `CurrentServerCompressionAlgorithm` and the other `Current*` properties | `client.Algorithms` (`EncryptionClientToServer`, `CompressionServerToClient`, ...) |
+| `ConnectionInfo.ProxyType`, `ProxyHost`, `ProxyPort`, `ProxyUsername`, `ProxyPassword` | `SshClientOptions.Proxy = SshProxy.Http(host, port, credentials)` (or `Socks5`, `Socks4`, or `SshProxy.FromUri(new Uri("socks5://proxy:1080"))`) |
 | `client.IsConnected` | `client.IsConnected`; `client.ConnectionClosed` (a `CancellationToken`) fires when the connection drops |
 | `client.ErrorOccurred` event | `client.ConnectionClosed` and `client.ConnectionError` |
 | `client.ConnectionInfo.ServerVersion` | `client.ServerIdentification` |
@@ -118,12 +129,13 @@ A rejected key throws `SshHostKeyException`, which carries the key the server pr
 
 | SSH.NET | SshSharp |
 |---|---|
-| `PasswordAuthenticationMethod(user, password)` | `SshClientOptions.Password` |
+| `PasswordAuthenticationMethod(user, password)` | `SshClientOptions.Password`; or `PasswordProvider`, which asks only when a password is needed |
+| `PasswordAuthenticationMethod.PasswordExpired`, setting `e.NewPassword` | `SshClientOptions.ChangePassword`, a callback that returns the new password (see [Passwords](how-to/passwords.md)) |
 | `PrivateKeyAuthenticationMethod(user, keyFiles)` | `SshClientOptions.PrivateKeys` |
 | `KeyboardInteractiveAuthenticationMethod` and its `AuthenticationPrompt` event | `SshClientOptions.KeyboardInteractive`, a callback that returns the answers |
 | several methods in `ConnectionInfo` | set several options: the client tries public keys, keyboard-interactive, then password, as `ssh` does, and follows the server's multi-factor chains |
 | (no agent support) | `SshAgent.FromEnvironment()` and `GetKeysAsync()`; `ForwardAgent` for agent forwarding |
-| `SshAuthenticationException` | `SshAuthenticationException`, with `AllowedMethods` listing what the server would accept |
+| `SshAuthenticationException` | `SshAuthenticationException`, with `AllowedMethods` listing what the server would accept and `Attempts` listing each method tried and its outcome |
 
 When the server takes passwords only through keyboard-interactive (PAM with `PasswordAuthentication no`), `Password` answers that
 prompt, so you need no handler for it.
@@ -281,9 +293,10 @@ await using var forward = await client.ForwardLocalPortAsync(new IPEndPoint(IPAd
 | SSH.NET | SshSharp |
 |---|---|
 | `ForwardedPortLocal` (`ssh -L`) | `client.ForwardLocalPortAsync(localEndPoint, remoteHost, remotePort)` |
-| `ForwardedPortRemote` (`ssh -R`) | `client.ForwardRemotePortAsync(bindAddress, remotePort, localHost, localPort)` |
+| `ForwardedPortRemote` (`ssh -R`) | `client.ForwardRemotePortAsync(bindAddress, remotePort, localHost, localPort)`, or with a handler that gets each connection as a `Stream` |
 | (no remote dynamic forwarding) | `client.ForwardRemoteDynamicPortAsync(bindAddress, remotePort, allowDestination)` (`ssh -R port`) |
-| `ForwardedPortDynamic` (`ssh -D`) | `client.ForwardDynamicPortAsync(localEndPoint)` |
+| `ForwardedPortDynamic` (`ssh -D`) | `client.ForwardDynamicPortAsync(localEndPoint)`; with `credentials`, a SOCKS 5 proxy that asks for a user name and password |
+| (no local Unix-socket forwarding) | `client.ForwardLocalPortAsync(localEndPoint, remoteSocketPath)` (`ssh -L port:/remote.sock`) and `ForwardLocalUnixSocketAsync(localSocketPath, ...)` (`ssh -L /local.sock:...`) |
 | `forward.Start()`, `Stop()` | started when returned; stopped by `DisposeAsync` |
 | (no remote Unix-socket forwarding) | `client.ForwardRemoteUnixSocketAsync(remoteSocketPath, localHost, localPort)` or `(remoteSocketPath, localSocketPath)` (`ssh -R /socket:target`) |
 | `client.ForwardedPorts` | `client.LocalForwardings`, `RemoteForwardings`, `RemoteSocketForwardings`, `DynamicForwardings` (the ones started from `ssh_config`) |
@@ -318,7 +331,7 @@ await sftp.UploadFileAsync("report.pdf", "incoming/report.pdf");
 | `UploadFile(stream, path)`, `UploadFileAsync` | `UploadAsync(stream, path)`, or `UploadFileAsync(localPath, path)` |
 | `DownloadFile(path, stream)`, `DownloadFileAsync` | `DownloadAsync(path, stream)`, or `DownloadFileAsync(path, localPath)` |
 | `ListDirectory(path)`, `ListDirectoryAsync` | `ListDirectoryAsync(path)`: `IAsyncEnumerable<SftpFileInfo>`, without `.` and `..`; with `SftpListOptions`, a name `Pattern` and `Recursive` listings |
-| `SynchronizeDirectories(source, destination, searchPattern)` | `UploadDirectoryAsync(source, destination, new SftpTransferOptions { Preserve = true, SkipUnchanged = true, Filter = ... })`: new and changed files by size and modification time, a whole tree, in either direction |
+| `SynchronizeDirectories(source, destination, searchPattern)` | `UploadDirectoryAsync(source, destination, new SftpTransferOptions { Preserve = true, SkipUnchanged = true, Filter = ... })`: new and changed files by size and modification time, a whole tree; `DownloadDirectoryAsync` the other way |
 | `Exists`, `Get`, `GetAttributes` | `ExistsAsync`, `GetAttributesAsync` |
 | `CreateDirectory`, `DeleteDirectory`, `DeleteFile`, `Delete` | `CreateDirectoryAsync`, `DeleteDirectoryAsync`, `DeleteFileAsync`; also `CreateDirectoryAsync(path, createParents: true)` (`mkdir -p`) and `DeleteDirectoryAsync(path, recursive: true)` (`rm -r`) |
 | `ReadAllBytes`, `ReadAllText`, `WriteAllBytes`, `WriteAllText` | `ReadAllBytesAsync`, `ReadAllTextAsync`, `WriteAllBytesAsync`, `WriteAllTextAsync` |

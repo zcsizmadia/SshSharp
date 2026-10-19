@@ -50,9 +50,10 @@ pipelined, though, and one that fails (a full disk, say) may be followed by late
 nearly its full size with a hole that a resume, taking the file's size for what was sent, would keep. So when a write landed past
 one that failed, the upload cuts the remote file back to the part it holds without a gap before it throws. If the server cannot
 cut a file, or a write went unanswered and may still land after the cut, the exception's
-`Data[SftpClient.UploadCleanupIncompleteKey]` is `true`: then do not resume that file; delete it or upload it again. After a
-cancellation the answers to the writes already sent are awaited for at most `OperationTimeout` (5 s when it is not set), so this is
-known. A segmented upload cleans up the same way, and deletes the file where it cannot be cut (see
+`Data[SftpClient.UploadCleanupIncompleteKey]` is `true`: then do not resume that file; delete it or upload it again. The same goes
+when the server refused a write and did not answer the writes after it, which may still land past the gap. After a cancellation
+the answers to the writes already sent are awaited for at most `OperationTimeout` (5 s when it is not set), so this is known, and
+closing the file after a failure or a cancellation waits no longer than that either. A segmented upload cleans up the same way, and deletes the file where it cannot be cut (see
 [Segmented transfers](#segmented-transfers)).
 
 ### Memory
@@ -262,7 +263,7 @@ A write the server refuses is never lost. Which call reports it depends on when 
 |---|---|---|
 | `WriteAsync` | Only the oldest, when 16 are outstanding, and all of them after a seek. | Any that has failed by then. |
 | `FlushAsync` | All of them, then asks the server to write the file to disk (`fsync@openssh.com`) when it can. | Any. |
-| `ReadAsync` (read-write stream), `GetLengthAsync`, `SetLength` | All of them, so they see (or change) what was written. | Any. |
+| `ReadAsync` (read-write stream), `SetLength` | All of them, so they see (or change) what was written. | Any. |
 | `Seek`, `Position` set, `Flush` | No. | Any that has failed by then. |
 | `DisposeAsync`, `Dispose` | All of them, then close the handle (also after a failure). | Any not reported yet. |
 
@@ -395,7 +396,7 @@ var reports = fs.Directory.GetFiles("reports", "*.txt", SearchOption.AllDirector
 | `FileInfo`, `DirectoryInfo` | Attributes are read on first use and kept until `Refresh()`, as in `System.IO`; enumerations carry each entry's attributes, so no request per entry. |
 | Streams | Buffered (64 KiB), sync and async, seekable; read-only streams read ahead, and writes are written behind, so a failed write is thrown (as an `IOException`) by a later call, at the latest by `Flush` or `Dispose`. |
 | Errors | The `System.IO` exceptions, from sync and async methods alike: `FileNotFoundException`, `DirectoryNotFoundException`, `UnauthorizedAccessException`, `IOException` (also a failed session or a timeout). `Exists` never throws: it is false when the answer cannot be had. `Copy` onto the same file is an `IOException`. |
-| Timeouts | `SftpFileSystemOptions.OperationTimeout` (60 s; `Timeout.InfiniteTimeSpan` for none) bounds each request, and for whole-file reads, writes and copies the time without progress, so large files are not cut off. |
+| Timeouts | `SftpFileSystemOptions.OperationTimeout` (60 s; `Timeout.InfiniteTimeSpan` for none) bounds each request, and for whole-file reads, writes and copies the time without progress, so large files are not cut off. A server-side copy (`copy-data`) reports no progress and has no limit. |
 | Sessions | Built from an `SftpClient`, the file system uses that session for its lifetime and does not own it. Built from a session factory (`new SftpFileSystem(ct => ...)`), it opens a session on first use and a new one after the session or its connection fails; reads that met the drop are tried once more, writes are not. It owns those sessions: dispose it. See [Follow a connection that drops](how-to/file-system-adapters.md#follow-a-connection-that-drops). |
 | Not supported | `FileSystemWatcher`, `DriveInfo`, `FileVersionInfo`, `RandomAccess`, `SafeFileHandle` overloads, encryption, `Replace`: they throw `NotSupportedException`. SFTP has no creation times: they read as the last write time, and setting one does nothing. |
 
@@ -414,8 +415,11 @@ It also bounds a request that cannot be sent. When the server's `sftp-server` st
 keep-alives), the channel's flow-control window fills and a write cannot go out; once the server has sent nothing for
 `OperationTimeout`, that send is cut off and the whole SFTP session is closed, since part of the request may have gone out and
 nothing could follow it. Every request waiting on the session then fails with `Timeout`, so uploads, the cleanup of a failed upload
-and disposing a write stream all end, and `SftpClient.IsConnected` is false: open a new session. Without `OperationTimeout`, a
-cancelled request stops waiting for a send that cannot finish, and the send goes on in the background until the session ends. See
+and disposing a write stream all end, and `SftpClient.IsConnected` is false: open a new session. This holds for a send whose caller
+cancelled too: the caller stops waiting at once, but the send goes on in the background, holding up the requests behind it, and
+`OperationTimeout` still bounds it, so the session cannot stay up with nothing able to get through. Without `OperationTimeout`, such
+a send goes on until the session ends. A send that fails (the session or the connection under it ended) also closes the session,
+before the failure is thrown, so `IsConnected` is already false when you catch it. See
 [Fail when the server stops answering](how-to/transfer-files-sftp.md#fail-when-the-server-stops-answering).
 
 The adapters above (`IFileProvider`, `IFileSystem`) have an `OperationTimeout` of their own, which they apply to each call with a

@@ -53,7 +53,8 @@ A `KeyboardInteractive` handler, when set, answers keyboard-interactive itself, 
 [!code-csharp[](../snippets/Passwords.cs#password-change)]
 
 When the password was right but has expired, the server asks for a new one. `ChangePassword` gets the server's `Prompt` (often
-the reason, such as "Password too short.") and its `Language`, and returns the new password, or null to leave it unchanged. The
+the reason, such as "Password too short.") and its `Language`, with the `UserName`, `Host` and `Port` it is for and the `Attempt` (1 for the server's first request, more
+when it refused the new password and asks again, up to 3), and returns the new password, or null to leave it unchanged. The
 client sends the old password again with the new one, in one request, as RFC 4252 section 8 specifies:
 
 ```mermaid

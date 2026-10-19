@@ -77,7 +77,7 @@ What is taken from the configuration: `HostName`, `Port`, `User`, `IdentityFile`
 `UpdateHostKeys`, `HostKeyAlias`, `KexAlgorithms`, `HostKeyAlgorithms`, `Ciphers`, `MACs`, `PubkeyAcceptedAlgorithms` (which
 keys are offered, and how RSA keys sign), `RequiredRSASize`, `PreferredAuthentications`, `PubkeyAuthentication`, `PasswordAuthentication`, `KbdInteractiveAuthentication`,
 `NumberOfPasswordPrompts`, `BatchMode`, `ProxyJump`, `ProxyCommand`, `ServerAliveInterval`, `ServerAliveCountMax`,
-`ConnectTimeout`, `ConnectionAttempts`, `AddressFamily`, `BindAddress`, `BindInterface`, `TCPKeepAlive`, `IPQoS`, `ForwardAgent`,
+`ConnectTimeout`, `ConnectionAttempts`, `AddressFamily`, `BindAddress`, `BindInterface`, `TCPKeepAlive`, `IPQoS`, `Compression`, `ForwardAgent`,
 `AddKeysToAgent` (`ask` with `ConfirmAddKeyToAgent`), `GSSAPIAuthentication`, `GSSAPIDelegateCredentials`, `ChannelTimeout`,
 `ObscureKeystrokeTiming`, `RefuseConnection` and `KnownHostsCommand` (with `AllowKnownHostsCommand`); with `StartForwardings`,
 also `LocalForward`, `RemoteForward`, `DynamicForward`, `PermitRemoteOpen`, `GatewayPorts`, `StreamLocalBindMask`,
@@ -91,7 +91,7 @@ directory, environment, local user, host name canonicalization), a `Password` or
 configured one, `AskHostKey` and `ConfirmHostKeyUpdate`, `ConfirmAddKeyToAgent` (for `AddKeysToAgent ask`), `UseAgent`/`Agent`,
 `ForwardAgentFilter`, `AllowProxyCommand`, `AllowKnownHostsCommand`, a `Proxy` (HTTP or SOCKS), `ConfigureSocket` (run after
 `TCPKeepAlive` and `IPQoS`), `StartForwardings`, `AuthenticationBanner` and a `Logger`. `Port`, `ConnectTimeout`,
-`ConnectionAttempts`, `AddressFamily`, `KeepAliveInterval` and `KeepAliveCountMax` override what the configuration says (see
+`ConnectionAttempts`, `AddressFamily`, `KeepAliveInterval`, `KeepAliveCountMax` and `Compression` override what the configuration says (see
 [Override what the configuration says](how-to/ssh-config-and-known-hosts.md#override-what-the-configuration-says)).
 
 ### Jump hosts and proxy commands
@@ -147,7 +147,7 @@ await using var client = await SshClient.ConnectAsync("ssh.example.com", 22, new
 if given), and `SshProxy.Socks4` SOCKS 4, or 4a for host names. `SshProxy.FromUri(new Uri("socks5://user:pass@proxy:1080"))`
 reads the usual URI form (`http`, `socks5`, `socks5h`, `socks4`, `socks4a`). The server's host name is sent to the proxy, which
 resolves it. A refusal, such as a 407 or a SOCKS error code, is an `SshException` with `Reason = ConnectFailed` saying what
-the proxy answered. A proxy that does not finish its handshake within 30 seconds fails the same way. Host names must be ASCII
+the proxy answered. A proxy that does not finish its handshake within 30 seconds fails with `Reason = Timeout`. Host names must be ASCII
 (use the punycode form of an internationalized name), since the proxy protocols cannot carry anything else.
 
 With `ssh_config`, `SshConfigConnectOptions.Proxy` applies to the first network hop: the destination, or the first
@@ -350,7 +350,7 @@ the ones allowed (`host:port` entries, `*` for any host or port, or `none`; name
 socket path (`RemoteForward /run/app.sock 127.0.0.1:3000` or `RemoteForward /remote.sock /local.sock`) is remote Unix-socket
 forwarding, listed in `client.RemoteSocketForwardings`; as in ssh, a target with a `/` in it is a socket path. `LocalForward` takes
 socket paths on either side: `LocalForward /tmp/docker.sock /var/run/docker.sock`, `LocalForward 15432 /run/postgresql/.s.PGSQL.5432`
-or `LocalForward ~/db.sock db.internal:5432`. Those that listen on a socket here are listed in `client.LocalSocketForwardings`. Their paths
+or `LocalForward ~/db.sock db.internal:5432`. Those that listen on a socket here are listed in `client.LocalSocketForwardings`, each an `SshLocalSocketForwarder` with its `LocalSocketPath`, its `RemoteHost` and `RemotePort` or `RemoteSocketPath`, and `ActiveConnections`. Their paths
 take `ssh_config`'s tokens (`%d`, `%h`, `%C` and the rest) and `${VAR}`, as `ssh` expands them, and a local path `~` too (a
 path on the server never does); a local path may also be written with `\` on Windows, in `RemoteForward` too. `StreamLocalBindUnlink yes` replaces a stale socket file instead of failing, and `StreamLocalBindMask`
 sets the socket file's permissions (`0177`, owner-only, by default; `0117` lets the owner's group connect). `RemoteForward` socket

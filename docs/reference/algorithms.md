@@ -108,7 +108,7 @@ A server that offers nothing else fails the connection with `SshFailureReason.Ke
   [Choose algorithms and authentication methods](../how-to/algorithms-and-authentication-order.md).
 - **Host certificates:** when a certificate authority is trusted for the host, the certificate algorithms are asked for first
   with the default `HostKeyAlgorithms` or a `+` or `-` change to it; a plain or `^` list is used as written, as in `ssh`.
-- **FIPS mode:** `SshClientOptions.FipsMode` restricts every list, yours included, to the FIPS column; see
+- **FIPS mode:** `SshClientOptions.FipsMode` restricts every transport list, yours included, to the FIPS column (`PubkeyAcceptedAlgorithms`, which governs your own keys, is not filtered); see
   [FIPS mode](../how-to/fips-mode.md).
 - **RSA host key size:** `SshClientOptions.RequiredRsaSize` (`RequiredRSASize` in `ssh_config`), 2048 bits by default, 1024 at
   the least.
