@@ -82,11 +82,24 @@ public class CompressionInteropTests
         await client.RekeyAsync(Timeout());
         await Assert.That(client.Connection.KeyExchangeCount).IsGreaterThan(exchanges);
 
-        // Input the other way (compressed where SshSharp compresses), echoed back.
+        // Input the other way (compressed where SshSharp compresses), echoed back. OpenSSH for Windows deadlocks when a command's
+        // output backs up while its input is being closed (#86, see SessionInteropTests): its log shows rcvd eof, obuf empty and
+        // chan_shutdown_write, and then nothing, with or without compression. So against Windows the server hashes the input instead,
+        // which still proves every byte arrived, with only one line back through sshd's stdout pipe.
         var input = Encoding.ASCII.GetBytes(string.Concat(Enumerable.Repeat("compressible line of text\n", 20_000)));
-        var echoed = await client.RunCommandAsync("cat", null, SshCommandInput.FromBytes(input), Timeout());
-        await Assert.That(echoed.ExitStatus).IsEqualTo(0);
-        await Assert.That(echoed.StandardOutput.Span.SequenceEqual(input)).IsTrue();
+        if (RealServer.IsWindows)
+        {
+            var hashed = await client.RunCommandAsync("sha256sum", null, SshCommandInput.FromBytes(input), Timeout());
+            await Assert.That(hashed.ExitStatus).IsEqualTo(0);
+            await Assert.That(hashed.StandardOutputText.Split(' ')[0])
+                .IsEqualTo(Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(input)).ToLowerInvariant());
+        }
+        else
+        {
+            var echoed = await client.RunCommandAsync("cat", null, SshCommandInput.FromBytes(input), Timeout());
+            await Assert.That(echoed.ExitStatus).IsEqualTo(0);
+            await Assert.That(echoed.StandardOutput.Span.SequenceEqual(input)).IsTrue();
+        }
 
         var after = await client.RunCommandAsync("echo still-here", Timeout());
         await Assert.That(after.StandardOutputText).IsEqualTo("still-here\n");
