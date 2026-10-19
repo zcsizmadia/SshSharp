@@ -61,7 +61,13 @@ A token gives the same bound without the option, with an exception of your choos
 
 A token bounds one call, however long it should take. For SFTP, where a large transfer may rightly take hours, set
 `OperationTimeout` instead: it fails a request only once the server has sent nothing at all for that long, so slow transfers go on
-while a hung server is caught. See [Fail when the server stops answering](transfer-files-sftp.md#fail-when-the-server-stops-answering).
+while a hung server is caught, including one that stops reading what you send. See
+[Fail when the server stops answering](transfer-files-sftp.md#fail-when-the-server-stops-answering).
+
+A cancelled SFTP request returns at once, even while it is being sent: a request is never cut off halfway (the server would read a
+broken stream), so the send goes on in the background, and the session stays usable once it completes. A cancelled upload still
+waits for the answers to the writes it already sent, for at most `OperationTimeout` (5 s when it is not set), to know what the
+server holds and leave a file a resume can continue.
 
 ## Stop the program when you give up
 

@@ -1,11 +1,15 @@
 # Threat model
 
 SshSharp is an SSH **client** library. This page lists who and what it trusts, and what it does about the rest.
-It is reviewed before each release; the last review covered everything up to 1.0.0, including SFTP and its adapters,
-proxies, remote dynamic and Unix-socket forwarding, destination-constrained agent keys, SSH signatures, sntrup761, Kerberos
-(`gssapi-with-mic`), adding keys to the agent and Pageant, revoked host keys (KRLs), `ping@openssh.com`, channel idle timeouts
-(`ChannelTimeout`) and segmented SFTP downloads, and the areas added in 1.0.0: keys held elsewhere (`SshKeySigner`), SFTP
-`Preserve` with permissions, and the dependency injection package (`SshSharp.Extensions.DependencyInjection`).
+It is reviewed before each release; the last review covered everything up to 1.1.0. Up to 1.0.0 that included SFTP and its
+adapters, proxies, remote dynamic and Unix-socket forwarding, destination-constrained agent keys, SSH signatures, sntrup761,
+Kerberos (`gssapi-with-mic`), adding keys to the agent and Pageant, revoked host keys (KRLs), `ping@openssh.com`, channel idle
+timeouts (`ChannelTimeout`), segmented SFTP downloads, keys held elsewhere (`SshKeySigner`), SFTP `Preserve` with permissions,
+and the dependency injection package (`SshSharp.Extensions.DependencyInjection`). The 1.1.0 review added: Diffie-Hellman group
+exchange, the in-process agent (`SshAgent.FromKeys`) and the forwarded agent's filter, jump hosts (`JumpHosts`, and their
+credentials), custom proxies, SOCKS 5 authentication on the local SOCKS proxy, issuing certificates (`SshCertificateBuilder`),
+the public KRL reader (`SshKeyRevocationList`), the built-in DNS canonicalizer, segmented SFTP uploads, recursive SFTP listings
+and deletes, and local Unix-socket forwarding. Compression is not part of it; it is reviewed with its own change.
 
 ## Trusted
 
@@ -87,7 +91,10 @@ A man in the middle can read, change, drop and inject bytes. The server itself m
   real keys removed as stale. Only exact, plain host lines in the first user file are ever removed.
 - **Recording host keys:** the host name is written into `known_hosts` only if it is a literal name. White space, control
   characters, commas, `*`, `?` and `!` are refused, since they would add lines or hosts, or turn the entry into a pattern that
-  trusts the key for other hosts.
+  trusts the key for other hosts. Every line the library writes for the application (`KnownHostsEntry`, `KnownHostsFile.Add`,
+  `AppendAsync`) is checked the same way: host patterns and the key type must be single fields, and the comment must not contain
+  CR, LF or other control characters (a tab is allowed), so a value from the application, such as a comment taken from user input,
+  cannot add a line (an `@cert-authority` line, say) to the file.
 - **Revoked host keys (`RevokedHostKeys`):** checked before anything else, in every `StrictHostKeyChecking` mode, for the plain key
   and a certificate's authority, serial and key id. A file that cannot be read, or a KRL that is malformed or has a section or
   critical extension this library does not know, refuses every host key, as ssh does, rather than let a revoked key through. The
@@ -153,7 +160,8 @@ packet buffers. With compression off there are none.
   authenticate the peer. Each forwarding serves at most `maxConnections` (100 by default) at once and refuses the server's channels
   above it; a handler that throws closes its own connection only, and its exception is logged by type, never with its message.
   Disposal waits `HandlerShutdownTimeout` (5 seconds by default) for cancelled handlers, then closes their connections; with
-  `Timeout.InfiniteTimeSpan`, a handler that ignores its token holds disposal up for as long as it runs.
+  `Timeout.InfiniteTimeSpan`, a handler that ignores its token holds disposal up for as long as it runs. A connection that the client
+  takes only after disposal has gathered the ones it waits for is closed without reaching the handler: none escapes the bound.
 - **Agent forwarding** relays the agent protocol unchanged, as `ssh -A` does: while the connection is up, the server can ask the
   agent to sign with any of its keys. Forward the agent only to servers you trust, and narrow what it can do: with
   `ForwardAgentFilter`, destination constraints (`ssh-add -h`), or the agent's own confirmation (`ssh-add -c`) for sensitive keys.
@@ -195,6 +203,9 @@ packet buffers. With compression off there are none.
   create the OpenSSH agent's pipe while the service is stopped, or Pageant's (its name is derived from the user name and a value
   every process on the machine computes alike). SshSharp therefore uses an agent pipe only when its owner is the current user,
   SYSTEM or the Administrators group, as PuTTY checks Pageant's pipe; otherwise no signing request or key is sent to it.
+- **The agent's path** (a socket, or a pipe whose name, as Pageant's, holds the user name) is never put in an exception message or
+  a log: an agent that cannot be reached is reported by the system error's type or socket error code, not its message, which can
+  quote the path.
 - **Adding keys** (`AddKeyAsync`, `AddKeysToAgent`): the private key goes to the agent the application named. `AddKeysToAgent`
   adds only identity-file keys the server accepted, never keys the application passed in `PrivateKeys`. With `AddKeysToAgent ask`,
   a key goes only after the application's `ConfirmAddKeyToAgent` says yes; without that callback, or in `BatchMode`, none goes,
@@ -272,7 +283,11 @@ connection, but not read or change it: each host's key is verified end to end, b
   world-writable. A directory's mode is applied after its contents, and a name listed twice is fetched once.
 - A recursive delete (`DeleteDirectoryAsync(path, recursive: true)`) removes symbolic links without following them, and checks
   every subdirectory with `LSTAT` before entering it, so a listing that describes a link as a directory cannot lead it outside the
-  tree. It is bounded like a directory download (64 levels; each listing bounded) and touches only the server's files.
+  tree. It is bounded like a directory download (64 levels; each listing bounded) and touches only the server's files. The
+  checks cannot be atomic: SFTP has no `O_NOFOLLOW` or `openat`, so every request names a path the server resolves again. Someone
+  else who can write inside the tree on the server (another user, a process there) can swap a checked directory for a link between
+  the `LSTAT` and the requests that follow, and the delete then removes the files the link leads to, as far as this login's rights
+  on the server reach. Delete recursively only trees no one else can change while it runs.
 - A listing keeps up to 8 READDIR requests in flight on its handle and takes the batches in the order it asked for them; the
   replies to requests past the end (EOF, or an error from some servers) are read and dropped before the handle is closed. A
   recursive listing (`SftpListOptions.Recursive`) only reads: it goes at most `MaxDepth` levels down (64 by default, 1024 at most),
@@ -319,7 +334,10 @@ connection, but not read or change it: each host's key is verified end to end, b
   in allowed-signers files. Revocation is not part of these checks: check it with `SshKeyRevocationList` (a KRL or a key list, as
   sshd's `RevokedKeys`), which revokes a certificate by serial or key id for its authority, and when its certified key or its
   authority's key is revoked. The list is parsed with the same bounds and strictness as `RevokedHostKeys` (a malformed KRL, or one
-  with a section this library does not know, throws rather than being read in part) and its signatures are not verified: it is
+  with a section this library does not know, throws rather than being read in part). In a text key list, a certificate line
+  revokes the key it certifies, FIDO security-key certificates (`sk-...-cert-v01@openssh.com`) included, and a certificate line
+  whose key cannot be read throws for the whole list rather than being skipped, so it cannot leave a revoked key accepted. Its
+  signatures are not verified: it is
   local configuration, as trusted as the code that loads it. Vendor extension values (`ExtensionValues`) are what the CA wrote;
   servers ignore extensions they do not know, and an application that acts on one is trusting the CA for it.
 - **Signatures by an expected key** (`SshSignature.Verify(message, namespace, expectedKey)`): accepted when that key, or a
@@ -351,6 +369,9 @@ connection, but not read or change it: each host's key is verified end to end, b
 - Passwords, private keys and command text are never logged. User names and host names are not logged either; host key
   fingerprints and algorithm names are. The connection's addresses (`SshClient.RemoteEndPoint`, `LocalEndPoint`) and session id
   are there for the application to read, and are never logged or recorded in telemetry.
+- Exception messages, which applications log, follow the same rule: no user names, host names (the canonicalizer's failure
+  included) or names that usually are user names (a certificate's principals, the agent's path). A file or SFTP path the
+  application passed to the failing call can appear, as in .NET's own I/O exceptions.
 - `SshAuthenticationException` (its message and `Attempts`) names methods, outcomes and the SHA-256 fingerprints of the keys
   offered, which identify public keys only. It never holds a password, a keyboard-interactive answer or the user name. A key
   fingerprint can link a failed login to its owner, as it can in the server's own log; treat it as you treat host key fingerprints.
@@ -371,9 +392,13 @@ connection, but not read or change it: each host's key is verified end to end, b
 - `Match exec` runs nothing unless the application opts in with an exec runner.
 - `ProxyCommand` runs by default, as with `ssh`. Applications that load configurations they do not control can turn it off
   with `SshConfigConnectOptions.AllowProxyCommand = false`.
-- The password and keyboard-interactive answers given in `SshConfigConnectOptions` go to the destination only: a `ProxyJump`
-  hop, perhaps run by someone else, is never offered them, and logs in with keys or the agent. The same holds for
-  `PasswordProvider` and `ChangePassword`: they are never called for a hop, nor in `BatchMode`.
+- The password, keyboard-interactive answers and keys given in `SshConfigConnectOptions` (`Password`, `KeyboardInteractive`,
+  `PrivateKeys`) go to the destination only: a `ProxyJump` hop, perhaps run by someone else, is never offered them, and logs in
+  with its own configuration's identity files and the agent. The same holds for `PasswordProvider` and `ChangePassword`: they are
+  never called for a hop, nor in `BatchMode`. (Before 1.1, `PrivateKeys` were offered to every hop as well: a hop learned the
+  public keys, and could have accepted one of them.)
+- `PubkeyAcceptedAlgorithms` narrows which keys are offered, as in `ssh`; it only ever removes keys from what would otherwise be
+  offered, and never brings SHA-1 `ssh-rsa` signatures back.
 - `Include` is bounded: at most 16 levels deep and 1,024 files in all, so a configuration cannot make resolution parse without end.
 - `KnownHostsCommand` runs only with `SshConfigConnectOptions.AllowKnownHostsCommand = true`. It is off by default, unlike
   `ProxyCommand`, because its output is trusted as known_hosts lines: a configuration the application does not control must not
@@ -392,13 +417,15 @@ connection, but not read or change it: each host's key is verified end to end, b
   forged answer cannot impersonate a host whose key is known; with `StrictHostKeyChecking` other than `yes`, a new name may be
   accepted as for any new host. A CNAME target replaces the name only when `CanonicalizePermittedCNAMEs` allows that pair, which
   keeps a forged CNAME from moving the connection (and its known_hosts lookup) to an arbitrary name. Canonicalization makes no
-  lookups for a host reached through `ProxyJump` or `ProxyCommand` unless the configuration says `always`.
+  lookups for a host reached through `ProxyJump`, `ProxyCommand` or `SshConfigConnectOptions.Proxy` unless the configuration says
+  `always`, so with a proxy that resolves names itself (`socks5h`, HTTP), the names are not sent to this machine's DNS.
 - Host and user names supplied by the caller are substituted into those commands (`%h`, `%n`, `%r`), so they are refused when
   they contain shell metacharacters, control characters or a leading `-` (the CVE-2023-51385 pattern). Host names may not
   contain white space either, which would split `%h` into extra arguments. User names may (Windows account names can).
 - The config file itself is trusted to the same degree OpenSSH trusts it: whoever can edit it can run commands as the user.
   Values it sets (`HostName`, `User`) are used as written.
-- Socket paths in `LocalForward` and `RemoteForward` take `%` tokens and `${VAR}`, as in `ssh`. A `RemoteForward` path is expanded
+- Socket paths in `LocalForward` and `RemoteForward` take `%` tokens and `${VAR}`, as in `ssh`; only paths on this machine take
+  `~`, so a path on the server never carries this machine's home directory (and user name). A server-side path is expanded
   on this machine and sent to the server as one string (no shell is involved on either side), so a caller-supplied host or user
   name in `%h` or `%r` can only change which path is asked for; the server's own `StreamLocalBindMask` and permissions apply there.
   `StreamLocalBindMask` can widen a local socket's permissions (see [Local listeners](#local-listeners-port-forwarding-and-socks)).
@@ -423,7 +450,7 @@ connection, but not read or change it: each host's key is verified end to end, b
   `AcceptNewHostKeys`); behind an endpoint that pins its keys, a hop without its own fails validation rather than falling back to
   files a pinned deployment does not have.
 - `UseAgent` lets the endpoint (or a hop) sign with the agent's keys: an `SshAgent` registered in the container, else the user's
-  agent. Every key the agent holds is offered to that server, as with ssh; an application that should offer one key only registers
+  agent (with `ConfigAlias` too, in place of ssh_config's `IdentityAgent`). Every key the agent holds is offered to that server, as with ssh; an application that should offer one key only registers
   an in-process agent (`SshAgent.FromKeys`) with it. Nothing is added to the agent.
 - `UseSshTunnel` sends an `HttpClient`'s connections through the endpoint's server, which resolves the host names and connects to
   them (`direct-tcpip`): the server sees which services are called, but not the traffic when it is HTTPS, as TLS runs end to end.

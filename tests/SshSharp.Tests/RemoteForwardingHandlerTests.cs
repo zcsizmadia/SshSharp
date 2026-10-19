@@ -1,6 +1,7 @@
 using System.Text;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Time.Testing;
+using SshSharp.Protocol;
 using SshSharp.Tests.Protocol;
 
 namespace SshSharp.Tests;
@@ -403,12 +404,15 @@ public class RemoteForwardingHandlerTests
     public async Task TheGracePeriod_IsConfigurable_AndRunsOnTheConnectionsClock(bool unix)
     {
         var time = new FakeTimeProvider();
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var cancelled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var finished = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         await using var server = new FakeSessionServer();
         await using var client = await ConnectAsync(server, time: time);
         var forwarding = await ForwardAsync(client, unix, async (connection, ct) =>
         {
+            started.SetResult();
+
             // Sees its token cancelled, but reads on without it: only the connection closing ends this.
             await using var registration = ct.Register(() => cancelled.TrySetResult());
             var buffer = new byte[1024];
@@ -431,7 +435,10 @@ public class RemoteForwardingHandlerTests
         forwarding.HandlerShutdownTimeout = grace;
         await Assert.That(forwarding.HandlerShutdownTimeout).IsEqualTo(grace);
 
+        // The server has the channel once it is confirmed, but the client starts the handler only after that: disposing before then
+        // would close the connection without it (see AConnectionAcceptedDuringDisposal_IsClosed_WithoutReachingTheHandler).
         await using var remote = (await ConnectRemoteAsync(server, forwarding))!;
+        await started.Task.WaitAsync(Timeout());
         var disposing = forwarding.DisposeAsync().AsTask();
         await cancelled.Task.WaitAsync(Timeout());
 
@@ -452,6 +459,56 @@ public class RemoteForwardingHandlerTests
         await Assert.That(advanced).IsGreaterThanOrEqualTo(grace);
         await finished.Task.WaitAsync(Timeout());
         await Assert.That(await ReadToEndAsync(remote)).IsEqualTo(string.Empty);
+    }
+
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
+    public async Task AConnectionAcceptedDuringDisposal_IsClosed_WithoutReachingTheHandler(bool unix)
+    {
+        // The connection's clock never moves, so a handler disposal knew of would hold it for good: it must not know of any.
+        var time = new FakeTimeProvider();
+        var handled = 0;
+        var held = new TaskCompletionSource<Action>(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var server = new FakeSessionServer();
+        await using var client = await ConnectAsync(server, time: time);
+        var forwarding = await ForwardAsync(client, unix, async (connection, _) =>
+        {
+            // Ignores its token: only the forwarding closing its connection would end this.
+            Interlocked.Increment(ref handled);
+            var buffer = new byte[1024];
+            try
+            {
+                while (await connection.Stream.ReadAsync(buffer, CancellationToken.None) > 0)
+                {
+                }
+            }
+            catch (ObjectDisposedException)
+            {
+                // Closed under it.
+            }
+        });
+
+        // The client confirms a channel the server opens, then starts serving it. Hold that start back: the server has the connection
+        // (it opened it before the cancel), and the client takes it only once disposal is done.
+        var accept = client.Connection.AcceptChannel!;
+        client.Connection.AcceptChannel = (type, data) =>
+        {
+            var start = accept(type, data);
+            return start is null || ReferenceEquals(start, SshConnection.RefuseResourceShortage)
+                ? start
+                : channel => held.SetResult(() => start(channel));
+        };
+
+        await using var remote = (await ConnectRemoteAsync(server, forwarding))!;
+        var serve = await held.Task.WaitAsync(Timeout());
+        await forwarding.DisposeAsync().AsTask().WaitAsync(Timeout());
+        serve();
+
+        // Nothing would cancel, wait for or close a handler started now: the connection is closed instead, and its counts given back.
+        await Assert.That(await ReadToEndAsync(remote)).IsEqualTo(string.Empty);
+        await WaitUntilAsync(() => forwarding.ActiveConnections == 0 && client.ForwardedConnections == 0);
+        await Assert.That(Volatile.Read(ref handled)).IsEqualTo(0);
     }
 
     [Test]

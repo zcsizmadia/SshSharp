@@ -82,7 +82,7 @@ sequenceDiagram
 |---|---|
 | `SshCommandInput.FromText(text, encoding)` | The text, encoded as UTF-8 (or the `Encoding` given), without a byte order mark. Line endings are sent as written: use `\n` for a Unix server. |
 | `SshCommandInput.FromBytes(bytes)` | The bytes as they are. |
-| `SshCommandInput.FromStream(stream)` | The stream, from its current position to its end, read while the command runs. The stream stays open; dispose it yourself. |
+| `SshCommandInput.FromStream(stream)` | The stream, from its current position to its end, read while the command runs. The stream stays open; dispose it yourself. A read in progress when the command ends may finish after the call returns (see below). |
 
 A script on standard input avoids quoting it into a command line:
 
@@ -95,6 +95,11 @@ A stream is sent as it is read, so a large file does not have to fit in memory:
 With `standardInput: null` the command's input is empty: end-of-file is sent at once. A command may exit, or close its input, before
 reading all of it, as `head` does. Like a pipe, that is not an error, and the rest is not sent. A failure reading your stream
 fails the call with that exception, and the connection stays usable.
+
+When the command ends first, the read in progress on your stream is cancelled. A stream whose `ReadAsync` ignores cancellation,
+such as some pipes and network streams, is not waited for: the call returns with the command's result, and that one read may still
+complete or fail afterwards. Its data is discarded and its error is not reported. If you dispose such a stream right after the
+call, the pending read may end with `ObjectDisposedException`, which SshSharp also ignores.
 
 ## Set environment variables or a terminal
 

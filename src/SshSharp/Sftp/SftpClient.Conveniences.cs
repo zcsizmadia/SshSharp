@@ -96,6 +96,12 @@ public sealed partial class SftpClient
     /// When <paramref name="path"/> is itself a symbolic link, only the link is deleted, as <c>rm -r</c> and
     /// <see cref="Directory.Delete(string, bool)"/> do.
     /// </para>
+    /// <para>
+    /// Not following links relies on the server's state not changing under the delete. SFTP has no <c>O_NOFOLLOW</c> or <c>openat</c>:
+    /// each request names a path the server resolves again, so a directory checked with <c>LSTAT</c> can be replaced by a link before
+    /// the requests that follow. Someone else who can write inside the tree on the server can use that to make the delete remove
+    /// files outside it, wherever this login may delete. Delete recursively only trees no one else can change while it runs.
+    /// </para>
     /// </remarks>
     /// <exception cref="SftpException">The path does not exist, is not a directory, or the server refused to delete something in it
     /// (for example <see cref="SftpStatusCode.PermissionDenied"/>).</exception>

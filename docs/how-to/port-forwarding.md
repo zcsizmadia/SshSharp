@@ -196,7 +196,8 @@ How the handler runs:
 - **Stopping.** The handler's token is cancelled when the forwarder is disposed or the SSH connection ends. Disposing the forwarder
   sends the cancel request to the server, so it stops listening; it then cancels the handlers and waits up to
   `HandlerShutdownTimeout` (5 seconds by default) for them to return. The connections of any still running then are closed under
-  them, and disposal returns without waiting further.
+  them, and disposal returns without waiting further. A connection the server forwarded just before the cancel, but that reaches
+  the client only once disposal has taken the connections it waits for, is closed without being passed to the handler.
 
 The forwarder is the usual `SshRemotePortForwarder` (or `SshRemoteSocketForwarder`), with `RemotePort` set when port 0 was
 requested; its `LocalHost` is empty and `LocalPort` 0. `IsHandler` is true for a forwarding to a handler, and `MaxConnections` is
@@ -258,7 +259,8 @@ before disposing; forwardings to a host and port, or dynamic ones, close their c
 - **From `ssh_config`.** `LocalForward`, `RemoteForward` and `DynamicForward` start with the connection when
   `SshConfigConnectOptions.StartForwardings` is true, Unix-socket forms included (`LocalForward /tmp/docker.sock /var/run/docker.sock`).
   Socket paths take `ssh_config`'s `%` tokens and `${VAR}` on both sides (`RemoteForward /home/%r/app.sock /run/app.sock`), and the
-  local one `~` too; `StreamLocalBindMask` sets the mode of a local socket.
+  local one `~` too (a path on the server never takes `~`, which would name this machine's home directory); `StreamLocalBindMask`
+  sets the mode of a local socket.
 
 ## See also
 

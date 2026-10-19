@@ -281,7 +281,7 @@ internal sealed class SshConfigResolver(IReadOnlyList<SshConfigDocument> documen
             return null;
         }
 
-        var viaProxy = IsSet("proxycommand") || IsSet("proxyjump");
+        var viaProxy = IsSet("proxycommand") || IsSet("proxyjump") || options.ViaProxy;
         var host = CurrentHost();
         var maxDots = _values.TryGetValue("canonicalizemaxdots", out var dots) && dots.Count > 0
             && int.TryParse(dots[0], NumberStyles.None, CultureInfo.InvariantCulture, out var d) ? d : 1;
@@ -304,7 +304,7 @@ internal sealed class SshConfigResolver(IReadOnlyList<SshConfigDocument> documen
         var canonical = answers.Canonical(host, domains);
         if (canonical is null)
         {
-            RequireFallbackLocal(host);
+            RequireFallbackLocal();
         }
 
         return canonical;
@@ -314,11 +314,12 @@ internal sealed class SshConfigResolver(IReadOnlyList<SshConfigDocument> documen
     /// <c>CanonicalizeFallbackLocal</c>, after no canonical name was found: on (the default), the name is used as it is; <c>no</c> fails.
     /// </summary>
     /// <exception cref="InvalidOperationException"><c>CanonicalizeFallbackLocal no</c>.</exception>
-    private void RequireFallbackLocal(string host)
+    private void RequireFallbackLocal()
     {
         if (_values.TryGetValue("canonicalizefallbacklocal", out var fallback) && fallback.Count > 0 && fallback[0].ToLowerInvariant() is "no" or "false")
         {
-            throw new InvalidOperationException($"Could not canonicalize host name '{host}' and CanonicalizeFallbackLocal is off.");
+            // The message leaves the host name out: exception messages end up in logs (docs/diagnostics.md).
+            throw new InvalidOperationException("Could not canonicalize the host name, and CanonicalizeFallbackLocal is off.");
         }
     }
 
@@ -339,9 +340,10 @@ internal sealed class SshConfigResolver(IReadOnlyList<SshConfigDocument> documen
             return null;
         }
 
-        var family = _values.TryGetValue("addressfamily", out var af) && af.Count > 0
+        // The family the connection will use: the caller's override (SshConfigConnectOptions.AddressFamily), else the configuration's.
+        var family = options.AddressFamily ?? (_values.TryGetValue("addressfamily", out var af) && af.Count > 0
             ? af[0].ToLowerInvariant() switch { "inet" => SshAddressFamily.Inet, "inet6" => SshAddressFamily.Inet6, _ => SshAddressFamily.Any }
-            : SshAddressFamily.Any;
+            : SshAddressFamily.Any);
         if (host.EndsWith('.'))
         {
             if (answers.Lookup(host, family) is { } anchored)
@@ -349,7 +351,7 @@ internal sealed class SshConfigResolver(IReadOnlyList<SshConfigDocument> documen
                 return FollowCname(host[..^1], anchored);
             }
 
-            RequireFallbackLocal(host);
+            RequireFallbackLocal();
             return null;
         }
 
@@ -372,7 +374,7 @@ internal sealed class SshConfigResolver(IReadOnlyList<SshConfigDocument> documen
             }
         }
 
-        RequireFallbackLocal(host);
+        RequireFallbackLocal();
         return FollowBareName(host, family);
     }
 

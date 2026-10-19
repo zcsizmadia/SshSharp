@@ -300,6 +300,11 @@ internal sealed class FakeSshServer : IAsyncDisposable
     /// <summary>Every packet received from the client after the first key exchange: its message number and whether it came compressed.</summary>
     public System.Collections.Concurrent.ConcurrentQueue<(byte Type, bool Compressed)> ReceivedPackets { get; } = new();
 
+    /// <summary>The payload bytes of every packet received from the client, key exchange messages included (after decompression).</summary>
+    public long PayloadBytesReceived => Interlocked.Read(ref _payloadBytesReceived);
+
+    private long _payloadBytesReceived;
+
     /// <summary>Every packet sent to the client: its message number and whether it went compressed.</summary>
     public System.Collections.Concurrent.ConcurrentQueue<(byte Type, bool Compressed)> SentPackets { get; } = new();
 
@@ -794,6 +799,7 @@ internal sealed class FakeSshServer : IAsyncDisposable
                     packet = _inflater!.Decompress(packet!);
                 }
 
+                Interlocked.Add(ref _payloadBytesReceived, packet!.Payload.Length); // decompressed
                 if (KeyExchangeCount > 0)
                 {
                     ReceivedPackets.Enqueue((packet!.Payload.IsEmpty ? (byte)0 : packet.Payload.Span[0], compressed));

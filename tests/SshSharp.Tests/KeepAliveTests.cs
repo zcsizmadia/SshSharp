@@ -176,4 +176,53 @@ public class KeepAliveTests
         await Assert.That((await client.Connection.SendGlobalRequestAsync("no-reply@example.com", false, null, Timeout())).Success).IsTrue();
         await Assert.That(client.IsConnected).IsTrue();
     }
+
+    [Test]
+    [Arguments(0L)] // ServerAliveInterval 0
+    [Arguments(-10_000L)] // Timeout.InfiniteTimeSpan
+    [Arguments(60L * 24 * 3600 * 1000 * 10_000)] // 60 days: longer than a timer waits
+    public async Task AnIntervalThatSendsNone_ConnectsWithoutKeepAlives(long ticks)
+    {
+        // These used to pass the setter and then fail the connection after authentication.
+        var time = new FakeTimeProvider();
+        await using var server = new FakeSessionServer();
+        _ = server.StartAsync();
+        var options = new SshClientOptions
+        {
+            UserName = "tester",
+            Password = "secret",
+            HostKeyVerifier = SshHostKeyVerifier.FromDelegate((_, _) => ValueTask.FromResult(true)),
+            KeepAliveInterval = TimeSpan.FromTicks(ticks),
+            TimeProvider = time,
+        };
+        await Assert.That(options.EffectiveKeepAliveInterval).IsNull();
+        await using var client = await SshClient.ConnectAsync(server.ClientStream, options, leaveOpen: true, Timeout());
+        await TickAsync(time);
+        await TickAsync(time);
+        await Assert.That(Probes(server)).IsEqualTo(0);
+        await Assert.That(client.IsConnected).IsTrue();
+    }
+
+    [Test]
+    public async Task ANegativeInterval_OrCount_IsRefusedWhenSet()
+    {
+        await Assert.That(() => new SshClientOptions
+        {
+            UserName = "tester",
+            HostKeyVerifier = SshHostKeyVerifier.Pinned("SHA256:unused"),
+            KeepAliveInterval = TimeSpan.FromSeconds(-1),
+        }).Throws<ArgumentOutOfRangeException>();
+        await Assert.That(() => new SshClientOptions
+        {
+            UserName = "tester",
+            HostKeyVerifier = SshHostKeyVerifier.Pinned("SHA256:unused"),
+            KeepAliveCountMax = -1,
+        }).Throws<ArgumentOutOfRangeException>();
+        await Assert.That(new SshClientOptions
+        {
+            UserName = "tester",
+            HostKeyVerifier = SshHostKeyVerifier.Pinned("SHA256:unused"),
+            KeepAliveInterval = Interval,
+        }.EffectiveKeepAliveInterval).IsEqualTo(Interval);
+    }
 }

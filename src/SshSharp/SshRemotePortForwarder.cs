@@ -25,6 +25,11 @@ public sealed class SshRemotePortForwarder : IAsyncDisposable
     // Kept apart from _stop: a connection the server forwarded just before disposal may start after _stop is disposed.
     private readonly CancellationToken _stopToken;
     private readonly HashSet<Task> _connections = [];
+
+    // Set under the _connections lock when DisposeAsync takes the connections it waits for. A channel the server opened before the
+    // cancel is confirmed before it is accepted, so it can be accepted after that: it is closed then, not served, since nothing would
+    // cancel its handler, wait for it or close its connection.
+    private bool _closing;
     private int _disposed;
     private int _active;
 
@@ -167,6 +172,11 @@ public sealed class SshRemotePortForwarder : IAsyncDisposable
         Task connection;
         lock (_connections)
         {
+            if (_closing)
+            {
+                return CloseLateAsync(channel, Release);
+            }
+
             connection = ServeAsync(channel, data);
             _connections.Add(connection);
         }
@@ -201,6 +211,22 @@ public sealed class SshRemotePortForwarder : IAsyncDisposable
         finally
         {
             Interlocked.Decrement(ref _active);
+        }
+    }
+
+    /// <summary>
+    /// Closes a channel accepted after disposal took the connections it waits for, and gives back its reservation with
+    /// <paramref name="release"/>. Never faults.
+    /// </summary>
+    internal static async Task CloseLateAsync(SshChannel channel, Action release)
+    {
+        try
+        {
+            await CloseQuietlyAsync(channel).ConfigureAwait(false);
+        }
+        finally
+        {
+            release();
         }
     }
 
@@ -421,7 +447,8 @@ public sealed class SshRemotePortForwarder : IAsyncDisposable
     /// Cancels the forwarding on the server (<c>cancel-tcpip-forward</c>) and closes every forwarded connection. For a forwarding to a
     /// handler, the token each handler was given is cancelled, and this waits up to <see cref="HandlerShutdownTimeout"/> (5 seconds by
     /// default) for the handlers to return; the connections of any still running then are closed under them, and this returns without
-    /// waiting for them further.
+    /// waiting for them further. A connection the server opened before the cancel, but that reaches this forwarder only after disposal
+    /// has gathered the connections it waits for, is closed without being served.
     /// </summary>
     public async ValueTask DisposeAsync()
     {
@@ -444,6 +471,7 @@ public sealed class SshRemotePortForwarder : IAsyncDisposable
         Task[] open;
         lock (_connections)
         {
+            _closing = true;
             open = [.. _connections];
         }
 

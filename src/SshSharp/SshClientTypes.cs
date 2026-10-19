@@ -147,6 +147,7 @@ public sealed class SshClientOptions
     /// for exactly one hidden input. With a <see cref="PasswordProvider"/> too, this password is tried first, and the provider is asked
     /// only if the server refuses it.
     /// </summary>
+    [System.Diagnostics.DebuggerBrowsable(System.Diagnostics.DebuggerBrowsableState.Never)]
     public string? Password { get; init; }
 
     /// <summary>
@@ -310,16 +311,49 @@ public sealed class SshClientOptions
     public string? HostKeyAlias { get; init; }
 
     /// <summary>
-    /// Send a keep-alive when the server has been silent this long (OpenSSH's <c>ServerAliveInterval</c>). Null (the default) sends none.
-    /// Keep-alives detect a dead connection and stop idle NAT and firewall timeouts from dropping it.
+    /// Send a keep-alive when the server has been silent this long (OpenSSH's <c>ServerAliveInterval</c>). Null (the default),
+    /// <see cref="TimeSpan.Zero"/> (as <c>ServerAliveInterval 0</c>) and <see cref="System.Threading.Timeout.InfiniteTimeSpan"/> send none,
+    /// and so does an interval longer than about 49 days, the longest a timer waits. Keep-alives detect a dead connection and stop idle
+    /// NAT and firewall timeouts from dropping it.
     /// </summary>
-    public TimeSpan? KeepAliveInterval { get; init; }
+    /// <exception cref="ArgumentOutOfRangeException">The value is negative (other than infinite).</exception>
+    public TimeSpan? KeepAliveInterval
+    {
+        get => _keepAliveInterval;
+        init
+        {
+            // Checked here, so the mistake is not found only after the connection has been authenticated.
+            if (value is { } interval && interval < TimeSpan.Zero && interval != System.Threading.Timeout.InfiniteTimeSpan)
+            {
+                throw new ArgumentOutOfRangeException(nameof(value), interval, "The keep-alive interval must not be negative (zero or infinite sends none).");
+            }
+
+            _keepAliveInterval = value;
+        }
+    }
+
+    private readonly TimeSpan? _keepAliveInterval;
+
+    /// <summary>The keep-alive interval to run, or null when <see cref="KeepAliveInterval"/> sends none.</summary>
+    internal TimeSpan? EffectiveKeepAliveInterval =>
+        _keepAliveInterval is { } interval && interval > TimeSpan.Zero && interval <= ConnectDeadline.MaxTimerDelay ? interval : null;
 
     /// <summary>
     /// After this many keep-alive intervals without hearing from the server, the connection is declared dead and fails with
     /// <see cref="SshFailureReason.Timeout"/> (OpenSSH's <c>ServerAliveCountMax</c>). Default 3.
     /// </summary>
-    public int KeepAliveCountMax { get; init; } = 3;
+    /// <exception cref="ArgumentOutOfRangeException">The value is negative.</exception>
+    public int KeepAliveCountMax
+    {
+        get => _keepAliveCountMax;
+        init
+        {
+            ArgumentOutOfRangeException.ThrowIfNegative(value);
+            _keepAliveCountMax = value;
+        }
+    }
+
+    private readonly int _keepAliveCountMax = 3;
 
     /// <summary>The clock for rekey and keep-alive timing; replaceable in tests.</summary>
     internal TimeProvider TimeProvider { get; init; } = TimeProvider.System;
@@ -404,8 +438,9 @@ public sealed class SshClientOptions
     /// Jump hosts to reach the server through, first to last, as <c>ssh -J</c> and ssh_config's <c>ProxyJump</c>: the client connects
     /// to the first, reaches each next one through the one before, and the server through the last. Each hop logs in and verifies its
     /// host key with its own <see cref="SshJumpHost.Options"/>; these options (credentials, <see cref="HostKeyVerifier"/>) are the
-    /// destination's alone and never offered to a hop. <see cref="Proxy"/>, <see cref="LocalEndPoint"/> and <see cref="AddressFamily"/>
-    /// apply to the first network connection, which is the first hop's. <see cref="ConnectTimeout"/> bounds the whole chain. Disposing the
+    /// destination's alone and never offered to a hop. <see cref="Proxy"/>, <see cref="LocalEndPoint"/>, <see cref="AddressFamily"/>,
+    /// <see cref="ConfigureSocket"/> and <see cref="ConnectionAttempts"/> apply to the first network connection, which is the first hop's
+    /// (a hop's own are not used). <see cref="ConnectTimeout"/> bounds the whole chain. Disposing the
     /// client closes every hop. Empty (the default) connects directly. Used by
     /// <see cref="SshClient.ConnectAsync(string, int, SshClientOptions, CancellationToken)"/>; ignored when connecting over a stream you opened.
     /// </summary>
@@ -498,14 +533,17 @@ public sealed class SshClientOptions
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Used by <see cref="SshClient.ConnectAsync(string, int, SshClientOptions, CancellationToken)"/> only, for a direct connection: it
+    /// Used by <see cref="SshClient.ConnectAsync(string, int, SshClientOptions, CancellationToken)"/> only, for a direct connection: with
+    /// <see cref="JumpHosts"/>, that is the connection to the first hop (whose own options' <c>ConfigureSocket</c> is not used). It
     /// is not called when the connection goes through a <see cref="Proxy"/>, nor over a stream you opened yourself
     /// (<see cref="SshClient.ConnectAsync(Stream, SshClientOptions, bool, CancellationToken)"/>), where the socket, if there is one, is
     /// yours to configure.
     /// </para>
     /// <para>
-    /// It is called once for each socket SshSharp creates: once, unless a <see cref="LocalEndPoint"/> is set and the server's name has
-    /// several addresses, when each address tried gets a socket of its own. It runs on the connecting thread and should only set options.
+    /// It is called once for each socket SshSharp creates, and each address of the server that is tried gets a socket of its own: once
+    /// for an IP address or a name with one address, and again for each further address tried when a name has several and the first
+    /// cannot be reached. The socket's family is the address's (IPv4 or IPv6, not dual-mode). It runs on the connecting thread and should
+    /// only set options.
     /// An exception it throws ends the attempt and is thrown from <c>ConnectAsync</c> as it is.
     /// </para>
     /// </remarks>
@@ -658,6 +696,25 @@ public sealed class SshClientOptions
     /// <see cref="FipsMode"/>: zlib is not a cryptographic algorithm.
     /// </summary>
     public bool Compression { get; init; }
+
+    /// <summary>
+    /// The signature algorithms public-key authentication may use, as ssh_config's <c>PubkeyAcceptedAlgorithms</c>: for example
+    /// <c>SshAlgorithmList.Only("ssh-ed25519")</c>, or <c>SshAlgorithmList.Remove("rsa-sha2-*")</c>. A key in <see cref="PrivateKeys"/> is
+    /// offered only with an algorithm the list allows, and is skipped when it allows none of the key's: a plain key under its own type
+    /// (<c>ssh-ed25519</c>, <c>ecdsa-sha2-nistp256</c>), an RSA key as <c>rsa-sha2-512</c> or <c>rsa-sha2-256</c>, and a key with a
+    /// certificate under the certificate's algorithm (<c>ssh-ed25519-cert-v01@openssh.com</c>), which its plain one does not allow. An RSA
+    /// key signs with the first of the list's RSA algorithms that the server accepts (its <c>server-sig-algs</c>). Null (the default)
+    /// allows every algorithm a key has, in the key's own order (RSA: SHA-512 first). <see cref="FipsMode"/> does not apply to it.
+    /// </summary>
+    /// <exception cref="ArgumentException">A name is not a public key signature algorithm SshSharp implements (it never signs with SHA-1
+    /// <c>ssh-rsa</c>).</exception>
+    public SshAlgorithmList? PubkeyAcceptedAlgorithms
+    {
+        get => _pubkeyAcceptedAlgorithms;
+        init => _pubkeyAcceptedAlgorithms = Protocol.AlgorithmPreferences.Validate(value, Protocol.AlgorithmKind.PublicKey, nameof(value));
+    }
+
+    private readonly SshAlgorithmList? _pubkeyAcceptedAlgorithms;
 
     /// <summary>
     /// The smallest RSA host key accepted, in bits, as ssh_config's <c>RequiredRSASize</c>; a smaller one fails the connection with an

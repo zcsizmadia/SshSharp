@@ -86,11 +86,10 @@ public sealed class ConfigConnectTests : IDisposable
         await using var t = target;
         await using var client = await SshClient.ConnectAsync("target", new SshConfigConnectOptions
         {
-            UseAgent = false, // the developer's own agent must not change the outcome
+            Agent = SshAgent.FromKeys(HopKey), // the hops' key (PrivateKeys is the destination's only); also keeps the developer's agent out
             Config = SshConfig.Parse(Config("accept-new")),
             ResolveOptions = Resolve,
             Password = "secret",
-            PrivateKeys = [HopKey],
             TcpConnector = Network(("j1.example.com", jump1)),
         }, Timeout());
 
@@ -123,11 +122,10 @@ public sealed class ConfigConnectTests : IDisposable
         await using var at = againTarget;
         await using var again = await SshClient.ConnectAsync("target", new SshConfigConnectOptions
         {
-            UseAgent = false, // the developer's own agent must not change the outcome
+            Agent = SshAgent.FromKeys(HopKey), // the hops' key (PrivateKeys is the destination's only); also keeps the developer's agent out
             Config = SshConfig.Parse(Config("yes")),
             ResolveOptions = Resolve,
             Password = "secret",
-            PrivateKeys = [HopKey],
             TcpConnector = Network(("j1.example.com", again1)),
         }, Timeout());
         await Assert.That(again.IsConnected).IsTrue();
@@ -163,6 +161,68 @@ public sealed class ConfigConnectTests : IDisposable
     }
 
     [Test]
+    public async Task AJumpHost_IsNeverOfferedTheCallersPrivateKeys()
+    {
+        // A jump host that would take the caller's key: SshConfigConnectOptions.PrivateKeys are the destination's, so the hop never sees
+        // it, and the chain fails there.
+        await using var jump = JumpHost();
+        await using var target = new FakeSessionServer { AdvertisedMethods = ["publickey"], AuthorizedKeys = [HopKey.PublicKey.ToArray()] };
+        jump.DirectTcpIp = Routes(("t", target));
+
+        var error = await Assert.ThrowsAsync<SshException>(async () => await SshClient.ConnectAsync("t", new SshConfigConnectOptions
+        {
+            UseAgent = false,
+            Config = SshConfig.Parse("Host t\n ProxyJump j\nHost *\n User tester\n StrictHostKeyChecking no\n UserKnownHostsFile none\n"),
+            ResolveOptions = Resolve,
+            PrivateKeys = [HopKey],
+            TcpConnector = Network(("j", jump)),
+        }, Timeout()));
+
+        await Assert.That(error!.Reason).IsEqualTo(SshFailureReason.AuthenticationFailed);
+        int requests;
+        lock (jump.PublicKeyRequests)
+        {
+            requests = jump.PublicKeyRequests.Count;
+        }
+
+        await Assert.That(requests).IsEqualTo(0);
+
+        // Without a jump host, the same key logs in to the destination.
+        await using var direct = new FakeSessionServer { AdvertisedMethods = ["publickey"], AuthorizedKeys = [HopKey.PublicKey.ToArray()] };
+        await using var client = await SshClient.ConnectAsync("t", new SshConfigConnectOptions
+        {
+            UseAgent = false,
+            Config = SshConfig.Parse("Host *\n User tester\n StrictHostKeyChecking no\n UserKnownHostsFile none\n"),
+            ResolveOptions = Resolve,
+            PrivateKeys = [HopKey],
+            TcpConnector = Network(("t", direct)),
+        }, Timeout());
+        await Assert.That(client.IsConnected).IsTrue();
+    }
+
+    [Test]
+    [Arguments("60d")] // longer than a timer can wait (about 49.7 days)
+    [Arguments("2147483647")] // the longest ssh_config allows
+    public async Task AConnectTimeoutLongerThanATimerCanWait_IsNoLimit(string connectTimeout)
+    {
+        await using var server = new FakeSessionServer { Password = "secret" };
+        await using var client = await SshClient.ConnectAsync("t", new SshConfigConnectOptions
+        {
+            UseAgent = false,
+            Config = SshConfig.Parse($"Host *\n User tester\n StrictHostKeyChecking no\n UserKnownHostsFile none\n ConnectTimeout {connectTimeout}\n"),
+            ResolveOptions = Resolve,
+            Password = "secret",
+            TcpConnector = Network(("t", server)),
+        }, Timeout());
+        await Assert.That(client.IsConnected).IsTrue();
+
+        using var deadline = new ConnectDeadline(TimeSpan.FromDays(60), CancellationToken.None);
+        await Assert.That(deadline.Token.CanBeCanceled).IsFalse();
+        using var longest = new ConnectDeadline(ConnectDeadline.MaxTimerDelay, CancellationToken.None);
+        await Assert.That(longest.Token.CanBeCanceled).IsTrue();
+    }
+
+    [Test]
     public async Task DisposingTheClient_ClosesTheJumpHostsToo()
     {
         await using var jump = JumpHost();
@@ -170,11 +230,10 @@ public sealed class ConfigConnectTests : IDisposable
         jump.DirectTcpIp = Routes(("t", target));
         var client = await SshClient.ConnectAsync("t", new SshConfigConnectOptions
         {
-            UseAgent = false, // the developer's own agent must not change the outcome
+            Agent = SshAgent.FromKeys(HopKey), // the hops' key (PrivateKeys is the destination's only); also keeps the developer's agent out
             Config = SshConfig.Parse("Host t\n ProxyJump j\nHost *\n User tester\n StrictHostKeyChecking no\n UserKnownHostsFile none\n"),
             ResolveOptions = Resolve,
             Password = "secret",
-            PrivateKeys = [HopKey],
             TcpConnector = Network(("j", jump)),
         }, Timeout());
 

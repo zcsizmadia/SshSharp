@@ -132,6 +132,20 @@ public sealed class ConfigForwardingTests : IDisposable
     }
 
     [Test]
+    public async Task SocketPathsOnTheServer_GetTokensButNotThisMachinesHome_AndLocalOnesMayUseBackslashes()
+    {
+        // ~ on the server's side would name this machine's home directory (and its user); %r is the remote user, as in ssh.
+        var (server, client) = await ConnectAsync(" LocalForward 0 ~/run/%r.sock\n RemoteForward /run/agent.sock C:\\run\\agent.sock\n");
+        await using (server)
+        await using (client)
+        {
+            await Assert.That(client.LocalForwardings.Single().RemoteSocketPath).IsEqualTo("~/run/tester.sock");
+            await Assert.That(client.RemoteSocketForwardings.Single().LocalSocketPath).IsEqualTo(@"C:\run\agent.sock");
+            await Assert.That(client.RemoteSocketForwardings.Single().RemoteSocketPath).IsEqualTo("/run/agent.sock");
+        }
+    }
+
+    [Test]
     public async Task WithoutStartForwardings_NothingIsStarted()
     {
         var (server, client) = await ConnectAsync(" LocalForward 0 db:5432\n DynamicForward 0\n", start: false);

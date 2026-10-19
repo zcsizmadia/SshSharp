@@ -49,6 +49,14 @@ public sealed partial class SftpClient : IAsyncDisposable
         serverSoftware is not null
         && (serverSoftware.StartsWith("AsyncSSH_", StringComparison.Ordinal) || serverSoftware.StartsWith("Erlang/", StringComparison.Ordinal));
 
+    /// <summary>
+    /// Whether the session is still usable: false once its channel or the connection under it ended or failed (the server closed it, a
+    /// missed keep-alive, a broken protocol message, a request that could not be sent within <see cref="OperationTimeout"/>), or the
+    /// client was disposed. Every request fails from then on; open a new session. A request that fails on its own (an error status, or
+    /// a reply that timed out) leaves it true.
+    /// </summary>
+    public bool IsConnected => !_channel.IsClosed;
+
     /// <summary>The protocol version the server speaks (3 for OpenSSH).</summary>
     public int ProtocolVersion => (int)_channel.Version;
 
@@ -68,14 +76,18 @@ public sealed partial class SftpClient : IAsyncDisposable
     /// The limit is on the server's silence, not on how long an operation takes: while the server keeps answering other requests (a
     /// transfer's window of reads or writes on a slow link, or other callers on this session), a request waits on, so a large file is
     /// never cut off for its size. A server or link that has stopped answering fails every waiting request once this much time has
-    /// passed without a reply. It applies to every request, those of transfers, streams and listings included; the
-    /// <see cref="CancellationToken"/> each method takes still works alongside it, and cancelling is an
-    /// <see cref="OperationCanceledException"/>, never a timeout.
+    /// passed without a reply. That includes a request still being sent: when the server stops reading (its <c>sftp-server</c> hangs
+    /// while sshd still answers keep-alives), the channel's flow-control window fills and a write cannot go out. It applies to every
+    /// request, those of transfers, streams and listings included; the <see cref="CancellationToken"/> each method takes still works
+    /// alongside it, and cancelling is an <see cref="OperationCanceledException"/>, never a timeout.
     /// </para>
     /// <para>
-    /// A request that timed out is abandoned, not undone: the server may still carry it out, and its late reply is dropped (a handle it
-    /// opens is closed). The session stays usable. It can be changed at any time; requests already waiting keep the value they started
-    /// with. A segmented transfer's extra sessions (<see cref="SftpTransferOptions.Segments"/>) take this session's value.
+    /// A request that timed out waiting for its reply is abandoned, not undone: the server may still carry it out, and its late reply is
+    /// dropped (a handle it opens is closed). The session stays usable. A request that timed out while it was being sent closes the
+    /// session instead (<see cref="IsConnected"/> becomes false), since part of it may have gone out and nothing could follow it: every
+    /// request waiting on the session fails with the timeout, and a new session is needed. It can be changed at any time; requests
+    /// already waiting keep the value they started with. A segmented transfer's extra sessions (<see cref="SftpTransferOptions.Segments"/>)
+    /// take this session's value.
     /// </para>
     /// </remarks>
     /// <exception cref="ArgumentOutOfRangeException">Not positive and not <see cref="Timeout.InfiniteTimeSpan"/>, or longer than <see cref="int.MaxValue"/> milliseconds.</exception>
@@ -97,8 +109,15 @@ public sealed partial class SftpClient : IAsyncDisposable
     /// <summary>Opens another SFTP session on the same connection (for <see cref="SftpTransferOptions.Segments"/>); null when unknown.</summary>
     internal Func<CancellationToken, Task<SftpClient>>? OpenSibling { get; set; }
 
-    /// <summary>The connection's clock (<c>SshClientOptions.TimeProvider</c>), for the bounds on closing handles and on cleaning up after a segmented upload.</summary>
-    internal TimeProvider Clock { get; set; } = TimeProvider.System;
+    /// <summary>
+    /// The connection's clock (<c>SshClientOptions.TimeProvider</c>), for <see cref="OperationTimeout"/> and the bounds on closing handles
+    /// and on cleaning up after a segmented upload.
+    /// </summary>
+    internal TimeProvider Clock
+    {
+        get => _channel.Clock;
+        set => _channel.Clock = value;
+    }
 
     internal static async Task<SftpClient> StartAsync(SshSession session, string? serverSoftware, CancellationToken cancellationToken)
     {
@@ -815,11 +834,60 @@ public sealed partial class SftpClient : IAsyncDisposable
                 await SkipAsync(source, start, remotePath, cancellationToken).ConfigureAwait(false);
             }
 
-            return await UploadHandleAsync(handle, remotePath, source, start, options, cancellationToken).ConfigureAwait(false);
+            // Once cancelled, the answers to the writes already sent are still awaited, for up to CleanupWait: only then is it known
+            // what the server holds.
+            var state = new WriteRangeState();
+            using var replies = new CancellationTokenSource(Timeout.InfiniteTimeSpan, Clock);
+            var cleanupWait = CleanupWait;
+            using var stopping = cancellationToken.Register(() =>
+            {
+                try
+                {
+                    replies.CancelAfter(cleanupWait);
+                }
+                catch (ObjectDisposedException)
+                {
+                    // The upload is over.
+                }
+            });
+            try
+            {
+                return await UploadHandleAsync(handle, remotePath, source, start, options, state, cancellationToken, replies.Token).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (state.LandedPastGap)
+            {
+                // A write failed (or went unanswered) while later ones landed: the file reaches past a gap, and a resumed upload, taking
+                // its size for what was sent, would keep the gap. It is cut to its unbroken start, as a segmented upload does; when that
+                // cannot be done, or an unanswered write may still land after the cut, the exception says so (UploadCleanupIncompleteKey).
+                if (!await TryCutAsync(handle, remotePath, start + state.Confirmed).ConfigureAwait(false) || state.Unsettled)
+                {
+                    ex.Data[UploadCleanupIncompleteKey] = true;
+                }
+
+                throw;
+            }
         }
         finally
         {
             await CloseHandleAsync(handle).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Cuts the remote file to <paramref name="length"/> through <paramref name="handle"/>, waiting at most <see cref="CleanupWait"/>.
+    /// False when the server refused it or did not answer in time, or the session ended.
+    /// </summary>
+    private async Task<bool> TryCutAsync(byte[] handle, string path, long length)
+    {
+        try
+        {
+            using var timeout = new CancellationTokenSource(CleanupWait, Clock);
+            await SetHandleAttributesAsync(handle, path, new SftpFileAttributes { Size = length }, timeout.Token).ConfigureAwait(false);
+            return true;
+        }
+        catch (Exception ex) when (ex is SshException or OperationCanceledException)
+        {
+            return false; // SftpException included: a server that cannot cut a file
         }
     }
 
@@ -1182,7 +1250,8 @@ public sealed partial class SftpClient : IAsyncDisposable
     }
 
     /// <summary>Writes <paramref name="source"/> from its position to the remote file from <paramref name="start"/>; returns the bytes written.</summary>
-    private Task<long> UploadHandleAsync(byte[] handle, string path, Stream source, long start, SftpTransferOptions options, CancellationToken cancellationToken)
+    private Task<long> UploadHandleAsync(byte[] handle, string path, Stream source, long start, SftpTransferOptions options, WriteRangeState state,
+        CancellationToken cancellationToken, CancellationToken repliesToken)
     {
         long? size = options.Progress is not null && source.CanSeek ? source.Length : null;
         long acknowledged = 0;
@@ -1195,7 +1264,7 @@ public sealed partial class SftpClient : IAsyncDisposable
                     progress.Report(new SftpTransferProgress(path, start + acknowledged, size));
                 }
                 : null,
-            confirmed: null, options, cancellationToken);
+            state, options, cancellationToken, repliesToken);
     }
 
     /// <summary>
@@ -1294,6 +1363,11 @@ public sealed partial class SftpClient : IAsyncDisposable
                 try
                 {
                     var landed = IsOkStatus(await reply.ConfigureAwait(false));
+                    if (landed && !unbroken && confirmed is not null)
+                    {
+                        confirmed.LandedPastGap = true;
+                    }
+
                     unbroken &= landed;
                     if (unbroken && confirmed is not null)
                     {
@@ -1372,6 +1446,9 @@ public sealed partial class SftpClient : IAsyncDisposable
 
         /// <summary>Whether a write was sent whose answer never came (the wait gave up, or the session ended): the server may still apply it.</summary>
         public bool Unsettled { get; set; }
+
+        /// <summary>Whether a write landed after one that failed or went unanswered: the file may then reach past a gap.</summary>
+        public bool LandedPastGap { get; set; }
     }
 
     /// <summary>Whether a reply is a well-formed status of OK.</summary>
@@ -1562,6 +1639,15 @@ public sealed class SftpTransferOptions
     /// existing bytes match, so use it for the same file only. A failed download with this set keeps what arrived. Overrides
     /// <see cref="Overwrite"/> for an existing destination.
     /// </summary>
+    /// <remarks>
+    /// A failed upload keeps what was written, so it can be resumed. Its writes are pipelined, and one that fails may be followed by
+    /// later ones that land, leaving the remote file near its full size with a hole that a resume (taking the file's size for what was
+    /// sent) would keep; so when a write landed past one that failed, the upload cuts the file back to its unbroken start before it
+    /// throws. Where that cut cannot be made (the server cannot cut a file, did not answer in time, or a write went unanswered and may
+    /// still land), the exception has <see cref="SftpClient.UploadCleanupIncompleteKey"/> set to <see langword="true"/> in its
+    /// <see cref="Exception.Data"/>: do not resume that file; delete it or upload it again. A segmented upload
+    /// (<see cref="Segments"/>) is always cut to its unbroken start, or deleted.
+    /// </remarks>
     public bool Resume { get; init; }
 
     /// <summary>Reports each file's progress: its path, the bytes transferred so far and its size, when known.</summary>
@@ -1600,6 +1686,11 @@ public sealed class SftpTransferOptions
     /// or still being written) fails the download, which leaves no local file.
     /// </para>
     /// <para>
+    /// Uploads take it since 1.1 (in 1.0 it applied to downloads only): <see cref="SftpClient.UploadFileAsync"/>, and
+    /// <see cref="SftpClient.UploadDirectoryAsync"/> for each file of at least 1 MiB per segment. Set it to 1 for uploads to keep 1.0's
+    /// behavior.
+    /// </para>
+    /// <para>
     /// An upload: the first session creates (or truncates) the remote file and each extra session opens it for writing too, without
     /// truncating it; the ranges are written at their offsets, and nothing is allocated in advance (a range past the current end extends
     /// the file). A server that will not open a file for a second writer gets fewer sessions, down to one; a server that refuses a write
@@ -1613,7 +1704,8 @@ public sealed class SftpTransferOptions
     /// (the server stopped answering, or the session ended), the upload still throws its own exception (a cancellation stays an
     /// <see cref="OperationCanceledException"/>), with <see cref="SftpClient.UploadCleanupIncompleteKey"/> set to <see langword="true"/> in
     /// its <see cref="Exception.Data"/>: the remote file may then have gaps, so do not continue it with <see cref="Resume"/>; delete it or
-    /// upload it again.
+    /// upload it again. Unlike a segmented upload, a sequential one (one segment) keeps what was written, and is cut back only when a
+    /// write landed past one that failed (see <see cref="Resume"/>).
     /// </para>
     /// </remarks>
     public int Segments

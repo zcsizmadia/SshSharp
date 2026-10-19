@@ -220,6 +220,10 @@ public sealed class RemoteSocketForwardingTests : IDisposable
 
             // Not registered: a later try with an allowed path is not "already forwarded".
             await Assert.That(async () => await client.ForwardRemoteUnixSocketAsync("/run/x.sock", "127.0.0.1", 1, Timeout())).Throws<SshException>();
+
+            // The refused forwarding is released here, without asking the server to cancel what it never started.
+            await Assert.That(refusing.CancelledRemoteSocketForwards).IsEmpty();
+            await Assert.That(client.IsConnected).IsTrue();
         }
 
         await using var server = new FakeSessionServer();

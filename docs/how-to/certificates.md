@@ -89,6 +89,11 @@ read in part: treat that as "everything is revoked", as ssh does for `RevokedHos
 is trusted as local configuration. Serial 0 (a certificate issued without one) is never revoked by serial: give each certificate its
 own `Serial`.
 
+In a text file, a certificate line revokes the key it certifies, as in sshd. That includes FIDO security-key certificates
+(`sk-ssh-ed25519-cert-v01@openssh.com`, `sk-ecdsa-sha2-nistp256-cert-v01@openssh.com`): the security key itself is revoked. A
+certificate line whose key cannot be read throws `FormatException` for the whole file instead of being skipped, so a key the list
+means to revoke is never accepted. Other lines that do not parse are skipped, as in OpenSSH.
+
 ## Act as a certificate authority
 
 `SshCertificateBuilder` issues certificates as `ssh-keygen -s` does. Give it the key to certify, the type and a key id, set the

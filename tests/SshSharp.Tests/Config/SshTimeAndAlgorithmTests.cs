@@ -45,7 +45,8 @@ public class SshTimeAndAlgorithmTests
     [Test]
     public async Task Algorithms_Append()
     {
-        await Assert.That(string.Join(",", SshAlgorithmList.Apply("+x,aes256-ctr", Defaults))).IsEqualTo("aes128-ctr,chacha20-poly1305@openssh.com,x,aes256-ctr");
+        // As ssh: a name already among the defaults keeps its place.
+        await Assert.That(string.Join(",", SshAlgorithmList.Apply("+x,aes256-ctr", Defaults))).IsEqualTo("aes256-ctr,aes128-ctr,chacha20-poly1305@openssh.com,x");
     }
 
     [Test]

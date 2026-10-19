@@ -195,6 +195,61 @@ public sealed class SshCertificate
         var other => other + Suffix,
     };
 
+    /// <summary>
+    /// The plain public key a certificate blob certifies, for a revocation list that names keys by their certificates. Besides the types
+    /// <see cref="FromBlob"/> reads, this reads FIDO security-key certificates (<c>sk-ssh-ed25519-cert-v01@openssh.com</c>,
+    /// <c>sk-ecdsa-sha2-nistp256-cert-v01@openssh.com</c>, PROTOCOL.certkeys and PROTOCOL.u2f), whose key fields end with the
+    /// application string. The certificate's structure is checked, its signature is not: revoking a key needs no proof of who signed.
+    /// Throws <see cref="SshProtocolException"/> or <see cref="FormatException"/> when the blob is malformed or of another type.
+    /// </summary>
+    internal static byte[] ReadCertifiedKey(ReadOnlySpan<byte> blob)
+    {
+        var reader = new SshReader(blob);
+        var certificateType = reader.ReadUtf8String();
+        if (certificateType is not ("sk-ssh-ed25519" + Suffix or "sk-ecdsa-sha2-nistp256" + Suffix))
+        {
+            return FromBlob(blob).PublicKey.ToArray();
+        }
+
+        reader.ReadString(); // nonce
+        var keyType = certificateType[..^Suffix.Length] + OpenSshDomain;
+        byte[] plain;
+        if (keyType == "sk-ssh-ed25519" + OpenSshDomain)
+        {
+            var key = reader.ReadString().ToArray();
+            var application = reader.ReadString().ToArray();
+            plain = SshPrivateKey.Encode(w => { w.WriteString(keyType); w.WriteString(key); w.WriteString(application); });
+        }
+        else
+        {
+            var curve = reader.ReadString().ToArray();
+            var point = reader.ReadString().ToArray();
+            var application = reader.ReadString().ToArray();
+            plain = SshPrivateKey.Encode(w => { w.WriteString(keyType); w.WriteString(curve); w.WriteString(point); w.WriteString(application); });
+        }
+
+        // The rest of the certificate, as FromBlob reads it, so a truncated or padded blob is refused rather than half read.
+        reader.ReadUInt64(); // serial
+        reader.ReadUInt32(); // type
+        reader.ReadString(); // key id
+        reader.ReadString(); // principals
+        reader.ReadUInt64(); // valid after
+        reader.ReadUInt64(); // valid before
+        reader.ReadString(); // critical options
+        reader.ReadString(); // extensions
+        reader.ReadString(); // reserved
+        reader.ReadString(); // signature key
+        reader.ReadString(); // signature
+        if (!reader.IsEmpty)
+        {
+            throw new SshProtocolException("Trailing data after the certificate.");
+        }
+
+        // The key itself must be well formed (a 32-byte Ed25519 key, a point on P-256), as SshPublicKey reads sk keys.
+        SshPublicKey.Read(plain);
+        return plain;
+    }
+
     /// <summary>Parses a certificate blob (wire format). Throws <see cref="SshProtocolException"/> when it is malformed.</summary>
     internal static SshCertificate FromBlob(ReadOnlySpan<byte> blob, string? comment = null)
     {

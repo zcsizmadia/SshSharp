@@ -200,10 +200,9 @@ public class KexNegotiationTests
         await Assert.That(removed.Kex.Contains(group18)).IsFalse();
         await Assert.That(removed.Kex.Contains(SshAlgorithms.DhGroup16Sha512)).IsTrue();
 
+        // Already a default: as in ssh, + leaves it where it is.
         var added = AlgorithmPreferences.FromConfig(Config($"KexAlgorithms +{group18}\n"));
-        await Assert.That(added.Kex.Count(k => k == group18)).IsEqualTo(1);
-        await Assert.That(added.Kex[^1]).IsEqualTo(group18);
-        await Assert.That(added.Kex.Count).IsEqualTo(SshAlgorithms.DefaultKex.Count);
+        await Assert.That(string.Join(",", added.Kex)).IsEqualTo(string.Join(",", SshAlgorithms.DefaultKex));
     }
 
     [Test]
@@ -253,7 +252,7 @@ public class KexNegotiationTests
     [Arguments("MACs -hmac-sha2-*-etm@openssh.com", "hmac-sha2-256,hmac-sha2-512")]
     [Arguments("MACs -hmac-sha2-256,hmac-sha2-512", "hmac-sha2-512-etm@openssh.com,hmac-sha2-256-etm@openssh.com")]
     [Arguments("MACs ^hmac-sha2-512", "hmac-sha2-512,hmac-sha2-512-etm@openssh.com,hmac-sha2-256-etm@openssh.com,hmac-sha2-256")]
-    [Arguments("MACs +hmac-sha2-256", "hmac-sha2-512-etm@openssh.com,hmac-sha2-256-etm@openssh.com,hmac-sha2-512,hmac-sha2-256")]
+    [Arguments("MACs +hmac-sha2-256", "hmac-sha2-512-etm@openssh.com,hmac-sha2-256-etm@openssh.com,hmac-sha2-256,hmac-sha2-512")] // already there: unchanged
     public async Task FromConfig_MacsSpecsAcceptThePlainHmacSha2(string line, string expected)
     {
         var prefs = AlgorithmPreferences.FromConfig(Config(line + "\n"));

@@ -102,7 +102,9 @@ internal static class SocksHandshake
         var version = await ReadByteAsync(stream, cancellationToken).ConfigureAwait(false);
         if (version == Socks4 && credentials is not null)
         {
-            // SOCKS 4's user id is no password; a client that cannot do SOCKS 5 is turned away.
+            // SOCKS 4's user id is no password; a client that cannot do SOCKS 5 is turned away. The whole request is read first: closing
+            // with unread data sends a reset, and on Windows a reset can discard the refusal before the client has read it.
+            await ReadSocks4Async(stream, cancellationToken).ConfigureAwait(false);
             await SendAsync(stream, [0, 0x5B, 0, 0, 0, 0, 0, 0], cancellationToken).ConfigureAwait(false);
             throw new SocksAuthenticationException("SOCKS 4 has no password authentication");
         }

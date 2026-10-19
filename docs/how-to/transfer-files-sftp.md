@@ -67,6 +67,12 @@ arrived. Retry in a loop, with a new connection when the old one broke:
 > Resuming trusts that the bytes already at the destination are the start of the same file; nothing compares them. Resume only
 > into a destination that nothing else writes.
 
+A failed upload keeps what was written. Its writes are pipelined, so when one fails (a full disk) while later ones land, the upload
+cuts the remote file back to the part without a gap before it throws, and a resume does not keep a hole. When that cut could not be
+made (the server cannot cut a file, or did not answer), the exception's `Data[SftpClient.UploadCleanupIncompleteKey]` is `true`: do
+not resume that file, delete it or upload it again. See [Segmented transfers](../sftp.md#segmented-transfers) for how a segmented
+upload differs.
+
 ## Transfer large files faster
 
 One SFTP session moves at most about one window (2 MiB) per round trip: some 20 MiB/s at 100 ms of latency, however many requests
@@ -77,6 +83,12 @@ are in flight. `Segments` splits a download into ranges and fetches each over it
 Uploads work the same way, each session writing its range of the same remote file:
 
 [!code-csharp[](../snippets/FileTransfer.cs#sftp-segments-upload)]
+
+> [!NOTE]
+> **Behavior change since 1.0.** `Segments` applied to downloads only in 1.0. Since 1.1 it applies to `UploadFileAsync` and
+> `UploadDirectoryAsync` too (per file, for files of at least 1 MiB per segment), so code that set `Segments` for its downloads and
+> shares the options with uploads now uploads over several sessions. Use separate options with `Segments = 1` for uploads to keep
+> 1.0's behavior.
 
 ### When to use
 
@@ -93,10 +105,12 @@ Uploads work the same way, each session writing its range of the same remote fil
 - **Servers that do not take parallel writers.** A server that allows one writer per file gets the upload over fewer sessions, and
   one that takes writes in order only (object storage behind SFTP) gets the rest of the file in order over the first session. The
   upload succeeds either way, without the speed-up; use `Segments = 1` for such servers.
-- **A failed upload** stops every range and cuts the remote file to the part the server holds without a gap, so `Resume` can
-  continue it; a server that cannot cut a file has it deleted. This cleanup waits at most `OperationTimeout` (or 5 s when it is not
-  set) for each step. If it could not finish, the exception's `Data[SftpClient.UploadCleanupIncompleteKey]` is `true`: do not
-  resume that file, delete it or upload it again (see [Segmented transfers](../sftp.md#segmented-transfers) for an example).
+- **A failed or cancelled upload** stops every range and cuts the remote file to the part the server holds without a gap, so
+  `Resume` can continue it; a server that cannot cut a file has it deleted. This cleanup waits at most `OperationTimeout` (or 5 s
+  when it is not set) for each step. If it could not finish, the exception's `Data[SftpClient.UploadCleanupIncompleteKey]` is
+  `true`: do not resume that file, delete it or upload it again (see [Segmented transfers](../sftp.md#segmented-transfers) for an
+  example). A sequential upload differs: it keeps what was written, and is cut back only when a write landed past one that
+  failed; where it cannot be cut it is kept, with the key set.
 - **Readers meanwhile.** Until an upload ends, the parts still on their way read as zeros:
   upload to a temporary name and rename it (below) if others read the file meanwhile.
 - **Verify** a large transfer with a hash from the server where it has one (see [Verify a transfer with a hash from the
@@ -248,6 +262,8 @@ is itself, and a `[` without its `]` matches itself, as in fnmatch(3). Named cla
   `MaxDepth`.
 - **Concurrency**: up to `MaxConcurrentDirectories` (default 4) subdirectories are read ahead while your loop works through the
   entries already listed, each holding a directory handle while it is read (fewer when the server limits open handles).
+- **Memory**: at most `MaxConcurrentDirectories` listings read ahead are held until your loop reaches them, besides those of the
+  directories it is inside, so a directory with many subdirectories is not listed ahead whole.
 - **Stopping**: leaving the `await foreach` or cancelling stops the listings read ahead and closes their handles. A subdirectory that
   cannot be listed (permission denied) throws its `SftpException` when the listing reaches it, after everything before it.
 
@@ -314,6 +330,10 @@ flowchart LR
 - **Links are never followed.** A symbolic link in the tree is removed itself, even when it points to a directory; every
   subdirectory is checked with `LSTAT` before it is entered, so a server that describes a link as a directory in its listing
   cannot lead the delete out of the tree. A `path` that is itself a link removes only the link.
+- **The checks are not atomic.** SFTP has no `O_NOFOLLOW` or `openat`: every request names a path that the server resolves again.
+  Someone else who can write inside the tree on the server can replace a directory with a link after its `LSTAT` and before the
+  requests that follow, and the delete then removes files where the link leads, as far as your login may delete. Delete
+  recursively only trees no one else can change while it runs ([threat model](../threat-model.md#sftp)).
 - **The first failure stops it.** No more requests are sent, the ones in flight finish, and that failure is thrown (for example
   `SftpException` with `PermissionDenied` and the `Path` it could not delete). What was deleted stays deleted; once the cause is
   fixed, calling again finishes the job. Cancelling stops it the same way.
@@ -333,9 +353,13 @@ drops packets without closing the connection) then hangs your code too. Set `Ope
   takes longer than the timeout to work through.
 - **What is thrown:** `SshException` with `Reason = Timeout`, and a `TimeoutException` as its inner exception. Your
   `CancellationToken` still works alongside it, and cancelling is an `OperationCanceledException`, never a timeout.
-- **The session stays usable.** A request that timed out is abandoned, not undone: the server may still carry it out, and its
-  late reply is dropped (a file it opens is closed again). A server that has really stopped answering fails the next requests too;
-  reconnect, and resume transfers with `Resume = true`.
+- **The session stays usable.** A request that timed out waiting for its reply is abandoned, not undone: the server may still
+  carry it out, and its late reply is dropped (a file it opens is closed again). A server that has really stopped answering fails
+  the next requests too; reconnect, and resume transfers with `Resume = true`.
+- **Sends are bounded too.** When `sftp-server` stops reading while sshd stays up, the channel's window fills and an upload's
+  next write cannot go out. Once the server has sent nothing for `OperationTimeout`, that send is cut off and the SFTP session is
+  closed (half a request may be on its way, and nothing could follow it): every waiting request fails with `Timeout`, so the
+  upload, its cleanup and a write stream's `DisposeAsync` all return, and `sftp.IsConnected` is false. Open a new session.
 - It applies to every request of the `SftpClient`, including those of streams, listings and transfers, and to the extra sessions
   of a segmented download. Change it at any time.
 - [Keep-alives](keepalive-and-reconnect.md) (`KeepAliveInterval`) detect a dead connection; `OperationTimeout` also catches a

@@ -176,6 +176,9 @@ builder.Services.AddHostedService<ReverseTunnel>();
   succeeds.
 - **Events name the endpoint only.** No host or user name is in them; `Error` may hold the server's disconnect text, so log it rather
   than returning it to a caller.
+- **An event's client may already be gone.** By the time a `Connected` or `Reconnected` event is handled, that connection may have
+  dropped and been disposed by a later `GetClientAsync`. The example catches `ObjectDisposedException` as well as `SshException`
+  when `IsConnected` is false, rather than letting it stop the host; the next event says what followed.
 
 ## Reach the server through a bastion
 
@@ -236,8 +239,9 @@ the agent need no code: they are settings. Keep what the endpoint built, jump ho
   `known_hosts` file.
 - **`ConfigAlias`** connects through `ssh_config` instead; then `Host`, `Port`, `UserName`, `PrivateKeyFiles`, `PrivateKeyPassphrase`,
   `KnownHostsFiles`, `AcceptNewHostKeys`, `KeepAliveInterval` and `ConfigureClientOptions` are not used, and `PrivateKeys`,
-  `HostKeyFingerprints`, `Proxy` and `JumpHosts` fail validation. `AddressFamily` and `Compression`, when set, override
-  `ssh_config`'s, and `UseAgent` set to `false` turns the agent off (`true` uses the agent registered in the container).
+  `HostKeyFingerprints`, `Proxy` and `JumpHosts` fail validation. `AddressFamily` and `Compression`, when set, override `ssh_config`'s, and
+  `UseAgent` set to `false` turns the agent off (`true` uses the agent registered in the container, else the user's, in place of
+  `IdentityAgent`).
 - **IPv4 or IPv6 only.** `AddressFamily` (`Inet` or `Inet6`, `"AddressFamily": "Inet"` in configuration) limits which of the server's
   addresses are tried, as `ssh -4` and `-6` do: for a host whose IPv6 address is published but not reachable from the cluster. It
   is the built `SshClientOptions.AddressFamily`.

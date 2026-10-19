@@ -80,7 +80,7 @@ below). See [Compress a slow link](../how-to/tune-and-inspect-connections.md#com
 |---|---|
 | Ed25519 | `ssh-ed25519` |
 | ECDSA P-256, P-384, P-521 | `ecdsa-sha2-nistp256/384/521` |
-| RSA (2048 bits or more) | `rsa-sha2-512`, `rsa-sha2-256`, as the server's `server-sig-algs` allows |
+| RSA (2048 bits or more) | `rsa-sha2-512`, `rsa-sha2-256`, as the server's `server-sig-algs` and `PubkeyAcceptedAlgorithms` allow |
 | FIDO security keys, through the agent | `sk-ssh-ed25519@openssh.com`, `sk-ecdsa-sha2-nistp256@openssh.com` |
 | OpenSSH certificates of the above | the matching `-cert-v01@openssh.com` algorithms |
 
@@ -95,13 +95,19 @@ A server that offers nothing else fails the connection with `SshFailureReason.Ke
 
 ## Changing the lists
 
-- **With `ssh_config`:** `KexAlgorithms`, `HostKeyAlgorithms`, `Ciphers` and `MACs`, with OpenSSH's `+`, `-` and `^` forms,
-  applied to these defaults. Names SshSharp does not implement are ignored. `PubkeyAcceptedAlgorithms` is resolved but not
-  applied: each key is signed with the first of its algorithms the server lists in `server-sig-algs`.
-- **In code:** `SshClientOptions.KexAlgorithms`, `HostKeyAlgorithms`, `Ciphers` and `Macs` take an `SshAlgorithmList` in the same
-  four forms (`Only`, `Append`, `Prepend`, `Remove`, or `SshAlgorithmList.Parse` for the text form). Unlike in `ssh_config`, a name
-  SshSharp does not implement throws `ArgumentException`. See
+- **With `ssh_config`:** `KexAlgorithms`, `HostKeyAlgorithms`, `Ciphers`, `MACs` and `PubkeyAcceptedAlgorithms`, with OpenSSH's
+  `+`, `-` and `^` forms, applied to these defaults as `ssh` applies them: `+` leaves a name that is already a default where it is,
+  and a wildcard in any form stands for the names it matches (`Ciphers aes*-ctr`). Names SshSharp does not implement are ignored;
+  a list that leaves none it does fails the connection before anything is sent, naming the directive.
+  `PubkeyAcceptedAlgorithms` decides which keys are offered and, for RSA, which signature algorithm is used (the list's first that
+  the server's `server-sig-algs` has); its defaults are every algorithm in the table above, certificates first.
+- **In code:** `SshClientOptions.KexAlgorithms`, `HostKeyAlgorithms`, `Ciphers`, `Macs` and `PubkeyAcceptedAlgorithms` take an
+  `SshAlgorithmList` in the same four forms (`Only`, `Append`, `Prepend`, `Remove`, or `SshAlgorithmList.Parse` for the text form),
+  which mean what they mean in `ssh_config`. Unlike in `ssh_config`, a name SshSharp does not implement throws
+  `ArgumentException`, and only `Remove` takes wildcards. See
   [Choose algorithms and authentication methods](../how-to/algorithms-and-authentication-order.md).
+- **Host certificates:** when a certificate authority is trusted for the host, the certificate algorithms are asked for first
+  with the default `HostKeyAlgorithms` or a `+` or `-` change to it; a plain or `^` list is used as written, as in `ssh`.
 - **FIPS mode:** `SshClientOptions.FipsMode` restricts every list, yours included, to the FIPS column; see
   [FIPS mode](../how-to/fips-mode.md).
 - **RSA host key size:** `SshClientOptions.RequiredRsaSize` (`RequiredRSASize` in `ssh_config`), 2048 bits by default, 1024 at

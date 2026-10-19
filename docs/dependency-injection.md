@@ -49,11 +49,11 @@ builder.Services.AddSshClient("db", o => o.ConfigAlias = "prod-db"); // everythi
 | `UseAgent` | `true` also offers the SSH agent's keys, after `PrivateKeyFiles` and `PrivateKeys`. See [The SSH agent](#the-ssh-agent). |
 | `Proxy` | An HTTP or SOCKS proxy as a URI (`http://proxy.example.com:3128`, `socks5://...`), with optional `user:password@`. |
 | `JumpHosts` | Bastions to reach `Host` through, first to last, each with its own user, credentials and host keys. See [Jump hosts](#jump-hosts). |
-| `ConfigAlias` | Connect through ssh_config by this alias instead: ProxyJump, IdentityFile, known_hosts and the rest come from there, and `Host`, `Port`, `UserName`, `PrivateKeyFiles`, `PrivateKeyPassphrase`, `KnownHostsFiles`, `AcceptNewHostKeys` and `KeepAliveInterval` are ignored (ssh_config's `ServerAliveInterval` applies). `Password` is still offered, to the destination only, never to a ProxyJump hop; `UseAgent`, `AddressFamily` and `ConnectTimeout` still apply. `PrivateKeys`, `HostKeyFingerprints`, `Proxy` and `JumpHosts` fail validation with it, rather than being ignored. |
-| `KeepAliveInterval` | Keep-alives, so a dead connection is noticed. |
+| `ConfigAlias` | Connect through ssh_config by this alias instead: ProxyJump, IdentityFile, known_hosts and the rest come from there, and `Host`, `Port`, `UserName`, `PrivateKeyFiles`, `PrivateKeyPassphrase`, `KnownHostsFiles`, `AcceptNewHostKeys` and `KeepAliveInterval` are ignored (ssh_config's `ServerAliveInterval` applies). `Password` is still offered, to the destination only, never to a ProxyJump hop; `UseAgent`, `AddressFamily`, `Compression` and `ConnectTimeout` still apply. `PrivateKeys`, `HostKeyFingerprints`, `Proxy` and `JumpHosts` fail validation with it, rather than being ignored. |
+| `KeepAliveInterval` | Keep-alives, so a dead connection is noticed. Unset or zero sends none; a negative value fails validation. |
 | `AddressFamily` | `Inet` (IPv4 only) or `Inet6` (IPv6 only): which of the server's addresses are tried, as `ssh -4` and `-6`. Unset tries any. It is the built `SshClientOptions.AddressFamily`; with `ConfigAlias`, it overrides `ssh_config`'s `AddressFamily`. |
 | `Compression` | `true` asks for OpenSSH's delayed compression (`zlib@openssh.com`), for a slow link carrying text; see [Compress a slow link](how-to/tune-and-inspect-connections.md#compress-a-slow-link). Unset does not compress. It is the built `SshClientOptions.Compression`; with `ConfigAlias`, it overrides `ssh_config`'s `Compression`. |
-| `ConnectTimeout` | How long one attempt may take, authentication included (default 30 s); then a `TimeoutException`. It is also the built `SshClientOptions.ConnectTimeout`, which `ConfigureClientOptions` may shorten but not extend. |
+| `ConnectTimeout` | How long one attempt may take, authentication included (default 30 s, at most about 24 days, as `SshClientOptions.ConnectTimeout` allows; validation fails above that); then a `TimeoutException`. It is also the built `SshClientOptions.ConnectTimeout`, which `ConfigureClientOptions` may shorten but not extend. |
 | `ReconnectDelay`, `MaxReconnectDelay` | The shared connection's wait after a failed attempt (default 1 s, doubling up to 1 min). |
 | `ConfigureClientOptions` | A function from the services and the built `SshClientOptions` to the options to use: a custom host key verifier, keys held elsewhere (`SshPrivateKey.FromSigner`), a custom proxy (`SshProxy.FromConnector`). The options it receives already hold the jump hosts and the agent's keys: copy them into the new options. Not used with `ConfigAlias`. |
 
@@ -234,6 +234,9 @@ stateDiagram-v2
   reported once, before the `Reconnected` that follows it.
 - **Privacy.** An event names the endpoint by its registered name only, with no host or user name. `Error` can hold the server's
   disconnect text: log it, but keep it out of public responses.
+- **The event's client may be gone.** Events arrive after the fact: by the time one is handled, its `Client` may have ended, and
+  a later `GetClientAsync` may already have disposed it to replace it. Using it can then throw `ObjectDisposedException` as well as
+  `SshException`; catch both when `IsConnected` is false, and wait for the next event.
 - Disposing the container ends every enumeration, without a `Disconnected` event. An `ISshConnectionProvider` of your own (a test
   fake) need not implement it: the interface's default throws `NotSupportedException`.
 
@@ -340,7 +343,8 @@ See [Jump hosts](how-to/jump-hosts.md) for jump hosts without dependency injecti
   `Debug`, with the reason only).
 - **Per hop.** A jump host's `UseAgent` offers the agent to that hop; the endpoint's offers it to `Host` only.
 - **With `ConfigAlias`**, ssh_config decides when `UseAgent` is not set (`IdentityAgent`, as ssh does); `false` turns the agent off,
-  and `true` uses an agent registered in the container, if any.
+  and `true` uses the same agent as without it, in place of `IdentityAgent`: the one registered in the container, else the user's.
+  Only when there is neither does `IdentityAgent` decide.
 - The agent is listed once per connection, however many hops use it.
 
 ## Health checks

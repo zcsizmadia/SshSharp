@@ -40,6 +40,11 @@ public sealed class SshCommandInput
     /// Input read from <paramref name="stream"/>, from its current position to its end, while the command runs: a large file is sent without
     /// being held in memory. The stream stays open (the caller disposes it), and since it is read once, this input is for one command.
     /// </summary>
+    /// <remarks>
+    /// When the command ends before the stream is read to its end, the read in progress is cancelled. A stream whose <c>ReadAsync</c>
+    /// ignores cancellation (some pipes and network streams) is not waited for: <c>RunCommandAsync</c> returns, and that one read may
+    /// still complete, or fail, afterwards. What it returns is discarded, and an error it throws is not reported.
+    /// </remarks>
     /// <param name="stream">A readable stream.</param>
     public static SshCommandInput FromStream(Stream stream)
     {

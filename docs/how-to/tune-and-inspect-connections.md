@@ -27,9 +27,11 @@ Setting options before the connection is made matters for buffer sizes: TCP agre
 receive buffer the socket has then. Keep-alive and the type of service can be set at any time, so setting them here is simply the
 earliest point.
 
-`ConfigureSocket` is called once for each socket SshSharp creates. That is once, unless a `LocalEndPoint` is set and the server's
-name has several addresses: then each address that is tried gets a socket of its own. Anything the callback throws ends the
-connection attempt and is thrown from `ConnectAsync` unchanged, not wrapped as a failure to connect.
+`ConfigureSocket` is called once for each socket SshSharp creates, and each address of the server that is tried gets a new socket,
+of that address's family (IPv4 or IPv6, not dual-mode). For an IP address, or a name with one address, that is once. When a name
+has several addresses and the first cannot be reached, the callback runs again for the socket of each further address tried, so set
+the same options every time. Anything the callback throws ends the connection attempt and is thrown from `ConnectAsync` unchanged,
+not wrapped as a failure to connect.
 
 It applies only to the TCP connection that `SshClient.ConnectAsync(host, port, options)` opens itself:
 
@@ -184,7 +186,7 @@ Notes:
 | `RemoteEndPoint`, `LocalEndPoint` | The TCP connection's endpoints, when there is a socket: a connection SshSharp made, or a `NetworkStream` you passed. Through an HTTP or SOCKS proxy, the remote one is the proxy. Null over other streams (a ProxyJump tunnel, a ProxyCommand). |
 | `ConnectedAt` | When authentication succeeded, in UTC. |
 | `SessionId` | The session identifier: the exchange hash of the first key exchange (RFC 4253 section 7.2). It stays the same across re-exchanges. It is not secret, and both sides know it, so it can correlate a connection with the server's records. A copy, readable after the client is disposed. |
-| `BytesSent`, `BytesReceived` | SSH message bytes so far: each packet's payload before compression, encryption, padding and MAC (after decryption and decompression for what is received), as the `sshsharp.bytes.*` metrics count them. |
+| `BytesSent`, `BytesReceived` | SSH message bytes so far: each packet's payload, key exchange messages included, before compression, encryption, padding and MAC (after decryption and decompression for what is received), as the `sshsharp.bytes.*` metrics count them. |
 | `ServerIdentification` | The server's identification line, for example `SSH-2.0-OpenSSH_9.9`. |
 | `Algorithms` | The negotiated key exchange, host key algorithm, ciphers, MACs and compression; a re-exchange can change them. |
 | `HostKey` | The host key the server proved. |
@@ -206,9 +208,10 @@ prove the same host key as at the start, or the connection fails. Keys are renew
 - **TCP keep-alive is not SSH keep-alive.** TCP keep-alive keeps a firewall's state and finds a dead peer at the TCP level, but
   intervals are coarse on some systems, and a server that is up but stuck still answers it. `KeepAliveInterval` probes the SSH server
   itself. See [Keep-alive and reconnecting](keepalive-and-reconnect.md).
-- **The type of service** (`SocketOptionName.TypeOfService`) is an IPv4 option. A dual-mode socket, which SshSharp uses for a host
-  name when `AddressFamily` is `Any`, may refuse it. Set `AddressFamily = SshAddressFamily.Inet` to get an IPv4 socket. Windows
-  ignores it by default and marks traffic through QoS policies instead.
+- **The type of service** (`SocketOptionName.TypeOfService`) is an IPv4 option. Each socket has the family of the address it
+  connects to, so check `socket.AddressFamily`: an IPv6 socket takes the traffic class (`IPV6_TCLASS`) instead, which .NET sets only
+  as a raw option. ssh_config's `IPQoS` sets whichever applies. Windows ignores the IPv4 option by default and marks traffic through
+  QoS policies instead.
 - **A larger window does not help when bandwidth is the limit,** only when the round trip is.
 - **Counters cover the whole connection,** every channel together. For one transfer, take the difference before and after.
 

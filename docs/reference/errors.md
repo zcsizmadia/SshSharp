@@ -30,7 +30,7 @@ Exception
 | `ProtocolError` | The server sent something that violates the protocol. | `SshProtocolException` | Report it with a `Debug` log; usually a server bug or interference on the path. |
 | `ConnectionClosed` | The connection was lost, or the server or the client closed it. | `SshException` | Reconnect; decide whether interrupted work is safe to repeat. |
 | `ChannelClosed` | A channel was refused or closed: a command, terminal, subsystem or tunnel the server refused, or a session that ended. | `SshException` | Check server policy (`AllowTcpForwarding`, `Subsystem`, `MaxSessions`). The connection is still usable. |
-| `Timeout` | `SshClientOptions.ConnectTimeout` or `ConnectTimeout` from `ssh_config` passed (the inner exception is a `TimeoutException`), a proxy did not finish its handshake, the server missed `KeepAliveCountMax` keep-alives, or an SFTP server sent nothing for `SftpClient.OperationTimeout` (inner `TimeoutException`; the SFTP session stays usable). | `SshException` | Reconnect; check the network path. |
+| `Timeout` | `SshClientOptions.ConnectTimeout` or `ConnectTimeout` from `ssh_config` passed (the inner exception is a `TimeoutException`), a proxy did not finish its handshake, the server missed `KeepAliveCountMax` keep-alives, or an SFTP server sent nothing for `SftpClient.OperationTimeout` (inner `TimeoutException`; the SFTP session stays usable after a reply that timed out, and is closed after a request that could not be sent: check `SftpClient.IsConnected`). | `SshException` | Reconnect; check the network path. |
 | `AgentFailed` | The SSH agent could not be reached, or refused a request. | `SshException` | Check `SSH_AUTH_SOCK` or the agent service; a locked agent refuses, and an in-process agent (`SshAgent.FromKeys`) refuses to add, remove or lock keys. |
 | `TransferFailed` | An SCP transfer failed on the server's side, or a directory download met a name it will not write. | `SshException` | The message has the server's words. |
 | `SftpFailed` | An SFTP request failed. | `SftpException` | `Status` (`NoSuchFile`, `PermissionDenied`, `Failure`, ...) and `Path` say what and where. |
@@ -55,7 +55,10 @@ Exception
 
 ## Messages
 
-Exception messages never contain passwords, keys, command text, user names or host names, so they are safe to log. Some carry
+Exception messages never contain passwords, keys, command text, user names or host names, so they are safe to log. That covers
+names that are usually user names, such as a certificate's principals, and the SSH agent's socket or pipe path, which the
+environment chooses and which can hold the user's name. A file or SFTP path your code passed to the call that failed can appear,
+as it does in .NET's own I/O exceptions (`Could not find file '...'`): your code chose it, and the message is about it. Some carry
 text from the server (an SFTP error, an SCP message); treat that as untrusted before showing it to end users. `SshCommandException`
 keeps the command's stderr out of its message, in `StandardError` and `StandardErrorText`: it is the remote program's own output,
 which may contain anything, so decide whether it is safe to log, and strip control characters before showing it in a terminal.

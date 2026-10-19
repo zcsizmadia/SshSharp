@@ -89,7 +89,7 @@ public sealed partial class SshClient
     private static async Task<SshClient> ConnectJumpHostAsync(SshJumpHost jump, SshClient? via, SshClientOptions destination,
         IReadOnlyList<IPEndPoint>? local, CancellationToken cancellationToken)
     {
-        using var deadline = new ConnectDeadline(jump.Options.ConnectTimeout, cancellationToken);
+        using var deadline = new ConnectDeadline(jump.Options.ConnectTimeout, cancellationToken, destination.TimeProvider);
         using var measurement = new ConnectMeasurement(via is null && destination.Proxy is null ? jump.Port : null);
         Owned? owner = null;
         try

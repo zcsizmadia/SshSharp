@@ -61,7 +61,7 @@ jobs:
             tests: Keys/*Tests.cs;Crypto/WycheproofTests.cs;Fuzz/ParserRobustnessTests.cs
           - scope: certificates
             mutate: -m "**/SshCertificate.cs" -m "**/SshCertificateBuilder.cs"
-            tests: CertificateTests.cs;Keys/SshCertificate*Tests.cs;Keys/ExternalKeyTests.cs;Keys/SshSignatureTests.cs;KnownHostsVerifierTests.cs;Fuzz/ParserRobustnessTests.cs
+            tests: CertificateTests.cs;Keys/SshCertificate*Tests.cs;Keys/SshKeyRevocationListTests.cs;Keys/ExternalKeyTests.cs;Keys/SshSignatureTests.cs;KnownHostsVerifierTests.cs;Fuzz/ParserRobustnessTests.cs
           - scope: signatures
             mutate: -m "**/Keys/SshSignature.cs" -m "**/Keys/SshAllowedSigners.cs"
             tests: Keys/SshSignatureTests.cs;Keys/ExternalKeyTests.cs;Fuzz/ParserRobustnessTests.cs
@@ -97,8 +97,8 @@ jobs:
             mutate: -m "**/Sftp/SftpGlob.cs"
             tests: Sftp/SftpGlobTests.cs
           - scope: config-resolver
-            mutate: -m "**/Config/SshConfigResolver.cs" -m "**/Config/SshConfigResolveOptions.cs" -m "**/Config/SshHostConfig.cs" -m "**/Config/SshDnsLookup.cs" -m "**/SshAlgorithmList.cs"
-            tests: Config/*Tests.cs;ConfigConnectTests.cs;ConfigForwardingTests.cs;AlgorithmOptionsTests.cs
+            mutate: -m "**/Config/SshConfigResolver.cs" -m "**/Config/SshConfigResolveOptions.cs" -m "**/Config/SshHostConfig.cs" -m "**/Config/SshDnsLookup.cs" -m "**/SshAlgorithmList.cs" -m "**/Protocol/AlgorithmNegotiator.cs"
+            tests: Config/*Tests.cs;ConfigConnectTests.cs;ConfigForwardingTests.cs;AlgorithmOptionsTests.cs;PubkeyAcceptedAlgorithmsTests.cs;Protocol/KexNegotiationTests.cs
           # The SOCKS server of dynamic forwarding: request parsing, and the username/password check (RFC 1929).
           - scope: socks
             mutate: -m "**/Protocol/SocksHandshake.cs"

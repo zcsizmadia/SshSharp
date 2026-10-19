@@ -71,6 +71,36 @@ internal static class Algorithms
         return options;
     }
 
+    public static SshClientOptions PubkeyAccepted(IReadOnlyList<SshPrivateKey> keys)
+    {
+        // <pubkey-accepted>
+        // Offer only Ed25519 keys (and Ed25519 certificates): an RSA or ECDSA key among the keys, or in the agent, is skipped.
+        var options = new SshClientOptions
+        {
+            UserName = "deploy",
+            PrivateKeys = keys,
+            HostKeyVerifier = KnownHostsVerifier.ForCurrentUser(StrictHostKeyChecking.Yes),
+            PubkeyAcceptedAlgorithms = SshAlgorithmList.Only("ssh-ed25519-cert-v01@openssh.com", "ssh-ed25519"),
+        };
+        // </pubkey-accepted>
+        return options;
+    }
+
+    public static SshClientOptions RsaSha256(SshPrivateKey rsaKey)
+    {
+        // <pubkey-rsa-sha256>
+        // An RSA key held by a service that signs with SHA-256 only: rsa-sha2-256 first, so it is used whenever the server takes it.
+        var options = new SshClientOptions
+        {
+            UserName = "deploy",
+            PrivateKeys = [rsaKey],
+            HostKeyVerifier = KnownHostsVerifier.ForCurrentUser(StrictHostKeyChecking.Yes),
+            PubkeyAcceptedAlgorithms = SshAlgorithmList.Prepend("rsa-sha2-256"),
+        };
+        // </pubkey-rsa-sha256>
+        return options;
+    }
+
     public static SshClientOptions KeysOnly(SshPrivateKey key)
     {
         // <auth-order>

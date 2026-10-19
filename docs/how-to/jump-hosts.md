@@ -70,7 +70,8 @@ What applies where:
 | A hop's `UserName`, credentials, `HostKeyVerifier`, algorithm lists, `KeepAliveInterval`, `ForwardAgent` | That hop only. |
 | The destination's `ConnectTimeout` | The whole chain: every hop, every tunnel, and the destination's handshake and login. |
 | A hop's `ConnectTimeout` | That hop's connection, within the destination's limit. |
-| The destination's `Proxy`, `LocalEndPoint`, `AddressFamily` | The first network connection, which is the first hop's. |
+| The destination's `Proxy`, `LocalEndPoint`, `AddressFamily`, `ConfigureSocket`, `ConnectionAttempts` | The first network connection, which is the first hop's. |
+| A hop's `AddressFamily`, `ConfigureSocket`, `ConnectionAttempts` | Not used: the first hop's connection takes the destination's. |
 | A hop's `Proxy`, `LocalEndPoint`, `JumpHosts` | Not allowed: `SshJumpHost` throws `ArgumentException`. |
 
 The destination's host name is resolved by the last hop, and each hop's by the one before it, so names that exist only inside
@@ -115,10 +116,14 @@ pinned key).
 
 ## Notes and pitfalls
 
-- **Passwords go to the destination only.** When connecting by alias, `SshConfigConnectOptions.Password` and the
-  keyboard-interactive handler are offered to the final host, never to a jump host. Hops log in with keys or the agent, as `ssh`
-  asks for each host's password separately. With `JumpHosts`, each host gets only what its own options hold: a hop may have a
-  password of its own, and the destination's is never offered to it.
+- **Credentials go to the destination only.** When connecting by alias, `SshConfigConnectOptions.Password`, the
+  keyboard-interactive handler and `SshConfigConnectOptions.PrivateKeys` are offered to the final host, never to a jump host. Hops
+  log in with their own `IdentityFile`s and the agent, as `ssh` asks for each host's password separately. With `JumpHosts`, each
+  host gets only what its own options hold: a hop may have a password or keys of its own, and the destination's are never offered
+  to it.
+- **Upgrading from 1.0:** `SshConfigConnectOptions.PrivateKeys` used to be offered to every hop as well. A hop that logged in with
+  one of them now needs that key in its own `IdentityFile` (in the configuration) or in the agent (`SshConfigConnectOptions.Agent`,
+  for example `SshAgent.FromKeys(key)` for a key held in the application).
 - **Reusing one options object** for a hop and the destination offers its credentials to both. Give each host its own options
   unless they really share a login.
 - **Disposal.** Disposing the destination client tears down the whole chain, and a connection that fails partway closes the hops

@@ -355,7 +355,7 @@ public sealed class JumpHostTests
         var connected = new List<string>();
         await using var client = await SshClient.ConnectAsync("app", new SshConfigConnectOptions
         {
-            UseAgent = false, // the developer's own agent must not change the outcome
+            Agent = SshAgent.FromKeys(JumpKey), // the hop's key (PrivateKeys is the destination's only); also keeps the developer's agent out
             Config = SshConfig.Parse("""
                 Host app
                   HostName app.internal
@@ -369,7 +369,6 @@ public sealed class JumpHostTests
                 """),
             ResolveOptions = new SshConfigResolveOptions { LocalUser = "local", HomeDirectory = Path.GetTempPath(), LocalHostName = "box" },
             Password = TargetPassword,
-            PrivateKeys = [JumpKey],
             Proxy = Network(connected, ("bastion.example.com", jump)),
         }, Timeout());
 

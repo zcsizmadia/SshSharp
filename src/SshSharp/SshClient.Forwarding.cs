@@ -502,6 +502,7 @@ public sealed partial class SshClient
         if (!reply.Success)
         {
             _remoteSocketForwards.TryRemove(remoteSocketPath, out _);
+            forwarder.Abandon(); // never returned to the caller, so released here
             throw new SshException(SshFailureReason.ChannelClosed, "The server refused to listen on the Unix socket (stream-local forwarding not allowed, or the socket exists).");
         }
 
@@ -725,7 +726,7 @@ public sealed partial class SshClient
         }
         catch (Exception ex) when (ex is SshException or OperationCanceledException or ObjectDisposedException)
         {
-            SshLog.AgentUnavailable(_logger, ex.Message);
+            SshLog.AgentUnavailable(_logger, new(ex));
             await channel.CloseAsync(CancellationToken.None).ConfigureAwait(false);
             channel.DiscardUnread();
             return;
@@ -743,7 +744,7 @@ public sealed partial class SshClient
                 }
                 catch (Exception ex) when (ex is IOException or SshException or OperationCanceledException)
                 {
-                    SshLog.AgentUnavailable(_logger, ex.Message);
+                    SshLog.AgentUnavailable(_logger, new(ex));
                     await channel.CloseAsync(CancellationToken.None).ConfigureAwait(false);
                     channel.DiscardUnread();
                     return;
@@ -805,6 +806,10 @@ public sealed partial class SshClient
     private static string ExpandSocketPath(string path, SshHostConfig hostConfig) =>
         hostConfig.Tokens is { } tokens ? tokens.ExpandPath(tokens.ExpandTokens(path)) : path;
 
+    /// <summary>A Unix socket path on the server, with ssh_config's tokens and <c>${VAR}</c> expanded but not <c>~</c>, which is this machine's.</summary>
+    private static string ExpandRemoteSocketPath(string path, SshHostConfig hostConfig) =>
+        hostConfig.Tokens is { } tokens ? tokens.ExpandTokensAndVariables(path) : path;
+
     /// <summary>The mode a socket file gets under <c>StreamLocalBindMask</c>: the permissions the mask does not clear, as ssh's umask leaves them.</summary>
     internal static UnixFileMode SocketModeFromMask(UnixFileMode mask) => (UnixFileMode)(0x1FF & ~(int)mask);
 
@@ -820,12 +825,13 @@ public sealed partial class SshClient
             {
                 // As in ssh, a field with a '/' in it is a Unix socket path: /local/socket host:hostport, [bind:]port /remote/socket, or
                 // /local/socket /remote/socket. The local one may be written with '\' too, as Windows paths are (no bind address or
-                // port has either). Paths take ssh_config's tokens, ~ and ${VAR}, as ssh expands them.
+                // port has either). Both take ssh_config's tokens and ${VAR}; only the local one takes ~, which on the server's side
+                // would name this machine's home directory (and tell the server this machine's user name).
                 var parts = spec.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
                 var localIsSocket = parts.Length == 2 && parts[0].AsSpan().IndexOfAny('/', '\\') >= 0;
                 if (parts.Length == 2 && (localIsSocket || parts[1].Contains('/')))
                 {
-                    var remoteSocket = parts[1].Contains('/') ? ExpandSocketPath(parts[1], hostConfig) : null;
+                    var remoteSocket = parts[1].Contains('/') ? ExpandRemoteSocketPath(parts[1], hostConfig) : null;
                     var socketTarget = remoteSocket is null
                         ? ForwardSpec.ParseTarget(parts[1]) ?? throw new FormatException("the target must be host:hostport or a socket path")
                         : default;
@@ -857,14 +863,15 @@ public sealed partial class SshClient
             await TryForwardAsync("RemoteForward", spec, async () =>
             {
                 // /remote/socket host:hostport or /remote/socket /local/socket: a Unix socket on the server. As in ssh, a field
-                // with a '/' in it is a socket path (so C:/run/agent.sock is one on Windows). Both paths take ssh_config's tokens and
-                // ${VAR}, expanded here as ssh does (%d and %u are this machine's, %r the remote user); only the local one takes ~,
-                // which on the server's side would name this machine's home directory.
+                // with a '/' in it is a socket path (so C:/run/agent.sock is one on Windows); the local one may be written with '\'
+                // too, as LocalForward's may (no host:hostport has either). Both paths take ssh_config's tokens and ${VAR}, expanded
+                // here as ssh does (%d and %u are this machine's, %r the remote user); only the local one takes ~, which on the
+                // server's side would name this machine's home directory.
                 var parts = spec.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
                 if (parts.Length == 2 && parts[0].Contains('/'))
                 {
-                    var remoteSocket = hostConfig.Tokens is { } tokens ? tokens.ExpandTokensAndVariables(parts[0]) : parts[0];
-                    _remoteSocketForwardings.Add(parts[1].Contains('/')
+                    var remoteSocket = ExpandRemoteSocketPath(parts[0], hostConfig);
+                    _remoteSocketForwardings.Add(parts[1].AsSpan().IndexOfAny('/', '\\') >= 0
                         ? await ForwardRemoteUnixSocketAsync(remoteSocket, ExpandSocketPath(parts[1], hostConfig), cancellationToken).ConfigureAwait(false)
                         : ForwardSpec.ParseTarget(parts[1]) is { } socketTarget
                             ? await ForwardRemoteUnixSocketAsync(remoteSocket, socketTarget.Host, socketTarget.Port, cancellationToken).ConfigureAwait(false)

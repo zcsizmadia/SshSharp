@@ -139,8 +139,10 @@ public class SshTransportCompressionTests
             await Assert.That(received.Where(p => p.Type == 94).All(p => p.Compressed == SshAlgorithms.CanCompressOutgoing)).IsTrue();
             await Assert.That(received.Count(p => p.Type == 94)).IsEqualTo(2);
 
-            // The byte counters count message payloads as the application sees them, uncompressed.
+            // The byte counters count message payloads as the application sees them, uncompressed: every byte the client counted as sent
+            // is what the server has after inflating (key exchange messages included, as both count them).
             await Assert.That(client.BytesSent).IsGreaterThanOrEqualTo(20_000 + 100 + 40 + 60);
+            await Assert.That(client.BytesSent).IsEqualTo(server.PayloadBytesReceived);
             await Assert.That(client.BytesReceived).IsGreaterThanOrEqualTo(20_000 + 100 + 30 + 1);
         }
     }

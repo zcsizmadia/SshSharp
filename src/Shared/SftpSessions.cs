@@ -11,8 +11,10 @@ namespace SshSharp.Adapters;
 /// with the adapter.
 /// </summary>
 /// <remarks>
-/// Only a failure of the session or the connection replaces it (<see cref="IsConnectionFailure"/>); an error status from the server,
-/// such as a missing file, or a timeout, leaves the session in use. Concurrent callers that find no live session share one open, so a
+/// Only a session that has ended is replaced (<see cref="SftpClient.IsConnected"/> false: its channel or the connection under it
+/// closed or failed, for whatever reason, a missed keep-alive and a failed key exchange included). That is decided on the session's
+/// state, not on the exception an operation threw: one request's failure, such as an error status from the server, a reply that timed
+/// out or a reply too large to take, leaves a live session in use for the other callers. Concurrent callers that find no live session share one open, so a
 /// dropped connection is followed by one reconnect, not one per caller; when that open fails, each of them gets the failure, and the
 /// next call tries again (the factory decides how often that may connect).
 /// </remarks>
@@ -52,9 +54,17 @@ internal sealed class SftpSessions : IAsyncDisposable
         }
 
         Task<SftpClient> session;
+        SftpClient? ended = null;
         lock (_lock)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
+            if (_current is { IsCompletedSuccessfully: true } open && !open.Result.IsConnected)
+            {
+                // The session ended since it was last used (the connection dropped while the adapter was idle): not worth a failed call.
+                ended = open.Result;
+                _current = null;
+            }
+
             if (_current is null || _current.IsFaulted || _current.IsCanceled)
             {
                 // Started on the thread pool, so the factory does not run under the lock.
@@ -62,6 +72,11 @@ internal sealed class SftpSessions : IAsyncDisposable
             }
 
             session = _current;
+        }
+
+        if (ended is not null)
+        {
+            DisposeRetired(ended);
         }
 
         return session.IsCompletedSuccessfully ? session : WaitForOpenAsync(session, cancellationToken);
@@ -119,9 +134,10 @@ internal sealed class SftpSessions : IAsyncDisposable
     }
 
     /// <summary>
-    /// Runs <paramref name="operation"/> on the session. When the session or its connection fails, the session is replaced, so the next
-    /// call opens a new one; with <paramref name="retry"/> (only for operations that change nothing on the server), this call also tries
-    /// once more on the new session, so a lookup right after a drop succeeds.
+    /// Runs <paramref name="operation"/> on the session. When it fails and the session has ended (see <see cref="SftpClient.IsConnected"/>),
+    /// the session is replaced, so the next call opens a new one; with <paramref name="retry"/> (only for operations that change nothing
+    /// on the server), this call also tries once more on the new session, so a lookup right after a drop succeeds. A failure that left
+    /// the session up (an error status, a timed-out reply, a reply too large) is this call's alone and changes nothing for the others.
     /// </summary>
     public async Task<T> RunAsync<T>(Func<SftpClient, CancellationToken, Task<T>> operation, bool retry, CancellationToken cancellationToken)
     {
@@ -130,7 +146,7 @@ internal sealed class SftpSessions : IAsyncDisposable
         {
             return await operation(session, cancellationToken).ConfigureAwait(false);
         }
-        catch (Exception ex) when (_factory is not null && IsConnectionFailure(ex))
+        catch (Exception) when (_factory is not null && !session.IsConnected)
         {
             Retire(session);
             if (!retry)
@@ -144,24 +160,12 @@ internal sealed class SftpSessions : IAsyncDisposable
         {
             return await operation(session, cancellationToken).ConfigureAwait(false);
         }
-        catch (Exception ex) when (IsConnectionFailure(ex))
+        catch (Exception) when (!session.IsConnected)
         {
             Retire(session);
             throw;
         }
     }
-
-    /// <summary>
-    /// Whether <paramref name="exception"/> means the session or the connection under it is gone, rather than one request failing: the
-    /// connection or the SFTP channel closed, or the server broke the protocol. An SFTP error status (a missing file, a denied request)
-    /// and a timeout leave the session in use.
-    /// </summary>
-    internal static bool IsConnectionFailure(Exception exception) => exception switch
-    {
-        SftpException sftp => sftp.Status is SftpStatusCode.NoConnection or SftpStatusCode.ConnectionLost,
-        SshException ssh => ssh.Reason is SshFailureReason.ConnectionClosed or SshFailureReason.ChannelClosed or SshFailureReason.ProtocolError,
-        _ => false,
-    };
 
     /// <summary>Stops sharing <paramref name="session"/> and disposes it, unless another caller already replaced it.</summary>
     private void Retire(SftpClient session)
@@ -176,6 +180,12 @@ internal sealed class SftpSessions : IAsyncDisposable
             _current = null;
         }
 
+        DisposeRetired(session);
+    }
+
+    /// <summary>Disposes a session no longer shared; the adapter's disposal waits for it.</summary>
+    private void DisposeRetired(SftpClient session)
+    {
         // Outside the lock: disposing closes the channel. Calls still running on the session fail, as they would have anyway.
         var disposal = DisposeQuietlyAsync(session);
         lock (_lock)

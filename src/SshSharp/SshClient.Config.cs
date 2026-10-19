@@ -42,7 +42,9 @@ public sealed partial class SshClient
             throw new SshException(SshFailureReason.ConnectFailed, "ProxyJump/ProxyCommand chains nest too deeply (is there a loop in ssh_config?).");
         }
 
-        var resolveOptions = (options.ResolveOptions ?? new SshConfigResolveOptions()).With(user, port, jumpHost: depth > 0);
+        // A Proxy resolves names itself (socks5h, HTTP CONNECT), so canonicalization does not ask this machine's DNS, as with ProxyCommand.
+        var resolveOptions = (options.ResolveOptions ?? new SshConfigResolveOptions())
+            .With(user, port, jumpHost: depth > 0, viaProxy: options.Proxy is not null, addressFamily: options.AddressFamily);
         var hostConfig = await config.ResolveAsync(host, resolveOptions, cancellationToken).ConfigureAwait(false);
         var logger = options.Logger ?? NullLogger.Instance;
         if (hostConfig.RefuseConnection)
@@ -126,8 +128,9 @@ public sealed partial class SshClient
                 stream = tcpStream;
             }
 
-            // The password and the keyboard-interactive answers are the destination's: a ProxyJump hop (depth > 0), perhaps run by
-            // someone else, is never offered them, as ssh asks for each host's password separately. Hops log in with keys or the agent.
+            // The password, the keyboard-interactive answers and the caller's own keys are the destination's: a ProxyJump hop (depth > 0),
+            // perhaps run by someone else, is never offered them, as ssh asks for each host's password separately. Hops log in with their
+            // own configuration's identity files and the agent.
             var destination = depth == 0;
 
             // As ssh -C: the override is the destination's. A hop would compress the destination's packets, already encrypted, for nothing.
@@ -136,7 +139,7 @@ public sealed partial class SshClient
             {
                 UserName = hostConfig.User,
                 Password = destination && (hostConfig.PasswordAuthentication || hostConfig.KbdInteractiveAuthentication) ? options.Password : null,
-                PrivateKeys = hostConfig.PubkeyAuthentication ? [.. options.PrivateKeys, .. keys] : [],
+                PrivateKeys = hostConfig.PubkeyAuthentication ? [.. destination ? options.PrivateKeys : [], .. keys] : [],
                 KeyboardInteractive = destination && !hostConfig.BatchMode ? options.KeyboardInteractive : null,
                 PasswordProvider = destination && !hostConfig.BatchMode && (hostConfig.PasswordAuthentication || hostConfig.KbdInteractiveAuthentication)
                     ? options.PasswordProvider
@@ -448,7 +451,7 @@ public sealed partial class SshClient
             }
             catch (Exception ex) when (ex is SshException { Reason: SshFailureReason.AgentFailed } or NotSupportedException)
             {
-                SshLog.AgentUnavailable(logger, ex.Message);
+                SshLog.AgentUnavailable(logger, new(ex));
             }
         }
     }
@@ -467,7 +470,7 @@ public sealed partial class SshClient
         }
         catch (SshException ex) when (ex.Reason == SshFailureReason.AgentFailed)
         {
-            SshLog.AgentUnavailable(logger, ex.Message); // like ssh: no agent is not an error
+            SshLog.AgentUnavailable(logger, new(ex)); // like ssh: no agent is not an error
             return [];
         }
     }

@@ -57,6 +57,16 @@ public sealed class SshConfigResolveOptions
     /// </summary>
     internal Func<string, SshAddressFamily, CancellationToken, ValueTask<string?>>? NameLookup { get; init; }
 
+    /// <summary>
+    /// Whether the connection goes through an HTTP or SOCKS proxy (<see cref="SshConfigConnectOptions.Proxy"/>), which resolves the
+    /// name: canonicalization is then skipped unless <c>CanonicalizeHostname always</c>, as with <c>ProxyCommand</c>, so the name is not
+    /// sent to this machine's resolver.
+    /// </summary>
+    internal bool ViaProxy { get; init; }
+
+    /// <summary>The address family the connection uses when the caller overrides ssh_config's (<see cref="SshConfigConnectOptions.AddressFamily"/>), for canonicalization's lookups.</summary>
+    internal SshAddressFamily? AddressFamily { get; init; }
+
     /// <summary>A tag given by the caller (<c>ssh -P</c>), matched by <c>Match tagged</c>; overrides <c>Tag</c> in the file.</summary>
     public string? Tag { get; init; }
 
@@ -100,8 +110,10 @@ public sealed class SshConfigResolveOptions
     /// type <c>none</c> and no command, as the <c>ssh -W</c> that ssh runs for each ProxyJump hop has: the caller's session is the
     /// destination's, not the hop's.
     /// </summary>
-    internal SshConfigResolveOptions With(string? user, int? port, bool jumpHost = false) => new()
+    internal SshConfigResolveOptions With(string? user, int? port, bool jumpHost = false, bool viaProxy = false, SshAddressFamily? addressFamily = null) => new()
     {
+        ViaProxy = viaProxy,
+        AddressFamily = addressFamily,
         User = user ?? User,
         Port = port ?? Port,
         LocalUser = LocalUser,

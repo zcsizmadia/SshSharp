@@ -8,8 +8,9 @@ namespace SshSharp.Protocol;
 
 /// <summary>
 /// Opens the TCP connection to a server or proxy: from any local address, or from given ones (<c>BindAddress</c>, <c>BindInterface</c>,
-/// <see cref="SshClientOptions.LocalEndPoint"/>). A socket bound to an IPv4 address reaches only IPv4 destinations and an IPv6 one only
-/// IPv6, so with a bind the destination's addresses are filtered to the families the local addresses have, and tried in order.
+/// <see cref="SshClientOptions.LocalEndPoint"/>). The name is resolved here and its addresses tried in order, each with a new socket. A
+/// socket bound to an IPv4 address reaches only IPv4 destinations and an IPv6 one only IPv6, so with a bind the destination's addresses
+/// are filtered to the families the local addresses have.
 /// </summary>
 internal static class TcpConnector
 {
@@ -34,8 +35,29 @@ internal static class TcpConnector
     /// <param name="what">"the server" or "the proxy", for the error message.</param>
     /// <param name="configure">Sets the caller's socket options; what it throws is thrown as it is, not reported as a failure to connect.</param>
     /// <param name="cancellationToken">Cancels resolving and connecting.</param>
-    public static async Task<NetworkStream> ConnectAsync(string host, int port, IReadOnlyList<IPEndPoint>? local, SshAddressFamily family, string what,
-        Action<Socket>? configure, CancellationToken cancellationToken)
+    public static Task<NetworkStream> ConnectAsync(string host, int port, IReadOnlyList<IPEndPoint>? local, SshAddressFamily family, string what,
+        Action<Socket>? configure, CancellationToken cancellationToken) =>
+        ConnectAsync(host, port, local, family, what, configure, Dns.GetHostAddressesAsync, cancellationToken);
+
+    /// <summary>
+    /// Connects as above, resolving names with <paramref name="resolve"/> (tests give a name the addresses they need).
+    /// </summary>
+    /// <remarks>
+    /// Each address is tried with a socket of its own, created, bound and configured afresh, not with one socket reused from address to
+    /// address as <c>TcpClient.ConnectAsync(host, port)</c> does: on Linux and macOS a socket with a raw option set (<c>IPV6_TCLASS</c>
+    /// for <c>IPQoS</c>, or whatever <paramref name="configure"/> sets) cannot be connected again after a failed attempt, so that
+    /// gives up after the first address.
+    /// </remarks>
+    /// <param name="host">The host name or address.</param>
+    /// <param name="port">The port.</param>
+    /// <param name="local">Local endpoints to connect from, or null for any.</param>
+    /// <param name="family">The <c>AddressFamily</c> restriction.</param>
+    /// <param name="what">"the server" or "the proxy", for the error message.</param>
+    /// <param name="configure">Sets the caller's socket options.</param>
+    /// <param name="resolve">Resolves a host name to its addresses.</param>
+    /// <param name="cancellationToken">Cancels resolving and connecting.</param>
+    internal static async Task<NetworkStream> ConnectAsync(string host, int port, IReadOnlyList<IPEndPoint>? local, SshAddressFamily family, string what,
+        Action<Socket>? configure, Func<string, CancellationToken, Task<IPAddress[]>> resolve, CancellationToken cancellationToken)
     {
         // An address of the other family has nothing to try (the socket would refuse it with a NotSupportedException).
         if (family != SshAddressFamily.Any && IPAddress.TryParse(host, out var address)
@@ -45,86 +67,71 @@ internal static class TcpConnector
                 $"The address of {what} is not {(family == SshAddressFamily.Inet ? "IPv4" : "IPv6")}, the only family AddressFamily allows.");
         }
 
-        if (local is null || local.Count == 0)
-        {
-            var tcp = family switch
-            {
-                SshAddressFamily.Inet => new TcpClient(AddressFamily.InterNetwork),
-                SshAddressFamily.Inet6 => new TcpClient(AddressFamily.InterNetworkV6),
-                _ => new TcpClient(),
-            };
-            tcp.NoDelay = true;
-            var configuring = false;
-            try
-            {
-                // TcpClient connects this same socket, to each of the name's addresses in turn.
-                configuring = true;
-                configure?.Invoke(tcp.Client);
-                configuring = false;
-                await tcp.ConnectAsync(host, port, cancellationToken).ConfigureAwait(false);
-
-                // A cancellation racing the connect's completion can close the socket and still let ConnectAsync return (seen on
-                // .NET 8 under load); GetStream would then throw InvalidOperationException. The caller asked to cancel: say so.
-                cancellationToken.ThrowIfCancellationRequested();
-                return tcp.GetStream();
-            }
-            catch (SocketException ex) when (!configuring)
-            {
-                tcp.Dispose();
-                throw new SshException(SshFailureReason.ConnectFailed, $"Could not connect to {what}: {ex.SocketErrorCode}.", ex);
-            }
-            catch
-            {
-                tcp.Dispose();
-                throw;
-            }
-        }
-
         IPAddress[] destinations;
         try
         {
-            destinations = IPAddress.TryParse(host, out var literal) ? [literal] : await Dns.GetHostAddressesAsync(host, cancellationToken).ConfigureAwait(false);
+            destinations = IPAddress.TryParse(host, out var literal) ? [literal] : await resolve(host, cancellationToken).ConfigureAwait(false);
         }
         catch (SocketException ex)
         {
             throw new SshException(SshFailureReason.ConnectFailed, $"Could not resolve the address of {what}: {ex.SocketErrorCode}.", ex);
         }
 
-        var candidates = destinations
+        var allowed = destinations
             .Where(d => family switch
             {
                 SshAddressFamily.Inet => d.AddressFamily == AddressFamily.InterNetwork,
                 SshAddressFamily.Inet6 => d.AddressFamily == AddressFamily.InterNetworkV6,
-                _ => true,
+                _ => d.AddressFamily is AddressFamily.InterNetwork or AddressFamily.InterNetworkV6,
             })
-            .Select(d => (Destination: d, Local: local.FirstOrDefault(l => l.AddressFamily == d.AddressFamily)))
-            .Where(pair => pair.Local is not null)
+            .ToList();
+        if (allowed.Count == 0)
+        {
+            throw new SshException(SshFailureReason.ConnectFailed, family == SshAddressFamily.Any
+                ? $"Could not resolve the address of {what}: it has no IP address."
+                : $"None of the addresses of {what} is {(family == SshAddressFamily.Inet ? "IPv4" : "IPv6")}, the only family AddressFamily allows.");
+        }
+
+        // With a bind, a destination is reachable only from a local address of its own family.
+        var bind = local is { Count: > 0 };
+        var candidates = allowed
+            .Select(d => (Destination: d, Local: bind ? local!.FirstOrDefault(l => l.AddressFamily == d.AddressFamily) : null))
+            .Where(pair => !bind || pair.Local is not null)
             .ToList();
         if (candidates.Count == 0)
         {
             throw new SshException(SshFailureReason.ConnectFailed,
-                $"None of the addresses of {what} is of the bind address's family ({string.Join(" or ", local.Select(l => l.AddressFamily == AddressFamily.InterNetwork ? "IPv4" : "IPv6").Distinct())}).");
+                $"None of the addresses of {what} is of the bind address's family ({string.Join(" or ", local!.Select(l => l.AddressFamily == AddressFamily.InterNetwork ? "IPv4" : "IPv6").Distinct())}).");
         }
 
         SocketException? last = null;
         foreach (var (destination, from) in candidates)
         {
-            var socket = new Socket(from!.AddressFamily, SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
+            Socket? socket = null;
             var configuring = false;
             try
             {
-                socket.Bind(from);
+                // A socket of the destination's family. Where the system has no IPv6, creating one fails here and the next address is tried.
+                socket = new Socket(destination.AddressFamily, SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
+                if (from is not null)
+                {
+                    socket.Bind(from);
+                }
+
                 configuring = true;
                 configure?.Invoke(socket);
                 configuring = false;
                 await socket.ConnectAsync(destination, port, cancellationToken).ConfigureAwait(false);
-                cancellationToken.ThrowIfCancellationRequested(); // as above: a cancelled connect must not surface as a closed socket
+
+                // A cancellation racing the connect's completion can close the socket and still let ConnectAsync return (seen on .NET 8
+                // under load); the stream would then fail on first use. The caller asked to cancel: say so.
+                cancellationToken.ThrowIfCancellationRequested();
                 return new NetworkStream(socket, ownsSocket: true);
             }
             catch (SocketException ex) when (!configuring)
             {
-                socket.Dispose();
-                if (ex.SocketErrorCode is SocketError.AddressNotAvailable or SocketError.AddressAlreadyInUse)
+                socket?.Dispose();
+                if (from is not null && ex.SocketErrorCode is SocketError.AddressNotAvailable or SocketError.AddressAlreadyInUse)
                 {
                     throw new SshException(SshFailureReason.ConnectFailed, $"Could not bind to the local address: {ex.SocketErrorCode}.", ex);
                 }
@@ -133,7 +140,7 @@ internal static class TcpConnector
             }
             catch
             {
-                socket.Dispose();
+                socket?.Dispose();
                 throw;
             }
         }
