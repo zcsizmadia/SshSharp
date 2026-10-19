@@ -20,7 +20,19 @@ runs:
   using: composite
   steps:
     # Actions are pinned by commit SHA (the tag in the comment is for humans and Dependabot).
-    - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+    # On windows-11-arm, the PowerShell that runs install-dotnet.ps1 now and then crashes ("Internal CLR error. (0x80131506)", exit
+    # code 0xC0000005) before our code runs (actions/setup-dotnet#793), so a failed install there gets one more try. Everywhere else a
+    # failure fails the job at once. Remove the retry when the issue is fixed.
+    - id: install
+      uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+      continue-on-error: ${{ runner.os == 'Windows' && runner.arch == 'ARM64' }}
+      with:
+        global-json-file: global.json
+        dotnet-version: ${{ inputs.dotnet-8 == 'true' && '8.0.x' || '' }}
+        cache: ${{ inputs.cache == 'true' }}
+        cache-dependency-path: '**/Directory.Packages.props'
+    - if: steps.install.outcome == 'failure'
+      uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
       with:
         global-json-file: global.json
         dotnet-version: ${{ inputs.dotnet-8 == 'true' && '8.0.x' || '' }}
