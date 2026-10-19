@@ -59,8 +59,9 @@ public sealed partial class SshClient
         // Covers the whole hop, as ssh's does: loading identities, any ProxyJump hosts, the connection, handshake and authentication. So it
         // is applied here rather than through the hop's SshClientOptions.ConnectTimeout, which would start only at the connection.
         // As in OpenSSH, ConnectTimeout 0 means no limit; so does an infinite SshConfigConnectOptions.ConnectTimeout, which overrides it.
+        // On the clock that times the waits between ConnectionAttempts, so the two are measured alike.
         using var deadline = new ConnectDeadline((options.ConnectTimeout ?? hostConfig.ConnectTimeout) is { } limit && limit > TimeSpan.Zero ? limit : null,
-            cancellationToken);
+            cancellationToken, options.TimeProvider);
         var token = deadline.Token;
 
         // Measured from here, so failures to reach the server count too; a direct TCP connection is tagged as one.

@@ -17,13 +17,14 @@ internal sealed class ConnectDeadline : IDisposable
     /// <summary>Starts the clock: the deadline is <paramref name="limit"/> from now.</summary>
     /// <param name="limit">The limit; null or infinite for none.</param>
     /// <param name="cancellationToken">The caller's token.</param>
-    public ConnectDeadline(TimeSpan? limit, CancellationToken cancellationToken)
+    /// <param name="timeProvider">The clock, the same one that times the waits between connection attempts; the system clock by default.</param>
+    public ConnectDeadline(TimeSpan? limit, CancellationToken cancellationToken, TimeProvider? timeProvider = null)
     {
         _limit = limit;
         _caller = cancellationToken;
         if (limit is { } span && span != Timeout.InfiniteTimeSpan)
         {
-            _timeout = new CancellationTokenSource(span);
+            _timeout = new CancellationTokenSource(span, timeProvider ?? TimeProvider.System);
             _linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _timeout.Token);
         }
     }

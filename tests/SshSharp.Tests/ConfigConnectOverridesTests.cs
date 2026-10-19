@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Net.Sockets;
+using Microsoft.Extensions.Time.Testing;
 using SshSharp.Config;
 using SshSharp.Tests.Protocol;
 
@@ -150,19 +151,62 @@ public sealed class ConfigConnectOverridesTests : IDisposable
     [Test]
     public async Task ConnectTimeout_BoundsAllTheAttemptsTogether()
     {
+        // On a fake clock: on the real one, a starved thread pool could run a wait that ended after the deadline before the deadline's
+        // own callback, and start one attempt too many (seen on a macOS runner). The clock moves only once the deadline's timer and each
+        // wait's are set, so the count is exact: an attempt at 0 s and at 1 s, then the deadline at 1.5 s, before the next at 2 s.
+        var time = new TimerCountingTimeProvider(new FakeTimeProvider());
         var calls = new List<(string, int)>();
-        var ex = await Assert.ThrowsAsync<SshException>(async () => await SshClient.ConnectAsync("box", new SshConfigConnectOptions
+        var connect = SshClient.ConnectAsync("box", new SshConfigConnectOptions
         {
             UseAgent = false,
             Config = SshConfig.Parse("Host box\n ConnectionAttempts 100\n ConnectTimeout 300\n" + Trusting),
             ResolveOptions = Resolve,
             ConnectTimeout = TimeSpan.FromMilliseconds(1500), // overrides the configuration's 300 seconds
             TcpConnector = FailingThen(int.MaxValue, Refused, null, calls),
-        }, Timeout()));
+            TimeProvider = time,
+        }, Timeout());
 
+        await time.WaitForTimersAsync(2); // the deadline, and the wait after the first attempt
+        time.Advance(TimeSpan.FromSeconds(1));
+        await time.WaitForTimersAsync(3); // the wait after the second attempt
+        time.Advance(TimeSpan.FromMilliseconds(500));
+
+        var ex = await Assert.ThrowsAsync<SshException>(async () => await connect);
         await Assert.That(ex!.Reason).IsEqualTo(SshFailureReason.Timeout);
         await Assert.That(ex.InnerException).IsTypeOf<TimeoutException>();
-        await Assert.That(calls.Count).IsBetween(1, 3);
+        await Assert.That(calls.Count).IsEqualTo(2);
+    }
+
+    /// <summary>A <see cref="FakeTimeProvider"/> that counts the timers created on it, so a test can advance it once they are set.</summary>
+    private sealed class TimerCountingTimeProvider(FakeTimeProvider inner) : TimeProvider
+    {
+        private int _timers;
+
+        public override DateTimeOffset GetUtcNow() => inner.GetUtcNow();
+
+        public override long GetTimestamp() => inner.GetTimestamp();
+
+        public override long TimestampFrequency => inner.TimestampFrequency;
+
+        public override TimeZoneInfo LocalTimeZone => inner.LocalTimeZone;
+
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+        {
+            var timer = inner.CreateTimer(callback, state, dueTime, period);
+            Interlocked.Increment(ref _timers);
+            return timer;
+        }
+
+        public void Advance(TimeSpan delta) => inner.Advance(delta);
+
+        public async Task WaitForTimersAsync(int count)
+        {
+            using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            while (Volatile.Read(ref _timers) < count)
+            {
+                await Task.Delay(5, limit.Token);
+            }
+        }
     }
 
     [Test]
