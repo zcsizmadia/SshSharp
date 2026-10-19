@@ -50,7 +50,7 @@ for it, so `Host` blocks written for full names apply and `Match canonical` is t
 flowchart TD
     start["Host name"] --> addr{"An IP address?"}
     addr -- yes --> keep["Unchanged"]
-    addr -- no --> proxy{"ProxyJump or ProxyCommand,<br/>and not 'always'?"}
+    addr -- no --> proxy{"ProxyJump, ProxyCommand or a Proxy,<br/>and not 'always'?"}
     proxy -- yes --> keep
     proxy -- no --> dot{"Ends with a dot?"}
     dot -- yes --> anchored["Look it up as it is"]
@@ -62,13 +62,18 @@ flowchart TD
     cname -- yes --> target["The CNAME target"]
     cname -- no --> found["The name found"]
     domains -- "none found" --> fallback{"CanonicalizeFallbackLocal no?"}
-    anchored -- "not found" --> fallback
+    anchored -- "not found" --> anchoredFallback{"CanonicalizeFallbackLocal no?"}
     fallback -- yes --> fail["InvalidOperationException"]
+    anchoredFallback -- yes --> fail
+    anchoredFallback -- no --> keep
     fallback -- no --> bare["With CNAME rules: the name as the system<br/>resolves it, to its CNAME target if a rule allows"]
 ```
 
+"A Proxy" is `SshConfigConnectOptions.Proxy`: an HTTP or SOCKS proxy resolves the name itself, so, as with `ProxyCommand`, the
+name is not looked up here unless the configuration says `always`.
+
 The lookups go to the system resolver (`System.Net.Dns`, the hosts file and DNS, as `getaddrinfo` for `ssh`), for the configured
-`AddressFamily`. It reports the end of a CNAME chain, not the names in between, which is also what `ssh` sees; when the platform
+`AddressFamily` (or `SshConfigConnectOptions.AddressFamily`, when it overrides it). It reports the end of a CNAME chain, not the names in between, which is also what `ssh` sees; when the platform
 reports no canonical name, the rules have nothing to act on. Each name is looked up once per resolution, second pass included.
 `CanonicalizePermittedCNAMEs` without `CanonicalizeHostname` follows no CNAMEs here, unlike `ssh`. The built-in canonicalizer is
 off by default, because resolving a configuration then makes network queries.

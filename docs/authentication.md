@@ -95,7 +95,9 @@ var options = new SshClientOptions { UserName = "deploy", PrivateKeys = [ed25519
 
 Formats: the OpenSSH format (`BEGIN OPENSSH PRIVATE KEY`, also encrypted), PKCS#8 (also encrypted, for RSA and ECDSA),
 PKCS#1 and SEC1 PEM, and PuTTY `.ppk` versions 2 and 3 (also encrypted). Key types: Ed25519, ECDSA (nistp256/384/521) and
-RSA (2048 bits or more; signs with `rsa-sha2-256/512` as the server's `server-sig-algs` allows). The client announces
+RSA (2048 bits or more; signs with `rsa-sha2-256/512` as the server's `server-sig-algs` allows). `PubkeyAcceptedAlgorithms`
+(`SshClientOptions` or `ssh_config`) narrows which keys are offered and picks the RSA algorithm; see
+[Choose which keys are offered](how-to/algorithms-and-authentication-order.md#choose-which-keys-are-offered-and-how-they-sign). The client announces
 `ext-info-in-auth@openssh.com`, so a server can send `server-sig-algs` again during authentication (for example when a `Match`
 block changes them for this user), and each key uses the latest list. `SshPrivateKey.Parse` reads a key from a string.
 

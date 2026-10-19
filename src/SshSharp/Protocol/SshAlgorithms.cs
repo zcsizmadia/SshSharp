@@ -102,6 +102,19 @@ internal static class SshAlgorithms
         "ecdsa-sha2-nistp521-cert-v01@openssh.com", "rsa-sha2-512-cert-v01@openssh.com", "rsa-sha2-256-cert-v01@openssh.com",
     ];
 
+    /// <summary>
+    /// The signature algorithms public-key authentication can use, in OpenSSH's order for <c>PubkeyAcceptedAlgorithms</c>: certificates
+    /// first, then plain keys, FIDO security keys (signed by an agent) after the others of their kind, and RSA with SHA-2 only.
+    /// </summary>
+    public static IReadOnlyList<string> PublicKeySignatures { get; } =
+    [
+        "ssh-ed25519-cert-v01@openssh.com", "ecdsa-sha2-nistp256-cert-v01@openssh.com", "ecdsa-sha2-nistp384-cert-v01@openssh.com",
+        "ecdsa-sha2-nistp521-cert-v01@openssh.com", "sk-ssh-ed25519-cert-v01@openssh.com", "sk-ecdsa-sha2-nistp256-cert-v01@openssh.com",
+        "rsa-sha2-512-cert-v01@openssh.com", "rsa-sha2-256-cert-v01@openssh.com",
+        SshEd25519, EcdsaNistp256, EcdsaNistp384, EcdsaNistp521, "sk-ssh-ed25519@openssh.com", "sk-ecdsa-sha2-nistp256@openssh.com", RsaSha2_512,
+        RsaSha2_256,
+    ];
+
     private static readonly bool HardwareAes = System.Runtime.Intrinsics.X86.Aes.IsSupported || System.Runtime.Intrinsics.Arm.Aes.IsSupported;
 
     /// <summary>
@@ -178,7 +191,7 @@ internal static class SshAlgorithms
         [.. names.Where(n => kind switch
         {
             AlgorithmKind.Kex => FipsKex.Contains(n),
-            AlgorithmKind.HostKey => FipsHostKeys.Contains(n),
+            AlgorithmKind.HostKey => FipsHostKeys.Contains(SshCertificate.BaseAlgorithm(n)), // a certificate is as approved as its key
             AlgorithmKind.Cipher => Ciphers.TryGetValue(n, out var c) && c.IsFipsApproved,
             AlgorithmKind.Mac => Macs.TryGetValue(n, out var m) && m.IsFipsApproved,
             _ => true,
@@ -193,4 +206,7 @@ internal enum AlgorithmKind
     Cipher,
     Mac,
     Compression,
+
+    /// <summary>Signature algorithms for public-key authentication (<c>PubkeyAcceptedAlgorithms</c>).</summary>
+    PublicKey,
 }

@@ -74,8 +74,8 @@ await using var client = await SshClient.ConnectAsync("deploy@prod-db", new SshC
 
 What is taken from the configuration: `HostName`, `Port`, `User`, `IdentityFile`, `CertificateFile`, `IdentityAgent`,
 `IdentitiesOnly`, `UserKnownHostsFile`, `GlobalKnownHostsFile`, `RevokedHostKeys`, `StrictHostKeyChecking`, `HashKnownHosts`,
-`UpdateHostKeys`, `HostKeyAlias`, `KexAlgorithms`, `HostKeyAlgorithms`, `Ciphers`, `MACs`, `RequiredRSASize`,
-`PreferredAuthentications`, `PubkeyAuthentication`, `PasswordAuthentication`, `KbdInteractiveAuthentication`,
+`UpdateHostKeys`, `HostKeyAlias`, `KexAlgorithms`, `HostKeyAlgorithms`, `Ciphers`, `MACs`, `PubkeyAcceptedAlgorithms` (which
+keys are offered, and how RSA keys sign), `RequiredRSASize`, `PreferredAuthentications`, `PubkeyAuthentication`, `PasswordAuthentication`, `KbdInteractiveAuthentication`,
 `NumberOfPasswordPrompts`, `BatchMode`, `ProxyJump`, `ProxyCommand`, `ServerAliveInterval`, `ServerAliveCountMax`,
 `ConnectTimeout`, `ConnectionAttempts`, `AddressFamily`, `BindAddress`, `BindInterface`, `TCPKeepAlive`, `IPQoS`, `ForwardAgent`,
 `AddKeysToAgent` (`ask` with `ConfirmAddKeyToAgent`), `GSSAPIAuthentication`, `GSSAPIDelegateCredentials`, `ChannelTimeout`,
@@ -87,7 +87,7 @@ directives apply when `ResolveOptions` turns on `UseDnsCanonicalizer` or sets a 
 
 `SshConfigConnectOptions` also takes a `Config` (default: the user's and the system's files), `ResolveOptions` (home
 directory, environment, local user, host name canonicalization), a `Password` or `PasswordProvider`, `ChangePassword`, extra
-`PrivateKeys`, a `PassphraseProvider` for encrypted identity files, `KeyboardInteractive`, a `HostKeyVerifier` that replaces the
+`PrivateKeys` (the destination's, offered before its identity files), a `PassphraseProvider` for encrypted identity files, `KeyboardInteractive`, a `HostKeyVerifier` that replaces the
 configured one, `AskHostKey` and `ConfirmHostKeyUpdate`, `ConfirmAddKeyToAgent` (for `AddKeysToAgent ask`), `UseAgent`/`Agent`,
 `ForwardAgentFilter`, `AllowProxyCommand`, `AllowKnownHostsCommand`, a `Proxy` (HTTP or SOCKS), `ConfigureSocket` (run after
 `TCPKeepAlive` and `IPQoS`), `StartForwardings`, `AuthenticationBanner` and a `Logger`. `Port`, `ConnectTimeout`,
@@ -97,7 +97,9 @@ configured one, `AskHostKey` and `ConfirmHostKeyUpdate`, `ConfirmAddKeyToAgent` 
 ### Jump hosts and proxy commands
 
 `ProxyJump a,b` connects to `a`, then to `b` through `a`, then to the target through `b`; each hop is verified and
-authenticated with its own configuration. `ProxyCommand` runs a local command and speaks SSH over its standard input and
+authenticated with its own configuration: its identity files and the agent. What the caller gives in `SshConfigConnectOptions`
+(`Password`, `PasswordProvider`, `KeyboardInteractive`, `ChangePassword` and `PrivateKeys`) is the destination's and never reaches
+a hop. (Before 1.1, `PrivateKeys` were offered to every hop too.) `ProxyCommand` runs a local command and speaks SSH over its standard input and
 output, as `ssh` does; set `AllowProxyCommand = false` to refuse configurations that name one.
 
 Without `ssh_config`, `SshClientOptions.JumpHosts` builds the same chain: a list of `SshJumpHost`, each with its own host, port and
@@ -349,8 +351,8 @@ socket path (`RemoteForward /run/app.sock 127.0.0.1:3000` or `RemoteForward /rem
 forwarding, listed in `client.RemoteSocketForwardings`; as in ssh, a target with a `/` in it is a socket path. `LocalForward` takes
 socket paths on either side: `LocalForward /tmp/docker.sock /var/run/docker.sock`, `LocalForward 15432 /run/postgresql/.s.PGSQL.5432`
 or `LocalForward ~/db.sock db.internal:5432`. Those that listen on a socket here are listed in `client.LocalSocketForwardings`. Their paths
-take `ssh_config`'s tokens (`%d`, `%h`, `%C` and the rest), `~` and `${VAR}`, as `ssh` expands them; a local path may also be
-written with `\` on Windows. `StreamLocalBindUnlink yes` replaces a stale socket file instead of failing, and `StreamLocalBindMask`
+take `ssh_config`'s tokens (`%d`, `%h`, `%C` and the rest) and `${VAR}`, as `ssh` expands them, and a local path `~` too (a
+path on the server never does); a local path may also be written with `\` on Windows, in `RemoteForward` too. `StreamLocalBindUnlink yes` replaces a stale socket file instead of failing, and `StreamLocalBindMask`
 sets the socket file's permissions (`0177`, owner-only, by default; `0117` lets the owner's group connect). `RemoteForward` socket
 paths take the tokens and `${VAR}` too, expanded on this machine as `ssh` does (`RemoteForward /home/%r/app.sock /run/app.sock`:
 `%r` is the remote user); `~` only in the local one, since on the server's side it would name this machine's home directory.
@@ -375,7 +377,7 @@ var options = new SshClientOptions
     UserName = "deploy",
     Password = password,
     HostKeyVerifier = verifier,
-    KeepAliveInterval = TimeSpan.FromSeconds(30), // ServerAliveInterval
+    KeepAliveInterval = TimeSpan.FromSeconds(30), // ServerAliveInterval; null or TimeSpan.Zero sends none
     KeepAliveCountMax = 3,                        // ServerAliveCountMax
 };
 await using var client = await SshClient.ConnectAsync("example.com", 22, options);
@@ -451,7 +453,9 @@ so FIPS mode keeps a post-quantum key exchange where the server offers one. Keys
 
 To change the lists, set `KexAlgorithms`, `HostKeyAlgorithms`, `Ciphers` or `Macs` to an `SshAlgorithmList`, in the forms of
 `ssh_config`'s directives of the same names: `SshAlgorithmList.Remove("diffie-hellman-*")` drops from the defaults, `Prepend` moves
-to the front, `Append` adds at the end, and `Only` replaces them. `FipsMode` still applies on top. `RequiredRsaSize` sets the
+to the front, `Append` adds at the end (leaving one that is already a default in place, as `+` does), and `Only` replaces them.
+`FipsMode` still applies on top. `PubkeyAcceptedAlgorithms` decides which of `PrivateKeys` are offered and the signature algorithm
+an RSA key uses. `RequiredRsaSize` sets the
 smallest RSA host key accepted (2048 bits by default). See
 [Choose algorithms and authentication methods](how-to/algorithms-and-authentication-order.md).
 

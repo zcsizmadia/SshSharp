@@ -17,7 +17,8 @@ public enum SshAuthenticationOutcome
 
     /// <summary>
     /// The key has no signature algorithm the server accepts (its <c>server-sig-algs</c>), for example an RSA key and a server that
-    /// lists no <c>rsa-sha2-*</c>. The key was not offered.
+    /// lists no <c>rsa-sha2-*</c>, or none that <see cref="SshClientOptions.PubkeyAcceptedAlgorithms"/> (ssh_config's
+    /// <c>PubkeyAcceptedAlgorithms</c>) allows. The key was not offered.
     /// </summary>
     NoAcceptedAlgorithm,
 

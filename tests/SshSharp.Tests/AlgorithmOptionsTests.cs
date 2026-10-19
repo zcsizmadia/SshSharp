@@ -47,7 +47,7 @@ public class AlgorithmOptionsTests
     {
         IReadOnlyList<string> defaults = ["a", "b", "c"];
         await Assert.That(string.Join(",", SshAlgorithmList.Only("c", "a", "c").Apply(defaults))).IsEqualTo("c,a");
-        await Assert.That(string.Join(",", SshAlgorithmList.Append("a", "d").Apply(defaults))).IsEqualTo("b,c,a,d");
+        await Assert.That(string.Join(",", SshAlgorithmList.Append("a", "d").Apply(defaults))).IsEqualTo("a,b,c,d"); // a default stays put, as with +
         await Assert.That(string.Join(",", SshAlgorithmList.Prepend("c", "d").Apply(defaults))).IsEqualTo("c,d,a,b");
         await Assert.That(string.Join(",", SshAlgorithmList.Remove("b", "x*").Apply(defaults))).IsEqualTo("a,c");
     }

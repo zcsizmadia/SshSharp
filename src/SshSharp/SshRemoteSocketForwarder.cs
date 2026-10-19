@@ -234,6 +234,21 @@ public sealed class SshRemoteSocketForwarder : IAsyncDisposable
     }
 
     /// <summary>
+    /// Releases a forwarding the server refused: there is nothing to cancel there and no connection was routed to it, so only its
+    /// registration on the connection's token is released, without the round trip <see cref="DisposeAsync"/> makes.
+    /// </summary>
+    internal void Abandon()
+    {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+        {
+            return;
+        }
+
+        _stop.Cancel();
+        _stop.Dispose();
+    }
+
+    /// <summary>
     /// Cancels the forwarding on the server (<c>cancel-streamlocal-forward@openssh.com</c>) and closes every forwarded connection. For a
     /// forwarding to a handler, the token each handler was given is cancelled, and this waits up to <see cref="HandlerShutdownTimeout"/>
     /// (5 seconds by default) for the handlers to return; the connections of any still running then are closed under them, and this

@@ -58,6 +58,15 @@ key fails the same way. See [Algorithms](algorithms.md).
 `SshClientOptions.KexAlgorithms = SshAlgorithmList.Remove("diffie-hellman-*")`) that removes the finite-field methods leaves
 nothing in common with a server that offers only those. The same goes for the other lists.
 
+**"ssh_config's Ciphers leaves no cipher algorithm that SshSharp can use"** (`ConnectFailed`, before anything is sent): every
+name in that directive is one SshSharp does not implement (`Ciphers aes128-cbc`), or a `-` list removed them all. `ssh` refuses
+such a configuration too. The message names the directive (`KexAlgorithms`, `HostKeyAlgorithms`, `Ciphers`, `MACs` or
+`PubkeyAcceptedAlgorithms`).
+
+**A key is never offered** (`NoAcceptedAlgorithm` in `SshAuthenticationException.Attempts`): the server's `server-sig-algs` has
+none of its algorithms, or `PubkeyAcceptedAlgorithms` allows none of them. A key with a certificate needs the certificate's
+algorithm (`ssh-ed25519-cert-v01@openssh.com`) in that list, not only the plain one.
+
 **`ArgumentException` naming `SshClientOptions.Ciphers` (or another list).** The list leaves no algorithm SshSharp can use here:
 `FipsMode` removed everything in it, or it names only `mlkem*` methods on a platform without ML-KEM. It is thrown before anything
 is sent. See [Choose algorithms and authentication methods](../how-to/algorithms-and-authentication-order.md).

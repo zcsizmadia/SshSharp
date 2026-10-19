@@ -15,6 +15,18 @@ internal sealed class AlgorithmPreferences
 
     public IReadOnlyList<string> Compression { get; init; } = SshAlgorithms.DefaultCompression;
 
+    /// <summary>
+    /// The signature algorithms public-key authentication may use (<c>PubkeyAcceptedAlgorithms</c>), most preferred first; null (the
+    /// default) leaves each key's own algorithms, in its own order.
+    /// </summary>
+    public IReadOnlyList<string>? PublicKeys { get; init; }
+
+    /// <summary>
+    /// The host key list as configured, which decides whether <see cref="WithCertificateHostKeysFirst"/> may reorder it; null for the
+    /// defaults.
+    /// </summary>
+    public SshAlgorithmList? HostKeySpecification { get; init; }
+
     /// <summary>The default preferences restricted to FIPS-approved algorithms.</summary>
     public static AlgorithmPreferences Fips() => new()
     {
@@ -25,14 +37,26 @@ internal sealed class AlgorithmPreferences
     };
 
     /// <summary>
-    /// Builds preferences from the algorithm specifications of a resolved <c>ssh_config</c> host (<c>+</c>, <c>-</c>, <c>^</c> and plain lists)
-    /// applied to the defaults, optionally restricted to FIPS-approved algorithms. Names this library does not implement are dropped.
+    /// Builds preferences from the algorithm specifications of a resolved <c>ssh_config</c> host (<c>+</c>, <c>-</c>, <c>^</c> and plain
+    /// lists, with wildcards, as ssh applies them) applied to the defaults, optionally restricted to FIPS-approved algorithms. Names this
+    /// library does not implement are dropped.
     /// </summary>
+    /// <exception cref="SshException">A directive leaves no algorithm of its kind that SshSharp can use (<see cref="SshFailureReason.ConnectFailed"/>).</exception>
     public static AlgorithmPreferences FromConfig(SshHostConfig config, bool fipsMode = false)
     {
         ArgumentNullException.ThrowIfNull(config);
-        return From(SshAlgorithmList.FromConfig(config.KexAlgorithms), SshAlgorithmList.FromConfig(config.HostKeyAlgorithms),
-            SshAlgorithmList.FromConfig(config.Ciphers), SshAlgorithmList.FromConfig(config.Macs), fipsMode);
+        var preferences = From(SshAlgorithmList.FromConfig(config.KexAlgorithms), SshAlgorithmList.FromConfig(config.HostKeyAlgorithms),
+            SshAlgorithmList.FromConfig(config.Ciphers), SshAlgorithmList.FromConfig(config.Macs), SshAlgorithmList.FromConfig(config.PubkeyAcceptedAlgorithms),
+            fipsMode);
+
+        // As ssh refuses such a configuration: said now, naming the directive, rather than as a negotiation failure that looks like the
+        // server's doing (or, for PubkeyAcceptedAlgorithms, as keys that are silently never offered).
+        if (Empty(preferences, "KexAlgorithms", "HostKeyAlgorithms", "Ciphers", "MACs", "PubkeyAcceptedAlgorithms") is { } problem)
+        {
+            throw new SshException(SshFailureReason.ConnectFailed, $"ssh_config's {problem} that SshSharp can use{(fipsMode ? " in FIPS mode" : string.Empty)}.");
+        }
+
+        return preferences;
     }
 
     /// <summary>Builds preferences from the typed lists of <see cref="SshClientOptions"/>, whose names were checked when they were set.</summary>
@@ -40,37 +64,53 @@ internal sealed class AlgorithmPreferences
     public static AlgorithmPreferences FromOptions(SshClientOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
-        var preferences = From(options.KexAlgorithms, options.HostKeyAlgorithms, options.Ciphers, options.Macs, options.FipsMode);
-        var mode = options.FipsMode ? " in FIPS mode" : string.Empty;
-        foreach (var (list, name, kind) in new[]
+        var preferences = From(options.KexAlgorithms, options.HostKeyAlgorithms, options.Ciphers, options.Macs, options.PubkeyAcceptedAlgorithms,
+            options.FipsMode);
+
+        // Said now, with the option named, rather than as a negotiation failure that looks like the server's doing.
+        const string Options = nameof(SshClientOptions) + ".";
+        if (Empty(preferences, Options + nameof(SshClientOptions.KexAlgorithms), Options + nameof(SshClientOptions.HostKeyAlgorithms),
+            Options + nameof(SshClientOptions.Ciphers), Options + nameof(SshClientOptions.Macs), Options + nameof(SshClientOptions.PubkeyAcceptedAlgorithms))
+            is { } problem)
         {
-            (preferences.Kex, nameof(SshClientOptions.KexAlgorithms), "key exchange"),
-            (preferences.HostKeys, nameof(SshClientOptions.HostKeyAlgorithms), "host key"),
-            (preferences.Ciphers, nameof(SshClientOptions.Ciphers), "cipher"),
-            (preferences.Macs, nameof(SshClientOptions.Macs), "MAC"),
-        })
-        {
-            // Said now, with the option named, rather than as a negotiation failure that looks like the server's doing.
-            if (list.Count == 0)
-            {
-                throw new ArgumentException($"SshClientOptions.{name} leaves no {kind} algorithm that SshSharp can use on this platform{mode}.",
-                    nameof(options));
-            }
+            throw new ArgumentException($"{problem} that SshSharp can use on this platform{(options.FipsMode ? " in FIPS mode" : string.Empty)}.",
+                nameof(options));
         }
 
         return preferences;
     }
 
+    /// <summary>The first list that is empty, as "<c>name</c> leaves no <c>kind</c> algorithm", or null when none is.</summary>
+    private static string? Empty(AlgorithmPreferences preferences, string kex, string hostKeys, string ciphers, string macs, string publicKeys)
+    {
+        foreach (var (list, name, kind) in new (IReadOnlyList<string>?, string, string)[]
+        {
+            (preferences.Kex, kex, "key exchange"),
+            (preferences.HostKeys, hostKeys, "host key"),
+            (preferences.Ciphers, ciphers, "cipher"),
+            (preferences.Macs, macs, "MAC"),
+            (preferences.PublicKeys, publicKeys, "public key signature"),
+        })
+        {
+            if (list is { Count: 0 })
+            {
+                return $"{name} leaves no {kind} algorithm";
+            }
+        }
+
+        return null;
+    }
+
     /// <summary>
     /// The defaults with each list applied, without the algorithms this platform lacks (ML-KEM before .NET 10), restricted to FIPS-approved
-    /// ones in FIPS mode. The one path for both ssh_config and <see cref="SshClientOptions"/>.
+    /// ones in FIPS mode. The one path for both ssh_config and <see cref="SshClientOptions"/>, where lists apply as ssh applies them.
     /// </summary>
     private static AlgorithmPreferences From(SshAlgorithmList? kex, SshAlgorithmList? hostKeys, SshAlgorithmList? ciphers, SshAlgorithmList? macs,
-        bool fipsMode)
+        SshAlgorithmList? publicKeys, bool fipsMode)
     {
         IReadOnlyList<string> Resolve(SshAlgorithmList? spec, IReadOnlyList<string> defaults, AlgorithmKind kind)
         {
-            var list = spec is null ? defaults : spec.Apply(defaults);
+            var list = spec is null ? defaults : spec.Apply(defaults, Known(kind));
             list = [.. list.Where(n => IsImplemented(n, kind))];
             return fipsMode ? SshAlgorithms.FilterFips(list, kind) : list;
         }
@@ -81,6 +121,10 @@ internal sealed class AlgorithmPreferences
             HostKeys = Resolve(hostKeys, SshAlgorithms.DefaultHostKeys, AlgorithmKind.HostKey),
             Ciphers = Resolve(ciphers, SshAlgorithms.DefaultCiphers, AlgorithmKind.Cipher),
             Macs = Resolve(macs, SshAlgorithms.DefaultMacs, AlgorithmKind.Mac),
+
+            // FIPS mode does not restrict the client's own keys (FilterFips keeps them all), as before this list was applied.
+            PublicKeys = publicKeys is null ? null : Resolve(publicKeys, SshAlgorithms.PublicKeySignatures, AlgorithmKind.PublicKey),
+            HostKeySpecification = hostKeys,
         };
     }
 
@@ -111,6 +155,7 @@ internal sealed class AlgorithmPreferences
                     AlgorithmKind.Kex => "key exchange algorithm",
                     AlgorithmKind.HostKey => "host key algorithm",
                     AlgorithmKind.Cipher => "cipher",
+                    AlgorithmKind.PublicKey => "public key signature algorithm",
                     _ => "MAC",
                 };
                 throw new ArgumentException($"'{name}' is not a {what} SshSharp supports. Supported: {string.Join(", ", known)}.", parameterName);
@@ -127,19 +172,37 @@ internal sealed class AlgorithmPreferences
         AlgorithmKind.HostKey => [.. SshAlgorithms.DefaultHostKeys, .. SshAlgorithms.CertificateHostKeys],
         AlgorithmKind.Cipher => SshAlgorithms.CipherNames,
         AlgorithmKind.Mac => SshAlgorithms.MacNames,
+        AlgorithmKind.PublicKey => SshAlgorithms.PublicKeySignatures,
         _ => [],
     };
 
-    /// <summary>These preferences with the certificate versions of the host key algorithms in front (only for algorithms already allowed).</summary>
-    public AlgorithmPreferences WithCertificateHostKeysFirst() => new()
+    /// <summary>
+    /// These preferences with the certificate versions of the allowed host key algorithms in front, for a host whose certificate authority
+    /// is trusted. ssh orders host key algorithms by what known_hosts holds only when <c>HostKeyAlgorithms</c> is the default or a
+    /// <c>+</c> or <c>-</c> change to it, so a list that sets the order itself (a plain list, or <c>^</c>) is kept as written, with the
+    /// certificate algorithms it names, if any. A <c>-</c> list's patterns remove certificate algorithms too, as they would from ssh's
+    /// defaults, which include them.
+    /// </summary>
+    public AlgorithmPreferences WithCertificateHostKeysFirst()
     {
-        Kex = Kex,
-        HostKeys = [.. SshAlgorithms.CertificateHostKeys.Where(c => HostKeys.Contains(SshCertificate.BaseAlgorithm(c))),
-            .. HostKeys.Where(h => !SshCertificate.IsCertificateAlgorithm(h))],
-        Ciphers = Ciphers,
-        Macs = Macs,
-        Compression = Compression,
-    };
+        if (HostKeySpecification is { SetsOrder: true })
+        {
+            return this;
+        }
+
+        return new()
+        {
+            Kex = Kex,
+            HostKeys = [.. SshAlgorithms.CertificateHostKeys.Where(c => HostKeys.Contains(c)
+                    || (HostKeys.Contains(SshCertificate.BaseAlgorithm(c)) && HostKeySpecification?.Removes(c) != true)),
+                .. HostKeys.Where(h => !SshCertificate.IsCertificateAlgorithm(h))],
+            Ciphers = Ciphers,
+            Macs = Macs,
+            Compression = Compression,
+            PublicKeys = PublicKeys,
+            HostKeySpecification = HostKeySpecification,
+        };
+    }
 
     private static bool IsImplemented(string name, AlgorithmKind kind) => kind switch
     {
@@ -147,6 +210,7 @@ internal sealed class AlgorithmPreferences
         AlgorithmKind.Mac => SshAlgorithms.IsKnownMac(name),
         AlgorithmKind.Kex => SshAlgorithms.DefaultKex.Contains(name),
         AlgorithmKind.HostKey => SshAlgorithms.DefaultHostKeys.Contains(name) || SshAlgorithms.CertificateHostKeys.Contains(name),
+        AlgorithmKind.PublicKey => SshAlgorithms.PublicKeySignatures.Contains(name),
         _ => true,
     };
 }

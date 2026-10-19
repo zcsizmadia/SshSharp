@@ -67,6 +67,43 @@ public sealed class ConfigInteropTests : IDisposable
     }
 
     [Test]
+    public async Task PubkeyAcceptedAlgorithms_OffersOnlyTheKeysItAllows()
+    {
+        // Against the real server, with an RSA key it would accept listed first: ssh-ed25519 alone keeps the RSA key from being offered.
+        var user = Environment.GetEnvironmentVariable("SSHSHARP_TEST_USER");
+        var rsa = Key is { } ed25519Path ? Path.Combine(Path.GetDirectoryName(ed25519Path)!, "rsa") : null;
+        if (RealServer.Endpoint is not var (host, port) || string.IsNullOrEmpty(user) || Key is not { } ed25519 || !File.Exists(ed25519)
+            || rsa is null || !File.Exists(rsa))
+        {
+            Skip.Test("SSHSHARP_TEST_SSHD, SSHSHARP_TEST_USER and SSHSHARP_TEST_KEYDIR (with ed25519 and rsa keys) are needed.");
+            return;
+        }
+
+        string Config(params string[] identities) => $"""
+            Host target
+              HostName {host}
+              Port {port}
+              User {user}
+            {string.Concat(identities.Select(i => $"  IdentityFile \"{i}\"\n"))}  IdentitiesOnly yes
+              PubkeyAcceptedAlgorithms ssh-ed25519
+              PreferredAuthentications publickey
+              StrictHostKeyChecking accept-new
+              UserKnownHostsFile "{Path.Combine(_dir, "known_hosts")}"
+            """;
+
+        await using (var client = await SshClient.ConnectAsync("target",
+            new SshConfigConnectOptions { Config = SshConfig.Parse(Config(rsa, ed25519)), UseAgent = false }, Timeout()))
+        {
+            await Assert.That(client.AcceptedKeys.Single().KeyType).IsEqualTo("ssh-ed25519");
+        }
+
+        var error = await Assert.ThrowsAsync<SshAuthenticationException>(async () =>
+            await SshClient.ConnectAsync("target", new SshConfigConnectOptions { Config = SshConfig.Parse(Config(rsa)), UseAgent = false }, Timeout()));
+        await Assert.That(error!.Attempts.Where(a => a.Method == "publickey").Select(a => a.Outcome))
+            .IsEquivalentTo(new[] { SshAuthenticationOutcome.NoAcceptedAlgorithm });
+    }
+
+    [Test]
     public async Task TwoJumpHosts_ConfiguredInCode()
     {
         // The same chain as above, from SshClientOptions.JumpHosts: each hop with its own options and known_hosts check.

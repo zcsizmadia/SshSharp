@@ -66,9 +66,9 @@ internal sealed partial class SshClientFactory(
                     Password = endpoint.Password,
                     Logger = _logger,
                     AddressFamily = endpoint.AddressFamily,
-                    // Null leaves the agent to ssh_config, as before UseAgent existed; true prefers an agent the application registered.
                     UseAgent = endpoint.UseAgent ?? true,
-                    Agent = endpoint.UseAgent == true ? services.GetService<SshAgent>() : null,
+                    Agent = await AliasAgentAsync(endpoint.UseAgent, services.GetService<SshAgent>(), SshAgent.FromEnvironmentAsync, timeout.Token)
+                        .ConfigureAwait(false),
                 }, timeout.Token).ConfigureAwait(false)
                 : await ConnectDirectAsync(name, endpoint, timeout.Token).ConfigureAwait(false);
         }
@@ -77,6 +77,16 @@ internal sealed partial class SshClientFactory(
             throw new TimeoutException($"Connecting to the SSH endpoint '{name}' took longer than {endpoint.ConnectTimeout}.", ex);
         }
     }
+
+    /// <summary>
+    /// The agent for a <see cref="SshEndpointOptions.ConfigAlias"/> connection (<see cref="SshConfigConnectOptions.Agent"/>). Null
+    /// leaves it to ssh_config, as before UseAgent existed (and false turns the agent off). True asks for an agent explicitly: the one
+    /// the application registered, else the environment's, as without ConfigAlias, so ssh_config's IdentityAgent does not quietly
+    /// replace it; that decides only when the environment has none either.
+    /// </summary>
+    internal static async Task<SshAgent?> AliasAgentAsync(bool? useAgent, SshAgent? registered, Func<CancellationToken, Task<SshAgent?>> fromEnvironment,
+        CancellationToken cancellationToken) =>
+        useAgent == true ? registered ?? await fromEnvironment(cancellationToken).ConfigureAwait(false) : null;
 
     private async Task<SshClient> ConnectDirectAsync(string name, SshEndpointOptions endpoint, CancellationToken cancellationToken)
     {
@@ -281,9 +291,15 @@ internal sealed class SshEndpointOptionsValidator(SshEndpointRegistry registry) 
             ValidateServer(failures, $"SSH endpoint '{name}'", options.Host, options.UserName, options.Port, "set Host, or ConfigAlias to connect through ssh_config.");
         }
 
-        if (options.ConnectTimeout <= TimeSpan.Zero)
+        // The bound SshClientOptions.ConnectTimeout takes, which the endpoint's value is passed to: above it, every connection would fail.
+        if (options.ConnectTimeout <= TimeSpan.Zero || options.ConnectTimeout.TotalMilliseconds > int.MaxValue)
         {
-            failures.Add($"SSH endpoint '{name}': ConnectTimeout must be positive.");
+            failures.Add($"SSH endpoint '{name}': ConnectTimeout must be positive, and at most about 24 days ({int.MaxValue} ms).");
+        }
+
+        if (options.KeepAliveInterval < TimeSpan.Zero)
+        {
+            failures.Add($"SSH endpoint '{name}': KeepAliveInterval must not be negative (zero sends no keep-alives).");
         }
 
         if (options.ReconnectDelay <= TimeSpan.Zero || options.MaxReconnectDelay < options.ReconnectDelay)

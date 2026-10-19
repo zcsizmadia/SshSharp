@@ -281,7 +281,7 @@ internal sealed class SshConfigResolver(IReadOnlyList<SshConfigDocument> documen
             return null;
         }
 
-        var viaProxy = IsSet("proxycommand") || IsSet("proxyjump");
+        var viaProxy = IsSet("proxycommand") || IsSet("proxyjump") || options.ViaProxy;
         var host = CurrentHost();
         var maxDots = _values.TryGetValue("canonicalizemaxdots", out var dots) && dots.Count > 0
             && int.TryParse(dots[0], NumberStyles.None, CultureInfo.InvariantCulture, out var d) ? d : 1;
@@ -340,9 +340,10 @@ internal sealed class SshConfigResolver(IReadOnlyList<SshConfigDocument> documen
             return null;
         }
 
-        var family = _values.TryGetValue("addressfamily", out var af) && af.Count > 0
+        // The family the connection will use: the caller's override (SshConfigConnectOptions.AddressFamily), else the configuration's.
+        var family = options.AddressFamily ?? (_values.TryGetValue("addressfamily", out var af) && af.Count > 0
             ? af[0].ToLowerInvariant() switch { "inet" => SshAddressFamily.Inet, "inet6" => SshAddressFamily.Inet6, _ => SshAddressFamily.Any }
-            : SshAddressFamily.Any;
+            : SshAddressFamily.Any);
         if (host.EndsWith('.'))
         {
             if (answers.Lookup(host, family) is { } anchored)

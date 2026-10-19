@@ -14,15 +14,21 @@ internal sealed class ConnectDeadline : IDisposable
     private readonly CancellationTokenSource? _timeout;
     private readonly CancellationTokenSource? _linked;
 
+    /// <summary>
+    /// The longest delay a timer takes (2^32 - 2 ms, about 49.7 days). ssh_config allows longer times (up to 2^31 - 1 seconds), which
+    /// are treated as no limit: a longer wait could not be timed, and would not end before the caller gave up anyway.
+    /// </summary>
+    internal static readonly TimeSpan MaxTimerDelay = TimeSpan.FromMilliseconds(uint.MaxValue - 1);
+
     /// <summary>Starts the clock: the deadline is <paramref name="limit"/> from now.</summary>
-    /// <param name="limit">The limit; null or infinite for none.</param>
+    /// <param name="limit">The limit; null, infinite or longer than <see cref="MaxTimerDelay"/> for none.</param>
     /// <param name="cancellationToken">The caller's token.</param>
     /// <param name="timeProvider">The clock, the same one that times the waits between connection attempts; the system clock by default.</param>
     public ConnectDeadline(TimeSpan? limit, CancellationToken cancellationToken, TimeProvider? timeProvider = null)
     {
         _limit = limit;
         _caller = cancellationToken;
-        if (limit is { } span && span != Timeout.InfiniteTimeSpan)
+        if (limit is { } span && span != Timeout.InfiniteTimeSpan && span <= MaxTimerDelay)
         {
             _timeout = new CancellationTokenSource(span, timeProvider ?? TimeProvider.System);
             _linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _timeout.Token);

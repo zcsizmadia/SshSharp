@@ -87,7 +87,7 @@ sequenceDiagram
 | `Rejected` | The server refused it: a wrong password, a key not in `authorized_keys`. |
 | `PartialSuccess` | Accepted, but the server requires another method too. |
 | `NotOffered` | You set credentials for a method the server does not offer (keys, and a server that takes only passwords). |
-| `NoAcceptedAlgorithm` | The key has no signature algorithm the server accepts (`server-sig-algs`); it was not offered. |
+| `NoAcceptedAlgorithm` | The key has no signature algorithm the server accepts (`server-sig-algs`), or none that `PubkeyAcceptedAlgorithms` allows; it was not offered. |
 | `SigningFailed` | The server would take the key, but the agent did not sign: the key is gone, or the user declined a confirmation. |
 | `Declined` | This side gave up: a handler or the provider returned null, or keyboard-interactive asked something a password does not answer. |
 | `PasswordChangeRequired` | The password has expired and was not changed. |

@@ -155,6 +155,24 @@ public sealed class CertificateTests : IDisposable
     }
 
     [Test]
+    public async Task ACertificateOnlyHostKeyList_ConnectsToAHostWhoseAuthorityIsTrusted()
+    {
+        // The list names only the certificate algorithm: it used to be emptied (and the connection fail) once the authority was trusted.
+        File.WriteAllText(KnownHosts, AuthorityLine("*.example.com"));
+        await using var server = new FakeSessionServer(WithHostCertificate(FakeHostKey.Ed25519()));
+        _ = server.StartAsync();
+        await using var client = await SshClient.ConnectAsync(server.ClientStream, new SshClientOptions
+        {
+            UserName = "tester",
+            Password = "secret",
+            HostKeyAlias = Host,
+            HostKeyVerifier = new KnownHostsVerifier([KnownHosts]),
+            HostKeyAlgorithms = SshAlgorithmList.Only("ssh-ed25519-cert-v01@openssh.com"),
+        }, leaveOpen: true, Timeout());
+        await Assert.That(client.HostKey.Algorithm).IsEqualTo("ssh-ed25519-cert-v01@openssh.com");
+    }
+
+    [Test]
     public async Task RsaHostCertificates_UseTheSha2CertificateAlgorithms()
     {
         File.WriteAllText(KnownHosts, AuthorityLine("*"));

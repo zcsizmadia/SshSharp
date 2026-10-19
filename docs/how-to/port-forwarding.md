@@ -259,7 +259,8 @@ before disposing; forwardings to a host and port, or dynamic ones, close their c
 - **From `ssh_config`.** `LocalForward`, `RemoteForward` and `DynamicForward` start with the connection when
   `SshConfigConnectOptions.StartForwardings` is true, Unix-socket forms included (`LocalForward /tmp/docker.sock /var/run/docker.sock`).
   Socket paths take `ssh_config`'s `%` tokens and `${VAR}` on both sides (`RemoteForward /home/%r/app.sock /run/app.sock`), and the
-  local one `~` too; `StreamLocalBindMask` sets the mode of a local socket.
+  local one `~` too (a path on the server never takes `~`, which would name this machine's home directory); `StreamLocalBindMask`
+  sets the mode of a local socket.
 
 ## See also
 

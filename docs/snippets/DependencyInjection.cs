@@ -244,9 +244,9 @@ internal static partial class DependencyInjection
                     // Connected or Reconnected: forwardings die with their connection, so set this one up on the new connection.
                     await change.Client.ForwardRemotePortAsync("localhost", 8080, "localhost", 5000, stoppingToken);
                 }
-                catch (SshException) when (!change.Client.IsConnected)
+                catch (Exception ex) when (ex is SshException or ObjectDisposedException && !change.Client.IsConnected)
                 {
-                    // Dropped again already: the Disconnected event is next.
+                    // Dropped again already (and perhaps disposed, replaced by a newer connection): the next event says what followed.
                 }
             }
         }

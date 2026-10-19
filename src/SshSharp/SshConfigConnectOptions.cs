@@ -64,7 +64,12 @@ public sealed class SshConfigConnectOptions
     /// </summary>
     public Func<SshAddKeyToAgentPrompt, CancellationToken, ValueTask<bool>>? ConfirmAddKeyToAgent { get; init; }
 
-    /// <summary>Keys to offer before the configured <c>IdentityFile</c>s. The client does not dispose them.</summary>
+    /// <summary>
+    /// Keys to offer the destination before its configured <c>IdentityFile</c>s. The client does not dispose them. Never offered to a
+    /// ProxyJump hop, which logs in with its own configuration's identity files and the agent, as <see cref="Password"/> is never sent
+    /// to one. (Before 1.1 they were offered to every hop too: a hop that needs one of these keys now needs it in its own
+    /// <c>IdentityFile</c>, or in the agent.)
+    /// </summary>
     public IReadOnlyList<SshPrivateKey> PrivateKeys { get; init; } = [];
 
     /// <summary>
