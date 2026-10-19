@@ -14,8 +14,7 @@ namespace SshSharp.Keys;
 /// </summary>
 internal static class OpenSshKeyWriter
 {
-    private const string Begin = "-----BEGIN OPENSSH PRIVATE KEY-----";
-    private const string End = "-----END OPENSSH PRIVATE KEY-----";
+    private const string Label = "OPENSSH PRIVATE KEY";
     private const int SaltLength = 16;
     private const int KeyLength = 32;
     private const int IvLength = 16;
@@ -71,7 +70,7 @@ internal static class OpenSshKeyWriter
             outer.WriteString(key.PublicKey.Span);
             outer.WriteString(plain);
             file = body.WrittenSpan.ToArray();
-            return Armor(file);
+            return Armor(Label, file, 70);
         }
         finally
         {
@@ -94,27 +93,32 @@ internal static class OpenSshKeyWriter
     internal static int EstimatePrivateSectionSize(SshPrivateKey key) =>
         8 + 4 + key.KeyType.Length + (5 * (key.PublicKey.Length + 8)) + 4 + Encoding.UTF8.GetMaxByteCount((key.Comment ?? string.Empty).Length) + 16;
 
-    /// <summary>The PEM-style text as UTF-8 bytes, base64 in 70-character lines as ssh-keygen writes it; built without an intermediate string.</summary>
-    private static byte[] Armor(ReadOnlySpan<byte> data)
+    /// <summary>
+    /// The PEM-style text (the BEGIN line, base64 in lines of <paramref name="lineLength"/> characters, the END line and a final newline)
+    /// as UTF-8 bytes, built without an intermediate string: ssh-keygen writes 70-character lines, PEM (RFC 7468) 64.
+    /// </summary>
+    internal static byte[] Armor(string label, ReadOnlySpan<byte> data, int lineLength)
     {
+        var begin = "-----BEGIN " + label + "-----";
+        var end = "-----END " + label + "-----";
         var base64Length = ((data.Length + 2) / 3) * 4;
-        var lines = (base64Length + 69) / 70;
-        var output = new byte[Begin.Length + 1 + base64Length + lines + End.Length + 1];
+        var lines = (base64Length + lineLength - 1) / lineLength;
+        var output = new byte[begin.Length + 1 + base64Length + lines + end.Length + 1];
         var base64 = new byte[base64Length];
         try
         {
             System.Buffers.Text.Base64.EncodeToUtf8(data, base64, out _, out _);
-            var at = Encoding.ASCII.GetBytes(Begin, output);
+            var at = Encoding.ASCII.GetBytes(begin, output);
             output[at++] = (byte)'\n';
-            for (var i = 0; i < base64Length; i += 70)
+            for (var i = 0; i < base64Length; i += lineLength)
             {
-                var length = Math.Min(70, base64Length - i);
+                var length = Math.Min(lineLength, base64Length - i);
                 base64.AsSpan(i, length).CopyTo(output.AsSpan(at));
                 at += length;
                 output[at++] = (byte)'\n';
             }
 
-            at += Encoding.ASCII.GetBytes(End, output.AsSpan(at));
+            at += Encoding.ASCII.GetBytes(end, output.AsSpan(at));
             output[at] = (byte)'\n';
             return output;
         }

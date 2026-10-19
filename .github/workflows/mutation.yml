@@ -47,6 +47,9 @@ jobs:
           - scope: argon2-blake2b
             mutate: -m "**/Crypto/Argon2.cs" -m "**/Crypto/Blake2b.cs"
             tests: Crypto/Argon2Tests.cs;Keys/*Tests.cs
+          - scope: key-writers
+            mutate: -m "**/Keys/Pkcs8KeyWriter.cs" -m "**/Keys/PuttyKeyWriter.cs"
+            tests: Keys/*Tests.cs
           - scope: bcrypt-pbkdf
             mutate: -m "**/Crypto/BcryptPbkdf.cs"
             tests: Crypto/BcryptPbkdfTests.cs;Keys/*Tests.cs

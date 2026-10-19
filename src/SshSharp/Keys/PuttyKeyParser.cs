@@ -24,7 +24,7 @@ internal static class PuttyKeyParser
         var lines = text.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
         var position = 0;
 
-        string Header(string expected)
+        string Header(string expected, bool trim = true)
         {
             while (position < lines.Length && lines[position].Length == 0)
             {
@@ -43,7 +43,8 @@ internal static class PuttyKeyParser
                 throw new FormatException($"Expected '{expected}' in the .ppk file.");
             }
 
-            return line[(colon + 2)..].Trim();
+            // PuTTY takes a value to the end of the line, and its MAC covers the comment as it is, so the comment is not trimmed.
+            return trim ? line[(colon + 2)..].Trim() : line[(colon + 2)..];
         }
 
         byte[] Base64Lines(string header)
@@ -65,7 +66,7 @@ internal static class PuttyKeyParser
             : throw new FormatException("Unsupported PuTTY key file version (versions 2 and 3 are supported).");
         var algorithm = Header($"PuTTY-User-Key-File-{version}");
         var encryption = Header("Encryption");
-        var comment = Header("Comment");
+        var comment = Header("Comment", trim: false);
         var publicBlob = Base64Lines("Public-Lines");
 
         Argon2Type argonType = default;

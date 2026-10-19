@@ -64,8 +64,12 @@ internal sealed class ExternalKey : SshPrivateKey
         return blob;
     }
 
-    internal override void WritePrivateFields(SshWriter writer) =>
-        throw new NotSupportedException("This key's private material is held by an external signer: it cannot be exported or added to an agent.");
+    internal override void WritePrivateFields(SshWriter writer) => throw NotExportable();
+
+    internal override byte[] ExportPkcs8(string? passphrase) => throw NotExportable();
+
+    private static NotSupportedException NotExportable() =>
+        new("This key's private material is held by an external signer: it cannot be exported or added to an agent.");
 
     private protected override void DisposeCore()
     {

@@ -172,6 +172,30 @@ internal static class Keys
         // </generate>
     }
 
+    public static async Task SaveWithRoundsAsync(SshPrivateKey key, CancellationToken cancellationToken)
+    {
+        // <save-rounds>
+        // As ssh-keygen -a 64: more bcrypt_pbkdf rounds make guessing the passphrase slower (and loading the key too).
+        await key.SaveAsync("ci_ed25519", Environment.GetEnvironmentVariable("NEW_KEY_PASSPHRASE"), kdfRounds: 64, cancellationToken);
+        // </save-rounds>
+    }
+
+    public static async Task ExportAsync(CancellationToken cancellationToken)
+    {
+        // <export>
+        var passphrase = Environment.GetEnvironmentVariable("KEY_PASSPHRASE") ?? throw new InvalidOperationException("KEY_PASSPHRASE is not set.");
+        using var key = await SshPrivateKey.LoadAsync("id_ecdsa", passphrase, cancellationToken);
+
+        // For PuTTY, Pageant or WinSCP: a version 3 .ppk file (and id_ecdsa.ppk.pub), readable only by the current user.
+        await key.SaveAsync("id_ecdsa.ppk", SshPrivateKeyFormat.Putty, passphrase, cancellationToken);
+
+        // For OpenSSL or the .NET cryptography APIs: PKCS#8 PEM, here as text for a secret store. It holds the private key: never log it.
+        var pem = key.ToPkcs8PrivateKey(passphrase);
+        using var ecdsa = ECDsa.Create();
+        ecdsa.ImportFromEncryptedPem(pem, passphrase);
+        // </export>
+    }
+
     public static async Task PublicKeysAsync(SshAgent agent, CancellationToken cancellationToken)
     {
         // <public-key>
