@@ -114,7 +114,8 @@ internal sealed class SshConfigResolver(IReadOnlyList<SshConfigDocument> documen
                 }
                 catch (FormatException ex)
                 {
-                    throw new FormatException($"{file}: {ex.Message}", ex);
+                    // The file name only: the directory is the user's home, or wherever the configuration keeps it.
+                    throw new FormatException($"{Path.GetFileName(file)}: {ex.Message}", ex);
                 }
 
                 ProcessBlocks(included.Blocks, baseDirectory, depth + 1);

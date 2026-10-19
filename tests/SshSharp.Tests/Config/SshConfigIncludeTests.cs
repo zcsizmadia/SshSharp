@@ -178,6 +178,9 @@ public sealed class SshConfigIncludeTests : IDisposable
         var ex = Assert.Throws<FormatException>(() => Resolve($"Include {P("bad.inc")}\n", "a"));
         await Assert.That(ex.Message).Contains("bad.inc");
         await Assert.That(ex.Message).Contains("line 2");
+
+        // The file name, not its path: the directory is often the user's home, which holds the user's name.
+        await Assert.That(ex.Message).DoesNotContain(Path.GetFileName(_dir));
     }
 
     [Test]

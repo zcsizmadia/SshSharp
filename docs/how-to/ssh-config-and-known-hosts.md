@@ -34,8 +34,11 @@ work, retries for a server that may be restarting. Set them in `SshConfigConnect
 - `Port` is the destination's, never a `ProxyJump` hop's, and resolution sees it (`%p`, `Match`). A port written in an
   `ssh://host:port` destination still wins.
 - `ConnectTimeout`, `ConnectionAttempts` and the keep-alive settings apply to the destination and every `ProxyJump` hop.
-  `Timeout.InfiniteTimeSpan` removes the time limit and `KeepAliveInterval = TimeSpan.Zero` the keep-alives, whatever the file
-  says.
+  `Timeout.InfiniteTimeSpan` removes the time limit and `KeepAliveInterval = TimeSpan.Zero` (or `Timeout.InfiniteTimeSpan`, as
+  `SshClientOptions` takes it) the keep-alives, whatever the file says.
+- An algorithm directive that leaves nothing SshSharp implements (`Ciphers aes128-cbc`: `ssh` still has CBC, SshSharp does not)
+  fails right after the file is read, before anything is sent, naming the directive. `PubkeyAcceptedKeyTypes ssh-rsa` (SHA-1 only)
+  is the exception: no key is offered, a warning says why, and a password still logs in.
 - `AddressFamily` applies to the one TCP connection this machine makes: to the destination, or to the first `ProxyJump` hop.
 - `Compression` is the destination's, as `ssh -C`: `true` or `false` wins over its `Compression` line, and each `ProxyJump` hop
   keeps its own (see [Compress a slow link](tune-and-inspect-connections.md#compress-a-slow-link)).

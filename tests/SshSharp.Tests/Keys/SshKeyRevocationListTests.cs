@@ -157,14 +157,85 @@ public sealed class SshKeyRevocationListTests
         await Assert.That(() => SshKeyRevocationList.Parse(List(Certificate(key[..^1], "ssh:")))).Throws<FormatException>();
     }
 
-    [Test]
-    public async Task AKeyList_WithACertificateOfATypeThisLibraryDoesNotKnow_IsRefused()
+    /// <summary>A certificate laid out as PROTOCOL.certkeys does: <paramref name="type"/>, a nonce, the key fields, then the rest.</summary>
+    private static byte[] RawCertificate(string type, Action<SshSharp.Protocol.SshWriter> keyFields, byte[] authorityKey) => SshPrivateKey.Encode(w =>
     {
-        const string Type = "ssh-future-cert-v01@openssh.com";
-        var type = Encoding.ASCII.GetBytes(Type);
-        byte[] blob = [0, 0, 0, (byte)type.Length, .. type, 0, 0, 0, 1, 7];
-        var line = $"{Type} {Convert.ToBase64String(blob)} future\n";
-        await Assert.That(() => SshKeyRevocationList.Parse(Encoding.UTF8.GetBytes(line))).Throws<FormatException>();
+        w.WriteString(type);
+        w.WriteString(new byte[32]); // nonce
+        keyFields(w);
+        w.WriteUInt64(7); // serial
+        w.WriteUInt32(1); // user
+        w.WriteString("id");
+        w.WriteString(SshPrivateKey.Encode(p => p.WriteString("deploy")));
+        w.WriteUInt64(0);
+        w.WriteUInt64(ulong.MaxValue);
+        w.WriteString([]); // critical options
+        w.WriteString([]); // extensions
+        w.WriteString([]); // reserved
+        w.WriteString(authorityKey);
+        w.WriteString(SshPrivateKey.Encode(p => { p.WriteString("ssh-ed25519"); p.WriteString(new byte[64]); }));
+    });
+
+    private static readonly byte[] PlainAuthority = SshPrivateKey.Encode(p => { p.WriteString("ssh-ed25519"); p.WriteString(new byte[32]); });
+
+    private static string Line(byte[] blob) => $"{new SshSharp.Protocol.SshReader(blob).ReadUtf8String()} {Convert.ToBase64String(blob)}";
+
+    [Test]
+    public async Task AKeyList_SkipsCertificatesOfTypesNeverAccepted_AndStillRevokesTheRest()
+    {
+        // OpenSSH (and SshSharp 1.0) skip lines they cannot use: a DSA certificate or an unknown type certifies a key SshSharp never
+        // accepts, so refusing the list for it would fail every connection that checks the list, and protect nothing.
+        var dss = RawCertificate("ssh-dss-cert-v01@openssh.com", w => { w.WriteMpint([7]); w.WriteMpint([11]); w.WriteMpint([2]); w.WriteMpint([5]); }, PlainAuthority);
+        const string Future = "ssh-future-cert-v01@openssh.com";
+        var future = Encoding.ASCII.GetBytes(Future);
+        byte[] unknown = [0, 0, 0, (byte)future.Length, .. future, 0, 0, 0, 1, 7];
+        var revoked = Key("revoked_hash.pub");
+        var text = $"{Line(dss)}\n{Future} {Convert.ToBase64String(unknown)} future\nssh-dss-cert-v01@openssh.com not-base64!\n"
+            + File.ReadAllText(FixturePath("revoked_hash.pub"));
+
+        var list = SshKeyRevocationList.Parse(Encoding.UTF8.GetBytes(text));
+        await Assert.That(list.IsRevoked(revoked)).IsTrue();
+        await Assert.That(list.IsRevoked(Key("other_ca.pub"))).IsFalse();
+    }
+
+    [Test]
+    [Arguments("user_rsa-cert.pub")]
+    [Arguments("host_ecdsa-cert.pub")]
+    [Arguments("user_ecdsa521-cert.pub")]
+    [Arguments("user_ed25519-cert.pub")]
+    public async Task ACertificateLine_RevokesExactlyTheKeyItCertifies_OfEveryAcceptedType(string name)
+    {
+        var list = SshKeyRevocationList.Parse(File.ReadAllBytes(FixturePath(name)));
+        var certificate = Certificate(name);
+        await Assert.That(list.IsRevoked(certificate.GetPublicKey())).IsTrue();
+        await Assert.That(list.IsRevoked(certificate)).IsTrue();
+        await Assert.That(list.IsRevoked(Key("revoked_key.pub"))).IsFalse();
+    }
+
+    [Test]
+    public async Task ACertificateWhoseAuthorityIsACertificate_StillRevokesItsKey()
+    {
+        // FromBlob refuses such a certificate (an authority cannot be a certificate), but revoking the key it certifies needs no authority.
+        var key = Enumerable.Range(1, 32).Select(i => (byte)i).ToArray();
+        var authority = RawCertificate("ssh-ed25519-cert-v01@openssh.com", w => w.WriteString(new byte[32]), PlainAuthority);
+        var certificate = RawCertificate("ssh-ed25519-cert-v01@openssh.com", w => w.WriteString(key), authority);
+
+        var list = SshKeyRevocationList.Parse(Encoding.UTF8.GetBytes(Line(certificate) + "\n"));
+        await Assert.That(list.IsRevoked(SshPublicKey.FromBlob(SshPrivateKey.Encode(w => { w.WriteString("ssh-ed25519"); w.WriteString(key); })))).IsTrue();
+    }
+
+    [Test]
+    [Arguments("ssh-ed25519-cert-v01@openssh.com not-base64!")]                 // corrupt base64
+    [Arguments("ssh-rsa-cert-v01@openssh.com AAAAC3NzaC1lZDI1NTE5AAAAIA==")]     // the blob is another type (a plain ssh-ed25519 key)
+    [Arguments("ecdsa-sha2-nistp256-cert-v01@openssh.com AAAAKGVjZHNhLXNoYTItbmlzdHAyNTYtY2VydC12MDFAb3BlbnNzaC5jb20=")] // truncated
+    public async Task AMalformedCertificateLineOfAnAcceptedType_RefusesTheList(string line)
+    {
+        // Skipping it would leave a key the list means to revoke accepted.
+        await Assert.That(() => SshKeyRevocationList.Parse(Encoding.UTF8.GetBytes(line + "\n"))).Throws<FormatException>();
+
+        // A plain key line that does not parse is skipped, as in OpenSSH.
+        var list = SshKeyRevocationList.Parse(Encoding.UTF8.GetBytes("ssh-ed25519 not-base64!\n"));
+        await Assert.That(list.IsKrl).IsFalse();
     }
 
     [Test]

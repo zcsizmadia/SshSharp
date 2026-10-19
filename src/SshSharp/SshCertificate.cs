@@ -196,36 +196,75 @@ public sealed class SshCertificate
     };
 
     /// <summary>
-    /// The plain public key a certificate blob certifies, for a revocation list that names keys by their certificates. Besides the types
-    /// <see cref="FromBlob"/> reads, this reads FIDO security-key certificates (<c>sk-ssh-ed25519-cert-v01@openssh.com</c>,
-    /// <c>sk-ecdsa-sha2-nistp256-cert-v01@openssh.com</c>, PROTOCOL.certkeys and PROTOCOL.u2f), whose key fields end with the
-    /// application string. The certificate's structure is checked, its signature is not: revoking a key needs no proof of who signed.
+    /// Whether <paramref name="certificateType"/> certifies a key of a type SshSharp accepts (Ed25519, ECDSA, RSA, and the FIDO security
+    /// keys an agent signs with), which <see cref="ReadCertifiedKey"/> reads. Other certificates (<c>ssh-dss-cert-v01@openssh.com</c>, or
+    /// types this library does not know) certify keys that are never accepted.
+    /// </summary>
+    internal static bool IsAcceptedCertificateKeyType(string certificateType) => certificateType is
+        "ssh-ed25519" + Suffix or "ecdsa-sha2-nistp256" + Suffix or "ecdsa-sha2-nistp384" + Suffix or "ecdsa-sha2-nistp521" + Suffix
+        or "ssh-rsa" + Suffix or "sk-ssh-ed25519" + Suffix or "sk-ecdsa-sha2-nistp256" + Suffix;
+
+    /// <summary>
+    /// The plain public key a certificate blob certifies, for a revocation list that names keys by their certificates: any type
+    /// <see cref="IsAcceptedCertificateKeyType"/> allows, FIDO security-key certificates included (<c>sk-ssh-ed25519-cert-v01@openssh.com</c>,
+    /// <c>sk-ecdsa-sha2-nistp256-cert-v01@openssh.com</c>, PROTOCOL.certkeys and PROTOCOL.u2f), whose key fields end with the application
+    /// string. The certificate's structure and its key are checked; its signature and authority are not: revoking a key needs no proof of
+    /// who signed, so an authority key that is itself a certificate (which <see cref="FromBlob"/> refuses) does not stop the key being read.
     /// Throws <see cref="SshProtocolException"/> or <see cref="FormatException"/> when the blob is malformed or of another type.
     /// </summary>
     internal static byte[] ReadCertifiedKey(ReadOnlySpan<byte> blob)
     {
         var reader = new SshReader(blob);
         var certificateType = reader.ReadUtf8String();
-        if (certificateType is not ("sk-ssh-ed25519" + Suffix or "sk-ecdsa-sha2-nistp256" + Suffix))
+        if (!IsAcceptedCertificateKeyType(certificateType))
         {
-            return FromBlob(blob).PublicKey.ToArray();
+            throw new SshProtocolException("The certificate is not of a type SshSharp accepts.");
         }
 
         reader.ReadString(); // nonce
-        var keyType = certificateType[..^Suffix.Length] + OpenSshDomain;
+        var keyType = BaseAlgorithm(certificateType); // ssh-rsa for an RSA certificate, sk-* keep their domain
         byte[] plain;
-        if (keyType == "sk-ssh-ed25519" + OpenSshDomain)
+        switch (keyType)
         {
-            var key = reader.ReadString().ToArray();
-            var application = reader.ReadString().ToArray();
-            plain = SshPrivateKey.Encode(w => { w.WriteString(keyType); w.WriteString(key); w.WriteString(application); });
-        }
-        else
-        {
-            var curve = reader.ReadString().ToArray();
-            var point = reader.ReadString().ToArray();
-            var application = reader.ReadString().ToArray();
-            plain = SshPrivateKey.Encode(w => { w.WriteString(keyType); w.WriteString(curve); w.WriteString(point); w.WriteString(application); });
+            case SshAlgorithms.SshEd25519:
+            {
+                var key = reader.ReadString().ToArray();
+                plain = SshPrivateKey.Encode(w => { w.WriteString(keyType); w.WriteString(key); });
+                break;
+            }
+
+            case "ssh-rsa":
+            {
+                var e = reader.ReadMpint().ToArray();
+                var n = reader.ReadMpint().ToArray();
+                plain = SshPrivateKey.Encode(w => { w.WriteString(keyType); w.WriteMpint(e); w.WriteMpint(n); });
+                break;
+            }
+
+            case "sk-ssh-ed25519" + OpenSshDomain:
+            {
+                var key = reader.ReadString().ToArray();
+                var application = reader.ReadString().ToArray();
+                plain = SshPrivateKey.Encode(w => { w.WriteString(keyType); w.WriteString(key); w.WriteString(application); });
+                break;
+            }
+
+            case "sk-ecdsa-sha2-nistp256" + OpenSshDomain:
+            {
+                var curve = reader.ReadString().ToArray();
+                var point = reader.ReadString().ToArray();
+                var application = reader.ReadString().ToArray();
+                plain = SshPrivateKey.Encode(w => { w.WriteString(keyType); w.WriteString(curve); w.WriteString(point); w.WriteString(application); });
+                break;
+            }
+
+            default: // ECDSA
+            {
+                var curve = reader.ReadString().ToArray();
+                var point = reader.ReadString().ToArray();
+                plain = SshPrivateKey.Encode(w => { w.WriteString(keyType); w.WriteString(curve); w.WriteString(point); });
+                break;
+            }
         }
 
         // The rest of the certificate, as FromBlob reads it, so a truncated or padded blob is refused rather than half read.

@@ -111,7 +111,14 @@ public sealed class SshAuthenticationException : SshException
     /// <param name="allowedMethods">The methods the server said it still accepts.</param>
     /// <param name="attempts">Each attempt and what became of it, in order.</param>
     public SshAuthenticationException(string message, IReadOnlyList<string> allowedMethods, IReadOnlyList<SshAuthenticationAttempt> attempts)
-        : base(SshFailureReason.AuthenticationFailed, message)
+        : this(message, allowedMethods, attempts, innerException: null)
+    {
+    }
+
+    /// <summary>A failure that wraps another's, for a ProxyJump hop: the same methods and attempts, with the hop named in the message.</summary>
+    internal SshAuthenticationException(string message, IReadOnlyList<string> allowedMethods, IReadOnlyList<SshAuthenticationAttempt> attempts,
+        Exception? innerException)
+        : base(SshFailureReason.AuthenticationFailed, message, innerException)
     {
         ArgumentNullException.ThrowIfNull(attempts);
         AllowedMethods = allowedMethods;

@@ -61,11 +61,104 @@ public sealed class PubkeyAcceptedAlgorithmsTests : IDisposable
     }
 
     [Test]
-    public async Task AConfigListThatLeavesNothing_FailsNamingTheDirective()
+    [Arguments("PubkeyAcceptedAlgorithms ssh-rsa,ssh-dss")]
+    [Arguments("PubkeyAcceptedKeyTypes ssh-rsa")] // common in older configurations
+    public async Task AConfigListThatLeavesNothing_OffersNoKey_ButIsNoError(string line)
     {
-        var error = await Assert.That(() => AlgorithmPreferences.FromConfig(Config("PubkeyAcceptedAlgorithms ssh-rsa,ssh-dss\n"))).Throws<SshException>();
-        await Assert.That(error!.Reason).IsEqualTo(SshFailureReason.ConnectFailed);
-        await Assert.That(error.Message).Contains("PubkeyAcceptedAlgorithms leaves no public key signature algorithm");
+        // Unlike the other lists: an empty one means no key is offered, and the other methods still work (as they did in 1.0, before
+        // the list was applied). The connection logs a warning naming the directive.
+        var preferences = AlgorithmPreferences.FromConfig(Config(line + "\n"));
+        await Assert.That(preferences.PublicKeys!).IsEmpty();
+        await Assert.That(preferences.NoPublicKeyAlgorithm).IsTrue();
+        await Assert.That(AlgorithmPreferences.FromConfig(Config("User x\n")).NoPublicKeyAlgorithm).IsFalse();
+    }
+
+    /// <summary>Records each entry's level and message.</summary>
+    private sealed class TestLogger : Microsoft.Extensions.Logging.ILogger
+    {
+        public List<(Microsoft.Extensions.Logging.LogLevel Level, string Message)> Entries { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull => null;
+
+        public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => true;
+
+        public void Log<TState>(Microsoft.Extensions.Logging.LogLevel logLevel, Microsoft.Extensions.Logging.EventId eventId, TState state,
+            Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            lock (Entries)
+            {
+                Entries.Add((logLevel, formatter(state, exception)));
+            }
+        }
+    }
+
+    private static SshConfigConnectOptions LegacyConfigOptions(FakeSessionServer server, SshPrivateKey key, string? password, TestLogger logger) => new()
+    {
+        Config = SshConfig.Parse("Host *\n User tester\n StrictHostKeyChecking no\n UserKnownHostsFile none\n PubkeyAcceptedKeyTypes ssh-rsa\n"),
+        ResolveOptions = new SshConfigResolveOptions { LocalUser = "local", HomeDirectory = Path.GetTempPath() },
+        UseAgent = false,
+        PrivateKeys = [key],
+        Password = password,
+        Logger = logger,
+        TcpConnector = (_, _, _, _) =>
+        {
+            _ = server.StartAsync();
+            return ValueTask.FromResult<(Stream, IAsyncDisposable?)>((server.ClientStream, null));
+        },
+    };
+
+    [Test]
+    public async Task PubkeyAcceptedKeyTypesSshRsa_StillLogsInWithAPassword()
+    {
+        using var rsa = SshPrivateKey.Parse(TestKeys.OpenSshRsa(2048, out var rsaBlob));
+        var password = Guid.NewGuid().ToString("N");
+        await using var server = new FakeSessionServer { AdvertisedMethods = ["publickey", "password"], AuthorizedKeys = [rsaBlob], Password = password };
+        var logger = new TestLogger();
+        await using var client = await SshClient.ConnectAsync("target.example.com", LegacyConfigOptions(server, rsa, password, logger), Timeout());
+
+        await Assert.That(client.IsConnected).IsTrue();
+        await Assert.That(Attempts(server)).IsEquivalentTo(new[] { "none", "password" }); // the key, which the server would take, was not offered
+
+        // One warning, naming the directive, and neither the host nor the user.
+        var warnings = logger.Entries.Where(e => e.Level == Microsoft.Extensions.Logging.LogLevel.Warning).Select(e => e.Message).ToList();
+        await Assert.That(warnings.Count).IsEqualTo(1);
+        await Assert.That(warnings[0]).Contains("PubkeyAcceptedAlgorithms leaves no public key signature algorithm");
+        await Assert.That(warnings[0]).DoesNotContain("target");
+        await Assert.That(warnings[0]).DoesNotContain("tester");
+    }
+
+    [Test]
+    public async Task PubkeyAcceptedKeyTypesSshRsa_WithOnlyKeys_ReportsEachKeyAsNoAcceptedAlgorithm()
+    {
+        using var rsa = SshPrivateKey.Parse(TestKeys.OpenSshRsa(2048, out var rsaBlob));
+        await using var server = new FakeSessionServer { AdvertisedMethods = ["publickey"], AuthorizedKeys = [rsaBlob] };
+        var error = await Assert.ThrowsAsync<SshAuthenticationException>(async () =>
+            await SshClient.ConnectAsync("target.example.com", LegacyConfigOptions(server, rsa, password: null, new TestLogger()), Timeout()));
+
+        await Assert.That(error!.Attempts.Single().Outcome).IsEqualTo(SshAuthenticationOutcome.NoAcceptedAlgorithm);
+        await Assert.That(error.Attempts.Single().KeyFingerprint).IsEqualTo(rsa.Fingerprint);
+        await Assert.That(Attempts(server)).IsEquivalentTo(new[] { "none" });
+    }
+
+    [Test]
+    public async Task AnUnusableAlgorithmList_FailsBeforeAnythingIsSent()
+    {
+        var connected = false;
+        var error = await Assert.ThrowsAsync<SshException>(async () => await SshClient.ConnectAsync("target.example.com", new SshConfigConnectOptions
+        {
+            Config = SshConfig.Parse("Host *\n User tester\n Ciphers aes128-cbc\n"),
+            ResolveOptions = new SshConfigResolveOptions { LocalUser = "local", HomeDirectory = Path.GetTempPath() },
+            UseAgent = false,
+            TcpConnector = (_, _, _, _) =>
+            {
+                connected = true;
+                throw new SshException(SshFailureReason.ConnectFailed, "Not reached.");
+            },
+        }, Timeout()));
+
+        await Assert.That(error!.Message).Contains("Ciphers leaves no cipher algorithm");
+        await Assert.That(connected).IsFalse();
     }
 
     [Test]
@@ -257,9 +350,14 @@ public sealed class PubkeyAcceptedAlgorithmsTests : IDisposable
         var defaults = AlgorithmPreferences.FromConfig(Config("User x\n")).WithCertificateHostKeysFirst();
         await Assert.That(defaults.HostKeys[0]).IsEqualTo(Ed25519Cert);
 
+        // As in ssh, whose defaults hold the certificate algorithms: '-ssh-ed25519' removes that name only, not its certificate algorithm.
         var removed = AlgorithmPreferences.FromConfig(Config("HostKeyAlgorithms -ssh-ed25519\n")).WithCertificateHostKeysFirst();
-        await Assert.That(removed.HostKeys.Contains(Ed25519Cert)).IsFalse();
-        await Assert.That(removed.HostKeys[0]).IsEqualTo("ecdsa-sha2-nistp256-cert-v01@openssh.com");
+        await Assert.That(removed.HostKeys[0]).IsEqualTo(Ed25519Cert);
+        await Assert.That(removed.HostKeys.Contains("ssh-ed25519")).IsFalse();
+
+        var both = AlgorithmPreferences.FromConfig(Config($"HostKeyAlgorithms -ssh-ed25519,{Ed25519Cert}\n")).WithCertificateHostKeysFirst();
+        await Assert.That(both.HostKeys.Contains(Ed25519Cert)).IsFalse();
+        await Assert.That(both.HostKeys[0]).IsEqualTo("ecdsa-sha2-nistp256-cert-v01@openssh.com");
 
         // A '-' pattern removes certificate algorithms too, as it would from ssh's defaults, which hold them.
         var noCertificates = AlgorithmPreferences.FromConfig(Config("HostKeyAlgorithms -*-cert-v01@openssh.com\n")).WithCertificateHostKeysFirst();
@@ -280,5 +378,17 @@ public sealed class PubkeyAcceptedAlgorithmsTests : IDisposable
             FipsMode = true,
         });
         await Assert.That(preferences.HostKeys).IsEquivalentTo(new[] { "ecdsa-sha2-nistp256-cert-v01@openssh.com" });
+
+        // Certificate algorithms added for a trusted authority are approved ones too: no Ed25519 certificate after a '-' list.
+        var removal = AlgorithmPreferences.FromOptions(new SshClientOptions
+        {
+            UserName = "tester",
+            HostKeyVerifier = SshHostKeyVerifier.Pinned("SHA256:unused"),
+            HostKeyAlgorithms = SshAlgorithmList.Remove("rsa-sha2-256"),
+            FipsMode = true,
+        }).WithCertificateHostKeysFirst();
+        await Assert.That(removal.HostKeys.Contains(Ed25519Cert)).IsFalse();
+        await Assert.That(removal.HostKeys.Contains("rsa-sha2-256-cert-v01@openssh.com")).IsTrue();
+        await Assert.That(AlgorithmPreferences.Fips().WithCertificateHostKeysFirst().HostKeys.Contains(Ed25519Cert)).IsFalse();
     }
 }

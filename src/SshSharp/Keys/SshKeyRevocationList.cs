@@ -13,7 +13,8 @@ namespace SshSharp;
 /// id, for one certificate authority or for any). A certificate is also revoked when its certified key or its authority's key is.
 /// Serial 0, which a certificate carries when its authority assigned none, is never revoked by serial. In a text file of keys, lines
 /// that do not parse are skipped, as in OpenSSH, and a certificate line (a FIDO security key's too) revokes the key it certifies; a
-/// certificate line whose key cannot be read refuses the file instead of being skipped, so a revoked key is never accepted.
+/// certificate line of a type SshSharp accepts (Ed25519, ECDSA, RSA, FIDO) whose key cannot be read refuses the file instead of being
+/// skipped, so a revoked key is never accepted. A certificate line of another type (DSA, or one this library does not know) is skipped.
 /// </para>
 /// <para>
 /// A KRL's signature sections are read but not verified: OpenSSH checks a signature only against the key the KRL itself carries, which
@@ -37,14 +38,14 @@ public sealed class SshKeyRevocationList
     /// <param name="data">The file's contents.</param>
     /// <exception cref="FormatException">The data is a malformed KRL, or uses a section or critical extension this library does not know
     /// (a KRL is refused rather than read in part, since a part could leave a revoked key out), or is a key list with a certificate line
-    /// whose certified key cannot be read (refused for the same reason).</exception>
+    /// of an accepted type whose certified key cannot be read (refused for the same reason).</exception>
     public static SshKeyRevocationList Parse(ReadOnlySpan<byte> data) => new(RevokedKeyList.Parse(data));
 
     /// <summary>Reads a revoked keys file, as <see cref="Parse"/> does.</summary>
     /// <param name="path">The file.</param>
     /// <param name="cancellationToken">Cancels the read.</param>
     /// <exception cref="FormatException">The file is a malformed KRL, uses a KRL feature this library does not know, or is a key list with
-    /// a certificate line whose certified key cannot be read.</exception>
+    /// a certificate line of an accepted type whose certified key cannot be read.</exception>
     /// <exception cref="IOException">The file cannot be read, or is larger than 16 MiB.</exception>
     public static async Task<SshKeyRevocationList> LoadAsync(string path, CancellationToken cancellationToken = default)
     {

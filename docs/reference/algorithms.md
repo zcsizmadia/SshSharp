@@ -98,7 +98,9 @@ A server that offers nothing else fails the connection with `SshFailureReason.Ke
 - **With `ssh_config`:** `KexAlgorithms`, `HostKeyAlgorithms`, `Ciphers`, `MACs` and `PubkeyAcceptedAlgorithms`, with OpenSSH's
   `+`, `-` and `^` forms, applied to these defaults as `ssh` applies them: `+` leaves a name that is already a default where it is,
   and a wildcard in any form stands for the names it matches (`Ciphers aes*-ctr`). Names SshSharp does not implement are ignored;
-  a list that leaves none it does fails the connection before anything is sent, naming the directive.
+  a `KexAlgorithms`, `HostKeyAlgorithms`, `Ciphers` or `MACs` list that leaves none it does fails the connection before anything
+  is sent, naming the directive. A `PubkeyAcceptedAlgorithms` list that leaves none (`PubkeyAcceptedKeyTypes ssh-rsa`, SHA-1 only)
+  offers no key, with a warning in the log; the other authentication methods still work.
   `PubkeyAcceptedAlgorithms` decides which keys are offered and, for RSA, which signature algorithm is used (the list's first that
   the server's `server-sig-algs` has); its defaults are every algorithm in the table above, certificates first.
 - **In code:** `SshClientOptions.KexAlgorithms`, `HostKeyAlgorithms`, `Ciphers`, `Macs` and `PubkeyAcceptedAlgorithms` take an

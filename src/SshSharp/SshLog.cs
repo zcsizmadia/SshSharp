@@ -76,11 +76,14 @@ internal static partial class SshLog
 
     /// <summary>
     /// Why the agent failed, as logged: formatted only when the message is written, and never with the agent's socket or pipe path
-    /// (<see cref="SshAgent.LogReason"/>), which can hold the user's name.
+    /// (<see cref="SshAgent.LogReason"/>), which can hold the user's name. The exception stays private: a structured log sink records a
+    /// logged value's public properties, and the exception (or an inner <see cref="IOException"/>) can quote that path.
     /// </summary>
-    internal readonly record struct AgentFailure(Exception Error)
+    internal readonly struct AgentFailure(Exception error)
     {
-        public override string ToString() => SshAgent.LogReason(Error);
+        private readonly Exception _error = error;
+
+        public override string ToString() => SshAgent.LogReason(_error);
     }
 
     [LoggerMessage(EventId = 24, Level = LogLevel.Information, Message = "Forwarding {LocalEndPoint} to remote port {RemotePort}")]
@@ -154,6 +157,10 @@ internal static partial class SshLog
 
     [LoggerMessage(EventId = 54, Level = LogLevel.Information, Message = "Key {Fingerprint} was not added to the agent: AddKeysToAgent ask, and it was not confirmed (declined, no ConfirmAddKeyToAgent, or BatchMode)")]
     public static partial void KeyNotAddedToAgent(ILogger logger, string fingerprint);
+
+    // The directive only, never the host or the user.
+    [LoggerMessage(EventId = 60, Level = LogLevel.Warning, Message = "{Directive} leaves no public key signature algorithm that SshSharp can use, so no key is offered; the other authentication methods are still tried")]
+    public static partial void NoPublicKeyAlgorithm(ILogger logger, string directive);
 
     [LoggerMessage(EventId = 55, Level = LogLevel.Warning, Message = "A client of the SOCKS proxy on {LocalEndPoint} failed to authenticate ({Reason}); its connection was closed")]
     public static partial void SocksAuthenticationFailed(ILogger logger, string localEndPoint, string reason);

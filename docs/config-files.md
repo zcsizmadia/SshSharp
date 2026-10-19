@@ -50,7 +50,7 @@ for it, so `Host` blocks written for full names apply and `Match canonical` is t
 flowchart TD
     start["Host name"] --> addr{"An IP address?"}
     addr -- yes --> keep["Unchanged"]
-    addr -- no --> proxy{"ProxyJump, ProxyCommand or a Proxy,<br/>and not 'always'?"}
+    addr -- no --> proxy{"ProxyJump, ProxyCommand, a Proxy,<br/>or reached through a ProxyJump hop,<br/>and not 'always'?"}
     proxy -- yes --> keep
     proxy -- no --> dot{"Ends with a dot?"}
     dot -- yes --> anchored["Look it up as it is"]

@@ -103,8 +103,8 @@ public sealed class SshEndpointOptions
     public bool? UseAgent { get; set; }
 
     /// <summary>
-    /// Send keep-alives at this interval, so a dead connection is noticed (none by default, or when zero). A negative value fails
-    /// validation. Not used with <see cref="ConfigAlias"/>, where ssh_config's <c>ServerAliveInterval</c> applies.
+    /// Send keep-alives at this interval, so a dead connection is noticed (none by default, or when zero or
+    /// <see cref="Timeout.InfiniteTimeSpan"/>). Any other negative value fails validation. Not used with <see cref="ConfigAlias"/>, where ssh_config's <c>ServerAliveInterval</c> applies.
     /// </summary>
     public TimeSpan? KeepAliveInterval { get; set; }
 

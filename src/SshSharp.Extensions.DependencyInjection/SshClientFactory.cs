@@ -299,9 +299,9 @@ internal sealed class SshEndpointOptionsValidator(SshEndpointRegistry registry) 
             failures.Add($"SSH endpoint '{name}': ConnectTimeout must be positive, and at most about 24 days ({int.MaxValue} ms).");
         }
 
-        if (options.KeepAliveInterval < TimeSpan.Zero)
+        if (options.KeepAliveInterval < TimeSpan.Zero && options.KeepAliveInterval != Timeout.InfiniteTimeSpan)
         {
-            failures.Add($"SSH endpoint '{name}': KeepAliveInterval must not be negative (zero sends no keep-alives).");
+            failures.Add($"SSH endpoint '{name}': KeepAliveInterval must not be negative (zero or infinite sends no keep-alives).");
         }
 
         if (options.ReconnectDelay <= TimeSpan.Zero || options.MaxReconnectDelay < options.ReconnectDelay)

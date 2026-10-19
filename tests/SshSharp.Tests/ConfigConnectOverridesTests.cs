@@ -340,18 +340,19 @@ public sealed class ConfigConnectOverridesTests : IDisposable
             await Assert.That(client.Options.KeepAliveCountMax).IsEqualTo(7);
         }
 
-        // Zero turns keep-alives off, whatever the configuration says.
-        await using (var server = new FakeSessionServer())
-        await using (var client = await SshClient.ConnectAsync("box", new SshConfigConnectOptions
+        // Zero turns keep-alives off, whatever the configuration says; so does infinite, as SshClientOptions.KeepAliveInterval takes it.
+        foreach (var off in new[] { TimeSpan.Zero, System.Threading.Timeout.InfiniteTimeSpan })
         {
-            UseAgent = false,
-            Config = SshConfig.Parse("Host box\n" + KeepAlive + Trusting),
-            ResolveOptions = Resolve,
-            Password = "secret",
-            KeepAliveInterval = TimeSpan.Zero,
-            TcpConnector = FailingThen(0, Refused, server, []),
-        }, Timeout()))
-        {
+            await using var server = new FakeSessionServer();
+            await using var client = await SshClient.ConnectAsync("box", new SshConfigConnectOptions
+            {
+                UseAgent = false,
+                Config = SshConfig.Parse("Host box\n" + KeepAlive + Trusting),
+                ResolveOptions = Resolve,
+                Password = "secret",
+                KeepAliveInterval = off,
+                TcpConnector = FailingThen(0, Refused, server, []),
+            }, Timeout());
             await Assert.That(client.Options.KeepAliveInterval).IsNull();
             await Assert.That(client.Options.KeepAliveCountMax).IsEqualTo(5);
         }

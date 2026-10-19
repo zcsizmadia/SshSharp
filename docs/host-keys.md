@@ -78,11 +78,14 @@ refuses the file; a certificate line revokes the key it certifies). A KRL can re
 - host certificates, by serial number (single, range or bitmap) or key id, for one certificate authority or for any.
 
 A host certificate is also refused when its certified key or its authority's key is revoked. The refusal reads as ssh's:
-`Host key ssh-ed25519 SHA256:... revoked by file ...`.
+`Host key ssh-ed25519 SHA256:... revoked by file (RevokedHostKeys).` The file's path is left out: it comes from ssh_config, often
+with the home directory (and so the user's name) in it.
 
 As with ssh, a file that cannot be read, or a KRL that is malformed or uses a section or critical extension this library does
-not know, refuses every host key ("Error checking host key ... in revoked keys file ..."): a revocation list that cannot be
-checked must not let a revoked key through. A KRL's signature sections are read but not verified; the file is trusted as local
+not know, refuses every host key ("Error checking host key ... in the revoked keys file (RevokedHostKeys): ..." and what is wrong,
+such as "the file does not exist"): a revocation list that cannot be checked must not let a revoked key through. In a text list of
+keys, a malformed certificate line of a type SshSharp accepts (Ed25519, ECDSA, RSA, FIDO) does the same, while lines that are not
+keys, plain keys that do not parse and certificates of types SshSharp never accepts (DSA) are skipped, as OpenSSH skips them. A KRL's signature sections are read but not verified; the file is trusted as local
 configuration. `UpdateHostKeys` never learns a revoked key.
 
 To check a key or certificate against such a file yourself (a user's, in a bastion or a portal, as sshd's `RevokedKeys` does), use

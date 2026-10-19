@@ -20,6 +20,9 @@ internal sealed class RevokedKeyList
     /// <summary>Larger files are refused rather than read into memory.</summary>
     internal const int MaxFileSize = 16 * 1024 * 1024;
 
+    /// <summary>The message of the <see cref="IOException"/> for a file over <see cref="MaxFileSize"/>, which names no path.</summary>
+    internal const string TooLargeMessage = "The revoked keys file is larger than 16 MiB.";
+
     /// <summary>The most bits of one serial bitmap section that are expanded.</summary>
     private const int MaxBitmapBytes = 1024 * 1024;
 
@@ -137,7 +140,7 @@ internal sealed class RevokedKeyList
         {
             if (stream.Length > MaxFileSize)
             {
-                throw new IOException($"The revoked keys file is larger than {MaxFileSize / (1024 * 1024)} MiB.");
+                throw new IOException(TooLargeMessage);
             }
 
             data = new byte[stream.Length];
@@ -235,8 +238,10 @@ internal sealed class RevokedKeyList
     /// <summary>
     /// A list of public keys (sshkey_in_file): <c>type base64 [comment]</c> per line; blank lines, comments and lines that do not parse
     /// are skipped. A certificate line revokes the key it certifies (ssh compares the keys, not the certificates), FIDO security-key
-    /// certificates included. A certificate line whose key cannot be read refuses the whole list: skipping it would leave a key the list
-    /// means to revoke accepted.
+    /// certificates included. A certificate line of a type SshSharp accepts (Ed25519, ECDSA, RSA, FIDO) that cannot be read (bad base64,
+    /// a truncated certificate, a malformed key) refuses the whole list: skipping it would leave a key the list means to revoke accepted.
+    /// A certificate of another type (<c>ssh-dss-cert-v01@openssh.com</c>, or one this library does not know) is skipped: its key is
+    /// never accepted anyway. Its authority is not checked, so a certificate whose authority key is itself a certificate still revokes.
     /// </summary>
     /// <exception cref="FormatException">A certificate line's certified key cannot be read.</exception>
     private static RevokedKeyList ParseKeyList(string text)
@@ -256,30 +261,37 @@ internal sealed class RevokedKeyList
                 continue;
             }
 
+            var certificate = SshCertificate.IsCertificateAlgorithm(fields[0]);
+            if (certificate && !SshCertificate.IsAcceptedCertificateKeyType(fields[0]))
+            {
+                // A DSA certificate, or a type this library does not know: it certifies a key SshSharp never accepts, so there is
+                // nothing for the line to revoke here. Skipped, as OpenSSH skips lines it cannot use.
+                continue;
+            }
+
             byte[] blob;
             try
             {
                 blob = Convert.FromBase64String(fields[1]);
                 if (new SshReader(blob).ReadUtf8String() != fields[0])
                 {
-                    continue;
+                    throw new FormatException("The key's type does not match the line's.");
+                }
+
+                if (certificate)
+                {
+                    blob = SshCertificate.ReadCertifiedKey(blob);
                 }
             }
             catch (Exception ex) when (ex is FormatException or SshProtocolException)
             {
-                continue;
-            }
-
-            if (SshCertificate.IsCertificateAlgorithm(fields[0]))
-            {
-                try
+                if (certificate)
                 {
-                    blob = SshCertificate.ReadCertifiedKey(blob);
-                }
-                catch (Exception ex) when (ex is FormatException or SshProtocolException)
-                {
+                    // A certificate of a type SshSharp accepts, malformed: skipping it would leave a key the list means to revoke accepted.
                     throw new FormatException("A certificate in the revoked keys list cannot be read, so the list is refused.", ex);
                 }
+
+                continue;
             }
 
             list._keys.Add(Convert.ToHexString(blob));

@@ -106,7 +106,13 @@ public class AgentDestinationTests
     [Arguments("dest.example>")]
     public async Task MalformedOrUnknownDestinations_AreRejected(string specification)
     {
-        await Assert.That(() => SshAgentDestination.Parse(specification, Hosts)).Throws<FormatException>();
+        var error = await Assert.That(() => SshAgentDestination.Parse(specification, Hosts)).Throws<FormatException>();
+
+        // Exception messages end up in logs: they name no host or user.
+        foreach (var name in new[] { "unknown.example", "jump.example", "dest.example", "root@", "a>b" })
+        {
+            await Assert.That(error!.Message).DoesNotContain(name);
+        }
     }
 
     [Test]
