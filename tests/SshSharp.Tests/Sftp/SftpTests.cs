@@ -411,6 +411,7 @@ public sealed class SftpTests : IDisposable
             f.Limits = (8 * 1024, 8 * 1024);
             f.ShortReads = misbehave;
             f.ReorderReplies = misbehave;
+            f.PipelineGate = 2; // the first read is answered once a second one is in flight: no race with the client's next send
         });
         var data = RandomNumberGenerator.GetBytes(400_003);
         rig.Files.AddFile(Home + "/ahead", data);
@@ -461,7 +462,11 @@ public sealed class SftpTests : IDisposable
     [Arguments(1_000_003)]
     public async Task UploadThenDownload_RoundTripsAnySize_WithPipelining(int size)
     {
-        await using var rig = await Rig.StartAsync(f => f.Limits = (16 * 1024, 16 * 1024));
+        await using var rig = await Rig.StartAsync(f =>
+        {
+            f.Limits = (16 * 1024, 16 * 1024);
+            f.PipelineGate = size > 200_000 ? 2 : 0; // the first write is answered once a second one is in flight (checked below)
+        });
         var data = RandomNumberGenerator.GetBytes(size);
         var progress = new List<long>();
 
@@ -492,6 +497,7 @@ public sealed class SftpTests : IDisposable
             f.Limits = (8 * 1024, 8 * 1024);
             f.ShortReads = true;
             f.ReorderReplies = true;
+            f.PipelineGate = 2; // a second read is waiting when the first is answered, so the two are swapped
         });
         var data = RandomNumberGenerator.GetBytes(300_001);
         rig.Files.AddFile(Home + "/odd", data);

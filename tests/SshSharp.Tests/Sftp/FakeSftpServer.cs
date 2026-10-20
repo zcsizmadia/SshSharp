@@ -81,6 +81,17 @@ internal sealed class FakeSftpServer
     /// <summary>Hold each reply back until the next request arrives, answering them in reverse pairs (replies may come in any order).</summary>
     public bool ReorderReplies { get; set; }
 
+    /// <summary>
+    /// Hold the reply to a session's first READ or WRITE until this many requests wait for a reply at once (0: no gate). A test that
+    /// checks the client pipelines (<see cref="MaxOutstanding"/>, <see cref="ReorderedPairs"/>) then does not depend on the client's next
+    /// request winning a race against this server's reply, which a slow client loses (the instrumented build in the stress run did). A
+    /// client that never sends that many at once is answered after <see cref="PipelineGateLimit"/>, and the test's assertion fails.
+    /// </summary>
+    public int PipelineGate { get; set; }
+
+    /// <summary>How long the <see cref="PipelineGate"/> waits for the client before answering anyway: only a client that does not pipeline waits it out.</summary>
+    public TimeSpan PipelineGateLimit { get; set; } = TimeSpan.FromSeconds(10);
+
     /// <summary>List every entry twice, as a broken or hostile server might.</summary>
     public bool ListEntriesTwice { get; set; }
 
@@ -418,6 +429,13 @@ internal sealed class FakeSftpServer
         var queue = System.Threading.Channels.Channel.CreateUnbounded<byte[]>();
         var unanswered = 0;
         var endedEarly = false;
+        var gateSize = PipelineGate;
+        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        if (gateSize <= 1)
+        {
+            gate.SetResult();
+        }
+
         var reader = Task.Run(async () =>
         {
             var buffer = new List<byte>();
@@ -451,6 +469,11 @@ internal sealed class FakeSftpServer
                     }
 
                     queue.Writer.TryWrite(packet);
+                    if (now >= gateSize)
+                    {
+                        gate.TrySetResult(); // after the queueing: a reply reordered at the gate finds this request waiting
+                    }
+
                     if (StopReading?.Invoke(packet) == true)
                     {
                         Interlocked.Increment(ref _stoppedReading);
@@ -459,6 +482,7 @@ internal sealed class FakeSftpServer
                 }
             }
 
+            gate.TrySetResult(); // the client sends nothing more
             queue.Writer.Complete();
         });
 
@@ -509,6 +533,19 @@ internal sealed class FakeSftpServer
         await foreach (var packet in queue.Reader.ReadAllAsync())
         {
             await Task.Yield(); // lets requests the client already sent arrive behind this one
+            if (packet[0] is 5 or 6 && !gate.Task.IsCompleted)
+            {
+                try
+                {
+                    await gate.Task.WaitAsync(PipelineGateLimit);
+                }
+                catch (TimeoutException)
+                {
+                    // The client did not pipeline: answered anyway, and the test's assertion on MaxOutstanding fails.
+                }
+
+                gate.TrySetResult(); // only the first READ or WRITE waits
+            }
             if (packet[0] is 3 or 11 && HoldOpens is { } hold)
             {
                 lock (_requests)

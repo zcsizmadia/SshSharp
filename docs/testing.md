@@ -24,7 +24,9 @@ The protocol stack runs over any `Stream`, so the unit tests need no network. Sc
 `FakeSessionServer`, `FakeSftpServer`) and a fake SSH agent play the other side over in-memory pipes. They can also misbehave on
 purpose: send malformed or out-of-order messages, stall, refuse, reorder SFTP replies, or answer slowly. Time comes from a
 `TimeProvider`, so keep-alives, channel timeouts, re-key intervals and keystroke timing are tested on a fake clock. Real sleeps
-are not used. The file system, the environment and `Match exec` sit behind small delegates.
+are not used. A test that checks concurrency synchronizes on it rather than racing it: `FakeSftpServer` can hold the first SFTP
+read or write reply until a second request is in flight, so a test that the client pipelines passes however slow the client is. The file
+system, the environment and `Match exec` sit behind small delegates.
 
 Inputs come from the real tools wherever possible:
 - `known_hosts` files and KRLs made by OpenSSH
@@ -116,7 +118,8 @@ always finish. A sweep cuts the connection at 13 points from the first byte to w
 
 A stress workflow runs the unit tests on every platform, and the interop tests against every server, in a loop (100 iterations
 per job for a release). It uses an instrumented build that:
-- tracks every pooled buffer and reports a buffer returned twice, with both stacks
+- tracks every pooled buffer and reports a buffer returned twice, with both stacks (the earlier one with method names only:
+  formatting file and line numbers on every return slowed the build enough to change the timing it is there to observe)
 - checksums received data when it arrives, and checks it again when it is read and when it is released, so a buffer overwritten
   while queued is reported where it happens
 - records a bounded trace of relays and key exchanges, which a hung test includes in its failure message, together with the step

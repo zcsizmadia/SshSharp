@@ -20,7 +20,10 @@ namespace SshSharp.Protocol;
 internal static class Instrumentation
 {
     private static readonly ConcurrentDictionary<byte[], string> Outstanding = new(ReferenceEqualityComparer.Instance);
-    private static readonly ConcurrentDictionary<byte[], string> LastReturned = new(ReferenceEqualityComparer.Instance);
+    // The stack of each buffer's last return, for the report of a double return. It is kept unformatted, without file and line numbers:
+    // Environment.StackTrace resolved them from the PDBs on every return, which slowed each SFTP request and each received packet so
+    // much that the fake SFTP server, with no latency, answered nearly every request before the client sent the next one.
+    private static readonly ConcurrentDictionary<byte[], StackTrace> LastReturned = new(ReferenceEqualityComparer.Instance);
     private static readonly object WriteLock = new();
     private static int _reports;
 
@@ -72,11 +75,11 @@ internal static class Instrumentation
         if (!Outstanding.TryRemove(buffer, out _))
         {
             LastReturned.TryGetValue(buffer, out var earlier);
-            Report($"DOUBLE RETURN of a pooled buffer ({buffer.Length} bytes) by {owner}\n  now:\n{Environment.StackTrace}\n  earlier return:\n{earlier ?? "(not seen)"}");
+            Report($"DOUBLE RETURN of a pooled buffer ({buffer.Length} bytes) by {owner}\n  now:\n{Environment.StackTrace}\n  earlier return:\n{earlier?.ToString() ?? "(not seen)"}");
             return;
         }
 
-        LastReturned[buffer] = Environment.StackTrace;
+        LastReturned[buffer] = new StackTrace(1, fNeedFileInfo: false);
     }
 
     /// <summary>A checksum of received data, to compare later (FNV-1a over 64-bit words, then the tail bytes).</summary>
