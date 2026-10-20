@@ -106,6 +106,17 @@ internal sealed class FakeSftpServer
     /// <summary>How long to hold a reply back, by request type and reply type (a slow server); none by default.</summary>
     public Func<byte, byte, TimeSpan>? ReplyDelay { get; set; }
 
+    /// <summary>The clock <see cref="ReplyDelay"/> is measured on: a test that fakes the client's clock fakes this one too.</summary>
+    public TimeProvider Time { get; set; } = TimeProvider.System;
+
+    /// <summary>
+    /// How many replies are being held back by <see cref="ReplyDelay"/> right now (at most one per session); each is counted once its
+    /// delay has started on <see cref="Time"/>.
+    /// </summary>
+    public int DelayingReplies => Volatile.Read(ref _delayingReplies);
+
+    private int _delayingReplies;
+
     /// <summary>The protocol version to announce.</summary>
     public uint Version { get; set; } = 3;
 
@@ -591,7 +602,17 @@ internal sealed class FakeSftpServer
 
             if (ReplyDelay?.Invoke(packet[0], reply![0]) is { } delay && delay > TimeSpan.Zero)
             {
-                await Task.Delay(delay);
+                // Counted once the delay's timer is set: a test that sees the count and moves a fake clock on then lets the reply out.
+                var held = Task.Delay(delay, Time);
+                Interlocked.Increment(ref _delayingReplies);
+                try
+                {
+                    await held;
+                }
+                finally
+                {
+                    Interlocked.Decrement(ref _delayingReplies);
+                }
             }
 
             if (RawFrame?.Invoke(packet) is { } raw)

@@ -364,6 +364,9 @@ drops packets without closing the connection) then hangs your code too. Set `Ope
   bounded.
 - It applies to every request of the `SftpClient`, including those of streams, listings and transfers, and to the extra sessions
   of a segmented download or upload. Change it at any time.
+- **Pick seconds to minutes, well above your process's longest stall.** The silence is measured from the last reply your process
+  has read. If the process cannot run for a while (suspended, or a machine so overloaded that its threads do not get to run), that
+  time counts as silence even if the server answered meanwhile, and the timeout can fire before the waiting replies are read.
 - [Keep-alives](keepalive-and-reconnect.md) (`KeepAliveInterval`) detect a dead connection; `OperationTimeout` also catches a
   server that is connected but no longer answering SFTP requests.
 

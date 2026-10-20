@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.FileProviders;
+using Microsoft.Extensions.Time.Testing;
 using SshSharp.FileProviders;
 using SshSharp.Sftp;
 using SshSharp.Tests.Protocol;
@@ -284,17 +285,22 @@ public class SftpFileProviderTests
     [Test]
     public async Task ASynchronousReadThatTimesOut_IsTheSameTimeoutError_AsALookup()
     {
+        // The provider's timeout and the server's delays run on a fake clock, which stands still during the lookup and the open, and
+        // moves on while a read waits: each read's timeout starts before its request goes out, so it passes before the server's 10 s do.
+        var time = new FakeTimeProvider();
         await using var rig = await Rig.StartAsync();
-        // The limit must leave the lookup and the open, which run before the reads are slowed, time to finish on a loaded CI runner.
-        var provider = new SftpFileProvider(rig.Sftp, "site", new SftpFileProviderOptions { OperationTimeout = TimeSpan.FromSeconds(1.5) });
+        rig.Files.Time = time;
+        var provider = new SftpFileProvider(rig.Sftp, "site", new SftpFileProviderOptions { OperationTimeout = TimeSpan.FromSeconds(1.5), Clock = time });
         var file = provider.GetFileInfo("index.html");
         using var stream = file.CreateReadStream();
         rig.Files.ReplyDelay = (request, _) => request == 5 ? TimeSpan.FromSeconds(10) : TimeSpan.Zero;
 
-        var error = Assert.Throws<SshException>(() => stream.ReadExactly(new byte[4]));
-        await Assert.That(error!.Reason).IsEqualTo(SshFailureReason.Timeout);
-        error = Assert.Throws<SshException>(() => stream.ReadExactly(new byte[4].AsSpan()));
-        await Assert.That(error!.Reason).IsEqualTo(SshFailureReason.Timeout);
+        var read = Task.Run(() => Assert.Throws<SshException>(() => stream.ReadExactly(new byte[4])));
+        await FakeClock.AdvanceUntilAsync(time, TimeSpan.FromMilliseconds(500), () => read.IsCompleted);
+        await Assert.That((await read)!.Reason).IsEqualTo(SshFailureReason.Timeout);
+        read = Task.Run(() => Assert.Throws<SshException>(() => stream.ReadExactly(new byte[4].AsSpan())));
+        await FakeClock.AdvanceUntilAsync(time, TimeSpan.FromMilliseconds(500), () => read.IsCompleted);
+        await Assert.That((await read)!.Reason).IsEqualTo(SshFailureReason.Timeout);
     }
 
     /// <summary>How many entries the provider's two caches hold together (read through reflection: they are private).</summary>

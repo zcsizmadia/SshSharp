@@ -210,37 +210,31 @@ public class SftpAdapterReconnectTests
     [Test]
     public async Task TheProvider_KeepsItsSession_AfterATimeout()
     {
+        // The provider's timeout and the server's delay run on a fake clock: the timeout starts before the request goes out, so it
+        // passes before the server's 4 s do, however loaded the machine.
+        var time = new FakeTimeProvider();
         await using var connections = new Connections();
+        connections.Files.Time = time;
         await using var ready = await connections.OpenAsync(Timeout()); // opened up front, so the short timeout only bounds requests
         var opens = 0;
         await using var provider = new SftpFileProvider(_ =>
         {
             Interlocked.Increment(ref opens);
             return Task.FromResult(ready);
-        }, "site", new SftpFileProviderOptions { CacheDuration = TimeSpan.Zero, OperationTimeout = TimeSpan.FromSeconds(2) });
+        }, "site", new SftpFileProviderOptions { CacheDuration = TimeSpan.Zero, OperationTimeout = TimeSpan.FromSeconds(2), Clock = time });
         await Assert.That(provider.GetFileInfo("index.html").Exists).IsTrue();
 
-        // One slow answer is a timeout, not a failed connection: the session stays. (The server holds every reply behind the slow one,
-        // so the lookups after it may time out too, until it has gone.)
+        // One slow answer is a timeout, not a failed connection: the session stays.
         var slow = 1;
         connections.Files.ReplyDelay = (_, _) => Interlocked.Exchange(ref slow, 0) == 1 ? TimeSpan.FromSeconds(4) : TimeSpan.Zero;
-        var timeout = await Assert.That(() => provider.GetFileInfo("index.html")).Throws<SshException>();
+        var lookup = Task.Run(() => provider.GetFileInfo("index.html"));
+        await FakeClock.AdvanceUntilAsync(time, TimeSpan.FromMilliseconds(500), () => lookup.IsCompleted);
+        var timeout = await Assert.That(async () => await lookup).Throws<SshException>();
         await Assert.That(timeout!.Reason).IsEqualTo(SshFailureReason.Timeout);
 
-        var exists = false;
-        for (var i = 0; i < 30 && !exists; i++)
-        {
-            try
-            {
-                exists = provider.GetFileInfo("index.html").Exists;
-            }
-            catch (SshException ex) when (ex.Reason == SshFailureReason.Timeout)
-            {
-                // Still behind the slow reply.
-            }
-        }
-
-        await Assert.That(exists).IsTrue();
+        // Once the server has sent the slow answer (dropped), the next lookup is answered on the same session.
+        time.Advance(TimeSpan.FromSeconds(4));
+        await Assert.That(provider.GetFileInfo("index.html").Exists).IsTrue();
         await Assert.That(opens).IsEqualTo(1);
     }
 

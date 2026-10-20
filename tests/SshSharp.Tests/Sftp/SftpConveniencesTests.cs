@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
+using Microsoft.Extensions.Time.Testing;
 using SshSharp.Sftp;
 using SshSharp.Tests.Protocol;
 
@@ -28,10 +29,12 @@ public sealed class SftpConveniencesTests
 
         public SftpClient Sftp { get; private set; } = null!;
 
-        public static async Task<Rig> StartAsync(Action<FakeSftpServer>? setup = null)
+        /// <summary>A rig whose client and SFTP server (its <see cref="FakeSftpServer.ReplyDelay"/>) run on <paramref name="time"/>.</summary>
+        public static async Task<Rig> StartAsync(Action<FakeSftpServer>? setup = null, TimeProvider? time = null)
         {
             var password = Convert.ToHexString(RandomNumberGenerator.GetBytes(16));
             var rig = new Rig { Ssh = new FakeSessionServer { Password = password } };
+            rig.Files.Time = time ?? TimeProvider.System;
             setup?.Invoke(rig.Files);
             rig.Files.Install(rig.Ssh);
             _ = rig.Ssh.StartAsync();
@@ -40,6 +43,7 @@ public sealed class SftpConveniencesTests
                 UserName = "tester",
                 Password = password,
                 HostKeyVerifier = SshHostKeyVerifier.FromDelegate((_, _) => ValueTask.FromResult(true)),
+                TimeProvider = time ?? TimeProvider.System,
             }, leaveOpen: true, Timeout());
             rig.Sftp = await rig.Client.OpenSftpAsync(Timeout());
             return rig;
@@ -394,24 +398,30 @@ public sealed class SftpConveniencesTests
     [Test]
     public async Task OperationTimeout_FailsARequestTheServerDoesNotAnswer_AndTheSessionStaysUsable()
     {
-        var delayed = 0;
+        // The server holds the first STAT's reply until released, and the client's timeout runs on a fake clock, moved on by the test:
+        // the timeout comes first, and not before its time, however loaded the machine.
+        var time = new FakeTimeProvider();
+        var held = 0;
         await using var rig = await Rig.StartAsync(f =>
         {
             f.AddFile(Home + "/f", [1, 2, 3]);
-            f.ReplyDelay = (request, _) => request == 17 && Interlocked.Increment(ref delayed) == 1 ? TimeSpan.FromSeconds(3) : TimeSpan.Zero;
-        });
+            f.Hold = packet => packet[0] == 17 && Interlocked.Increment(ref held) == 1;
+        }, time);
         rig.Sftp.OperationTimeout = TimeSpan.FromMilliseconds(300);
+        var started = time.GetTimestamp();
 
-        var clock = Stopwatch.StartNew();
-        var error = await Assert.That(async () => await rig.Sftp.GetAttributesAsync("f", cancellationToken: Timeout())).Throws<SshException>();
-        clock.Stop();
+        var stat = rig.Sftp.GetAttributesAsync("f", cancellationToken: Timeout());
+        await FakeClock.AdvanceUntilAsync(time, TimeSpan.FromMilliseconds(50), () => stat.IsCompleted);
+        var error = await Assert.That(async () => await stat).Throws<SshException>();
 
         await Assert.That(error!.Reason).IsEqualTo(SshFailureReason.Timeout);
         await Assert.That(error.InnerException).IsTypeOf<TimeoutException>();
-        await Assert.That(clock.Elapsed).IsLessThan(TimeSpan.FromSeconds(2.5));
+        await Assert.That(time.GetElapsedTime(started)).IsGreaterThanOrEqualTo(TimeSpan.FromMilliseconds(300)); // never before the timeout
+        await Assert.That(rig.Files.Held).IsEqualTo(1);
 
         // The late reply is dropped; the next request (answered once the server gets to it) works.
         rig.Sftp.OperationTimeout = TimeSpan.FromSeconds(30);
+        rig.Files.Released.SetResult();
         await Assert.That((await rig.Sftp.GetAttributesAsync("f", cancellationToken: Timeout())).Size).IsEqualTo(3L);
     }
 
@@ -419,21 +429,26 @@ public sealed class SftpConveniencesTests
     public async Task OperationTimeout_DoesNotCutOffATransfer_WhileTheServerKeepsAnswering()
     {
         // Each read is answered 75 ms after the one before, with up to 64 in flight: the later reads of a window wait seconds for their
-        // replies, longer than the timeout, but the server is never silent for more than a twentieth of it (headroom for a loaded
-        // machine, where the gaps stretch: with 40 ms against 500 ms, the full suite once saw one pass the timeout).
+        // replies, several times the timeout, but the server is never silent for more than 75 ms. The server's delays and the client's
+        // timeout run on one fake clock, moved on only once the client has taken every reply sent so far and the server holds the next
+        // one back, so a loaded machine (whose stalls once stretched a 75 ms gap past a 1.5 s timeout on the wall clock) changes nothing.
+        var time = new FakeTimeProvider();
         var data = RandomNumberGenerator.GetBytes(64 * 32 * 1024);
         await using var rig = await Rig.StartAsync(f =>
         {
             f.Limits = (32 * 1024, 32 * 1024);
             f.AddFile(Home + "/big", data);
             f.ReplyDelay = (request, _) => request == 5 ? TimeSpan.FromMilliseconds(75) : TimeSpan.Zero;
-        });
+        }, time);
         rig.Sftp.OperationTimeout = TimeSpan.FromMilliseconds(1500);
+        var started = time.GetTimestamp();
 
-        var read = await rig.Sftp.ReadAllBytesAsync("big", Timeout());
+        var read = rig.Sftp.ReadAllBytesAsync("big", Timeout());
+        await FakeClock.AnswerEachInTurnAsync(time, rig.Files, rig.Sftp, TimeSpan.FromMilliseconds(75), read);
 
-        await Assert.That(read.AsSpan().SequenceEqual(data)).IsTrue();
+        await Assert.That((await read).AsSpan().SequenceEqual(data)).IsTrue();
         await Assert.That(rig.Files.MaxDataRequestsInFlight).IsGreaterThan(20); // 20 × 75 ms: enough in flight that the last waited past the timeout
+        await Assert.That(time.GetElapsedTime(started)).IsGreaterThan(TimeSpan.FromSeconds(3)); // the transfer took twice the timeout and more
     }
 
     [Test]

@@ -77,7 +77,7 @@ public sealed class SftpFileProvider : IFileProvider, IDisposable, IAsyncDisposa
         ArgumentNullException.ThrowIfNull(sessionFactory);
         ArgumentException.ThrowIfNullOrEmpty(root);
         _options = options ?? new SftpFileProviderOptions();
-        _sessions = new SftpSessions(sessionFactory, _options.OperationTimeout);
+        _sessions = new SftpSessions(sessionFactory, _options.OperationTimeout, _options.Clock);
         Root = root.Length > 1 ? root.TrimEnd('/') : root;
     }
 
@@ -243,7 +243,7 @@ public sealed class SftpFileProvider : IFileProvider, IDisposable, IAsyncDisposa
     }
 
     internal Stream OpenRead(string path, long length) =>
-        new BlockingReadStream(Run((sftp, ct) => sftp.OpenReadAsync(path, ct)), length, _options.OperationTimeout);
+        new BlockingReadStream(Run((sftp, ct) => sftp.OpenReadAsync(path, ct)), length, _options.OperationTimeout, _options.Clock);
 
     /// <summary>
     /// Runs an SFTP operation to completion for a synchronous caller, bounded by <see cref="SftpFileProviderOptions.OperationTimeout"/>.
@@ -252,7 +252,7 @@ public sealed class SftpFileProvider : IFileProvider, IDisposable, IAsyncDisposa
     /// tried once more on a new session, when the provider has a session factory.
     /// </summary>
     internal T Run<T>(Func<SftpClient, CancellationToken, Task<T>> operation) =>
-        Run(_options.OperationTimeout, ct => _sessions.RunAsync(operation, retry: true, ct));
+        Run(_options.OperationTimeout, _options.Clock, ct => _sessions.RunAsync(operation, retry: true, ct));
 
     /// <summary>
     /// Disposes the SFTP sessions the provider opened from its session factory; later lookups throw <see cref="ObjectDisposedException"/>.
@@ -264,8 +264,8 @@ public sealed class SftpFileProvider : IFileProvider, IDisposable, IAsyncDisposa
     public void Dispose() =>
         Task.Run(() => _sessions.DisposeAsync().AsTask(), CancellationToken.None).GetAwaiter().GetResult();
 
-    /// <summary>Runs <paramref name="operation"/> as <see cref="Run{T}(Func{SftpClient, CancellationToken, Task{T}})"/> does, with the given timeout; a timeout is an <see cref="SshException"/> (<see cref="SshFailureReason.Timeout"/>).</summary>
-    internal static T Run<T>(TimeSpan timeout, Func<CancellationToken, Task<T>> operation)
+    /// <summary>Runs <paramref name="operation"/> as <see cref="Run{T}(Func{SftpClient, CancellationToken, Task{T}})"/> does, with the given timeout on <paramref name="clock"/>; a timeout is an <see cref="SshException"/> (<see cref="SshFailureReason.Timeout"/>).</summary>
+    internal static T Run<T>(TimeSpan timeout, TimeProvider clock, Func<CancellationToken, Task<T>> operation)
     {
         // The timeout starts when the work does, on the thread pool: started before queueing it, a busy pool's delay would count
         // against the server, and the operation could find its time used up before it began.
@@ -274,7 +274,7 @@ public sealed class SftpFileProvider : IFileProvider, IDisposable, IAsyncDisposa
         {
             return Task.Run(async () =>
             {
-                using var started = new CancellationTokenSource(timeout);
+                using var started = new CancellationTokenSource(timeout, clock);
                 cancel = started;
                 return await operation(started.Token).ConfigureAwait(false);
             }, CancellationToken.None).GetAwaiter().GetResult();
@@ -346,4 +346,7 @@ public sealed class SftpFileProviderOptions
             field = value;
         }
     } = TimeSpan.FromSeconds(30);
+
+    /// <summary>The clock <see cref="OperationTimeout"/> is measured on: the system's, or a fake one in tests.</summary>
+    internal TimeProvider Clock { get; init; } = TimeProvider.System;
 }

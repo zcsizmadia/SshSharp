@@ -30,13 +30,13 @@ internal sealed class SftpFileSystemStream : FileSystemStream
     /// stays on <paramref name="sftp"/>, the session that opened it.
     /// </summary>
     public static SftpFileSystemStream Wrap(SftpFileSystem fileSystem, SftpClient sftp, Stream remote, string full, int bufferSize) =>
-        new(new BufferedStream(new IOStream(remote, full, sftp, fileSystem.Options.OperationTimeout), Math.Max(bufferSize, 64 * 1024)), full);
+        new(new BufferedStream(new IOStream(remote, full, sftp, fileSystem.Options.OperationTimeout, fileSystem.Options.Clock), Math.Max(bufferSize, 64 * 1024)), full);
 
     /// <summary>
     /// The SFTP stream with synchronous calls added (each bounded by the timeout) and every failure, synchronous or asynchronous,
     /// turned into the <c>System.IO</c> exception <see cref="SftpFileSystem.Translate"/> gives.
     /// </summary>
-    private sealed class IOStream(Stream remote, string path, SftpClient sftp, TimeSpan timeout) : Stream
+    private sealed class IOStream(Stream remote, string path, SftpClient sftp, TimeSpan timeout, TimeProvider clock) : Stream
     {
         public override bool CanRead => remote.CanRead;
 
@@ -160,7 +160,7 @@ internal sealed class SftpFileSystemStream : FileSystemStream
             {
                 return Task.Run(async () =>
                 {
-                    using var started = new CancellationTokenSource(timeout);
+                    using var started = new CancellationTokenSource(timeout, clock);
                     cancel = started;
                     return await operation(started.Token).ConfigureAwait(false);
                 }, CancellationToken.None).GetAwaiter().GetResult();

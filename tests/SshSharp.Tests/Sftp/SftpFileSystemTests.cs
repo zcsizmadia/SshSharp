@@ -5,6 +5,7 @@
 using System.IO.Abstractions;
 using System.Security.Cryptography;
 using System.Text;
+using Microsoft.Extensions.Time.Testing;
 using SshSharp.IO.Abstractions;
 using SshSharp.Sftp;
 using SshSharp.Tests.Protocol;
@@ -30,9 +31,11 @@ public class SftpFileSystemTests
 
         public SftpFileSystem Fs { get; private set; } = null!;
 
-        public static async Task<Rig> StartAsync(Action<FakeSftpServer>? setup = null, SftpFileSystemOptions? options = null)
+        /// <summary>A rig whose client and SFTP server (its <see cref="FakeSftpServer.ReplyDelay"/>) run on <paramref name="time"/>.</summary>
+        public static async Task<Rig> StartAsync(Action<FakeSftpServer>? setup = null, SftpFileSystemOptions? options = null, TimeProvider? time = null)
         {
             var rig = new Rig();
+            rig.Files.Time = time ?? TimeProvider.System;
             setup?.Invoke(rig.Files);
             rig.Files.Install(rig.Ssh);
             _ = rig.Ssh.StartAsync();
@@ -41,6 +44,7 @@ public class SftpFileSystemTests
                 UserName = "tester",
                 Password = "secret",
                 HostKeyVerifier = SshHostKeyVerifier.FromDelegate((_, _) => ValueTask.FromResult(true)),
+                TimeProvider = time ?? TimeProvider.System,
             }, leaveOpen: true, Timeout());
             rig.Sftp = await rig.Client.OpenSftpAsync(Timeout());
             rig.Fs = new SftpFileSystem(rig.Sftp, options);
@@ -580,29 +584,45 @@ public class SftpFileSystemTests
     public async Task WholeFileTransfers_AreTimedOnlyWithoutProgress_ButASilentServerStillTimesOut()
     {
         // Every answer with data (and to every WRITE) takes 100 ms and they come one after another, so a whole-file transfer takes longer
-        // than the 6 s timeout: it must still succeed, as each answer comes well within it. A macOS runner running the whole suite (a
-        // starved thread pool, as the synchronous API blocks a thread) has stalled for 1.35 s, and in a later stress run for over 3 s
-        // (when the timeout was 3 s), so the margin is now nearly 6 s.
-        var data = RandomNumberGenerator.GetBytes(4 * 1024 * 1024); // 64 READs of 64 KiB, so about 6.4 s in all
+        // than the 3 s timeout: it must still succeed, as each answer comes well within it. The server's delays and the timeout run on
+        // one fake clock, moved on only once the client has taken every answer sent so far, so a stalled machine (a macOS runner once
+        // stalled for over 3 s on the wall clock) changes nothing.
+        var time = new FakeTimeProvider();
+        var step = TimeSpan.FromMilliseconds(100);
+        var data = RandomNumberGenerator.GetBytes(4 * 1024 * 1024); // 64 READs of 64 KiB, so 6.4 s in all
         await using var rig = await Rig.StartAsync(f =>
         {
             f.AddFile(Home + "/big.bin", data);
-            f.ReplyDelay = (request, reply) => (request, reply) is (5, 103) or (6, _) ? TimeSpan.FromMilliseconds(100) : TimeSpan.Zero;
-        }, new SftpFileSystemOptions { OperationTimeout = TimeSpan.FromSeconds(6) });
+            f.ReplyDelay = (request, reply) => (request, reply) is (5, 103) or (6, _) ? step : TimeSpan.Zero;
+        }, new SftpFileSystemOptions { OperationTimeout = TimeSpan.FromSeconds(3), Clock = time }, time);
         var fs = rig.Fs;
 
-        var started = System.Diagnostics.Stopwatch.StartNew();
-        await Assert.That(TestBytes.Compare(fs.File.ReadAllBytes("big.bin"), data)).IsEqualTo("equal");
-        await Assert.That(started.Elapsed).IsGreaterThan(TimeSpan.FromSeconds(6));
-        await Assert.That(TestBytes.Compare(await fs.File.ReadAllBytesAsync("big.bin", Timeout()), data)).IsEqualTo("equal");
-        fs.File.WriteAllBytes("copy.bin", data);
+        var started = time.GetTimestamp();
+        var read = Task.Run(() => fs.File.ReadAllBytes("big.bin"));
+        await FakeClock.AnswerEachInTurnAsync(time, rig.Files, rig.Sftp, step, read);
+        await Assert.That(TestBytes.Compare(await read, data)).IsEqualTo("equal");
+        await Assert.That(time.GetElapsedTime(started)).IsGreaterThan(TimeSpan.FromSeconds(6)); // twice the timeout
+
+        var readAsync = fs.File.ReadAllBytesAsync("big.bin", Timeout());
+        await FakeClock.AnswerEachInTurnAsync(time, rig.Files, rig.Sftp, step, readAsync);
+        await Assert.That(TestBytes.Compare(await readAsync, data)).IsEqualTo("equal");
+
+        var write = Task.Run(() => fs.File.WriteAllBytes("copy.bin", data));
+        await FakeClock.AnswerEachInTurnAsync(time, rig.Files, rig.Sftp, step, write);
+        await write;
         await Assert.That(TestBytes.Compare(rig.Files.FileData(Home + "/copy.bin")!, data)).IsEqualTo("equal");
-        fs.File.AppendAllText("copy.bin", "tail");
+
+        var append = Task.Run(() => fs.File.AppendAllText("copy.bin", "tail"));
+        await FakeClock.AnswerEachInTurnAsync(time, rig.Files, rig.Sftp, step, append);
+        await append;
         await Assert.That(rig.Files.FileData(Home + "/copy.bin")!.Length).IsEqualTo(data.Length + 4);
 
-        // A request the server sits on is still a timeout.
+        // A request the server sits on is still a timeout: the timeout starts before the request goes out, so it passes before the
+        // server's 10 s do, however the clock is moved.
         rig.Files.ReplyDelay = (request, _) => request is 7 or 17 ? TimeSpan.FromSeconds(10) : TimeSpan.Zero;
-        await Assert.That(() => fs.File.GetAttributes("big.bin")).Throws<IOException>().WithMessageContaining("did not answer in time");
+        var stat = Task.Run(() => fs.File.GetAttributes("big.bin"));
+        await FakeClock.AdvanceUntilAsync(time, TimeSpan.FromSeconds(1), () => stat.IsCompleted);
+        await Assert.That(async () => await stat).Throws<IOException>().WithMessageContaining("did not answer in time");
     }
 
     [Test]
