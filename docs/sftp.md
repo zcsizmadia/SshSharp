@@ -411,6 +411,13 @@ not how long an operation takes, so a transfer whose window of requests takes lo
 as replies keep coming. A request that timed out waiting for its reply is abandoned (its late reply is dropped, a handle it opens is
 closed) and the session stays usable.
 
+The silence is measured from the last reply the client has read off the session, on the connection's clock. Time in which the
+process could not run at all (suspended, or so overloaded that its threads did not get to run) therefore counts as silence, even if
+the server answered meanwhile: its replies wait in the network buffers, and when the process runs again, the timeout's check can come
+before they are read. Measuring from the connection's last received packet instead would not change that, since the connection's
+own reads stall with the rest of the process, and the client cannot tell a stall of its own from the server's silence. So choose a
+timeout well above the longest stall the application may have: seconds to minutes, not milliseconds.
+
 It also bounds a request that cannot be sent. When the server's `sftp-server` stops reading (it hangs, while sshd goes on answering
 keep-alives), the channel's flow-control window fills and a write cannot go out; once the server has sent nothing for
 `OperationTimeout`, that send is cut off and the whole SFTP session is closed, since part of the request may have gone out and
@@ -424,7 +431,8 @@ before the failure is thrown, so `IsConnected` is already false when you catch i
 
 The adapters above (`IFileProvider`, `IFileSystem`) have an `OperationTimeout` of their own, which they apply to each call with a
 token and report their own way (`SshException` and `IOException`). They do not change the `SftpClient`'s; set that too if you want
-both, and the adapters report its timeout as they report a failed session.
+both, and the adapters report its timeout as they report a failed session. Their timeouts, too, count time in which the process
+could not run, so the same advice holds: well above the longest stall.
 
 ## Errors
 

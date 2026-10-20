@@ -140,6 +140,9 @@ internal sealed class SftpChannel : IAsyncDisposable
         }
     }
 
+    /// <summary>How long the server has sent nothing, as <see cref="OperationTimeout"/> measures it.</summary>
+    public TimeSpan SinceServerSent => Clock.GetElapsedTime(Volatile.Read(ref _lastReceived));
+
     /// <summary>
     /// Whether the channel has failed or been disposed: the session or the connection under it ended, the server broke the protocol, or
     /// a request could not be sent within <see cref="OperationTimeout"/> (also one whose caller stopped waiting), or a send failed. Every
@@ -339,7 +342,7 @@ internal sealed class SftpChannel : IAsyncDisposable
     /// <summary>How much longer to wait before the server has been silent for <paramref name="timeout"/>; null once it has.</summary>
     private TimeSpan? Remaining(TimeSpan timeout)
     {
-        var quiet = Clock.GetElapsedTime(Volatile.Read(ref _lastReceived));
+        var quiet = SinceServerSent;
         return quiet >= timeout ? null : TimeSpan.FromMilliseconds(Math.Max(1, (timeout - quiet).TotalMilliseconds));
     }
 

@@ -71,7 +71,8 @@ public sealed class SftpFileSystem : IFileSystem, IDisposable, IAsyncDisposable
     /// <param name="sessionFactory">Opens a new SFTP session; called on first use and after a failure, never concurrently.</param>
     /// <param name="options">Timeouts.</param>
     public SftpFileSystem(Func<CancellationToken, Task<SftpClient>> sessionFactory, SftpFileSystemOptions? options = null)
-        : this(new SftpSessions(sessionFactory ?? throw new ArgumentNullException(nameof(sessionFactory)), (options ?? new SftpFileSystemOptions()).OperationTimeout), options)
+        : this(new SftpSessions(sessionFactory ?? throw new ArgumentNullException(nameof(sessionFactory)),
+            (options ?? new SftpFileSystemOptions()).OperationTimeout, (options ?? new SftpFileSystemOptions()).Clock), options)
     {
     }
 
@@ -220,7 +221,7 @@ public sealed class SftpFileSystem : IFileSystem, IDisposable, IAsyncDisposable
         {
             return Task.Run(async () =>
             {
-                using var started = new Deadline(limited ? Options.OperationTimeout : Timeout.InfiniteTimeSpan, CancellationToken.None);
+                using var started = new Deadline(limited ? Options.OperationTimeout : Timeout.InfiniteTimeSpan, Options.Clock, CancellationToken.None);
                 deadline = started;
                 return await _sessions.RunAsync((sftp, ct) => operation(sftp, ct, started), retry, started.Token).ConfigureAwait(false);
             }, CancellationToken.None).GetAwaiter().GetResult();
@@ -246,7 +247,7 @@ public sealed class SftpFileSystem : IFileSystem, IDisposable, IAsyncDisposable
     internal async Task<T> RunTransferAsync<T>(string? path, bool directory, Func<SftpClient, CancellationToken, IProgress<SftpTransferProgress>, Task<T>> operation,
         CancellationToken cancellationToken, bool retry = false)
     {
-        using var deadline = new Deadline(Options.OperationTimeout, cancellationToken);
+        using var deadline = new Deadline(Options.OperationTimeout, Options.Clock, cancellationToken);
         try
         {
             return await _sessions.RunAsync((sftp, ct) => operation(sftp, ct, deadline), retry, deadline.Token).ConfigureAwait(false);
@@ -264,19 +265,21 @@ public sealed class SftpFileSystem : IFileSystem, IDisposable, IAsyncDisposable
             return true;
         }, cancellationToken);
 
-    /// <summary>A timeout that each progress report restarts, linked to the caller's token; infinite when the timeout is.</summary>
+    /// <summary>A timeout (on the options' clock) that each progress report restarts, linked to the caller's token; infinite when the timeout is.</summary>
     private sealed class Deadline : IProgress<SftpTransferProgress>, IDisposable
     {
+        // The timer runs on the clock, which a linked source cannot: the linked source joins it to the caller's token.
+        private readonly CancellationTokenSource _timer;
         private readonly CancellationTokenSource _source;
         private readonly CancellationToken _caller;
         private readonly TimeSpan _timeout;
 
-        public Deadline(TimeSpan timeout, CancellationToken caller)
+        public Deadline(TimeSpan timeout, TimeProvider clock, CancellationToken caller)
         {
             _timeout = timeout;
             _caller = caller;
-            _source = CancellationTokenSource.CreateLinkedTokenSource(caller);
-            _source.CancelAfter(timeout);
+            _timer = new CancellationTokenSource(timeout, clock);
+            _source = CancellationTokenSource.CreateLinkedTokenSource(caller, _timer.Token);
         }
 
         public CancellationToken Token => _source.Token;
@@ -288,7 +291,7 @@ public sealed class SftpFileSystem : IFileSystem, IDisposable, IAsyncDisposable
         {
             try
             {
-                _source.CancelAfter(_timeout);
+                _timer.CancelAfter(_timeout);
             }
             catch (ObjectDisposedException)
             {
@@ -296,7 +299,11 @@ public sealed class SftpFileSystem : IFileSystem, IDisposable, IAsyncDisposable
             }
         }
 
-        public void Dispose() => _source.Dispose();
+        public void Dispose()
+        {
+            _source.Dispose();
+            _timer.Dispose();
+        }
     }
 
     /// <summary>The <c>System.IO</c> exception for an SFTP or SSH failure; null for exceptions that pass through unchanged.</summary>
@@ -336,4 +343,7 @@ public sealed class SftpFileSystemOptions
             field = value;
         }
     } = TimeSpan.FromSeconds(60);
+
+    /// <summary>The clock <see cref="OperationTimeout"/> is measured on: the system's, or a fake one in tests.</summary>
+    internal TimeProvider Clock { get; init; } = TimeProvider.System;
 }

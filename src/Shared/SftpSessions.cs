@@ -23,6 +23,7 @@ internal sealed class SftpSessions : IAsyncDisposable
     private readonly SftpClient? _borrowed;
     private readonly Func<CancellationToken, Task<SftpClient>>? _factory;
     private readonly TimeSpan _openTimeout;
+    private readonly TimeProvider _clock = TimeProvider.System;
     private readonly CancellationTokenSource _disposing = new();
     private readonly object _lock = new();
 
@@ -36,11 +37,15 @@ internal sealed class SftpSessions : IAsyncDisposable
     /// <summary>Uses <paramref name="sftp"/> for the adapter's lifetime; it stays the caller's to dispose.</summary>
     public SftpSessions(SftpClient sftp) => _borrowed = sftp;
 
-    /// <summary>Opens sessions with <paramref name="factory"/>, each open bounded by <paramref name="openTimeout"/>, and owns them.</summary>
-    public SftpSessions(Func<CancellationToken, Task<SftpClient>> factory, TimeSpan openTimeout)
+    /// <summary>
+    /// Opens sessions with <paramref name="factory"/>, each open bounded by <paramref name="openTimeout"/> on <paramref name="clock"/>,
+    /// and owns them.
+    /// </summary>
+    public SftpSessions(Func<CancellationToken, Task<SftpClient>> factory, TimeSpan openTimeout, TimeProvider clock)
     {
         _factory = factory;
         _openTimeout = openTimeout;
+        _clock = clock;
     }
 
     /// <summary>The session to use now: the caller's, the shared one, or a new one when there is none.</summary>
@@ -107,8 +112,8 @@ internal sealed class SftpSessions : IAsyncDisposable
     {
         // Not a caller's token: the open is shared, so one caller giving up must not fail the others. It ends with the adapter, or
         // after the timeout.
-        using var cancel = CancellationTokenSource.CreateLinkedTokenSource(_disposing.Token);
-        cancel.CancelAfter(_openTimeout);
+        using var timeout = new CancellationTokenSource(_openTimeout, _clock);
+        using var cancel = CancellationTokenSource.CreateLinkedTokenSource(_disposing.Token, timeout.Token);
         SftpClient session;
         try
         {

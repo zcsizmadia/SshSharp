@@ -4,7 +4,7 @@ namespace SshSharp.FileProviders;
 /// An SFTP read stream that also reads synchronously, as <see cref="Microsoft.Extensions.FileProviders.IFileInfo"/> consumers may: a
 /// synchronous read waits for the asynchronous one (which never needs the caller's context), bounded by the provider's timeout.
 /// </summary>
-internal sealed class BlockingReadStream(Stream inner, long length, TimeSpan timeout) : Stream
+internal sealed class BlockingReadStream(Stream inner, long length, TimeSpan timeout, TimeProvider clock) : Stream
 {
     public override bool CanRead => inner.CanRead;
 
@@ -26,7 +26,7 @@ internal sealed class BlockingReadStream(Stream inner, long length, TimeSpan tim
     {
         ArgumentNullException.ThrowIfNull(buffer);
         var memory = buffer.AsMemory(offset, count);
-        return SftpFileProvider.Run(timeout, ct => inner.ReadAsync(memory, ct).AsTask());
+        return SftpFileProvider.Run(timeout, clock, ct => inner.ReadAsync(memory, ct).AsTask());
     }
 
     public override int Read(Span<byte> buffer)
@@ -36,7 +36,7 @@ internal sealed class BlockingReadStream(Stream inner, long length, TimeSpan tim
         var rented = System.Buffers.ArrayPool<byte>.Shared.Rent(length);
         try
         {
-            var read = SftpFileProvider.Run(timeout, ct => inner.ReadAsync(rented.AsMemory(0, length), ct).AsTask());
+            var read = SftpFileProvider.Run(timeout, clock, ct => inner.ReadAsync(rented.AsMemory(0, length), ct).AsTask());
             rented.AsSpan(0, read).CopyTo(buffer);
             return read;
         }

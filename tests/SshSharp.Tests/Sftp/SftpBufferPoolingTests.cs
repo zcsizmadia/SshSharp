@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using Microsoft.Extensions.Time.Testing;
 using SshSharp.Protocol;
 using SshSharp.Sftp;
 using SshSharp.Tests.Protocol;
@@ -282,8 +283,14 @@ public sealed class SftpBufferPoolingTests
     [Test]
     public async Task ReadAhead_CancelledWait_LeavesTheReplyToTheNextRead()
     {
-        // The reply the cancelled read waited for stays with the read-ahead; the next read takes it, and the bytes are right.
-        await using var rig = await Rig.StartAsync(f => f.ReplyDelay = (request, _) => request == SftpProtocol.Read ? TimeSpan.FromMilliseconds(200) : TimeSpan.Zero);
+        // The reply the cancelled read waited for stays with the read-ahead; the next read takes it, and the bytes are right. The server
+        // holds the reads back on a fake clock, so the reply cannot come before the cancellation, however loaded the machine.
+        var time = new FakeTimeProvider();
+        await using var rig = await Rig.StartAsync(f =>
+        {
+            f.Time = time;
+            f.ReplyDelay = (request, _) => request == SftpProtocol.Read ? TimeSpan.FromMilliseconds(200) : TimeSpan.Zero;
+        });
         var data = Data((6 * Chunk) + 1, 9);
         rig.Files.AddFile(Home + "/f", data);
 
@@ -293,8 +300,11 @@ public sealed class SftpBufferPoolingTests
             await Assert.That(async () => await stream.ReadAsync(new byte[Chunk], cancel.Token)).Throws<OperationCanceledException>();
         }
 
+        rig.Files.ReplyDelay = null; // the rest come at once, and the clock lets out the one held back
         var read = new MemoryStream();
-        await stream.CopyToAsync(read, Timeout());
+        var copy = stream.CopyToAsync(read, Timeout());
+        await FakeClock.AdvanceUntilAsync(time, TimeSpan.FromMilliseconds(200), () => copy.IsCompleted);
+        await copy;
         await Assert.That(read.ToArray().AsSpan().SequenceEqual(data)).IsTrue();
         await rig.NothingReportedAsync();
     }
@@ -302,12 +312,20 @@ public sealed class SftpBufferPoolingTests
     [Test]
     public async Task ConcurrentReadAhead_IsRefused()
     {
-        await using var rig = await Rig.StartAsync(f => f.ReplyDelay = (request, _) => request == SftpProtocol.Read ? TimeSpan.FromMilliseconds(200) : TimeSpan.Zero);
+        // The server holds the reads back on a fake clock, so the first read is still waiting when the second comes, on any machine.
+        var time = new FakeTimeProvider();
+        await using var rig = await Rig.StartAsync(f =>
+        {
+            f.Time = time;
+            f.ReplyDelay = (request, _) => request == SftpProtocol.Read ? TimeSpan.FromMilliseconds(200) : TimeSpan.Zero;
+        });
         rig.Files.AddFile(Home + "/f", Data(4 * Chunk, 7));
 
         await using var stream = await rig.Sftp.OpenReadAsync("f", Timeout());
         var first = stream.ReadAsync(new byte[10], Timeout()).AsTask();
         await Assert.That(async () => await stream.ReadAsync(new byte[10], Timeout())).Throws<InvalidOperationException>();
+        rig.Files.ReplyDelay = null;
+        await FakeClock.AdvanceUntilAsync(time, TimeSpan.FromMilliseconds(200), () => first.IsCompleted);
         await Assert.That(await first).IsEqualTo(10);
     }
 

@@ -91,6 +91,13 @@ public sealed partial class SftpClient : IAsyncDisposable
     /// already waiting keep the value they started with. A segmented transfer's extra sessions (<see cref="SftpTransferOptions.Segments"/>)
     /// take this session's value.
     /// </para>
+    /// <para>
+    /// The silence is measured from the last reply this client has read off the session, on the connection's clock. So time in which
+    /// this process could not run at all (suspended, or so overloaded that its threads did not get to run) counts as silence, even if
+    /// the server answered meanwhile: its replies wait in the network buffers until the process runs again, and when it does, the
+    /// timeout's check can come before they are read. Choose a timeout well above the longest stall your application may have; it is
+    /// meant for seconds to minutes, not milliseconds.
+    /// </para>
     /// </remarks>
     /// <exception cref="ArgumentOutOfRangeException">Not positive and not <see cref="Timeout.InfiniteTimeSpan"/>, or longer than <see cref="int.MaxValue"/> milliseconds.</exception>
     public TimeSpan OperationTimeout
@@ -120,6 +127,9 @@ public sealed partial class SftpClient : IAsyncDisposable
         get => _channel.Clock;
         set => _channel.Clock = value;
     }
+
+    /// <summary>How long the server has sent nothing on this session, as <see cref="OperationTimeout"/> measures it (for tests).</summary>
+    internal TimeSpan SinceServerSent => _channel.SinceServerSent;
 
     internal static async Task<SftpClient> StartAsync(SshSession session, string? serverSoftware, CancellationToken cancellationToken)
     {
