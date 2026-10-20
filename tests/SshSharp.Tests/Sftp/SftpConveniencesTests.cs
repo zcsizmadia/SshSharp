@@ -87,6 +87,10 @@ public sealed class SftpConveniencesTests
                 f.AddFile($"{Home}/tree/file{i}", [(byte)i]);
                 f.AddFile($"{Home}/tree/a/b/deep{i}", [(byte)i]);
             }
+
+            // The first REMOVE is answered once a second one is in flight: "pipelined" does not race the server's reply.
+            f.PipelineGate = 2;
+            f.PipelineGateFor = static packet => packet[0] == 13;
         });
 
         await rig.Sftp.DeleteDirectoryAsync("tree", recursive: true, Timeout());

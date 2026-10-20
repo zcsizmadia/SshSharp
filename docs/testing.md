@@ -25,8 +25,9 @@ The protocol stack runs over any `Stream`, so the unit tests need no network. Sc
 purpose: send malformed or out-of-order messages, stall, refuse, reorder SFTP replies, or answer slowly. Time comes from a
 `TimeProvider`, so keep-alives, channel timeouts, re-key intervals and keystroke timing are tested on a fake clock. Real sleeps
 are not used. A test that checks concurrency synchronizes on it rather than racing it: `FakeSftpServer` can hold the first SFTP
-read or write reply until a second request is in flight, so a test that the client pipelines passes however slow the client is. The file
-system, the environment and `Match exec` sit behind small delegates.
+request of a kind (a read or write, a removal, an open) unanswered until a second one has arrived, so a test that the client
+sends them together passes however slow the client is. The file system, the environment and `Match exec` sit behind small
+delegates.
 
 Inputs come from the real tools wherever possible:
 - `known_hosts` files and KRLs made by OpenSSH

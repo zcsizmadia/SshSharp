@@ -158,6 +158,13 @@ public sealed class SftpConcurrentFilesTests : IDisposable
         // The latency keeps every file open for a few round trips, so the transfers overlap as much as the limit lets them.
         var tree = Tree();
         var server = new FakeSftpServer { Latency = TimeSpan.FromMilliseconds(5) };
+        if (files > 1)
+        {
+            // The first file's OPEN is answered once a second file's has arrived, so two are open together however the timing goes.
+            server.PipelineGate = 2;
+            server.PipelineGateFor = static packet => packet[0] == 3;
+        }
+
         AddRemoteTree(server, Home + "/tree", tree);
         var rig = await StartAsync(server);
         try
@@ -190,7 +197,13 @@ public sealed class SftpConcurrentFilesTests : IDisposable
         // Eight larger files at once, each of which alone would fill a window of 8: together they still keep at most 8 reads, or 8
         // writes, in flight (and so in memory), not 64.
         var data = new Dictionary<string, byte[]>(StringComparer.Ordinal);
-        var server = new FakeSftpServer { Latency = TimeSpan.FromMilliseconds(5), Limits = (16 * 1024, 16 * 1024) };
+        var server = new FakeSftpServer
+        {
+            Latency = TimeSpan.FromMilliseconds(5),
+            Limits = (16 * 1024, 16 * 1024),
+            PipelineGate = 2, // the first file's OPEN is answered once a second file's has arrived: two are open together
+            PipelineGateFor = static packet => packet[0] == 3,
+        };
         server.AddDirectory(Home + "/big");
         for (var i = 0; i < 8; i++)
         {
