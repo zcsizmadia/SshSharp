@@ -2,6 +2,8 @@
 SshSharp.IO.Abstractions.SftpFileSystem
 SshSharp.IO.Abstractions.SftpFileSystem.Directory.get -> System.IO.Abstractions.IDirectory!
 SshSharp.IO.Abstractions.SftpFileSystem.DirectoryInfo.get -> System.IO.Abstractions.IDirectoryInfoFactory!
+SshSharp.IO.Abstractions.SftpFileSystem.Dispose() -> void
+SshSharp.IO.Abstractions.SftpFileSystem.DisposeAsync() -> System.Threading.Tasks.ValueTask
 SshSharp.IO.Abstractions.SftpFileSystem.DriveInfo.get -> System.IO.Abstractions.IDriveInfoFactory!
 SshSharp.IO.Abstractions.SftpFileSystem.File.get -> System.IO.Abstractions.IFile!
 SshSharp.IO.Abstractions.SftpFileSystem.FileInfo.get -> System.IO.Abstractions.IFileInfoFactory!
@@ -11,6 +13,7 @@ SshSharp.IO.Abstractions.SftpFileSystem.FileVersionInfo.get -> System.IO.Abstrac
 SshSharp.IO.Abstractions.SftpFileSystem.Path.get -> System.IO.Abstractions.IPath!
 SshSharp.IO.Abstractions.SftpFileSystem.RandomAccess.get -> System.IO.Abstractions.IRandomAccess!
 SshSharp.IO.Abstractions.SftpFileSystem.SftpFileSystem(SshSharp.Sftp.SftpClient! sftp, SshSharp.IO.Abstractions.SftpFileSystemOptions? options = null) -> void
+SshSharp.IO.Abstractions.SftpFileSystem.SftpFileSystem(System.Func<System.Threading.CancellationToken, System.Threading.Tasks.Task<SshSharp.Sftp.SftpClient!>!>! sessionFactory, SshSharp.IO.Abstractions.SftpFileSystemOptions? options = null) -> void
 SshSharp.IO.Abstractions.SftpFileSystemOptions
 SshSharp.IO.Abstractions.SftpFileSystemOptions.OperationTimeout.get -> System.TimeSpan
 SshSharp.IO.Abstractions.SftpFileSystemOptions.OperationTimeout.init -> void

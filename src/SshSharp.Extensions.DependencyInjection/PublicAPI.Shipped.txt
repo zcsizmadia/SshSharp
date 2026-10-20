@@ -1,12 +1,58 @@
 #nullable enable
+Microsoft.Extensions.DependencyInjection.SshHttpClientBuilderExtensions
 Microsoft.Extensions.DependencyInjection.SshServiceCollectionExtensions
 SshSharp.Extensions.DependencyInjection.ISshClientFactory
 SshSharp.Extensions.DependencyInjection.ISshClientFactory.ConnectAsync(string! name, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SshSharp.SshClient!>!
 SshSharp.Extensions.DependencyInjection.ISshConnectionProvider
 SshSharp.Extensions.DependencyInjection.ISshConnectionProvider.GetClientAsync(string! name, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SshSharp.SshClient!>!
+SshSharp.Extensions.DependencyInjection.ISshConnectionProvider.WatchAsync(string! name, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IAsyncEnumerable<SshSharp.Extensions.DependencyInjection.SshConnectionEvent!>!
+SshSharp.Extensions.DependencyInjection.ISshEndpoint
+SshSharp.Extensions.DependencyInjection.ISshEndpoint.ConnectAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SshSharp.SshClient!>!
+SshSharp.Extensions.DependencyInjection.ISshEndpoint.GetClientAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SshSharp.SshClient!>!
+SshSharp.Extensions.DependencyInjection.ISshEndpoint.Name.get -> string!
+SshSharp.Extensions.DependencyInjection.ISshEndpoint.WatchAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IAsyncEnumerable<SshSharp.Extensions.DependencyInjection.SshConnectionEvent!>!
+SshSharp.Extensions.DependencyInjection.SshConnectionEvent
+SshSharp.Extensions.DependencyInjection.SshConnectionEvent.Client.get -> SshSharp.SshClient!
+SshSharp.Extensions.DependencyInjection.SshConnectionEvent.EndpointName.get -> string!
+SshSharp.Extensions.DependencyInjection.SshConnectionEvent.Error.get -> System.Exception?
+SshSharp.Extensions.DependencyInjection.SshConnectionEvent.Kind.get -> SshSharp.Extensions.DependencyInjection.SshConnectionEventKind
+SshSharp.Extensions.DependencyInjection.SshConnectionEvent.Timestamp.get -> System.DateTimeOffset
+SshSharp.Extensions.DependencyInjection.SshConnectionEventKind
+SshSharp.Extensions.DependencyInjection.SshConnectionEventKind.Connected = 0 -> SshSharp.Extensions.DependencyInjection.SshConnectionEventKind
+SshSharp.Extensions.DependencyInjection.SshConnectionEventKind.Disconnected = 1 -> SshSharp.Extensions.DependencyInjection.SshConnectionEventKind
+SshSharp.Extensions.DependencyInjection.SshConnectionEventKind.Reconnected = 2 -> SshSharp.Extensions.DependencyInjection.SshConnectionEventKind
+SshSharp.Extensions.DependencyInjection.SshConnectionProviderExtensions
+SshSharp.Extensions.DependencyInjection.SshEndpointJumpHost
+SshSharp.Extensions.DependencyInjection.SshEndpointJumpHost.AcceptNewHostKeys.get -> bool
+SshSharp.Extensions.DependencyInjection.SshEndpointJumpHost.AcceptNewHostKeys.set -> void
+SshSharp.Extensions.DependencyInjection.SshEndpointJumpHost.Host.get -> string?
+SshSharp.Extensions.DependencyInjection.SshEndpointJumpHost.Host.set -> void
+SshSharp.Extensions.DependencyInjection.SshEndpointJumpHost.HostKeyFingerprints.get -> System.Collections.Generic.IList<string!>!
+SshSharp.Extensions.DependencyInjection.SshEndpointJumpHost.HostKeyFingerprints.set -> void
+SshSharp.Extensions.DependencyInjection.SshEndpointJumpHost.KnownHostsFiles.get -> System.Collections.Generic.IList<string!>!
+SshSharp.Extensions.DependencyInjection.SshEndpointJumpHost.KnownHostsFiles.set -> void
+SshSharp.Extensions.DependencyInjection.SshEndpointJumpHost.Password.get -> string?
+SshSharp.Extensions.DependencyInjection.SshEndpointJumpHost.Password.set -> void
+SshSharp.Extensions.DependencyInjection.SshEndpointJumpHost.Port.get -> int
+SshSharp.Extensions.DependencyInjection.SshEndpointJumpHost.Port.set -> void
+SshSharp.Extensions.DependencyInjection.SshEndpointJumpHost.PrivateKeyFiles.get -> System.Collections.Generic.IList<string!>!
+SshSharp.Extensions.DependencyInjection.SshEndpointJumpHost.PrivateKeyFiles.set -> void
+SshSharp.Extensions.DependencyInjection.SshEndpointJumpHost.PrivateKeyPassphrase.get -> string?
+SshSharp.Extensions.DependencyInjection.SshEndpointJumpHost.PrivateKeyPassphrase.set -> void
+SshSharp.Extensions.DependencyInjection.SshEndpointJumpHost.PrivateKeys.get -> System.Collections.Generic.IList<SshSharp.Extensions.DependencyInjection.SshEndpointPrivateKey!>!
+SshSharp.Extensions.DependencyInjection.SshEndpointJumpHost.PrivateKeys.set -> void
+SshSharp.Extensions.DependencyInjection.SshEndpointJumpHost.SshEndpointJumpHost() -> void
+SshSharp.Extensions.DependencyInjection.SshEndpointJumpHost.UseAgent.get -> bool
+SshSharp.Extensions.DependencyInjection.SshEndpointJumpHost.UseAgent.set -> void
+SshSharp.Extensions.DependencyInjection.SshEndpointJumpHost.UserName.get -> string?
+SshSharp.Extensions.DependencyInjection.SshEndpointJumpHost.UserName.set -> void
 SshSharp.Extensions.DependencyInjection.SshEndpointOptions
 SshSharp.Extensions.DependencyInjection.SshEndpointOptions.AcceptNewHostKeys.get -> bool
 SshSharp.Extensions.DependencyInjection.SshEndpointOptions.AcceptNewHostKeys.set -> void
+SshSharp.Extensions.DependencyInjection.SshEndpointOptions.AddressFamily.get -> SshSharp.Config.SshAddressFamily?
+SshSharp.Extensions.DependencyInjection.SshEndpointOptions.AddressFamily.set -> void
+SshSharp.Extensions.DependencyInjection.SshEndpointOptions.Compression.get -> bool?
+SshSharp.Extensions.DependencyInjection.SshEndpointOptions.Compression.set -> void
 SshSharp.Extensions.DependencyInjection.SshEndpointOptions.ConfigAlias.get -> string?
 SshSharp.Extensions.DependencyInjection.SshEndpointOptions.ConfigAlias.set -> void
 SshSharp.Extensions.DependencyInjection.SshEndpointOptions.ConfigureClientOptions.get -> System.Func<System.IServiceProvider!, SshSharp.SshClientOptions!, SshSharp.SshClientOptions!>?
@@ -15,6 +61,10 @@ SshSharp.Extensions.DependencyInjection.SshEndpointOptions.ConnectTimeout.get ->
 SshSharp.Extensions.DependencyInjection.SshEndpointOptions.ConnectTimeout.set -> void
 SshSharp.Extensions.DependencyInjection.SshEndpointOptions.Host.get -> string?
 SshSharp.Extensions.DependencyInjection.SshEndpointOptions.Host.set -> void
+SshSharp.Extensions.DependencyInjection.SshEndpointOptions.HostKeyFingerprints.get -> System.Collections.Generic.IList<string!>!
+SshSharp.Extensions.DependencyInjection.SshEndpointOptions.HostKeyFingerprints.set -> void
+SshSharp.Extensions.DependencyInjection.SshEndpointOptions.JumpHosts.get -> System.Collections.Generic.IList<SshSharp.Extensions.DependencyInjection.SshEndpointJumpHost!>!
+SshSharp.Extensions.DependencyInjection.SshEndpointOptions.JumpHosts.set -> void
 SshSharp.Extensions.DependencyInjection.SshEndpointOptions.KeepAliveInterval.get -> System.TimeSpan?
 SshSharp.Extensions.DependencyInjection.SshEndpointOptions.KeepAliveInterval.set -> void
 SshSharp.Extensions.DependencyInjection.SshEndpointOptions.KnownHostsFiles.get -> System.Collections.Generic.IList<string!>!
@@ -29,11 +79,27 @@ SshSharp.Extensions.DependencyInjection.SshEndpointOptions.PrivateKeyFiles.get -
 SshSharp.Extensions.DependencyInjection.SshEndpointOptions.PrivateKeyFiles.set -> void
 SshSharp.Extensions.DependencyInjection.SshEndpointOptions.PrivateKeyPassphrase.get -> string?
 SshSharp.Extensions.DependencyInjection.SshEndpointOptions.PrivateKeyPassphrase.set -> void
+SshSharp.Extensions.DependencyInjection.SshEndpointOptions.PrivateKeys.get -> System.Collections.Generic.IList<SshSharp.Extensions.DependencyInjection.SshEndpointPrivateKey!>!
+SshSharp.Extensions.DependencyInjection.SshEndpointOptions.PrivateKeys.set -> void
+SshSharp.Extensions.DependencyInjection.SshEndpointOptions.Proxy.get -> string?
+SshSharp.Extensions.DependencyInjection.SshEndpointOptions.Proxy.set -> void
 SshSharp.Extensions.DependencyInjection.SshEndpointOptions.ReconnectDelay.get -> System.TimeSpan
 SshSharp.Extensions.DependencyInjection.SshEndpointOptions.ReconnectDelay.set -> void
 SshSharp.Extensions.DependencyInjection.SshEndpointOptions.SshEndpointOptions() -> void
+SshSharp.Extensions.DependencyInjection.SshEndpointOptions.UseAgent.get -> bool?
+SshSharp.Extensions.DependencyInjection.SshEndpointOptions.UseAgent.set -> void
 SshSharp.Extensions.DependencyInjection.SshEndpointOptions.UserName.get -> string?
 SshSharp.Extensions.DependencyInjection.SshEndpointOptions.UserName.set -> void
+SshSharp.Extensions.DependencyInjection.SshEndpointPrivateKey
+SshSharp.Extensions.DependencyInjection.SshEndpointPrivateKey.Key.get -> string?
+SshSharp.Extensions.DependencyInjection.SshEndpointPrivateKey.Key.set -> void
+SshSharp.Extensions.DependencyInjection.SshEndpointPrivateKey.Passphrase.get -> string?
+SshSharp.Extensions.DependencyInjection.SshEndpointPrivateKey.Passphrase.set -> void
+SshSharp.Extensions.DependencyInjection.SshEndpointPrivateKey.SshEndpointPrivateKey() -> void
+override SshSharp.Extensions.DependencyInjection.SshEndpointPrivateKey.ToString() -> string!
+static Microsoft.Extensions.DependencyInjection.SshHttpClientBuilderExtensions.UseSshTunnel(this Microsoft.Extensions.DependencyInjection.IHttpClientBuilder! builder, string! endpointName, System.Action<System.Net.Http.SocketsHttpHandler!>? configureHandler = null) -> Microsoft.Extensions.DependencyInjection.IHttpClientBuilder!
 static Microsoft.Extensions.DependencyInjection.SshServiceCollectionExtensions.AddSsh(this Microsoft.Extensions.DependencyInjection.IHealthChecksBuilder! builder, string! name, string? checkName = null, Microsoft.Extensions.Diagnostics.HealthChecks.HealthStatus? failureStatus = null, System.Collections.Generic.IEnumerable<string!>? tags = null, System.TimeSpan? timeout = null) -> Microsoft.Extensions.DependencyInjection.IHealthChecksBuilder!
 static Microsoft.Extensions.DependencyInjection.SshServiceCollectionExtensions.AddSshClient(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, string! name) -> Microsoft.Extensions.Options.OptionsBuilder<SshSharp.Extensions.DependencyInjection.SshEndpointOptions!>!
 static Microsoft.Extensions.DependencyInjection.SshServiceCollectionExtensions.AddSshClient(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, string! name, System.Action<SshSharp.Extensions.DependencyInjection.SshEndpointOptions!>! configure) -> Microsoft.Extensions.Options.OptionsBuilder<SshSharp.Extensions.DependencyInjection.SshEndpointOptions!>!
+static SshSharp.Extensions.DependencyInjection.SshConnectionProviderExtensions.OpenSftpAsync(this SshSharp.Extensions.DependencyInjection.ISshConnectionProvider! connections, string! name, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SshSharp.Sftp.SftpClient!>!
+static SshSharp.Extensions.DependencyInjection.SshConnectionProviderExtensions.OpenSftpAsync(this SshSharp.Extensions.DependencyInjection.ISshEndpoint! endpoint, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SshSharp.Sftp.SftpClient!>!
