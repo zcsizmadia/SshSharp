@@ -1,4 +1,1 @@
 #nullable enable
-SshSharp.FileProviders.SftpFileProvider.Dispose() -> void
-SshSharp.FileProviders.SftpFileProvider.DisposeAsync() -> System.Threading.Tasks.ValueTask
-SshSharp.FileProviders.SftpFileProvider.SftpFileProvider(System.Func<System.Threading.CancellationToken, System.Threading.Tasks.Task<SshSharp.Sftp.SftpClient!>!>! sessionFactory, string! root, SshSharp.FileProviders.SftpFileProviderOptions? options = null) -> void

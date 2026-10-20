@@ -1,10 +1,13 @@
 #nullable enable
 SshSharp.FileProviders.SftpFileProvider
 SshSharp.FileProviders.SftpFileProvider.ClearCache() -> void
+SshSharp.FileProviders.SftpFileProvider.Dispose() -> void
+SshSharp.FileProviders.SftpFileProvider.DisposeAsync() -> System.Threading.Tasks.ValueTask
 SshSharp.FileProviders.SftpFileProvider.GetDirectoryContents(string! subpath) -> Microsoft.Extensions.FileProviders.IDirectoryContents!
 SshSharp.FileProviders.SftpFileProvider.GetFileInfo(string! subpath) -> Microsoft.Extensions.FileProviders.IFileInfo!
 SshSharp.FileProviders.SftpFileProvider.Root.get -> string!
 SshSharp.FileProviders.SftpFileProvider.SftpFileProvider(SshSharp.Sftp.SftpClient! sftp, string! root, SshSharp.FileProviders.SftpFileProviderOptions? options = null) -> void
+SshSharp.FileProviders.SftpFileProvider.SftpFileProvider(System.Func<System.Threading.CancellationToken, System.Threading.Tasks.Task<SshSharp.Sftp.SftpClient!>!>! sessionFactory, string! root, SshSharp.FileProviders.SftpFileProviderOptions? options = null) -> void
 SshSharp.FileProviders.SftpFileProvider.Watch(string! filter) -> Microsoft.Extensions.Primitives.IChangeToken!
 SshSharp.FileProviders.SftpFileProviderOptions
 SshSharp.FileProviders.SftpFileProviderOptions.CacheDuration.get -> System.TimeSpan
