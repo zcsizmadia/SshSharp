@@ -63,6 +63,20 @@ public sealed class SftpSegmentedDownloadTests : IDisposable
         }
     }
 
+    private static async Task WaitUntilAsync(Func<bool> condition)
+    {
+        var deadline = System.Diagnostics.Stopwatch.StartNew();
+        while (!condition())
+        {
+            if (deadline.Elapsed > TimeSpan.FromSeconds(30))
+            {
+                throw new TimeoutException("The condition did not become true.");
+            }
+
+            await Task.Delay(10);
+        }
+    }
+
     [Test]
     public async Task AConnectionThatRefusesNewSessions_DownloadsOverTheOpenSession()
     {
@@ -180,19 +194,30 @@ public sealed class SftpSegmentedDownloadTests : IDisposable
     [Test]
     public async Task Cancelling_StopsEverySegment_AndLeavesNoFile()
     {
+        // Each session holds its first READ unanswered (and everything after it), so every segment is waiting on its first two reads
+        // (a range starts with two in flight) when the download is cancelled: no wall-clock race decides where the cancellation lands.
+        // Once released, the server answers what was sent; a segment that missed the cancellation would read on through its 1 MiB.
         var data = RandomNumberGenerator.GetBytes(4 * 1024 * 1024);
         await using var rig = await Rig.StartAsync(f =>
         {
+            f.Limits = (32 * 1024, 32 * 1024);
             f.AddFile(Home + "/big.bin", data);
-            f.ReplyDelay = (request, _) => request == 5 ? TimeSpan.FromMilliseconds(20) : TimeSpan.Zero;
+            f.Hold = packet => packet[0] == 5;
         });
         var local = Path.Combine(_dir, "big.bin");
-        using var cancel = new CancellationTokenSource(TimeSpan.FromMilliseconds(300));
+        using var cancel = new CancellationTokenSource();
 
-        await Assert.That(async () =>
-            await rig.Sftp.DownloadFileAsync("big.bin", local, new SftpTransferOptions { Segments = 4 }, cancel.Token)).Throws<OperationCanceledException>();
+        var download = rig.Sftp.DownloadFileAsync("big.bin", local, new SftpTransferOptions { Segments = 4 }, cancel.Token);
+        await WaitUntilAsync(() => rig.Files.Held == 4 || download.IsCompleted); // every segment has its reads out
+        await Assert.That(rig.Files.Held).IsEqualTo(4);
+        await cancel.CancelAsync();
+        rig.Files.Released.SetResult();
 
+        await Assert.That(async () => await download).Throws<OperationCanceledException>();
         await Assert.That(File.Exists(local)).IsFalse();
+        await WaitUntilAsync(() => rig.Files.OpenHandles == 0);
+        // Every handle closed: each session's CLOSE was answered after the reads queued before it.
+        await Assert.That(rig.Files.ReadOffsets.Count).IsLessThanOrEqualTo(4 * 2).Because("only the two reads each segment had sent are answered: every segment stopped");
     }
 
     [Test]
