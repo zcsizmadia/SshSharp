@@ -131,6 +131,20 @@ public sealed partial class SftpClient : IAsyncDisposable
     /// <summary>How long the server has sent nothing on this session, as <see cref="OperationTimeout"/> measures it (for tests).</summary>
     internal TimeSpan SinceServerSent => _channel.SinceServerSent;
 
+    /// <summary>How many requests this session has issued, sent or still on their way out (for tests).</summary>
+    internal int RequestsIssued => _channel.RequestsIssued;
+
+    /// <summary>
+    /// How many READ and WRITE replies this session's transfers and file streams are done with: written out, acknowledged (with the
+    /// progress reported), or dropped. A test that moves a fake clock compares it with the replies its server sent, so the clock moves
+    /// only once the client has caught up, not merely received them (for tests).
+    /// </summary>
+    internal long TransferRepliesTaken => Interlocked.Read(ref _transferRepliesTaken);
+
+    private long _transferRepliesTaken;
+
+    internal void TookTransferReplies(int count = 1) => Interlocked.Add(ref _transferRepliesTaken, count);
+
     internal static async Task<SftpClient> StartAsync(SshSession session, string? serverSoftware, CancellationToken cancellationToken)
     {
         var channel = await SftpChannel.OpenAsync(session, cancellationToken).ConfigureAwait(false);
@@ -1151,6 +1165,7 @@ public sealed partial class SftpClient : IAsyncDisposable
         var next = start;
         var end = false;
         long total = 0;
+        var taken = 0; // the reply handled last, counted as taken once the reads that follow it are sent
         try
         {
             while (true)
@@ -1172,6 +1187,8 @@ public sealed partial class SftpClient : IAsyncDisposable
                     next += requested;
                 }
 
+                TookTransferReplies(taken);
+                taken = 0;
                 if (inFlight.Count == 0)
                 {
                     return total;
@@ -1214,11 +1231,15 @@ public sealed partial class SftpClient : IAsyncDisposable
                     {
                         budget?.Release();
                     }
+
+                    taken = 1;
                 }
             }
         }
         finally
         {
+            TookTransferReplies(taken); // failing: the reply handled last was not counted at the top of the loop
+
             // Replies still due are awaited, so none arrives after the handle is closed and the caller moves on; their buffers go back.
             foreach (var (_, _, pending) in inFlight)
             {
@@ -1233,6 +1254,7 @@ public sealed partial class SftpClient : IAsyncDisposable
                 finally
                 {
                     budget?.Release();
+                    TookTransferReplies();
                 }
             }
         }
@@ -1407,6 +1429,7 @@ public sealed partial class SftpClient : IAsyncDisposable
                 finally
                 {
                     budget?.Release();
+                    TookTransferReplies();
                 }
             }
         }
@@ -1435,6 +1458,7 @@ public sealed partial class SftpClient : IAsyncDisposable
                     confirmed.Unsettled = true; // no answer: what became of this write is not known
                 }
 
+                TookTransferReplies();
                 throw;
             }
             finally
@@ -1442,12 +1466,19 @@ public sealed partial class SftpClient : IAsyncDisposable
                 budget?.Release();
             }
 
-            if (confirmed is not null)
+            try
             {
-                confirmed.Confirmed += length;
-            }
+                if (confirmed is not null)
+                {
+                    confirmed.Confirmed += length;
+                }
 
-            acknowledged?.Invoke(length);
+                acknowledged?.Invoke(length);
+            }
+            finally
+            {
+                TookTransferReplies(); // once the progress is reported
+            }
         }
 
         async Task TakeSlotAsync(SemaphoreSlim slots)

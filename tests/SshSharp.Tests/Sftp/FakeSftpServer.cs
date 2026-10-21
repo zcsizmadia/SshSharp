@@ -317,6 +317,16 @@ internal sealed class FakeSftpServer
     private int _dataInFlight;
     private int _maxDataInFlight;
 
+    /// <summary>The replies to READ and WRITE requests sent so far, across sessions: counted as each starts out.</summary>
+    public long DataReplies => Interlocked.Read(ref _dataReplies);
+
+    private long _dataReplies;
+
+    /// <summary>The requests (everything after INIT) that have arrived so far, across sessions.</summary>
+    public int RequestsArrived => Volatile.Read(ref _requestsArrived);
+
+    private int _requestsArrived;
+
     private void DataRequestArrived()
     {
         var now = Interlocked.Increment(ref _dataInFlight);
@@ -471,6 +481,11 @@ internal sealed class FakeSftpServer
 
                     var packet = buffer.GetRange(4, length).ToArray();
                     buffer.RemoveRange(0, 4 + length);
+                    if (packet[0] != 1)
+                    {
+                        Interlocked.Increment(ref _requestsArrived);
+                    }
+
                     if (packet[0] is 5 or 6)
                     {
                         DataRequestArrived();
@@ -544,6 +559,7 @@ internal sealed class FakeSftpServer
             if (type is 5 or 6)
             {
                 Interlocked.Decrement(ref _dataInFlight);
+                Interlocked.Increment(ref _dataReplies);
             }
             else if (type is 12)
             {

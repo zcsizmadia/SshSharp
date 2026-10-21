@@ -110,6 +110,7 @@ internal sealed class SftpFileStream(SftpClient client, byte[] handle, string pa
         await WaitForWritesAsync(cancellationToken).ConfigureAwait(false);
         var length = Math.Min(buffer.Length, client.Limits.MaxReadLength);
         using var reply = await client.SendReadAsync(handle, _position, length, cancellationToken).ConfigureAwait(false);
+        client.TookTransferReplies();
         var data = SftpClient.ExpectData(reply, length, path); // copied out before the reply (its pooled buffer) is disposed
         data.CopyTo(buffer);
         _position += data.Length;
@@ -173,6 +174,7 @@ internal sealed class SftpFileStream(SftpClient client, byte[] handle, string pa
         var (offset, length, pending) = _ahead.Peek();
         var reply = await pending.WaitAsync(cancellationToken).ConfigureAwait(false);
         _ahead.Dequeue(); // the reply is this read's now
+        client.TookTransferReplies();
         ReadOnlyMemory<byte> data;
         try
         {
@@ -233,6 +235,7 @@ internal sealed class SftpFileStream(SftpClient client, byte[] handle, string pa
     {
         while (_ahead.TryDequeue(out var dropped))
         {
+            client.TookTransferReplies(); // nobody waits for it now
             _ = dropped.Reply.ContinueWith(static t =>
             {
                 if (t.IsCompletedSuccessfully)
@@ -432,6 +435,7 @@ internal sealed class SftpFileStream(SftpClient client, byte[] handle, string pa
     /// <summary>Records the outcome of a completed write: the first failure faults the stream, the others are observed.</summary>
     private void Acknowledge(Task<SftpResponse> write)
     {
+        client.TookTransferReplies();
         if (_fault is not null)
         {
             _ = write.Exception;
