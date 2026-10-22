@@ -149,9 +149,10 @@ internal sealed class SftpChannel : IAsyncDisposable
     /// <summary>
     /// Whether the channel has failed or been disposed: the session or the connection under it ended, the server broke the protocol, or
     /// a request could not be sent within <see cref="OperationTimeout"/> (also one whose caller stopped waiting), or a send failed. Every
-    /// request fails from then on.
+    /// request fails from then on. The connection ending counts at once, not only once the read loop hears of it: an adapter checks this
+    /// before reusing the session, and a call made in between would otherwise run on a session already gone (a write is not retried).
     /// </summary>
-    public bool IsClosed => Volatile.Read(ref _failure) is not null;
+    public bool IsClosed => Volatile.Read(ref _failure) is not null || _session.ConnectionEnded;
 
     /// <summary>Sends SSH_FXP_INIT, reads SSH_FXP_VERSION, and starts matching replies to requests.</summary>
     public static async Task<SftpChannel> OpenAsync(SshSession session, CancellationToken cancellationToken)

@@ -84,6 +84,18 @@ public class SftpAdapterReconnectTests
             return await client.OpenSftpAsync(cancellationToken);
         }
 
+        /// <summary>The connection opened last, with its server.</summary>
+        public (FakeSessionServer Server, SshClient Client) Newest
+        {
+            get
+            {
+                lock (_connections)
+                {
+                    return _connections[^1];
+                }
+            }
+        }
+
         /// <summary>Drops the newest connection: the server goes away, and the client sees its connection fail.</summary>
         public async Task DropAsync()
         {
@@ -279,6 +291,41 @@ public class SftpAdapterReconnectTests
         fs.File.WriteAllText("site/after.txt", "written");
         await Assert.That(Encoding.UTF8.GetString(connections.Files.FileData(Site + "/after.txt")!)).IsEqualTo("written");
         await Assert.That(connections.Opened).IsEqualTo(2);
+    }
+
+    [Test]
+    public async Task ASession_IsNotConnected_AsSoonAsItsConnectionEnds()
+    {
+        // An adapter checks IsConnected before it reuses a session. It must read false as soon as the connection has ended, not only once
+        // the session's read loop hears of it: a call in between ran on the dead session, and a write, which is not retried, failed
+        // (TheFileSystem_FollowsAConnectionTheKeepAliveDeclaredDead_WhileIdle, once on a loaded macOS runner). So the session is checked
+        // in the same step that sees the connection end, before anything awaited could let the read loop run.
+        var time = new FakeTimeProvider();
+        await using var connections = new Connections { Clock = time };
+        var sftp = await connections.OpenAsync(CancellationToken.None);
+        var (server, client) = connections.Newest;
+        server.IgnoreGlobalRequests = true;
+
+        bool? sessionAfter = null;
+        for (var i = 0; i < 500 && sessionAfter is null; i++)
+        {
+            time.Advance(TimeSpan.FromSeconds(30));
+            for (var j = 0; j < 1000 && sessionAfter is null; j++)
+            {
+                if (!client.IsConnected)
+                {
+                    sessionAfter = sftp.IsConnected;
+                }
+                else if (j % 100 == 99)
+                {
+                    await Task.Delay(1); // what the clock released is on its way
+                }
+            }
+        }
+
+        await Assert.That(client.ConnectionError).IsTypeOf<SshException>();
+        await Assert.That(sessionAfter).IsNotNull();
+        await Assert.That(sessionAfter!.Value).IsFalse();
     }
 
     [Test]
