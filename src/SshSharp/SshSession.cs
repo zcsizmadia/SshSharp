@@ -33,6 +33,9 @@ public sealed class SshSession : IAsyncDisposable
         _error = new SshChannelReadStream(channel.ReadExtendedAsync, channel.TryReadExtended);
     }
 
+    /// <summary>Whether the connection under the session has ended, as soon as it does.</summary>
+    internal bool ConnectionEnded => _channel.ConnectionEnded;
+
     /// <summary>
     /// The program's input. Writes are sent as they are made; <see cref="CloseInputAsync"/> (or disposing the stream) sends end-of-file.
     /// Once the server reports that the program closed its input (<c>eow@openssh.com</c>), writes fail with an
