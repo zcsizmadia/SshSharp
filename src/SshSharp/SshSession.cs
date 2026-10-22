@@ -19,11 +19,13 @@ public sealed class SshSession : IAsyncDisposable
     private readonly SshChannelWriteStream _input;
     private readonly SshChannelReadStream _output;
     private readonly SshChannelReadStream _error;
+    private readonly Func<bool> _connectionEnded;
     private int _disposed;
 
-    internal SshSession(SshChannel channel, bool hasTerminal, ILogger logger, KeystrokeTimingObfuscator? obfuscator = null)
+    internal SshSession(SshChannel channel, bool hasTerminal, ILogger logger, Func<bool> connectionEnded, KeystrokeTimingObfuscator? obfuscator = null)
     {
         _channel = channel;
+        _connectionEnded = connectionEnded;
         _logger = logger;
         HasTerminal = hasTerminal;
         _input = new SshChannelWriteStream(channel, obfuscator);
@@ -33,8 +35,11 @@ public sealed class SshSession : IAsyncDisposable
         _error = new SshChannelReadStream(channel.ReadExtendedAsync, channel.TryReadExtended);
     }
 
-    /// <summary>Whether the connection under the session has ended, as soon as it does.</summary>
-    internal bool ConnectionEnded => _channel.ConnectionEnded;
+    /// <summary>
+    /// Whether the connection under the session has ended, as soon as it does: the client's own view (<see cref="SshClient.IsConnected"/>),
+    /// not the channel's, which hears of it a moment later.
+    /// </summary>
+    internal bool ConnectionEnded => _connectionEnded();
 
     /// <summary>
     /// The program's input. Writes are sent as they are made; <see cref="CloseInputAsync"/> (or disposing the stream) sends end-of-file.

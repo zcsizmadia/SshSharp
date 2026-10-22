@@ -138,9 +138,6 @@ internal sealed class SshChannel
     /// <summary>Whether our CLOSE is still unsent, so data may still be sent.</summary>
     internal bool IsOpenForSending => !Volatile.Read(ref _closeSent);
 
-    /// <summary>Whether the connection under the channel has ended (set as it ends, before the channel's readers hear of it).</summary>
-    internal bool ConnectionEnded => _connection.Failure is not null;
-
     private void Touch() => Interlocked.Exchange(ref _lastActivity, _connection.Time.GetTimestamp());
 
     /// <summary>Whether our CLOSE is still unsent; checked under the transport's send lock (one delegate per channel, not per packet).</summary>

@@ -490,7 +490,7 @@ public sealed partial class SshClient : IAsyncDisposable
             var obfuscator = terminal is not null && _options.ObscureKeystrokeTiming is { } interval
                 ? new KeystrokeTimingObfuscator(channel, _connection, interval)
                 : null;
-            return new SshSession(channel, terminal is not null, _logger, obfuscator);
+            return new SshSession(channel, terminal is not null, _logger, () => _connection.Failure is not null, obfuscator);
         }
         catch
         {
