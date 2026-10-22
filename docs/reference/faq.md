@@ -108,7 +108,8 @@ No. RSA keys sign with `rsa-sha2-256` or `rsa-sha2-512`, which every OpenSSH sin
 ## Features
 
 **X11 forwarding? `gssapi-keyex`?**
-Not supported.
+Not supported. X11 forwarding is on the list of ideas, to be added if users ask for it: if you need it, open an issue and describe
+your use. GSSAPI user authentication (`gssapi-with-mic`) is supported; GSSAPI key exchange is not.
 
 **Compression?**
 Yes: OpenSSH's delayed `zlib@openssh.com`, off by default as in `ssh`. Set `SshClientOptions.Compression = true`, or

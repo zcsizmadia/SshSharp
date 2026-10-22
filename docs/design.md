@@ -53,7 +53,7 @@ signatures (SSHSIG), typed exceptions, keep-alive, `ping@openssh.com` (`PingAsyn
 (`ChannelTimeout`), FIPS mode, logging/tracing/metrics following OpenTelemetry's semantic conventions; adapters that expose SFTP as
 `IFileSystem` and `IFileProvider`.
 
-Out: server-side SSH, `ControlMaster` multiplexing, GSSAPI key exchange (`gssapi-keyex`), X11 forwarding.
+Out: server-side SSH, `ControlMaster` multiplexing, GSSAPI key exchange (`gssapi-keyex`), X11 forwarding (to be added if users ask).
 
 ## Packages
 
