@@ -78,16 +78,27 @@ reports no canonical name, the rules have nothing to act on. Each name is looked
 `CanonicalizePermittedCNAMEs` without `CanonicalizeHostname` follows no CNAMEs here, unlike `ssh`. The built-in canonicalizer is
 off by default, because resolving a configuration then makes network queries.
 
-`Match canonical` and the second pass differ from `ssh` in edge cases:
+The second pass and `Match canonical` behave as in `ssh` (OpenSSH 10.1 and later):
 
-| | `ssh` | SshSharp |
-|---|---|---|
-| The configuration is read a second time when | `CanonicalizeHostname` is on (whether a name was found or not), or a `Match final` without `!` appears | a canonical name was found, or any `Match final` or `Match canonical` appears (with or without `!`) |
-| `Match canonical` is true | in the second pass, as `Match final` is | in the second pass, and only when a canonical name was found |
+- The configuration is read a second time when `CanonicalizeHostname` is `yes` or `always`, whether or not a canonical name is
+  found (or looked up at all: through a proxy, or with no canonicalizer configured), or when a `Match final` without `!` appears.
+  `Match !final` or `Match canonical` alone does not cause a second pass.
+- `Match canonical` and `Match final` are both true in the second pass, and only there, however it came about.
+- In the second pass, `Host`, `Match host` and `%h` see the name the first pass settled on: `HostName` substituted, canonicalized
+  if a name was found, and lowercased. That is also the resolved `HostName`: a `HostName` that only the second pass reaches is
+  ignored, as in `ssh`.
 
-They agree whenever a canonical name is found. They differ when canonicalization is on but finds nothing (`ssh` still reads the
-configuration again, and `canonical` is true in that pass), and when `Match final` forces the second pass with canonicalization
-off (`canonical` is true there in `ssh` only).
+```mermaid
+flowchart TD
+    first["First pass<br/>(canonical and final false)"] --> on{"CanonicalizeHostname yes or always,<br/>or a Match final without '!' seen?"}
+    on -- no --> done["Resolved"]
+    on -- yes --> name["HostName := the name, canonicalized<br/>if one was found, lowercased"]
+    name --> second["Second pass<br/>(canonical and final true)"]
+    second --> done
+```
+
+Before 1.2, SshSharp read the configuration again only when a canonical name was found or any `Match final` or `Match canonical`
+appeared, `Match canonical` was true only when a name was found, and a `HostName` in the second pass could still set the name.
 
 Within one resolution, each distinct `Match exec` command runs once and its answer is reused, as is each canonicalization. That
 includes the second pass that `Match final` or canonicalization causes, where OpenSSH runs the command again. A command whose

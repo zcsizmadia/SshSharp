@@ -138,7 +138,7 @@ public class SshConfigMatchTests
     [Test]
     public async Task Exec_NeedsResolveAsync_AndEachCommandRunsOnce()
     {
-        const string config = "Match exec \"one\"\n Port 51\nMatch exec \"two\"\n User u2\nMatch final exec \"one\"\n HostName h1\n";
+        const string config = "Match exec \"one\"\n Port 51\nMatch exec \"two\"\n User u2\nMatch final exec \"one\"\n AddressFamily inet\n";
         var commands = new List<string>();
         var options = new SshConfigResolveOptions
         {
@@ -155,7 +155,7 @@ public class SshConfigMatchTests
         var c = await SshConfig.Parse(config).ResolveAsync("a", options);
         await Assert.That(c.Port).IsEqualTo(51);
         await Assert.That(c.User).IsEqualTo("l");
-        await Assert.That(c.HostName).IsEqualTo("h1");
+        await Assert.That(c.AddressFamily).IsEqualTo(SshAddressFamily.Inet);
         await Assert.That(string.Join(",", commands)).IsEqualTo("one,two");
     }
 
@@ -191,6 +191,84 @@ public class SshConfigMatchTests
     {
         await Assert.That(Resolve("Match canonical\n Port 5\nMatch !canonical\n User nc\n", "a").Port).IsEqualTo(22);
         await Assert.That(Resolve("Match canonical\n Port 5\nMatch !canonical\n User nc\n", "a").User).IsEqualTo("nc");
+    }
+
+    // The second-pass cases below follow OpenSSH 10.1 and later, where "Match !final" no longer asks for a second pass
+    // (openssh-portable 688fa02728); earlier releases read the configuration again for it.
+    [Test]
+    public async Task NegatedFinal_Alone_DoesNotReadAgain()
+    {
+        var c = Resolve("Host a\n HostName B.Example\nMatch !final\n User x\nHost b.example\n Port 7\n", "a");
+        await Assert.That(c.User).IsEqualTo("x");
+        await Assert.That(c.Port).IsEqualTo(22);
+    }
+
+    [Test]
+    public async Task Canonical_Alone_DoesNotReadAgain()
+    {
+        var c = Resolve("Host a\n HostName B.Example\nMatch canonical\n User x\nHost b.example\n Port 7\n", "a");
+        await Assert.That(c.User).IsEqualTo("local");
+        await Assert.That(c.Port).IsEqualTo(22);
+    }
+
+    [Test]
+    public async Task Final_WithoutCanonicalization_MakesCanonicalTrue()
+    {
+        // ssh has one flag for both: the second pass, however it came about.
+        var c = Resolve("Match final\n User f\nMatch canonical\n Port 6\nMatch !canonical\n Compression yes\n", "a");
+        await Assert.That(c.User).IsEqualTo("f");
+        await Assert.That(c.Port).IsEqualTo(6);
+        await Assert.That(c.Compression).IsTrue();
+    }
+
+    [Test]
+    public async Task Final_SecondPass_SeesTheLowercasedHostName()
+    {
+        var c = Resolve("Host a\n HostName B.Example\nMatch final\n User x\nHost b.example\n Port 7\nMatch final host b.example\n Compression yes\n", "a");
+        await Assert.That(c.HostName).IsEqualTo("b.example");
+        await Assert.That(c.Port).IsEqualTo(7);
+        await Assert.That(c.Compression).IsTrue();
+    }
+
+    [Test]
+    public async Task SecondPass_KeepsTheHostNameOfTheFirst()
+    {
+        // ssh sets HostName to the name it settled on before reading again, so a HostName met only in the second pass is ignored.
+        await Assert.That(Resolve("Match final\n HostName h1\n", "a").HostName).IsEqualTo("a");
+        await Assert.That(Resolve("CanonicalizeHostname yes\nMatch canonical\n HostName h1\n", "a").HostName).IsEqualTo("a");
+        await Assert.That(Resolve("Match !final\n HostName h1\n", "a").HostName).IsEqualTo("h1");
+    }
+
+    [Test]
+    public async Task CanonicalizationOn_ReadsAgain_WithoutACanonicalizer()
+    {
+        // ssh reads the configuration again whenever CanonicalizeHostname is not no, whether or not a name is looked up or found.
+        const string config = "Host a\n HostName B.Example\nMatch canonical\n User c\nHost b.example\n Port 7\n";
+        foreach (var mode in new[] { "yes", "always", "true" })
+        {
+            var c = Resolve($"CanonicalizeHostname {mode}\n" + config, "a");
+            await Assert.That(c.User).IsEqualTo("c");
+            await Assert.That(c.Port).IsEqualTo(7);
+        }
+
+        var off = Resolve("CanonicalizeHostname no\n" + config, "a");
+        await Assert.That(off.User).IsEqualTo("local");
+        await Assert.That(off.Port).IsEqualTo(22);
+
+        // Proxied with yes, no name is looked up, but the configuration is still read again.
+        await Assert.That(Resolve("CanonicalizeHostname yes\nProxyJump j\n" + config, "a").User).IsEqualTo("c");
+    }
+
+    [Test]
+    public async Task CanonicalizationOn_NoNameFound_ReadsAgain_AndCanonicalIsTrue()
+    {
+        const string config = "CanonicalizeHostname yes\nCanonicalDomains example.com\nHost web\n HostName Web.Internal\nMatch canonical\n Port 5\n"
+            + "Host web.internal\n User found\nMatch canonical host web.internal\n Compression yes\n";
+        var c = Resolve(config, "web", Canonicalizing((_, _) => null));
+        await Assert.That(c.HostName).IsEqualTo("web.internal");
+        await Assert.That(c.Port).IsEqualTo(5);
+        await Assert.That(c.User).IsEqualTo("found");
+        await Assert.That(c.Compression).IsTrue();
     }
 
     private static SshConfigResolveOptions Canonicalizing(Func<string, IReadOnlyList<string>, string?> canonicalizer) =>

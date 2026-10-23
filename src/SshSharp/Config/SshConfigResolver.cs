@@ -5,7 +5,7 @@ namespace SshSharp.Config;
 /// <summary>
 /// Walks the config documents for one host and collects the first-obtained value of each keyword. It follows OpenSSH:
 /// blocks are evaluated in order against the state collected so far, <c>Include</c> is a closed scope, and a second
-/// ("final") pass runs after canonicalization or when a <c>Match final</c> was seen.
+/// ("final") pass runs when <c>CanonicalizeHostname</c> is on or a <c>Match final</c> (not negated) was seen.
 /// </summary>
 internal sealed class SshConfigResolver(IReadOnlyList<SshConfigDocument> documents, string originalHost, SshConfigResolveOptions options,
     SshConfigCallbackAnswers answers)
@@ -24,32 +24,42 @@ internal sealed class SshConfigResolver(IReadOnlyList<SshConfigDocument> documen
 
     private readonly Dictionary<string, List<string>> _values = new(StringComparer.OrdinalIgnoreCase);
     private bool _finalPass;
-    private bool _canonical;
-    private bool _sawFinalOrCanonical;
+    private bool _wantFinalPass;
     private string? _finalHost;
 
     public Dictionary<string, List<string>> Run()
     {
         Pass();
 
+        // As ssh's main: canonicalization that is on asks for the second pass whether or not it finds a name, since the name is
+        // lowercased and HostName substituted either way, and blocks written for that name may now match.
+        var canonicalize = CanonicalizationEnabled();
         var canonicalName = TryCanonicalize();
         if (canonicalName is not null)
         {
             _values["hostname"] = [canonicalName];
-            _canonical = true;
         }
 
-        if (_canonical || _sawFinalOrCanonical)
+        if (canonicalize || _wantFinalPass)
         {
-            // OpenSSH re-reads the files with the new target name: Host sections now match the (HostName-substituted, canonicalized)
-            // name, lowercased, rather than what the user typed.
+            // OpenSSH re-reads the files with the new target name: Host sections, Match host and %h now see the (HostName-substituted,
+            // canonicalized) name, lowercased, rather than what the user typed.
             _finalHost = CurrentHost().ToLowerInvariant();
+
+            // ssh sets its HostName to that name before reading again, so a HostName met in the second pass does not change it. The
+            // name is already expanded: % is escaped so that expanding it again (SshConfig.Resolve does) leaves it as it is.
+            _values["hostname"] = [_finalHost.Replace("%", "%%", StringComparison.Ordinal)];
             _finalPass = true;
             Pass();
         }
 
         return _values;
     }
+
+    /// <summary><c>CanonicalizeHostname yes</c> or <c>always</c>, as the first pass left it.</summary>
+    private bool CanonicalizationEnabled() =>
+        _values.TryGetValue("canonicalizehostname", out var setting) && setting.Count > 0
+        && setting[0].ToLowerInvariant() is "yes" or "true" or "always";
 
     private void Pass()
     {
@@ -169,9 +179,10 @@ internal sealed class SshConfigResolver(IReadOnlyList<SshConfigDocument> documen
         ProxyJump = IsSet("proxyjump") ? _values["proxyjump"][0] : string.Empty,
     };
 
-    private string CurrentHost() => _values.TryGetValue("hostname", out var v) && v.Count > 0
+    // In the second pass, ssh has replaced its HostName with the name the first pass settled on, so that is the name everywhere.
+    private string CurrentHost() => _finalHost ?? (_values.TryGetValue("hostname", out var v) && v.Count > 0
         ? new SshTokenContext(originalHost, originalHost, 22, string.Empty, options.LocalUser, options.HomeDirectory, options.LocalHostName, options.GetEnvironmentVariable).ExpandTokens(v[0])
-        : originalHost;
+        : originalHost);
 
     private int CurrentPort() => options.Port
         ?? (_values.TryGetValue("port", out var v) && v.Count > 0 && int.TryParse(v[0], NumberStyles.None, CultureInfo.InvariantCulture, out var p) && p is >= 1 and <= 65535 ? p : 22);
@@ -196,13 +207,12 @@ internal sealed class SshConfigResolver(IReadOnlyList<SshConfigDocument> documen
                 case "all":
                     value = true;
                     break;
-                case "final":
-                    _sawFinalOrCanonical = true;
+                case "final" or "canonical":
+                    // Both are true exactly in the second pass, found name or not, as in ssh's match_cfg_line. Only a Match final
+                    // that is not negated asks for that pass: a block that wants the first pass only (!final) or the second
+                    // (canonical) does not by itself make one happen.
+                    _wantFinalPass |= name == "final" && !negate;
                     value = _finalPass;
-                    break;
-                case "canonical":
-                    _sawFinalOrCanonical = true;
-                    value = _canonical;
                     break;
                 case "host" or "originalhost" or "user" or "localuser" or "tagged" or "exec" or "localnetwork":
                     if (++i >= criteria.Count)
@@ -269,18 +279,12 @@ internal sealed class SshConfigResolver(IReadOnlyList<SshConfigDocument> documen
 
     private string? TryCanonicalize()
     {
-        if ((options.HostCanonicalizer is null && !options.UseDnsCanonicalizer)
-            || !_values.TryGetValue("canonicalizehostname", out var setting) || setting.Count == 0)
+        if ((options.HostCanonicalizer is null && !options.UseDnsCanonicalizer) || !CanonicalizationEnabled())
         {
             return null;
         }
 
-        var mode = setting[0].ToLowerInvariant();
-        var always = mode == "always";
-        if (!always && mode is not ("yes" or "true"))
-        {
-            return null;
-        }
+        var always = _values["canonicalizehostname"][0].Equals("always", StringComparison.OrdinalIgnoreCase);
 
         var viaProxy = IsSet("proxycommand") || IsSet("proxyjump") || options.ViaProxy;
         var host = CurrentHost();
