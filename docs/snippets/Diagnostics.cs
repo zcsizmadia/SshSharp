@@ -77,14 +77,14 @@ internal static class Diagnostics
     public static IDisposable ListenToTraces()
     {
         // <activity-listener>
-        // Without OpenTelemetry: the connect and command spans, straight from the ActivitySource.
+        // Without OpenTelemetry: the spans, straight from the ActivitySource. TagObjects, not Tags: Tags leaves out the numbers.
         var listener = new ActivityListener
         {
             ShouldListenTo = source => source.Name == SshTelemetry.SourceName,
             Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllDataAndRecorded,
             ActivityStopped = activity => Console.WriteLine(
                 $"{activity.OperationName} {activity.Duration.TotalMilliseconds:F0} ms {activity.Status} " +
-                string.Join(' ', activity.Tags.Select(t => $"{t.Key}={t.Value}"))),
+                string.Join(' ', activity.TagObjects.Select(t => $"{t.Key}={t.Value}"))),
         };
         ActivitySource.AddActivityListener(listener);
         // </activity-listener>
@@ -104,7 +104,10 @@ internal static class Diagnostics
                 }
             },
         };
+        // Most counters are long; sshsharp.key_exchanges and the open-now counts (connections, channels, forwarded connections) are
+        // int, and durations double.
         listener.SetMeasurementEventCallback<long>((instrument, value, tags, _) => Console.WriteLine($"{instrument.Name} {value:+#;-#;0}"));
+        listener.SetMeasurementEventCallback<int>((instrument, value, tags, _) => Console.WriteLine($"{instrument.Name} {value:+#;-#;0}"));
         listener.SetMeasurementEventCallback<double>((instrument, value, tags, _) => Console.WriteLine($"{instrument.Name} {value:F3}"));
         listener.Start();
         // </meter-listener>

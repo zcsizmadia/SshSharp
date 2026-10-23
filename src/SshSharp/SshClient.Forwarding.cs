@@ -70,7 +70,8 @@ public sealed partial class SshClient
         ObjectDisposedException.ThrowIf(_disposed != 0, this);
         cancellationToken.ThrowIfCancellationRequested();
         ThrowIfConnectionFailed();
-        var listener = LocalListener.Start(localEndPoint, (socket, ct) => OpenForwardedAsync(socket, remoteHost, remotePort, ct), _connection.Closed);
+        var listener = LocalListener.Start(localEndPoint, (socket, ct) => OpenForwardedAsync(socket, remoteHost, remotePort, ct),
+            ForwardedConnectionMeasurement.Local, _connection.Closed);
         var bound = listener.LocalEndPoint.ToString();
         SshLog.ForwardingStarted(_logger, bound, remotePort);
         return Task.FromResult(new SshLocalPortForwarder(listener, remoteHost, remotePort));
@@ -91,7 +92,8 @@ public sealed partial class SshClient
         ObjectDisposedException.ThrowIf(_disposed != 0, this);
         cancellationToken.ThrowIfCancellationRequested();
         ThrowIfConnectionFailed();
-        var listener = LocalListener.Start(localEndPoint, (_, ct) => OpenForwardedSocketAsync(remoteSocketPath, ct), _connection.Closed);
+        var listener = LocalListener.Start(localEndPoint, (_, ct) => OpenForwardedSocketAsync(remoteSocketPath, ct),
+            ForwardedConnectionMeasurement.Local, _connection.Closed);
         var bound = listener.LocalEndPoint.ToString();
         SshLog.ForwardingToSocketStarted(_logger, bound);
         return Task.FromResult(new SshLocalPortForwarder(listener, remoteSocketPath));
@@ -177,7 +179,7 @@ public sealed partial class SshClient
             remoteSocketPath is null
                 ? (socket, ct) => OpenForwardedAsync(socket, remoteHost!, remotePort, ct)
                 : (_, ct) => OpenForwardedSocketAsync(remoteSocketPath, ct),
-            _connection.Closed);
+            ForwardedConnectionMeasurement.Local, _connection.Closed);
         SshLog.LocalSocketForwardingStarted(_logger, remotePort);
         return Task.FromResult(new SshLocalSocketForwarder(listener, remoteHost, remotePort, remoteSocketPath));
     }
@@ -231,7 +233,8 @@ public sealed partial class SshClient
         ObjectDisposedException.ThrowIf(_disposed != 0, this);
         cancellationToken.ThrowIfCancellationRequested();
         ThrowIfConnectionFailed();
-        var listener = LocalListener.Start(localEndPoint, (socket, ct) => OpenSocksAsync(socket, required, ct), _connection.Closed);
+        var listener = LocalListener.Start(localEndPoint, (socket, ct) => OpenSocksAsync(socket, required, ct),
+            ForwardedConnectionMeasurement.Dynamic, _connection.Closed);
         var bound = listener.LocalEndPoint.ToString();
         SshLog.ForwardingStarted(_logger, bound, 0);
         return Task.FromResult(new SshDynamicPortForwarder(listener));
@@ -648,6 +651,7 @@ public sealed partial class SshClient
         Func<SshChannel, Task>? accept = null;
         Func<bool>? reserve = null;
         Action? release = null;
+        var forwardingType = ForwardedConnectionMeasurement.Remote;
         try
         {
             if (type == "forwarded-streamlocal@openssh.com")
@@ -668,6 +672,7 @@ public sealed partial class SshClient
                 if (_remoteForwards.TryGetValue(port, out var forwarder))
                 {
                     (accept, reserve, release) = (channel => forwarder.Accept(channel, data), forwarder.TryReserve, forwarder.Release);
+                    forwardingType = forwarder.TelemetryType;
                 }
             }
         }
@@ -688,12 +693,14 @@ public sealed partial class SshClient
         if (Interlocked.Increment(ref _forwardedConnections) > _options.MaxForwardedConnections)
         {
             Interlocked.Decrement(ref _forwardedConnections);
+            ForwardedConnectionMeasurement.Refused(forwardingType);
             return SshConnection.RefuseResourceShortage;
         }
 
         if (!reserve())
         {
             Interlocked.Decrement(ref _forwardedConnections);
+            ForwardedConnectionMeasurement.Refused(forwardingType);
             return SshConnection.RefuseResourceShortage;
         }
 

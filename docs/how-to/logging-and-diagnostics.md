@@ -39,8 +39,11 @@ builder.Services.AddOpenTelemetry()
 ```
 
 The `SshSharp.Connect` span covers connecting, key exchange and authentication (each `ProxyJump` hop is a span of its own inside
-it), and `SshSharp.Command` covers each `RunCommandAsync`. The metrics count connections, channels, commands, bytes and key
-exchanges, and time connecting. [Errors and diagnostics](../diagnostics.md#tracing-and-metrics) lists every tag and instrument.
+it), with `SshSharp.Authenticate` inside it for the method that logged in and how many attempts it took. `SshSharp.Command`
+covers each `RunCommandAsync`, and `SshSharp.Sftp.Upload`, `Download`, `UploadDirectory` and `DownloadDirectory` each SFTP
+transfer, with the bytes it moved. The metrics count connections, channels, commands, bytes, key exchanges, SFTP file data and
+forwarded connections, and time connecting and keep-alive round trips; with dependency injection, the shared connection's
+reconnections too. [Errors and diagnostics](../diagnostics.md#tracing-and-metrics) lists every tag and instrument.
 
 ## Listen without OpenTelemetry
 

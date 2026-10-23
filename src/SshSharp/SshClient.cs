@@ -793,10 +793,37 @@ public sealed partial class SshClient : IAsyncDisposable
     /// <summary>Requests for a new password the client answers for one password, before it treats the password as expired and unchanged.</summary>
     internal const int MaxPasswordChangeRequests = 3;
 
+    /// <summary>
+    /// Authenticates in a span of its own (<c>SshSharp.Authenticate</c>, inside the connect span): the method that got in and the
+    /// requests it took, or <c>error.type</c>. Never the user name, nor which keys were offered.
+    /// </summary>
     private static async Task AuthenticateAsync(SshTransport transport, SshClientOptions options, IReadOnlyList<string>? allowedSignatures, ILogger logger,
         List<SshPrivateKey> acceptedKeys, string? host, int port, CancellationToken cancellationToken)
     {
+        using var activity = SshTelemetry.Activities.StartActivity("SshSharp.Authenticate");
         var auth = new SshUserAuth(transport, options.UserName, options.AuthenticationBanner);
+        try
+        {
+            var method = await AuthenticateCoreAsync(auth, transport, options, allowedSignatures, logger, acceptedKeys, host, port, cancellationToken)
+                .ConfigureAwait(false);
+            activity?.SetTag("ssh.auth.method", method);
+        }
+        catch (Exception ex)
+        {
+            // As the connect span reports it: a stream that failed is a lost connection.
+            SshTelemetry.Failed(activity, ex is IOException ? SshConnection.ConnectionLost(ex) : ex);
+            throw;
+        }
+        finally
+        {
+            activity?.SetTag("ssh.auth.attempts", auth.Attempts);
+        }
+    }
+
+    /// <summary>Walks the methods until one gets in, and returns its name; throws <see cref="SshAuthenticationException"/> when none does.</summary>
+    private static async Task<string> AuthenticateCoreAsync(SshUserAuth auth, SshTransport transport, SshClientOptions options, IReadOnlyList<string>? allowedSignatures,
+        ILogger logger, List<SshPrivateKey> acceptedKeys, string? host, int port, CancellationToken cancellationToken)
+    {
         await auth.RequestServiceAsync(cancellationToken).ConfigureAwait(false);
 
         // Like ssh: "none" first (it succeeds only on servers that allow anonymous access, and otherwise lists the methods the server
@@ -807,7 +834,7 @@ public sealed partial class SshClient : IAsyncDisposable
         if (outcome.Success)
         {
             SshLog.Authenticated(logger, "none");
-            return;
+            return "none";
         }
 
         var order = options.PreferredAuthentications ?? DefaultAuthenticationOrder;
@@ -1028,7 +1055,7 @@ public sealed partial class SshClient : IAsyncDisposable
                 if (result.Success)
                 {
                     SshLog.Authenticated(logger, order[step]);
-                    return;
+                    return order[step];
                 }
 
                 methods = result.RemainingMethods;

@@ -16,7 +16,8 @@ ended, and your code (or the dependency injection package) opens a new one.
 After `KeepAliveInterval` without traffic from the server the client sends a probe (OpenSSH's `ping@openssh.com` where the server
 announces it, `keepalive@openssh.com` otherwise); any packet from the server counts as an answer. After `KeepAliveCountMax`
 intervals without one, the connection fails with `SshFailureReason.Timeout`. The probes do not wait behind pending writes, so a
-server that stops reading is detected too.
+server that stops reading is detected too. Each answered probe's round trip is recorded in the
+`sshsharp.keep_alive.round_trip_time` metric (see [Tracing and metrics](../diagnostics.md#tracing-and-metrics)).
 
 Null (the default), `TimeSpan.Zero` or `Timeout.InfiniteTimeSpan` sends no keep-alives, as `ServerAliveInterval 0` does, and so
 does an interval longer than about 49.7 days, the longest a timer waits. Any other negative interval, or a negative count, throws

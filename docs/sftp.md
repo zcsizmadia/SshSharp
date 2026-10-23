@@ -444,6 +444,14 @@ is false once the session has ended, and stays true after one request's failure.
 an extension the server lacks (an overwriting rename, a hard link, a file hash) throws `NotSupportedException`. `SendExtendedRequestAsync`
 returns the server's status instead of throwing it; `EnsureSuccess()` throws it.
 
+## Tracing and metrics
+
+Each `UploadAsync`, `UploadFileAsync`, `DownloadAsync` and `DownloadFileAsync` is a span (`SshSharp.Sftp.Upload` or
+`SshSharp.Sftp.Download`) tagged with the bytes it moved, and each directory transfer is one (`SshSharp.Sftp.UploadDirectory` or
+`SshSharp.Sftp.DownloadDirectory`) with a span inside it for every file. The `sshsharp.sftp.bytes` metric counts the file data as it
+moves, by direction. Paths are never recorded: add them to a span of your own if your policy allows. See
+[Tracing and metrics](diagnostics.md#tracing-and-metrics).
+
 ## SFTP or SCP?
 
 Prefer SFTP. It can list, resume and change files, and OpenSSH 9.0 switched its own `scp` command to SFTP by default. SCP

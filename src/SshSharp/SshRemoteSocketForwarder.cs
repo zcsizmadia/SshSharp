@@ -162,6 +162,7 @@ public sealed class SshRemoteSocketForwarder : IAsyncDisposable
     /// <summary>Serves one connection; it never faults, so <see cref="DisposeAsync"/> is not left with an exception to rethrow.</summary>
     private async Task ServeAsync(SshChannel channel)
     {
+        using var measurement = new ForwardedConnectionMeasurement(ForwardedConnectionMeasurement.Remote, _stopToken);
         try
         {
             await Task.Yield();
@@ -169,6 +170,7 @@ public sealed class SshRemoteSocketForwarder : IAsyncDisposable
             {
                 // The handler owns the stream; RunAsync disposes it (closing the channel) when the handler returns.
                 var stream = new SshChannelStream(channel);
+                measurement.Opened();
                 await handlers.RunAsync(SshForwardedConnection.ForUnixSocket(stream, RemoteSocketPath), stream, 0, _stopToken).ConfigureAwait(false);
                 return;
             }
@@ -189,6 +191,7 @@ public sealed class SshRemoteSocketForwarder : IAsyncDisposable
 
             using (socket)
             {
+                measurement.Opened();
                 await SocketChannelRelay.RunAsync(socket, channel, _stop.Token).ConfigureAwait(false);
             }
         }

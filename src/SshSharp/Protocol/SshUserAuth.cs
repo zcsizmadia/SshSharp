@@ -27,6 +27,12 @@ internal sealed class SshUserAuth(SshTransport transport, string userName, Func<
     /// <summary>Rounds of keyboard-interactive before the client gives up on a server that keeps asking.</summary>
     internal const int MaxRounds = 32;
 
+    /// <summary>
+    /// The authentication requests sent with a credential, for telemetry: every <c>SSH_MSG_USERAUTH_REQUEST</c> except <c>none</c>, which
+    /// only asks for the methods. A key held elsewhere can take two (a query, then the signed request); a password change is one more.
+    /// </summary>
+    public int Attempts { get; private set; }
+
     /// <summary>Asks the server to start the <c>ssh-userauth</c> service.</summary>
     public async Task RequestServiceAsync(CancellationToken cancellationToken)
     {
@@ -218,6 +224,7 @@ internal sealed class SshUserAuth(SshTransport transport, string userName, Func<
     /// </summary>
     public async Task<AuthOutcome?> GssapiAsync(IGssapiContext context, CancellationToken cancellationToken)
     {
+        Attempts++;
         await transport.SendAsync(Build(w =>
         {
             w.WriteByte(SshMessage.UserAuthRequest);
@@ -430,6 +437,11 @@ internal sealed class SshUserAuth(SshTransport transport, string userName, Func<
             w.WriteString(method);
             body?.Invoke(w);
         });
+        if (method != "none")
+        {
+            Attempts++;
+        }
+
         try
         {
             await transport.SendAsync(message, cancellationToken).ConfigureAwait(false);

@@ -11,6 +11,7 @@ internal sealed class LocalListener : IAsyncDisposable
 {
     private readonly Socket _listener;
     private readonly Func<Socket, CancellationToken, Task<SshChannel?>> _connect;
+    private readonly KeyValuePair<string, object?> _type;
     private readonly CancellationTokenSource _stop;
     private readonly Task _acceptLoop;
     private readonly HashSet<Task> _connections = [];
@@ -18,10 +19,12 @@ internal sealed class LocalListener : IAsyncDisposable
     private int _active;
     private volatile bool _listening = true;
 
-    private LocalListener(Socket listener, Func<Socket, CancellationToken, Task<SshChannel?>> connect, CancellationToken connectionClosed, string? socketPath = null)
+    private LocalListener(Socket listener, Func<Socket, CancellationToken, Task<SshChannel?>> connect, KeyValuePair<string, object?> type, CancellationToken connectionClosed,
+        string? socketPath = null)
     {
         _listener = listener;
         _connect = connect;
+        _type = type;
         _endPoint = socketPath is null ? listener.LocalEndPoint! : null;
         SocketPath = socketPath;
         _stop = CancellationTokenSource.CreateLinkedTokenSource(connectionClosed);
@@ -47,9 +50,13 @@ internal sealed class LocalListener : IAsyncDisposable
         }
     }
 
-    /// <summary>Binds and starts listening; <paramref name="connect"/> returns the channel for a connection, or null to drop it.</summary>
+    /// <summary>
+    /// Binds and starts listening; <paramref name="connect"/> returns the channel for a connection, or null to drop it. Connections are
+    /// counted in the forwarding instruments under <paramref name="type"/>.
+    /// </summary>
     /// <exception cref="SocketException">The endpoint could not be bound.</exception>
-    public static LocalListener Start(IPEndPoint localEndPoint, Func<Socket, CancellationToken, Task<SshChannel?>> connect, CancellationToken connectionClosed)
+    public static LocalListener Start(IPEndPoint localEndPoint, Func<Socket, CancellationToken, Task<SshChannel?>> connect, KeyValuePair<string, object?> type,
+        CancellationToken connectionClosed)
     {
         var listener = new Socket(localEndPoint.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
         try
@@ -63,7 +70,7 @@ internal sealed class LocalListener : IAsyncDisposable
             throw;
         }
 
-        return new LocalListener(listener, connect, connectionClosed);
+        return new LocalListener(listener, connect, type, connectionClosed);
     }
 
     /// <summary>
@@ -75,7 +82,7 @@ internal sealed class LocalListener : IAsyncDisposable
     /// <exception cref="SocketException">The socket could not be created (the file exists, or the directory does not).</exception>
     /// <exception cref="ArgumentException">The path is longer than the platform allows.</exception>
     public static LocalListener StartUnix(string path, bool unlinkExisting, UnixFileMode mode, Func<Socket, CancellationToken, Task<SshChannel?>> connect,
-        CancellationToken connectionClosed)
+        KeyValuePair<string, object?> type, CancellationToken connectionClosed)
     {
         var endPoint = new UnixDomainSocketEndPoint(path);
         if (unlinkExisting)
@@ -103,7 +110,7 @@ internal sealed class LocalListener : IAsyncDisposable
             throw;
         }
 
-        return new LocalListener(listener, connect, connectionClosed, path);
+        return new LocalListener(listener, connect, type, connectionClosed, path);
     }
 
     private static void SetMode(string path, UnixFileMode mode)
@@ -205,6 +212,7 @@ internal sealed class LocalListener : IAsyncDisposable
     private async Task ServeCoreAsync(Socket socket)
     {
         await Task.Yield(); // off the accept loop
+        using var measurement = new ForwardedConnectionMeasurement(_type, _stop.Token);
         using (socket)
         {
             SshChannel? channel;
@@ -219,6 +227,7 @@ internal sealed class LocalListener : IAsyncDisposable
 
             if (channel is not null)
             {
+                measurement.Opened();
                 await SocketChannelRelay.RunAsync(socket, channel, _stop.Token).ConfigureAwait(false);
             }
         }

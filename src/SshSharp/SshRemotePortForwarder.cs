@@ -116,6 +116,9 @@ public sealed class SshRemotePortForwarder : IAsyncDisposable
     /// </summary>
     public bool IsDynamic { get; }
 
+    /// <summary>The forwarding's type in the forwarding instruments.</summary>
+    internal KeyValuePair<string, object?> TelemetryType => IsDynamic ? ForwardedConnectionMeasurement.RemoteDynamic : ForwardedConnectionMeasurement.Remote;
+
     /// <summary>The address the server listens on, as requested (<c>localhost</c> for its loopback, empty for every address).</summary>
     public string BindAddress { get; }
 
@@ -199,9 +202,10 @@ public sealed class SshRemotePortForwarder : IAsyncDisposable
     /// </summary>
     private async Task ServeAsync(SshChannel channel, byte[] data)
     {
+        using var measurement = new ForwardedConnectionMeasurement(TelemetryType, _stopToken);
         try
         {
-            await ServeCoreAsync(channel, data).ConfigureAwait(false);
+            await ServeCoreAsync(channel, data, measurement).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -243,20 +247,21 @@ public sealed class SshRemotePortForwarder : IAsyncDisposable
         }
     }
 
-    private async Task ServeCoreAsync(SshChannel channel, byte[] data)
+    private async Task ServeCoreAsync(SshChannel channel, byte[] data, ForwardedConnectionMeasurement measurement)
     {
         await Task.Yield();
         if (_handlers is { } handlers)
         {
             // The handler owns the stream; RunAsync disposes it (closing the channel) when the handler returns.
             var stream = new SshChannelStream(channel);
+            measurement.Opened();
             await handlers.RunAsync(SshForwardedConnection.ForTcp(stream, data), stream, RemotePort, _stopToken).ConfigureAwait(false);
             return;
         }
 
         if (IsDynamic)
         {
-            await ServeDynamicAsync(channel).ConfigureAwait(false);
+            await ServeDynamicAsync(channel, measurement).ConfigureAwait(false);
             return;
         }
 
@@ -277,6 +282,7 @@ public sealed class SshRemotePortForwarder : IAsyncDisposable
 
         using (socket)
         {
+            measurement.Opened();
             await SocketChannelRelay.RunAsync(socket, channel, _stop.Token).ConfigureAwait(false);
         }
     }
@@ -285,7 +291,7 @@ public sealed class SshRemotePortForwarder : IAsyncDisposable
     /// Answers one forwarded connection as a SOCKS proxy: reads the request from the channel, checks the destination, connects to it from
     /// this machine, tells the remote application whether that worked, then relays.
     /// </summary>
-    private async Task ServeDynamicAsync(SshChannel channel)
+    private async Task ServeDynamicAsync(SshChannel channel, ForwardedConnectionMeasurement measurement)
     {
         var stream = new SshChannelStream(channel);
         SocksRequest? request;
@@ -357,6 +363,7 @@ public sealed class SshRemotePortForwarder : IAsyncDisposable
                 return;
             }
 
+            measurement.Opened();
             await SocketChannelRelay.RunAsync(socket, channel, _stop.Token).ConfigureAwait(false);
         }
     }
