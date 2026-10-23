@@ -562,7 +562,7 @@ jobs:
           read -ra settings <<< "$(env | grep -o '^SSHSHARP_TEST_[A-Z0-9_]*' | sed 's/^/-e /' | tr '\n' ' ')"
           in_container() {
             docker run --rm --network host --user "$(id -u):$(id -g)" -e HOME=/tmp "${settings[@]}" -v "$PWD:/src" -w /src "$RUNTIME_IMAGE" \
-              dotnet tests/SshSharp.Tests/bin/Release/net10.0/SshSharp.Tests.dll --results-directory TestResults "$@"
+              dotnet tests/SshSharp.Tests/bin/Release/net10.0/SshSharp.Tests.dll --results-directory /src/TestResults "$@"
           }
           docker run --rm "$RUNTIME_IMAGE" sh -c 'echo "Alpine $(cat /etc/alpine-release), .NET $DOTNET_VERSION, $(apk info -v 2>/dev/null | grep ^libcrypto3)"' | tee -a "$GITHUB_STEP_SUMMARY"
           in_container --treenode-filter "/*/*/(MlKemKexTests)|(NegotiatedAlgorithmsTests)|(WycheproofTests)/*[(Category!=Integration)&(Category!=Measure)]" \
