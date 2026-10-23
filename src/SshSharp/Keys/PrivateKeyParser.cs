@@ -1,4 +1,5 @@
 using System.Formats.Asn1;
+using System.Numerics;
 using System.Security.Cryptography;
 using System.Text;
 using SshSharp.Crypto;
@@ -395,32 +396,44 @@ internal static class PrivateKeyParser
     }
 
     /// <summary>
-    /// Imports a SEC1 ECPrivateKey (RFC 5915) and returns whether it was all of <paramref name="der"/>. LibreSSL, and so OpenSSH for
-    /// Windows, writes the private key without its leading zero bytes (about half of its nistp521 keys have 65 bytes, not 66). RFC 5915
-    /// fixes the length to the curve order's and .NET refuses a shorter one, so the zeros are put back first.
+    /// Imports a SEC1 ECPrivateKey (RFC 5915) and returns whether it was all of <paramref name="der"/>. The key is first put in the form
+    /// every platform imports (<see cref="NormalizeSec1"/>).
     /// </summary>
     private static bool ImportSec1(ECDsa ecdsa, byte[] der)
     {
-        var padded = PadSec1PrivateKey(der);
+        var normalized = NormalizeSec1(der);
         try
         {
-            ecdsa.ImportECPrivateKey(padded, out var read);
-            return read == padded.Length;
+            ecdsa.ImportECPrivateKey(normalized, out var read);
+            return read == normalized.Length;
         }
         finally
         {
-            if (!ReferenceEquals(padded, der))
+            if (!ReferenceEquals(normalized, der))
             {
-                CryptographicOperations.ZeroMemory(padded);
+                CryptographicOperations.ZeroMemory(normalized);
             }
         }
     }
 
+    // The SEC1 curve OIDs and field primes of the NIST curves SSH uses.
+    private static readonly (string Oid, NistCurve Curve, BigInteger Prime)[] Sec1Curves =
+    [
+        ("1.2.840.10045.3.1.7", NistCurve.P256, (BigInteger.One << 256) - (BigInteger.One << 224) + (BigInteger.One << 192) + (BigInteger.One << 96) - 1),
+        ("1.3.132.0.34", NistCurve.P384, (BigInteger.One << 384) - (BigInteger.One << 128) - (BigInteger.One << 96) + (BigInteger.One << 32) - 1),
+        ("1.3.132.0.35", NistCurve.P521, (BigInteger.One << 521) - 1),
+    ];
+
     /// <summary>
-    /// <paramref name="der"/> with the private key left-padded with zeros to its curve's size, or <paramref name="der"/> itself when it
-    /// needs nothing (or is not something this can fix, which the import then reports).
+    /// <paramref name="der"/> rewritten as .NET imports it everywhere, or <paramref name="der"/> itself when it needs nothing (or is not
+    /// something this can fix, which the import then reports). LibreSSL, and so OpenSSH for Windows and macOS, writes keys two ways
+    /// .NET refuses: the private key without its leading zero bytes (about half of all nistp521 keys have 65 bytes, not 66), though
+    /// RFC 5915 fixes its length to the curve order's; and on macOS the curve as explicit parameters rather than its OID, which macOS
+    /// does not import. The key is put back with its full length and the named curve. A curve is recognized by its field prime alone:
+    /// the key is then used on the named curve, and the public key in the file must match the private key there (the import and the
+    /// signing check after it make sure), so explicit parameters that differ in anything else cannot make another curve be used.
     /// </summary>
-    private static byte[] PadSec1PrivateKey(byte[] der)
+    private static byte[] NormalizeSec1(byte[] der)
     {
         try
         {
@@ -432,32 +445,46 @@ internal static class PrivateKeyParser
                 return der;
             }
 
-            // The rest: [0] the curve, [1] the public key; both are copied as they are.
-            var rest = new List<ReadOnlyMemory<byte>>();
-            while (sequence.HasData)
+            var parametersTag = new Asn1Tag(TagClass.ContextSpecific, 0, isConstructed: true);
+            var publicKeyTag = new Asn1Tag(TagClass.ContextSpecific, 1, isConstructed: true);
+            var curveIndex = -1;
+            var explicitParameters = false;
+            if (sequence.HasData && sequence.PeekTag() == parametersTag)
             {
-                rest.Add(sequence.ReadEncodedValue());
+                var parameters = sequence.ReadSequence(parametersTag);
+                if (parameters.PeekTag() == Asn1Tag.ObjectIdentifier)
+                {
+                    var oid = parameters.ReadObjectIdentifier();
+                    curveIndex = Array.FindIndex(Sec1Curves, c => c.Oid == oid);
+                }
+                else
+                {
+                    // ECParameters (SEC1 C.2): version, fieldID { prime-field, p }, then the curve, base point, order and cofactor.
+                    var ecParameters = parameters.ReadSequence();
+                    ecParameters.ReadInteger();
+                    var field = ecParameters.ReadSequence();
+                    if (field.ReadObjectIdentifier() == "1.2.840.10045.1.1")
+                    {
+                        var prime = field.ReadInteger();
+                        curveIndex = Array.FindIndex(Sec1Curves, c => c.Prime == prime);
+                        explicitParameters = true;
+                    }
+                }
             }
 
-            var parameters = new Asn1Tag(TagClass.ContextSpecific, 0, isConstructed: true);
-            string? curve = null;
-            if (rest.Count > 0 && new AsnReader(rest[0], AsnEncodingRules.DER) is var first && first.PeekTag() == parameters)
-            {
-                curve = first.ReadSequence(parameters).ReadObjectIdentifier();
-            }
-
-            var size = curve switch
-            {
-                "1.2.840.10045.3.1.7" => NistCurve.P256.FieldSize,
-                "1.3.132.0.34" => NistCurve.P384.FieldSize,
-                "1.3.132.0.35" => NistCurve.P521.FieldSize,
-                _ => 0,
-            };
-            if (d.Length >= size)
+            ReadOnlyMemory<byte>? publicKey = sequence.HasData && sequence.PeekTag() == publicKeyTag ? sequence.ReadEncodedValue() : null;
+            if (sequence.HasData || curveIndex < 0)
             {
                 return der;
             }
 
+            var known = Sec1Curves[curveIndex];
+            if (d.Length > known.Curve.FieldSize || (d.Length == known.Curve.FieldSize && !explicitParameters))
+            {
+                return der;
+            }
+
+            var size = known.Curve.FieldSize;
             var key = new byte[size];
             var writer = new AsnWriter(AsnEncodingRules.DER);
             try
@@ -467,9 +494,14 @@ internal static class PrivateKeyParser
                 {
                     writer.WriteEncodedValue(version.Span);
                     writer.WriteOctetString(key);
-                    foreach (var value in rest)
+                    using (writer.PushSequence(parametersTag))
                     {
-                        writer.WriteEncodedValue(value.Span);
+                        writer.WriteObjectIdentifier(known.Oid);
+                    }
+
+                    if (publicKey is { } point)
+                    {
+                        writer.WriteEncodedValue(point.Span);
                     }
                 }
 

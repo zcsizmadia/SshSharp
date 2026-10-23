@@ -233,6 +233,71 @@ public class EncryptedKeyFormatTests
     }
 
     [Test]
+    public async Task Sec1_WithExplicitCurveParameters_AsMacOsSshKeygenWritesIt_Reads()
+    {
+        // LibreSSL on macOS writes the curve as explicit ECParameters (SEC1 C.2), which macOS does not import; the key is read on the
+        // named curve with that field prime. The P-256 parameters are SEC2's.
+        using var ecdsa = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var parameters = ecdsa.ExportParameters(true);
+        var blob = TestKeys.EcdsaPublicBlob(ecdsa, "nistp256");
+        var p = Convert.FromHexString("FFFFFFFF00000001000000000000000000000000FFFFFFFFFFFFFFFFFFFFFFFF");
+        byte[] Sec1(byte[] prime)
+        {
+            var writer = new System.Formats.Asn1.AsnWriter(System.Formats.Asn1.AsnEncodingRules.DER);
+            using (writer.PushSequence())
+            {
+                writer.WriteInteger(1);
+                writer.WriteOctetString(parameters.D);
+                using (writer.PushSequence(new System.Formats.Asn1.Asn1Tag(System.Formats.Asn1.TagClass.ContextSpecific, 0, isConstructed: true)))
+                using (writer.PushSequence())
+                {
+                    writer.WriteInteger(1);
+                    using (writer.PushSequence())
+                    {
+                        writer.WriteObjectIdentifier("1.2.840.10045.1.1");
+                        writer.WriteIntegerUnsigned(prime);
+                    }
+
+                    using (writer.PushSequence())
+                    {
+                        writer.WriteOctetString(Convert.FromHexString("FFFFFFFF00000001000000000000000000000000FFFFFFFFFFFFFFFFFFFFFFFC"));
+                        writer.WriteOctetString(Convert.FromHexString("5AC635D8AA3A93E7B3EBBD55769886BC651D06B0CC53B0F63BCE3C3E27D2604B"));
+                    }
+
+                    writer.WriteOctetString(Convert.FromHexString(
+                        "046B17D1F2E12C4247F8BCE6E563A440F277037D812DEB33A0F4A13945D898C2964FE342E2FE1A7F9B8EE7EB4A7C0F9E162BCE33576B315ECECBB6406837BF51F5"));
+                    writer.WriteIntegerUnsigned(Convert.FromHexString("FFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551"));
+                    writer.WriteInteger(1);
+                }
+
+                using (writer.PushSequence(new System.Formats.Asn1.Asn1Tag(System.Formats.Asn1.TagClass.ContextSpecific, 1, isConstructed: true)))
+                {
+                    writer.WriteBitString([4, .. parameters.Q.X!, .. parameters.Q.Y!]);
+                }
+            }
+
+            return writer.Encode();
+        }
+
+        var passphrase = NewPassphrase();
+        using (var key = SshPrivateKey.Parse(PemEncoding.WriteString("EC PRIVATE KEY", Sec1(p))))
+        {
+            await Assert.That(key.PublicKey.ToArray()).IsEquivalentTo(blob);
+        }
+
+        using (var key = SshPrivateKey.Parse(TestKeys.LegacyEncryptedPem("EC PRIVATE KEY", Sec1(p), passphrase), passphrase))
+        {
+            await Assert.That(key.PublicKey.ToArray()).IsEquivalentTo(blob);
+        }
+
+        // A field prime that is not one of the three curves is left to the platform, which refuses it or reads another curve that SSH
+        // does not use: either way it is a format error.
+        var otherPrime = (byte[])p.Clone();
+        otherPrime[^1] = 0xFD;
+        await Assert.That(() => SshPrivateKey.Parse(PemEncoding.WriteString("EC PRIVATE KEY", Sec1(otherPrime)))).Throws<FormatException>();
+    }
+
+    [Test]
     public async Task Sec1_AfterAnEcParametersBlock_Reads()
     {
         // openssl ecparam -genkey writes the curve in its own block first.

@@ -121,6 +121,30 @@ public class EncryptedKeyInteropTests
     }
 
     [Test]
+    [Arguments("ec_paramgen_curve:P-256", "ecdsa-sha2-nistp256")]
+    [Arguments("ec_paramgen_curve:P-384", "ecdsa-sha2-nistp384")]
+    [Arguments("ec_paramgen_curve:P-521", "ecdsa-sha2-nistp521")]
+    public async Task OpenSslTraditionalPem_ExplicitCurveParameters_Reads(string option, string keyType)
+    {
+        if (Tool("openssl") is not { } openssl)
+        {
+            Skip.Test("openssl is not installed.");
+            return;
+        }
+
+        // The curve written as explicit parameters, as macOS's ssh-keygen -m PEM (LibreSSL) writes it.
+        using var directory = new TempDirectory();
+        var (plainPath, encryptedPath, passphrase) = await OpenSslEncryptAsync(openssl, directory, "EC", option, "-aes128", explicitCurve: true);
+        var text = await File.ReadAllTextAsync(encryptedPath);
+        await Assert.That(text).Contains("Proc-Type: 4,ENCRYPTED");
+
+        using var expected = await SshPrivateKey.LoadAsync(plainPath);
+        using var key = SshPrivateKey.Parse(text, passphrase);
+        await Assert.That(key.KeyType).IsEqualTo(keyType);
+        await Assert.That(key.PublicKey.ToArray()).IsEquivalentTo(expected.PublicKey.ToArray());
+    }
+
+    [Test]
     public async Task OpenSslTraditionalPem_TripleDes_IsRefused()
     {
         if (Tool("openssl") is not { } openssl)
@@ -141,7 +165,7 @@ public class EncryptedKeyInteropTests
     /// <c>-traditional</c>; LibreSSL writes the traditional format already and may not know the option.
     /// </summary>
     private static async Task<(string Plain, string Encrypted, string Passphrase)> OpenSslEncryptAsync(string openssl, TempDirectory directory,
-        string algorithm, string option, string cipherOption)
+        string algorithm, string option, string cipherOption, bool explicitCurve = false)
     {
         var plain = directory.NewPath("plain");
         var (exit, _, error) = await RunAsync(openssl, "genpkey", "-algorithm", algorithm, "-pkeyopt", option, "-out", plain);
@@ -152,10 +176,11 @@ public class EncryptedKeyInteropTests
         await File.WriteAllTextAsync(passphraseFile, passphrase);
         var encrypted = directory.NewPath("encrypted");
         var command = algorithm == "RSA" ? "rsa" : "ec";
-        (exit, _, error) = await RunAsync(openssl, command, "-in", plain, cipherOption, "-traditional", "-passout", "file:" + passphraseFile, "-out", encrypted);
+        string[] curveOptions = explicitCurve ? ["-param_enc", "explicit"] : [];
+        (exit, _, error) = await RunAsync(openssl, [command, "-in", plain, .. curveOptions, cipherOption, "-traditional", "-passout", "file:" + passphraseFile, "-out", encrypted]);
         if (exit != 0)
         {
-            (exit, _, error) = await RunAsync(openssl, command, "-in", plain, cipherOption, "-passout", "file:" + passphraseFile, "-out", encrypted);
+            (exit, _, error) = await RunAsync(openssl, [command, "-in", plain, .. curveOptions, cipherOption, "-passout", "file:" + passphraseFile, "-out", encrypted]);
         }
 
         await Assert.That(exit).IsEqualTo(0).Because(error);
