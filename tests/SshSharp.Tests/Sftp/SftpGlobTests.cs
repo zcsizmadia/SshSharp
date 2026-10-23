@@ -2,7 +2,10 @@ using SshSharp.Sftp;
 
 namespace SshSharp.Tests.Sftp;
 
-/// <summary>The name patterns of <see cref="SftpListOptions.Pattern"/>: fnmatch(3) without flags, case-sensitive, by code point.</summary>
+/// <summary>
+/// The name patterns of <see cref="SftpListOptions.Pattern"/>: fnmatch(3) without flags, case-sensitive, by code point; or ignoring case
+/// (<see cref="SftpListOptions.IgnoreCase"/>).
+/// </summary>
 public sealed class SftpGlobTests
 {
     [Test]
@@ -49,6 +52,8 @@ public sealed class SftpGlobTests
     [Arguments("[a-c]", "c", true)]
     [Arguments("[a-c]", "d", false)]
     [Arguments("[a-c]", "`", false)]
+    [Arguments("[a-c]", "B", false)] // case-sensitive
+    [Arguments("[!a-c]", "B", true)]
     [Arguments("[!a-c]", "d", true)]
     [Arguments("[!a-c]", "b", false)]
     [Arguments("[!a]", "", false)]
@@ -106,6 +111,40 @@ public sealed class SftpGlobTests
     [Arguments("caf?", "café", true)]
     public async Task CodePoints(string pattern, string name, bool expected) =>
         await Assert.That(SftpGlob.Parse(pattern).IsMatch(name)).IsEqualTo(expected);
+
+    [Test]
+    [Arguments("*.jpg", "IMG_01.JPG", true)]
+    [Arguments("Report.TXT", "report.txt", true)]
+    [Arguments("report.txt", "REPORT.TXT", true)]
+    [Arguments("*.log", "app.LOG.1", false)] // still the whole name
+    [Arguments("[a-z]", "Q", true)] // a character is in a set when any of its cases is
+    [Arguments("[A-Z]", "q", true)]
+    [Arguments("[!a-z]", "Q", false)]
+    [Arguments("[!a-z]", "1", true)]
+    [Arguments("[xyz]", "Y", true)]
+    [Arguments("café", "CAFÉ", true)] // beyond ASCII: by Unicode's simple case mapping
+    [Arguments("ß", "SS", false)] // one character to one: no full case folding (sharp s is not "ss")
+    [Arguments("i", "I", true)] // the invariant culture's, also on a Turkish machine (where i's uppercase is a dotted I)
+    [Arguments("\\A", "a", true)] // an escaped character too
+    [Arguments("?", "\U0001F600", true)]
+    public async Task IgnoreCase(string pattern, string name, bool expected) =>
+        await Assert.That(SftpGlob.Parse(pattern, ignoreCase: true).IsMatch(name)).IsEqualTo(expected);
+
+    [Test]
+    public async Task IgnoreCase_DoesNotDependOnTheCurrentCulture()
+    {
+        var culture = System.Globalization.CultureInfo.CurrentCulture;
+        try
+        {
+            System.Globalization.CultureInfo.CurrentCulture = new System.Globalization.CultureInfo("tr-TR");
+            await Assert.That(SftpGlob.Parse("FILE*", ignoreCase: true).IsMatch("file.txt")).IsTrue();
+            await Assert.That(SftpGlob.Parse("[h-j]", ignoreCase: true).IsMatch("I")).IsTrue();
+        }
+        finally
+        {
+            System.Globalization.CultureInfo.CurrentCulture = culture;
+        }
+    }
 
     [Test]
     public async Task ManyStars_DoNotBacktrackWithoutEnd()

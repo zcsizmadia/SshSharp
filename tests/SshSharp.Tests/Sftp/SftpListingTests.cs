@@ -189,6 +189,27 @@ public sealed class SftpListingTests
     }
 
     [Test]
+    public async Task Pattern_IgnoreCase_MatchesWithoutRegardToCase_InEveryDirectory()
+    {
+        await using var rig = await Rig.StartAsync(f =>
+        {
+            f.AddDirectory(Home + "/photos");
+            f.AddFile(Home + "/photos/a.jpg", [1]);
+            f.AddFile(Home + "/photos/B.JPG", [2]);
+            f.AddFile(Home + "/photos/c.Jpg", [3]);
+            f.AddFile(Home + "/photos/d.png", [4]);
+            f.AddDirectory(Home + "/photos/Trip");
+            f.AddFile(Home + "/photos/Trip/E.JPG", [5]);
+        });
+
+        await AssertInOrder(await ListAsync(rig.Sftp, "photos", new SftpListOptions { Pattern = "*.jpg" }), new[] { "photos/a.jpg" });
+        await AssertInOrder(await ListAsync(rig.Sftp, "photos", new SftpListOptions { Pattern = "*.jpg", IgnoreCase = true }),
+            new[] { "photos/B.JPG", "photos/a.jpg", "photos/c.Jpg" });
+        await AssertInOrder(await ListAsync(rig.Sftp, "photos", new SftpListOptions { Pattern = "*.jpg", IgnoreCase = true, Recursive = true }),
+            new[] { "photos/B.JPG", "photos/Trip/E.JPG", "photos/a.jpg", "photos/c.Jpg" });
+    }
+
+    [Test]
     public async Task Options_RejectOutOfRangeValues_AndANullOptions()
     {
         await Assert.That(() => new SftpListOptions { MaxDepth = 0 }).Throws<ArgumentOutOfRangeException>();
@@ -414,6 +435,87 @@ public sealed class SftpListingTests
         await Assert.That(thrown!.Status).IsEqualTo(SftpStatusCode.PermissionDenied);
         await Assert.That(paths[^1]).IsEqualTo("tree/sub"); // everything before it, in order
         await rig.HandlesClosedAsync();
+    }
+
+    [Test]
+    [Arguments(1)]
+    [Arguments(4)]
+    public async Task Recursive_SkipUnreadableDirectories_LeavesThemOut_AndGoesOn(int concurrentDirectories)
+    {
+        await using var rig = await Rig.StartAsync(f =>
+        {
+            AddTree(f);
+            f.AddDirectory(Home + "/tree/zz");
+            f.AddFile(Home + "/tree/zz/f.log", [6]);
+            f.DenyOpenDir = path => path is Home + "/tree/sub" or Home + "/tree/empty";
+        });
+        var skipped = new List<string>();
+        var paths = new List<string>();
+
+        await foreach (var entry in rig.Sftp.ListDirectoryAsync("tree", new SftpListOptions
+        {
+            Recursive = true,
+            MaxConcurrentDirectories = concurrentDirectories,
+            SkipUnreadableDirectories = true,
+            UnreadableDirectory = directory => skipped.Add(directory.FullPath),
+        }, Timeout()))
+        {
+            paths.Add(entry.FullPath);
+        }
+
+        // Their own entries are listed, then nothing below them; the listing goes on after each, and reports it right after its entry.
+        await AssertInOrder(paths, new[] { "tree/a.log", "tree/b.txt", "tree/dangling", "tree/empty", "tree/link", "tree/sub", "tree/zz", "tree/zz/f.log" });
+        await AssertInOrder(skipped, new[] { "tree/empty", "tree/sub" });
+        await rig.HandlesClosedAsync();
+    }
+
+    [Test]
+    public async Task Recursive_SkipUnreadableDirectories_WithoutACallback_AndAFollowedLink()
+    {
+        await using var rig = await Rig.StartAsync(f =>
+        {
+            AddTree(f);
+            f.DenyOpenDir = path => path == Home + "/tree/link";
+        });
+
+        // tree/link leads to a directory that cannot be read: left out like a subdirectory.
+        var paths = await ListAsync(rig.Sftp, "tree", new SftpListOptions { Recursive = true, FollowSymbolicLinks = true, SkipUnreadableDirectories = true, Pattern = "*.log" });
+
+        await AssertInOrder(paths, new[] { "tree/a.log", "tree/sub/c.log", "tree/sub/deeper/d.log" });
+    }
+
+    [Test]
+    [Arguments(2u, "No such file")] // deleted meanwhile
+    [Arguments(4u, "Failure")]
+    public async Task Recursive_SkipUnreadableDirectories_StillEndsTheListing_OnOtherErrors(uint code, string message)
+    {
+        await using var rig = await Rig.StartAsync(f =>
+        {
+            AddTree(f);
+            f.DenyOpenDir = path => path == Home + "/tree/sub";
+            f.DenyOpenDirStatus = (code, message);
+        });
+
+        var thrown = await Assert.That(async () => await ListAsync(rig.Sftp, "tree", new SftpListOptions { Recursive = true, SkipUnreadableDirectories = true }))
+            .Throws<SftpException>();
+
+        await Assert.That((uint)thrown!.Status).IsEqualTo(code);
+        await rig.HandlesClosedAsync();
+    }
+
+    [Test]
+    public async Task Recursive_SkipUnreadableDirectories_TheTopDirectoryStillFails()
+    {
+        await using var rig = await Rig.StartAsync(f =>
+        {
+            AddTree(f);
+            f.DenyOpenDir = path => path == Home + "/tree";
+        });
+
+        var thrown = await Assert.That(async () => await ListAsync(rig.Sftp, "tree", new SftpListOptions { Recursive = true, SkipUnreadableDirectories = true }))
+            .Throws<SftpException>();
+
+        await Assert.That(thrown!.Status).IsEqualTo(SftpStatusCode.PermissionDenied);
     }
 
     [Test]

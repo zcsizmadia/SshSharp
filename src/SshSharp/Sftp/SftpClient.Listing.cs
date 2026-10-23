@@ -20,7 +20,9 @@ public sealed partial class SftpClient
     /// most that many listings read ahead are kept until the walk reaches them, so the memory it holds is those listings and the ones
     /// of the directories it is inside, however wide the tree. It goes no deeper than <see cref="SftpListOptions.MaxDepth"/>. Symbolic links are listed but not entered unless
     /// <see cref="SftpListOptions.FollowSymbolicLinks"/> is set. A subdirectory that cannot be listed (permission denied, or deleted
-    /// meanwhile) ends the listing with its <see cref="SftpException"/> when the listing reaches it.
+    /// meanwhile) ends the listing with its <see cref="SftpException"/> when the listing reaches it; with
+    /// <see cref="SftpListOptions.SkipUnreadableDirectories"/>, one the server refuses with <see cref="SftpStatusCode.PermissionDenied"/>
+    /// is left out instead, and the listing goes on with the entries after it.
     /// </para>
     /// <para>
     /// Stopping early (leaving an <c>await foreach</c>) or cancelling stops the listings read ahead and waits for them to close their
@@ -35,7 +37,7 @@ public sealed partial class SftpClient
     {
         CheckPath(path);
         ArgumentNullException.ThrowIfNull(options);
-        var pattern = options.Pattern is { } text ? SftpGlob.Parse(text) : null;
+        var pattern = options.Pattern is { } text ? SftpGlob.Parse(text, options.IgnoreCase) : null;
         return options.Recursive ? ListTreeAsync(path, options, pattern, cancellationToken) : ListMatchingAsync(path, pattern, cancellationToken);
     }
 
@@ -106,7 +108,7 @@ public sealed partial class SftpClient
                         ahead--; // reached: its listing is the walk's now, and another may be read ahead
                     }
 
-                    if (await descent.Listing.ConfigureAwait(false) is { } child)
+                    if (await ListingOrSkippedAsync(descent).ConfigureAwait(false) is { } child)
                     {
                         stack.Push(child);
                     }
@@ -120,6 +122,20 @@ public sealed partial class SftpClient
             foreach (var task in started)
             {
                 await task.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+            }
+        }
+
+        // A subdirectory's listing, or null when it is not entered: also, with SkipUnreadableDirectories, when the server refused it.
+        async Task<ListedDirectory?> ListingOrSkippedAsync(Descent descent)
+        {
+            try
+            {
+                return await descent.Listing!.ConfigureAwait(false);
+            }
+            catch (SftpException ex) when (options.SkipUnreadableDirectories && IsUnreadable(ex))
+            {
+                options.UnreadableDirectory?.Invoke(descent.Entry);
+                return null;
             }
         }
 
@@ -206,6 +222,13 @@ public sealed partial class SftpClient
         }
     }
 
+    /// <summary>
+    /// Whether a directory could not be read for want of permission, which <see cref="SftpListOptions.SkipUnreadableDirectories"/> and
+    /// <see cref="SftpTransferOptions.SkipUnreadableDirectories"/> skip: only <see cref="SftpStatusCode.PermissionDenied"/>, never a
+    /// directory that is gone, a failure or a closed session, which would hide a real problem as an empty directory.
+    /// </summary>
+    private static bool IsUnreadable(SftpException exception) => exception.Status == SftpStatusCode.PermissionDenied;
+
     /// <summary>Reads a directory of a recursive listing whole, and finds the subdirectories (and links, if followed) to descend into.</summary>
     private async Task<ListedDirectory> ReadListingAsync(string path, string? realPath, ListedDirectory? parent, SftpListOptions options,
         CancellationToken cancellationToken)
@@ -279,8 +302,17 @@ public sealed class SftpListOptions
     /// <remarks>
     /// Matching is by Unicode code point, so <c>?</c> matches one character outside the Basic Multilingual Plane (an emoji, say). A
     /// <c>[</c> without a closing <c>]</c> matches itself, as in fnmatch(3); POSIX named classes (<c>[[:digit:]]</c>) are not supported.
+    /// <see cref="IgnoreCase"/> matches without regard to case.
     /// </remarks>
     public string? Pattern { get; init; }
+
+    /// <summary>
+    /// Match <see cref="Pattern"/> without regard to case (default false: case-sensitive), as <c>fnmatch</c>'s <c>FNM_CASEFOLD</c> does:
+    /// <c>*.jpg</c> then also lists <c>IMG_01.JPG</c>, and <c>[a-z]</c> also takes <c>Q</c>. For trees that came from Windows, or a server
+    /// on Windows, where names differ in case only by accident. Characters are compared by the invariant culture's simple case mapping,
+    /// so the result does not depend on this machine's culture; it does not change which directories a recursive listing enters.
+    /// </summary>
+    public bool IgnoreCase { get; init; }
 
     /// <summary>
     /// List the subdirectories too, and theirs, depth first: a directory's subtree follows its own entry, before its later siblings,
@@ -316,6 +348,27 @@ public sealed class SftpListOptions
     /// outside the directory listed.
     /// </remarks>
     public bool FollowSymbolicLinks { get; init; }
+
+    /// <summary>
+    /// In a recursive listing, leave out a subdirectory the server will not let this user read
+    /// (<see cref="SftpStatusCode.PermissionDenied"/>) and go on with the entries after it, as <c>find</c> does after its warning (default
+    /// false: the listing ends with the <see cref="SftpException"/>). The subdirectory's own entry is still returned (when it matches
+    /// <see cref="Pattern"/>), as it comes before its contents; <see cref="UnreadableDirectory"/> is told about each one left out.
+    /// </summary>
+    /// <remarks>
+    /// Only a refusal for want of permission qualifies: a subdirectory deleted meanwhile, any other status, and a broken session or
+    /// connection still end the listing. The directory listed (the top one) is not skipped: when it cannot be read, the listing fails.
+    /// With <see cref="FollowSymbolicLinks"/>, a link to a directory that cannot be read is left out the same way.
+    /// </remarks>
+    public bool SkipUnreadableDirectories { get; init; }
+
+    /// <summary>
+    /// With <see cref="SkipUnreadableDirectories"/>, called with the entry of each subdirectory that was left out because it could not be
+    /// read, when the listing reaches it: after its own entry, before the entries the server listed after it. It is called from within
+    /// the caller's enumeration, between two entries, never concurrently; an exception it throws ends the listing. Null (the default)
+    /// leaves the directories out silently.
+    /// </summary>
+    public Action<SftpFileInfo>? UnreadableDirectory { get; init; }
 
     /// <summary>
     /// How many subdirectories a recursive listing reads at once, ahead of the entries being returned (default 4, at most 64). Each holds

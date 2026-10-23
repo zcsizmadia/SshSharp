@@ -4,7 +4,10 @@ using SshSharp.Tests.Protocol;
 
 namespace SshSharp.Tests.Sftp;
 
-/// <summary>Directory transfers with <see cref="SftpTransferOptions.Filter"/> and <see cref="SftpTransferOptions.SkipUnchanged"/> (#266).</summary>
+/// <summary>
+/// Directory transfers with <see cref="SftpTransferOptions.Filter"/> and <see cref="SftpTransferOptions.SkipUnchanged"/> (#266), its
+/// <see cref="SftpTransferOptions.TimeTolerance"/>, and <see cref="SftpTransferOptions.SkipUnreadableDirectories"/> (#379).
+/// </summary>
 public sealed class SftpTransferFilterTests : IDisposable
 {
     private const string Home = FakeSftpServer.Home;
@@ -344,5 +347,268 @@ public sealed class SftpTransferFilterTests : IDisposable
         await Assert.That(SftpClient.IsUnchanged(1, time, null, time)).IsFalse();
         await Assert.That(SftpClient.IsUnchanged(1, null, 1, time)).IsFalse();
         await Assert.That(SftpClient.IsUnchanged(1, time, 1, null)).IsFalse();
+    }
+
+    // ---- TimeTolerance (#379) ----
+
+    [Test]
+    [Arguments(0, 0L, true)]
+    [Arguments(0, 1L, false)]
+    [Arguments(999, 1L, false)] // whole seconds: below a second is none
+    [Arguments(1000, 1L, true)]
+    [Arguments(1000, -1L, true)] // either side may be the later one
+    [Arguments(2000, 2L, true)]
+    [Arguments(2000, -2L, true)]
+    [Arguments(2000, 3L, false)]
+    [Arguments(2500, 3L, false)] // a fraction above whole seconds is dropped
+    [Arguments(3000, 3L, true)]
+    public async Task IsUnchanged_WithATolerance_TakesTimesThatMuchApart(int toleranceMilliseconds, long apartSeconds, bool expected)
+    {
+        var time = DateTimeOffset.FromUnixTimeSeconds(1_600_000_000);
+        await Assert.That(SftpClient.IsUnchanged(10, time.AddMilliseconds(999), 10, time.AddSeconds(apartSeconds), TimeSpan.FromMilliseconds(toleranceMilliseconds)))
+            .IsEqualTo(expected);
+    }
+
+    [Test]
+    public async Task IsUnchanged_WithATolerance_StillNeedsTheSameSize()
+    {
+        var time = DateTimeOffset.FromUnixTimeSeconds(1_600_000_000);
+        await Assert.That(SftpClient.IsUnchanged(10, time, 11, time, TimeSpan.FromHours(1))).IsFalse();
+        await Assert.That(SftpClient.IsUnchanged(10, time, 10, time.AddYears(100), TimeSpan.MaxValue)).IsTrue();
+    }
+
+    [Test]
+    public async Task TimeTolerance_IsZeroByDefault_AndCannotBeNegative()
+    {
+        await Assert.That(new SftpTransferOptions().TimeTolerance).IsEqualTo(TimeSpan.Zero);
+        await Assert.That(new SftpTransferOptions { TimeTolerance = TimeSpan.FromSeconds(2) }.TimeTolerance).IsEqualTo(TimeSpan.FromSeconds(2));
+        await Assert.That(() => new SftpTransferOptions { TimeTolerance = TimeSpan.FromTicks(-1) }).Throws<ArgumentOutOfRangeException>();
+    }
+
+    [Test]
+    [Arguments(1)]
+    [Arguments(4)]
+    public async Task DownloadDirectory_TimeTolerance_LeavesFilesWhoseTimesDifferByNoMore(int concurrentFiles)
+    {
+        // The local copies are on a file system that rounded their times (FAT keeps even seconds): one second, two, and three off.
+        await using var rig = await Rig.StartAsync(f =>
+        {
+            f.AddDirectory(Home + "/tree");
+            f.AddFile(Home + "/tree/one.txt", "1"u8.ToArray(), modifyTime: 1_600_000_001);
+            f.AddFile(Home + "/tree/two.txt", "2"u8.ToArray(), modifyTime: 1_600_000_003);
+            f.AddFile(Home + "/tree/three.txt", "3"u8.ToArray(), modifyTime: 1_600_000_003);
+        });
+        var target = Path.Combine(_dir, "down");
+        Directory.CreateDirectory(target);
+        foreach (var (name, text, seconds) in new[] { ("one.txt", "1", 1_600_000_002), ("two.txt", "2", 1_600_000_001), ("three.txt", "3", 1_600_000_006) })
+        {
+            await File.WriteAllTextAsync(Path.Combine(target, name), text);
+            File.SetLastWriteTimeUtc(Path.Combine(target, name), DateTime.UnixEpoch.AddSeconds(seconds));
+        }
+
+        var summary = await rig.Sftp.DownloadDirectoryAsync("tree", target,
+            new SftpTransferOptions { SkipUnchanged = true, TimeTolerance = TimeSpan.FromSeconds(2), MaxConcurrentFiles = concurrentFiles }, Timeout());
+
+        await Assert.That(summary).IsEqualTo(new SftpTransferSummary(1, 0, 1, 0) { Unchanged = 2 });
+        await Assert.That(File.GetLastWriteTimeUtc(Path.Combine(target, "one.txt"))).IsEqualTo(DateTime.UnixEpoch.AddSeconds(1_600_000_002)); // left alone
+    }
+
+    [Test]
+    [Arguments(1)]
+    [Arguments(4)]
+    public async Task UploadDirectory_TimeTolerance_LeavesRemoteFilesWhoseTimesDifferByNoMore(int concurrentFiles)
+    {
+        var source = Path.Combine(_dir, "up");
+        Directory.CreateDirectory(source);
+        await File.WriteAllTextAsync(Path.Combine(source, "near.txt"), "near");
+        File.SetLastWriteTimeUtc(Path.Combine(source, "near.txt"), DateTime.UnixEpoch.AddSeconds(1_600_000_001.5));
+        await File.WriteAllTextAsync(Path.Combine(source, "far.txt"), "far");
+        File.SetLastWriteTimeUtc(Path.Combine(source, "far.txt"), DateTime.UnixEpoch.AddSeconds(1_600_000_005));
+        await using var rig = await Rig.StartAsync(f =>
+        {
+            f.AddDirectory(Home + "/up");
+            f.AddFile(Home + "/up/near.txt", "near"u8.ToArray(), modifyTime: 1_600_000_000); // a share that kept even seconds
+            f.AddFile(Home + "/up/far.txt", "old"u8.ToArray(), modifyTime: 1_600_000_000);
+        });
+
+        var summary = await rig.Sftp.UploadDirectoryAsync(source, "up",
+            new SftpTransferOptions { SkipUnchanged = true, TimeTolerance = TimeSpan.FromSeconds(1), MaxConcurrentFiles = concurrentFiles }, Timeout());
+        var exact = await rig.Sftp.UploadDirectoryAsync(source, "up",
+            new SftpTransferOptions { SkipUnchanged = true, MaxConcurrentFiles = concurrentFiles, Filter = e => e.Name == "near.txt" }, Timeout());
+
+        await Assert.That(summary).IsEqualTo(new SftpTransferSummary(1, 0, 3, 0) { Unchanged = 1 });
+        await Assert.That(System.Text.Encoding.UTF8.GetString(rig.Files.FileData(Home + "/up/far.txt")!)).IsEqualTo("far");
+        await Assert.That(exact.Files).IsEqualTo(1).Because("a second apart is a change without a tolerance");
+    }
+
+    // ---- SkipUnreadableDirectories (#379) ----
+
+    /// <summary>tree/a.txt, tree/locked/ (b.txt, inner/c.txt), tree/open/d.txt, tree/z.txt.</summary>
+    private static void AddLockedTree(FakeSftpServer files)
+    {
+        files.AddDirectory(Home + "/tree");
+        files.AddFile(Home + "/tree/a.txt", "a"u8.ToArray());
+        files.AddDirectory(Home + "/tree/locked");
+        files.AddFile(Home + "/tree/locked/b.txt", "b"u8.ToArray());
+        files.AddDirectory(Home + "/tree/locked/inner");
+        files.AddFile(Home + "/tree/locked/inner/c.txt", "c"u8.ToArray());
+        files.AddDirectory(Home + "/tree/open");
+        files.AddFile(Home + "/tree/open/d.txt", "d"u8.ToArray());
+        files.AddDirectory(Home + "/tree/open/private");
+        files.AddFile(Home + "/tree/z.txt", "z"u8.ToArray());
+        files.DenyOpenDir = path => path is Home + "/tree/locked" or Home + "/tree/open/private";
+    }
+
+    [Test]
+    [Arguments(1)]
+    [Arguments(4)]
+    public async Task DownloadDirectory_SkipUnreadableDirectories_LeavesThemOut_AndReportsThem(int concurrentFiles)
+    {
+        await using var rig = await Rig.StartAsync(AddLockedTree);
+        var target = Path.Combine(_dir, "down");
+
+        var summary = await rig.Sftp.DownloadDirectoryAsync("tree", target,
+            new SftpTransferOptions { SkipUnreadableDirectories = true, MaxConcurrentFiles = concurrentFiles }, Timeout());
+
+        await Assert.That(summary with { UnreadableDirectories = [] }).IsEqualTo(new SftpTransferSummary(3, 1, 3, 0));
+        await Assert.That(string.Join(",", summary.UnreadableDirectories)).IsEqualTo("locked,open/private");
+        await Assert.That(File.Exists(Path.Combine(target, "z.txt"))).IsTrue(); // the transfer went on after them
+        await Assert.That(File.Exists(Path.Combine(target, "open", "d.txt"))).IsTrue();
+        await Assert.That(Path.Exists(Path.Combine(target, "locked"))).IsFalse(); // not created
+        await Assert.That(Path.Exists(Path.Combine(target, "open", "private"))).IsFalse();
+    }
+
+    [Test]
+    [Arguments(1)]
+    [Arguments(4)]
+    public async Task DownloadDirectory_AnUnreadableDirectory_FailsTheTransferByDefault(int concurrentFiles)
+    {
+        await using var rig = await Rig.StartAsync(AddLockedTree);
+
+        var thrown = await Assert.That(async () => await rig.Sftp.DownloadDirectoryAsync("tree", Path.Combine(_dir, "down"),
+            new SftpTransferOptions { MaxConcurrentFiles = concurrentFiles }, Timeout())).Throws<SftpException>();
+
+        await Assert.That(thrown!.Status).IsEqualTo(SftpStatusCode.PermissionDenied);
+    }
+
+    [Test]
+    [Arguments(2u, "No such file")] // deleted meanwhile
+    [Arguments(4u, "Failure")]
+    public async Task DownloadDirectory_SkipUnreadableDirectories_StillFailsOnOtherErrors(uint code, string message)
+    {
+        await using var rig = await Rig.StartAsync(f =>
+        {
+            AddLockedTree(f);
+            f.DenyOpenDirStatus = (code, message);
+        });
+
+        var thrown = await Assert.That(async () => await rig.Sftp.DownloadDirectoryAsync("tree", Path.Combine(_dir, "down"),
+            new SftpTransferOptions { SkipUnreadableDirectories = true }, Timeout())).Throws<SftpException>();
+
+        await Assert.That((uint)thrown!.Status).IsEqualTo(code);
+    }
+
+    [Test]
+    public async Task DownloadDirectory_SkipUnreadableDirectories_TheTopDirectoryStillFails()
+    {
+        await using var rig = await Rig.StartAsync(f =>
+        {
+            AddLockedTree(f);
+            f.DenyOpenDir = path => path == Home + "/tree";
+        });
+
+        var thrown = await Assert.That(async () => await rig.Sftp.DownloadDirectoryAsync("tree", Path.Combine(_dir, "down"),
+            new SftpTransferOptions { SkipUnreadableDirectories = true }, Timeout())).Throws<SftpException>();
+
+        await Assert.That(thrown!.Status).IsEqualTo(SftpStatusCode.PermissionDenied);
+    }
+
+    [Test]
+    [Arguments(1)]
+    [Arguments(4)]
+    public async Task UploadDirectory_SkipUnreadableDirectories_LeavesLocalOnesOut_AndReportsThem(int concurrentFiles)
+    {
+        var source = Path.Combine(_dir, "up");
+        Directory.CreateDirectory(Path.Combine(source, "locked", "inner"));
+        Directory.CreateDirectory(Path.Combine(source, "open"));
+        await File.WriteAllTextAsync(Path.Combine(source, "a.txt"), "a");
+        await File.WriteAllTextAsync(Path.Combine(source, "locked", "b.txt"), "b");
+        await File.WriteAllTextAsync(Path.Combine(source, "open", "d.txt"), "d");
+        await File.WriteAllTextAsync(Path.Combine(source, "z.txt"), "z");
+        using var denied = LocalDenial.Deny(Path.Combine(source, "locked"));
+        await using var rig = await Rig.StartAsync();
+
+        var thrown = await Assert.That(async () => await rig.Sftp.UploadDirectoryAsync(source, "failed",
+            new SftpTransferOptions { MaxConcurrentFiles = concurrentFiles }, Timeout())).Throws<UnauthorizedAccessException>();
+        var summary = await rig.Sftp.UploadDirectoryAsync(source, "up",
+            new SftpTransferOptions { SkipUnreadableDirectories = true, MaxConcurrentFiles = concurrentFiles }, Timeout());
+
+        await Assert.That(thrown).IsNotNull(); // by default
+        await Assert.That(summary with { UnreadableDirectories = [] }).IsEqualTo(new SftpTransferSummary(3, 1, 3, 0));
+        await Assert.That(string.Join(",", summary.UnreadableDirectories)).IsEqualTo("locked");
+        await Assert.That(string.Join(",", rig.Files.FilesUnder(Home + "/up"))).IsEqualTo($"{Home}/up/a.txt,{Home}/up/open/d.txt,{Home}/up/z.txt");
+        await Assert.That(rig.Files.Exists(Home + "/up/locked")).IsFalse(); // not created
+    }
+
+    /// <summary>
+    /// Makes a local directory unreadable for this account (a deny ACE for listing it on Windows, mode 000 elsewhere) until disposed,
+    /// so the temporary tree can be deleted again.
+    /// </summary>
+    private sealed class LocalDenial : IDisposable
+    {
+        private readonly string _path;
+        private readonly System.Security.AccessControl.FileSystemAccessRule? _rule;
+        private readonly UnixFileMode _mode;
+
+        private LocalDenial(string path)
+        {
+            _path = path;
+            if (OperatingSystem.IsWindows())
+            {
+                _rule = new System.Security.AccessControl.FileSystemAccessRule(System.Security.Principal.WindowsIdentity.GetCurrent().User!,
+                    System.Security.AccessControl.FileSystemRights.ListDirectory, System.Security.AccessControl.AccessControlType.Deny);
+                var info = new DirectoryInfo(path);
+                var security = info.GetAccessControl();
+                security.AddAccessRule(_rule);
+                info.SetAccessControl(security);
+            }
+            else
+            {
+                _mode = File.GetUnixFileMode(path);
+                File.SetUnixFileMode(path, UnixFileMode.None);
+            }
+        }
+
+        public static LocalDenial Deny(string path)
+        {
+            var denial = new LocalDenial(path);
+            try
+            {
+                _ = Directory.EnumerateFileSystemEntries(path).Any();
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return denial;
+            }
+
+            denial.Dispose();
+            Skip.Test("This account reads every directory (root), so none can be made unreadable to it.");
+            return denial;
+        }
+
+        public void Dispose()
+        {
+            if (OperatingSystem.IsWindows())
+            {
+                var info = new DirectoryInfo(_path);
+                var security = info.GetAccessControl();
+                security.RemoveAccessRule(_rule!);
+                info.SetAccessControl(security);
+            }
+            else
+            {
+                File.SetUnixFileMode(_path, _mode);
+            }
+        }
     }
 }

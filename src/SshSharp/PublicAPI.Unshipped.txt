@@ -1,1 +1,13 @@
 #nullable enable
+SshSharp.Sftp.SftpListOptions.IgnoreCase.get -> bool
+SshSharp.Sftp.SftpListOptions.IgnoreCase.init -> void
+SshSharp.Sftp.SftpListOptions.SkipUnreadableDirectories.get -> bool
+SshSharp.Sftp.SftpListOptions.SkipUnreadableDirectories.init -> void
+SshSharp.Sftp.SftpListOptions.UnreadableDirectory.get -> System.Action<SshSharp.Sftp.SftpFileInfo!>?
+SshSharp.Sftp.SftpListOptions.UnreadableDirectory.init -> void
+SshSharp.Sftp.SftpTransferOptions.SkipUnreadableDirectories.get -> bool
+SshSharp.Sftp.SftpTransferOptions.SkipUnreadableDirectories.init -> void
+SshSharp.Sftp.SftpTransferOptions.TimeTolerance.get -> System.TimeSpan
+SshSharp.Sftp.SftpTransferOptions.TimeTolerance.init -> void
+SshSharp.Sftp.SftpTransferSummary.UnreadableDirectories.get -> System.Collections.Generic.IReadOnlyList<string!>!
+SshSharp.Sftp.SftpTransferSummary.UnreadableDirectories.init -> void

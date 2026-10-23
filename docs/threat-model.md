@@ -311,9 +311,12 @@ connection, but not read or change it: each host's key is verified end to end, b
   server's `REALPATH` resolves (a server that does not resolve links leaves it to `MaxDepth`). The server decides what a listing
   contains, so a hostile one can make a recursive listing as large as `MaxDepth` allows; stop or cancel it to bound the work.
 - `SftpTransferOptions.SkipUnchanged` trusts the sizes and modification times the server reports (in a download's listing, or of
-  the remote files an upload would replace): a server can make a transfer leave files it should have replaced. It cannot make
-  anything be written that it did not send. `SftpTransferOptions.Filter` is the caller's code, run locally for each entry; in a
-  download it sees the server's names and attributes, already checked as above.
+  the remote files an upload would replace): a server can make a transfer leave files it should have replaced (`TimeTolerance`
+  gives it nothing more: it can report any time it likes). It cannot make anything be written that it did not send. With
+  `SkipUnreadableDirectories` (transfers and recursive listings), a server can leave a directory out by refusing it with
+  `PermissionDenied`; a transfer lists every such directory in `SftpTransferSummary.UnreadableDirectories` (a listing reports it to
+  `UnreadableDirectory`), and any other error still fails the transfer. `SftpTransferOptions.Filter` is the caller's code, run
+  locally for each entry; in a download it sees the server's names and attributes, already checked as above.
 - A server that stops answering holds a request until the session ends, unless `SftpClient.OperationTimeout` is set; it then
   fails the request (`Timeout`) once the server has been silent that long.
 - Segmented transfers (`Segments`) open more SFTP sessions as channels of the same connection: nothing new is authenticated or sent
