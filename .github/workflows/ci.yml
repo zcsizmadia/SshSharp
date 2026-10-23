@@ -400,9 +400,10 @@ jobs:
         run: |
           docker logs server 2>&1 | grep -vE 'debug1: (enqueue packet|dequeue packet|ssh_set_newkeys)' | tail -n 300
 
-  # SFTP against servers other than a plain OpenSSH: atmoz/sftp (OpenSSH in SFTP-only, chrooted mode, a popular container image)
-  # and a server built on Go's pkg/sftp (the stack behind many Go-based SFTP products). Most SFTP bug reports against other .NET
-  # clients are about such servers. Only the SFTP interop tests run: these servers have no shell.
+  # SFTP against servers other than a plain OpenSSH: atmoz/sftp (OpenSSH in SFTP-only, chrooted mode, a popular container image),
+  # a server built on Go's pkg/sftp (the stack behind many Go-based SFTP products), and ProFTPD's mod_sftp (an SFTP server that is not
+  # OpenSSH, and the one that announces check-file, for the file hash test). Most SFTP bug reports against other .NET clients are about
+  # such servers. Only the SFTP interop tests run: these servers have no shell.
   interop-sftp:
     name: interop (${{ matrix.name }})
     runs-on: ubuntu-latest
@@ -415,6 +416,8 @@ jobs:
             kind: atmoz
           - name: Go pkg/sftp
             kind: pkgsftp
+          - name: ProFTPD mod_sftp
+            kind: proftpd
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -435,6 +438,13 @@ jobs:
               atmoz/sftp:alpine@sha256:7e439fabeae536fa254340724c042e11999924d906417dbb5c73602ad518813f "tester:$PASSWORD:1001::upload"
             SOFTWARE=OpenSSH
             DIR=upload
+          elif [ "${{ matrix.kind }}" = "proftpd" ]; then
+            # User tester, chrooted to its home (tests/sftp-servers/proftpd/entrypoint.sh), on the Alpine 3.22 image of the other jobs.
+            docker run -d --name server -p 127.0.0.1:2201:2222 -e TEST_PASSWORD="$PASSWORD" \
+              -v "$PWD/tests/sftp-servers/proftpd/entrypoint.sh:/entrypoint.sh:ro" \
+              alpine@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8 sh /entrypoint.sh
+            SOFTWARE=mod_sftp
+            DIR=
           else
             (cd tests/sftp-servers/pkgsftp && go build -o "$RUNNER_TEMP/pkgsftp" .)
             mkdir -p "$RUNNER_TEMP/sftp-root"
@@ -443,7 +453,7 @@ jobs:
             SOFTWARE=pkg/sftp
             DIR=
           fi
-          BANNER="$(tests/docker/wait-for-ssh.sh 2201)" || { echo "::error::the server does not answer"; cat "$RUNNER_TEMP/server.log" || true; exit 1; }
+          BANNER="$(tests/docker/wait-for-ssh.sh 2201)" || { echo "::error::the server does not answer"; docker logs server 2>&1 || cat "$RUNNER_TEMP/server.log" || true; exit 1; }
           echo "Server: $BANNER"
           echo "Server: \`$BANNER\`" >> "$GITHUB_STEP_SUMMARY"
           {
@@ -468,7 +478,11 @@ jobs:
       - name: Server log
         if: failure()
         run: |
-          if [ "${{ matrix.kind }}" = "atmoz" ]; then docker logs server 2>&1 | tail -n 200; else tail -n 200 "$RUNNER_TEMP/server.log"; fi
+          case "${{ matrix.kind }}" in
+            atmoz) docker logs server 2>&1 | tail -n 200 ;;
+            proftpd) docker logs server 2>&1 | tail -n 50; docker exec server tail -n 200 /var/log/proftpd/sftp.log ;;
+            *) tail -n 200 "$RUNNER_TEMP/server.log" ;;
+          esac
 
   # Microsoft's OpenSSH for Windows as the server, with Git Bash as its default shell (the interop tests run POSIX commands).
   # Password-only, like the container matrix: the tests that need keys, certificates or an agent skip themselves.

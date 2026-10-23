@@ -253,6 +253,26 @@ public sealed class SftpFileHashTests
     }
 
     [Test]
+    public async Task AReplyWithoutTheExtensionsName_AsProFtpdSendsIt_IsRead()
+    {
+        // ProFTPD's mod_sftp announces check-file with the data "1" and replies with the algorithm and the hash, leaving out the
+        // "check-file" that draft-ietf-secsh-filexfer-extensions puts first.
+        await using var rig = await Rig.StartAsync(f =>
+        {
+            f.AddFile(Home + "/data.bin", Data);
+            f.Extensions["check-file"] = "1";
+            f.RawFrame = packet => IsExtended(packet, "check-file-name")
+                ? ReplyTo(packet, 201, w => { w.WriteString("sha256"); w.WriteBytes(SHA256.HashData(Data)); })
+                : null;
+        });
+
+        var hash = await rig.Sftp.GetFileHashAsync("data.bin", cancellationToken: Timeout());
+
+        await Assert.That(hash.Algorithm).IsEqualTo("sha256");
+        await Assert.That(hash.Matches(SHA256.HashData(Data))).IsTrue();
+    }
+
+    [Test]
     public async Task AHashOfTheWrongLength_IsAProtocolError()
     {
         await using var rig = await Rig.StartAsync(f =>

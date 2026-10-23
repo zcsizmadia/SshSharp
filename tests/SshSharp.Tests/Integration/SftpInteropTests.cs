@@ -527,6 +527,13 @@ public class SftpInteropTests
                         await Assert.That((await sftp.GetAttributesAsync(root + "/blob", cancellationToken: Timeout())).LastWriteTime).IsNotEqualTo(linkTime);
                     }
                 }
+                else if (RealServer.IsProFtpd)
+                {
+                    // ProFTPD's LSTAT resolves the path through the link before it looks (dir_best_path), so it describes the file the link
+                    // leads to; the link itself is still there.
+                    await Assert.That(link.IsRegularFile).IsTrue();
+                    await Assert.That((await sftp.ReadSymbolicLinkAsync(root + "/link", Timeout())).EndsWith("blob", StringComparison.Ordinal)).IsTrue();
+                }
                 else
                 {
                     // MSYS2 and Cygwin servers on Windows make a copy instead of a link unless told otherwise (winsymlinks).
@@ -892,6 +899,15 @@ public class SftpInteropTests
             return;
         }
 
+        if (RealServer.IsProFtpd)
+        {
+            // mod_sftp keeps one buffer for a partly received SFTP packet per connection, not per channel (fxp.c, curr_buf), so WRITE
+            // requests longer than a channel data message, sent over several sessions at once, are mixed up: it answers "Invalid handle"
+            // and closes the connection. A server limit; docs/reference/troubleshooting.md says what to do.
+            Skip.Test("ProFTPD's mod_sftp mixes up SFTP packets that arrive over several sessions of one connection at once.");
+            return;
+        }
+
         var local = Directory.CreateTempSubdirectory("sshsharp-upload-segments-");
         await using var client = await SshClient.ConnectAsync(host, port, options, Timeout());
         await using var sftp = await client.OpenSftpAsync(Timeout());
@@ -972,8 +988,11 @@ public class SftpInteropTests
             var whole = await sftp.GetFileHashAsync(remote, algorithms, cancellationToken: Timeout());
             await Assert.That(whole.Matches(LocalHash(whole.Algorithm, data))).IsTrue().Because($"the server's {whole.Algorithm} hash");
 
-            var range = await sftp.GetFileHashAsync(remote, algorithms, offset: 1000, length: 50_000, Timeout());
-            await Assert.That(range.Matches(LocalHash(range.Algorithm, data.AsSpan(1000, 50_000).ToArray()))).IsTrue();
+            // ProFTPD's mod_sftp (1.3.9) reads the range in chunks of four file system blocks and hashes on to the end of the file when the
+            // length is not a multiple of that (fxp.c, read_file_block), so it gets a length that is.
+            var length = RealServer.IsProFtpd ? 65_536 : 50_000;
+            var range = await sftp.GetFileHashAsync(remote, algorithms, offset: 1000, length: length, Timeout());
+            await Assert.That(range.Matches(LocalHash(range.Algorithm, data.AsSpan(1000, length).ToArray()))).IsTrue();
         }
         finally
         {

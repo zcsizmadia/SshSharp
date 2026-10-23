@@ -42,6 +42,10 @@ public sealed partial class SftpClient
     /// The hash is what the server says it is: it shows that the server holds the bytes it was sent, as far as the server can be trusted
     /// to compute it. It does not protect against a server that lies.
     /// </para>
+    /// <para>
+    /// ProFTPD's mod_sftp (1.3.9) hashes a range on to the end of the file unless <paramref name="length"/> is a multiple of its read
+    /// size (four file system blocks, 16 KiB on most file systems), so ask it for the whole file, or for a multiple of 64 KiB.
+    /// </para>
     /// </remarks>
     /// <param name="path">The remote file.</param>
     /// <param name="algorithms">The hash algorithms to accept, in order of preference, by their <c>check-file</c> names (<c>sha256</c>, <c>sha512</c>, ...); null for SHA-2 only.</param>
