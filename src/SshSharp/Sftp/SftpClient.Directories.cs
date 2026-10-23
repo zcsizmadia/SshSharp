@@ -22,7 +22,10 @@ public sealed partial class SftpClient
     /// </remarks>
     /// <exception cref="SshException">A path would end up outside the target (<see cref="SshFailureReason.TransferFailed"/>), or the tree is
     /// deeper than 64 levels.</exception>
-    public async Task<SftpTransferSummary> DownloadDirectoryAsync(string remoteDirectory, string localDirectory, SftpTransferOptions? options = null, CancellationToken cancellationToken = default)
+    public Task<SftpTransferSummary> DownloadDirectoryAsync(string remoteDirectory, string localDirectory, SftpTransferOptions? options = null, CancellationToken cancellationToken = default) =>
+        TracedAsync("SshSharp.Sftp.DownloadDirectory", () => DownloadDirectoryCoreAsync(remoteDirectory, localDirectory, options, cancellationToken));
+
+    private async Task<SftpTransferSummary> DownloadDirectoryCoreAsync(string remoteDirectory, string localDirectory, SftpTransferOptions? options, CancellationToken cancellationToken)
     {
         CheckPath(remoteDirectory);
         ArgumentException.ThrowIfNullOrEmpty(localDirectory);
@@ -51,7 +54,10 @@ public sealed partial class SftpClient
     /// files that match the local ones in size and modification time.
     /// </summary>
     /// <exception cref="DirectoryNotFoundException"><paramref name="localDirectory"/> does not exist.</exception>
-    public async Task<SftpTransferSummary> UploadDirectoryAsync(string localDirectory, string remoteDirectory, SftpTransferOptions? options = null, CancellationToken cancellationToken = default)
+    public Task<SftpTransferSummary> UploadDirectoryAsync(string localDirectory, string remoteDirectory, SftpTransferOptions? options = null, CancellationToken cancellationToken = default) =>
+        TracedAsync("SshSharp.Sftp.UploadDirectory", () => UploadDirectoryCoreAsync(localDirectory, remoteDirectory, options, cancellationToken));
+
+    private async Task<SftpTransferSummary> UploadDirectoryCoreAsync(string localDirectory, string remoteDirectory, SftpTransferOptions? options, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrEmpty(localDirectory);
         CheckPath(remoteDirectory);

@@ -600,7 +600,10 @@ public sealed partial class SftpClient : IAsyncDisposable
     /// 64 reads of up to <see cref="SftpLimits.MaxReadLength"/>), which is what makes SFTP fast on links with latency.
     /// </summary>
     /// <returns>The number of bytes downloaded.</returns>
-    public async Task<long> DownloadAsync(string remotePath, Stream destination, SftpTransferOptions? options = null, CancellationToken cancellationToken = default)
+    public Task<long> DownloadAsync(string remotePath, Stream destination, SftpTransferOptions? options = null, CancellationToken cancellationToken = default) =>
+        TracedAsync("SshSharp.Sftp.Download", () => DownloadStreamAsync(remotePath, destination, options, cancellationToken));
+
+    private async Task<long> DownloadStreamAsync(string remotePath, Stream destination, SftpTransferOptions? options, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(destination);
         options ??= new SftpTransferOptions();
@@ -622,7 +625,10 @@ public sealed partial class SftpClient : IAsyncDisposable
     /// modification and access times, and its permissions where this system has Unix modes. A failed download leaves no partial file behind.
     /// </summary>
     /// <returns>The number of bytes downloaded.</returns>
-    public async Task<long> DownloadFileAsync(string remotePath, string localPath, SftpTransferOptions? options = null, CancellationToken cancellationToken = default)
+    public Task<long> DownloadFileAsync(string remotePath, string localPath, SftpTransferOptions? options = null, CancellationToken cancellationToken = default) =>
+        TracedAsync("SshSharp.Sftp.Download", () => DownloadLocalFileAsync(remotePath, localPath, options, cancellationToken));
+
+    private async Task<long> DownloadLocalFileAsync(string remotePath, string localPath, SftpTransferOptions? options, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrEmpty(localPath);
         options ??= new SftpTransferOptions();
@@ -844,7 +850,10 @@ public sealed partial class SftpClient : IAsyncDisposable
     /// file is created or, with <see cref="SftpTransferOptions.Overwrite"/>, truncated.
     /// </summary>
     /// <returns>The number of bytes uploaded.</returns>
-    public async Task<long> UploadAsync(Stream source, string remotePath, SftpTransferOptions? options = null, CancellationToken cancellationToken = default)
+    public Task<long> UploadAsync(Stream source, string remotePath, SftpTransferOptions? options = null, CancellationToken cancellationToken = default) =>
+        TracedAsync("SshSharp.Sftp.Upload", () => UploadStreamAsync(source, remotePath, options, cancellationToken));
+
+    private async Task<long> UploadStreamAsync(Stream source, string remotePath, SftpTransferOptions? options, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(source);
         options ??= new SftpTransferOptions();
@@ -932,7 +941,10 @@ public sealed partial class SftpClient : IAsyncDisposable
     /// <see cref="SftpTransferOptions.Segments"/>, a large file is written in parallel ranges over several sessions.
     /// </summary>
     /// <returns>The number of bytes uploaded.</returns>
-    public async Task<long> UploadFileAsync(string localPath, string remotePath, SftpTransferOptions? options = null, CancellationToken cancellationToken = default)
+    public Task<long> UploadFileAsync(string localPath, string remotePath, SftpTransferOptions? options = null, CancellationToken cancellationToken = default) =>
+        TracedAsync("SshSharp.Sftp.Upload", () => UploadLocalFileAsync(localPath, remotePath, options, cancellationToken));
+
+    private async Task<long> UploadLocalFileAsync(string localPath, string remotePath, SftpTransferOptions? options, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrEmpty(localPath);
         options ??= new SftpTransferOptions();
@@ -944,7 +956,7 @@ public sealed partial class SftpClient : IAsyncDisposable
         else
         {
             await using var file = new FileStream(localPath, FileMode.Open, FileAccess.Read, FileShare.Read, 64 * 1024, useAsync: true);
-            total = await UploadAsync(file, remotePath, options, cancellationToken).ConfigureAwait(false);
+            total = await UploadStreamAsync(file, remotePath, options, cancellationToken).ConfigureAwait(false);
         }
 
         if (options.Preserve)
@@ -958,6 +970,48 @@ public sealed partial class SftpClient : IAsyncDisposable
         }
 
         return total;
+    }
+
+    /// <summary>
+    /// Runs a file transfer in its span (<c>SshSharp.Sftp.Upload</c> or <c>Download</c>), tagged with the bytes it moved or, when it fails,
+    /// <c>error.type</c>. The paths are not recorded. Each file of a directory transfer is a span of its own, inside the directory's.
+    /// </summary>
+    private static async Task<long> TracedAsync(string name, Func<Task<long>> transfer)
+    {
+        using var activity = SshTelemetry.StartTransfer(name);
+        try
+        {
+            var bytes = await transfer().ConfigureAwait(false);
+            activity?.SetTag("ssh.sftp.bytes", bytes);
+            return bytes;
+        }
+        catch (Exception ex)
+        {
+            SshTelemetry.Failed(activity, ex);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Runs a directory transfer in its span (<c>SshSharp.Sftp.UploadDirectory</c> or <c>DownloadDirectory</c>), tagged with what it moved
+    /// (bytes, files, directories) or, when it fails, <c>error.type</c>.
+    /// </summary>
+    private static async Task<SftpTransferSummary> TracedAsync(string name, Func<Task<SftpTransferSummary>> transfer)
+    {
+        using var activity = SshTelemetry.StartTransfer(name);
+        try
+        {
+            var summary = await transfer().ConfigureAwait(false);
+            activity?.SetTag("ssh.sftp.bytes", summary.Bytes);
+            activity?.SetTag("ssh.sftp.files", summary.Files);
+            activity?.SetTag("ssh.sftp.directories", summary.Directories);
+            return summary;
+        }
+        catch (Exception ex)
+        {
+            SshTelemetry.Failed(activity, ex);
+            throw;
+        }
     }
 
     /// <summary>Ends the SFTP session (the SSH connection stays up). Requests still waiting fail.</summary>
@@ -1216,6 +1270,7 @@ public sealed partial class SftpClient : IAsyncDisposable
 
                         await write(offset, data, cancellationToken).ConfigureAwait(false);
                         total += data.Length;
+                        SshTelemetry.SftpBytes.Add(data.Length, SshTelemetry.Download);
                         if (data.Length < length)
                         {
                             // The follow-up read takes over this read's slot: it must go out, and before anything else of this file.
@@ -1473,6 +1528,7 @@ public sealed partial class SftpClient : IAsyncDisposable
                     confirmed.Confirmed += length;
                 }
 
+                SshTelemetry.SftpBytes.Add(length, SshTelemetry.Upload);
                 acknowledged?.Invoke(length);
             }
             finally

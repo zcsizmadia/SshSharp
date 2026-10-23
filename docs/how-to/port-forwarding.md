@@ -256,6 +256,9 @@ before disposing; forwardings to a host and port, or dynamic ones, close their c
   everyone on the server.
 - **Limits.** The server can open at most `SshClientOptions.MaxForwardedConnections` (1,000) forwarded connections at a time, and a
   forwarding to a handler at most its `maxConnections`.
+- **Metrics.** `sshsharp.forwarding.connections` counts forwarded connections that opened or failed, and `sshsharp.forwarding.active`
+  those open now, each tagged with the kind of forwarding (`local`, `dynamic`, `remote`, `remote_dynamic`), never an address, port or
+  path (see [Tracing and metrics](../diagnostics.md#tracing-and-metrics)).
 - **From `ssh_config`.** `LocalForward`, `RemoteForward` and `DynamicForward` start with the connection when
   `SshConfigConnectOptions.StartForwardings` is true, Unix-socket forms included (`LocalForward /tmp/docker.sock /var/run/docker.sock`).
   Socket paths take `ssh_config`'s `%` tokens and `${VAR}` on both sides (`RemoteForward /home/%r/app.sock /run/app.sock`), and the

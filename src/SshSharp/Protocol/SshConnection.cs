@@ -39,6 +39,7 @@ internal sealed class SshConnection : IAsyncDisposable
     private readonly CancellationTokenSource _closed = new();
     private readonly TimeProvider _time;
     private long _lastReceived;
+    private long _keepAliveSent; // when the keep-alive ping being timed was sent; 0 when none is
     private Task? _keepAliveLoop;
     private Task? _channelTimeoutLoop;
 
@@ -306,6 +307,8 @@ internal sealed class SshConnection : IAsyncDisposable
         reply?.TrySetResult(result);
     }
 
+    private void RecordKeepAlive(long sent) => SshTelemetry.KeepAliveRoundTrip.Record(_time.GetElapsedTime(sent).TotalSeconds);
+
     private async Task RunKeepAliveAsync(TimeSpan interval, int countMax)
     {
         var missed = 0;
@@ -339,14 +342,24 @@ internal sealed class SshConnection : IAsyncDisposable
                 // Any packet from the server counts as an answer; the reply itself is not awaited (a dead server never sends it). A transport
                 // ping where the server has one (cheaper, and answered by servers whose global-request replies get lost), otherwise the
                 // keepalive@openssh.com global request, as OpenSSH's client sends.
+                var sent = _time.GetTimestamp();
                 if (SupportsPing)
                 {
+                    // Keep-alive pongs all echo 0, so a round trip is timed only from a probe sent with none outstanding: one sent while
+                    // the last is still unanswered (dropped during a key exchange, or late) times nothing, rather than pair with the
+                    // wrong pong.
+                    Interlocked.Exchange(ref _keepAliveSent, Interlocked.Read(ref _keepAliveSent) == 0 ? sent : 0);
                     Post(PingMessage(0));
                 }
                 else
                 {
                     var probe = SendGlobalRequestAsync("keepalive@openssh.com", wantReply: true, null, _stop.Token);
                     _ = probe.ContinueWith(static t => _ = t.Exception, CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
+                    if (SshTelemetry.KeepAliveRoundTrip.Enabled)
+                    {
+                        _ = probe.ContinueWith(_ => RecordKeepAlive(sent), CancellationToken.None,
+                            TaskContinuationOptions.OnlyOnRanToCompletion | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+                    }
                 }
             }
         }
@@ -794,9 +807,16 @@ internal sealed class SshConnection : IAsyncDisposable
             {
                 var data = reader.ReadString();
                 Instrumentation.Trace($"kex: pong ({data.Length} bytes)");
-                if (data.Length == 8 && _pings.TryGetValue(System.Buffers.Binary.BinaryPrimitives.ReadUInt64BigEndian(data), out var waiting))
+                if (data.Length == 8 && System.Buffers.Binary.BinaryPrimitives.ReadUInt64BigEndian(data) is var id)
                 {
-                    waiting.TrySetResult();
+                    if (_pings.TryGetValue(id, out var waiting))
+                    {
+                        waiting.TrySetResult();
+                    }
+                    else if (id == 0 && Interlocked.Exchange(ref _keepAliveSent, 0) is var sent and not 0)
+                    {
+                        RecordKeepAlive(sent);
+                    }
                 }
 
                 return false; // a keep-alive's pong, or one nobody waits for any more: receiving it was the point

@@ -76,7 +76,10 @@ builder.Services.AddOpenTelemetry()
 | Activity | Kind | Tags |
 |---|---|---|
 | `SshSharp.Connect` | Client | `network.protocol.name` (`ssh`), `network.protocol.version` (`2.0`), `network.transport` (`tcp`) and `server.port` when SshSharp makes a direct TCP connection (not through a proxy, `ProxyCommand` or `ProxyJump`, nor over your own stream), `ssh.kex`, `ssh.kex.post_quantum`, `ssh.cipher`, `ssh.host_key.type`; on failure `error.type` |
+| `SshSharp.Authenticate` | Internal | Inside `SshSharp.Connect`, from the `ssh-userauth` service request to the end of authentication: `ssh.auth.method` (the method that completed it: `password`, `publickey`, `keyboard-interactive`, `gssapi-with-mic`, or `none` on a server that lets anyone in), `ssh.auth.attempts` (the authentication requests sent with a credential; the first `none` request, which only asks for the methods, is not counted, a key held by an agent or a signer can take two, a query and then the signature, and a password change is one more); on failure `error.type` |
 | `SshSharp.Command` | Internal | `ssh.command.exit_status`; on failure `error.type` |
+| `SshSharp.Sftp.Upload` / `SshSharp.Sftp.Download` | Internal | One per `UploadAsync`, `UploadFileAsync`, `DownloadAsync` and `DownloadFileAsync` (and the conveniences built on them, such as `WriteAllBytesAsync`): `ssh.sftp.bytes` (what the call returns); on failure `error.type` |
+| `SshSharp.Sftp.UploadDirectory` / `SshSharp.Sftp.DownloadDirectory` | Internal | One per `UploadDirectoryAsync` and `DownloadDirectoryAsync`, with a file span inside it for each file: `ssh.sftp.bytes`, `ssh.sftp.files`, `ssh.sftp.directories` (as in `SftpTransferSummary`); on failure `error.type` |
 
 | Instrument | Unit | Description |
 |---|---|---|
@@ -86,6 +89,29 @@ builder.Services.AddOpenTelemetry()
 | `sshsharp.key_exchanges` | `{exchange}` | Completed key exchanges |
 | `sshsharp.channels` | `{channel}` | Open channels |
 | `sshsharp.commands` | `{command}` | Commands run, tagged `result` (`success`, `failure` for a non-zero exit status, `error`) and, for errors, `error.type` |
+| `sshsharp.sftp.bytes` | `By` | File data moved by SFTP transfers (the methods of the transfer spans above), tagged `ssh.sftp.direction` (`upload`, `download`). Counted as it moves, so a transfer that fails counts what it moved first; an upload counts what the server acknowledged. Reads and writes through `OpenAsync`'s streams are not counted |
+| `sshsharp.forwarding.connections` | `{connection}` | Forwarded connections, tagged `ssh.forwarding.type` and `result`: `opened` when one reaches its destination (or its handler), `failed` when it does not (the server refuses the channel, nothing listens at the local destination, a SOCKS request is refused or malformed, a forwarding's connection limit is reached). Connections cut short because their forwarding is stopping are not counted |
+| `sshsharp.forwarding.active` | `{connection}` | Open forwarded connections, tagged `ssh.forwarding.type` |
+| `sshsharp.keep_alive.round_trip_time` | `s` | Time from a keep-alive probe (`KeepAliveInterval`) to the server's answer: a `ping@openssh.com` transport ping where the server has one, otherwise the `keepalive@openssh.com` request. A ping sent while the last one is still unanswered is not timed. `PingAsync` returns its own round trip and is not recorded here |
+| `sshsharp.connection_provider.reconnects` | `{reconnect}` | `SshSharp.Extensions.DependencyInjection`: attempts of `ISshConnectionProvider` to replace a shared connection that ended, tagged `result` (`success`, `error`) and, for errors, `error.type`. The first connection, and attempts before any connection was made, are not counted. Its meter has the name `SshTelemetry.SourceName` too, so `AddMeter(SshTelemetry.SourceName)` collects it |
+
+`ssh.forwarding.type` is `local` (`ForwardLocalPortAsync`, `ForwardLocalUnixSocketAsync` and `LocalForward`), `dynamic` (a local SOCKS
+proxy, `ForwardDynamicPortAsync` and `DynamicForward`), `remote` (`ForwardRemotePortAsync`, `ForwardRemoteUnixSocketAsync`, a
+forwarding to a handler, and `RemoteForward` with a destination) or `remote_dynamic` (`ForwardRemoteDynamicPortAsync`, and
+`RemoteForward` without one). `OpenTcpTunnelAsync` and `OpenUnixSocketTunnelAsync` are channels of their own, counted in
+`sshsharp.channels` only.
+
+The spans nest like this; each file of a directory transfer is a span of its own:
+
+```mermaid
+flowchart TD
+    app["Your span (optional)"] --> connect["SshSharp.Connect"]
+    connect --> auth["SshSharp.Authenticate"]
+    app --> command["SshSharp.Command"]
+    app --> tree["SshSharp.Sftp.DownloadDirectory"]
+    tree --> file1["SshSharp.Sftp.Download (a file)"]
+    tree --> file2["SshSharp.Sftp.Download (another file)"]
+```
 
 `error.type` follows OpenTelemetry's semantic conventions: an `SshException`'s `Reason` (`AuthenticationFailed`, `Timeout`,
 `HostKeyRejected`, ...), otherwise the exception's type name; failed spans also get the `Error` status. The connect span and
@@ -99,6 +125,10 @@ using var span = MyActivitySource.StartActivity("connect to build host");
 span?.SetTag("server.address", host);
 await using var client = await SshClient.ConnectAsync(host, 22, options);
 ```
+
+For the same reason, no span or instrument records a user name, a file or directory path, a forwarding's addresses, ports or
+socket paths, a SOCKS destination, or the name of a dependency injection endpoint (often a host name). Add what your policy allows
+to a span of your own around the call, as above.
 
 Nothing is recorded unless something listens.
 

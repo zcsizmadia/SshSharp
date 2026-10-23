@@ -57,6 +57,11 @@ internal sealed class SshConnectionProvider(SshClientFactory factory, TimeProvid
                 entry.Client = client;
                 entry.LastError = null;
                 entry.Delay = TimeSpan.Zero;
+                if (entry.EverConnected)
+                {
+                    ProviderTelemetry.Reconnected();
+                }
+
                 ReportConnected(name, entry, client);
                 return client;
             }
@@ -68,6 +73,11 @@ internal sealed class SshConnectionProvider(SshClientFactory factory, TimeProvid
                     : TimeSpan.FromTicks(Math.Min(entry.Delay.Ticks * 2, endpoint.MaxReconnectDelay.Ticks));
                 entry.RetryAt = _time.GetUtcNow() + entry.Delay;
                 entry.LastError = ex;
+                if (entry.EverConnected)
+                {
+                    ProviderTelemetry.ReconnectFailed(ex);
+                }
+
                 throw;
             }
         }

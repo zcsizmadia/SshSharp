@@ -362,6 +362,9 @@ failure status, tags and a timeout.
 ## Logging and testing
 
 Clients log through the container's `ILoggerFactory`, under the category `SshSharp` (see [Errors and diagnostics](diagnostics.md)).
+The shared connection's reconnections are counted in the `sshsharp.connection_provider.reconnects` metric, tagged with the result
+and, for a failure, `error.type`, but not with the endpoint's name. It is collected with SshSharp's other metrics
+(`AddMeter(SshTelemetry.SourceName)`, see [Tracing and metrics](diagnostics.md#tracing-and-metrics)).
 
 `ISshClientFactory`, `ISshConnectionProvider` and `ISshEndpoint` are interfaces, so code that takes them can be given a fake in its
 tests.
