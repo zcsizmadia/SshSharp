@@ -9,7 +9,7 @@ does. This page describes what is tested, against what, how intermittent failure
 |---|---|
 | Unit tests | About 1,300 per target framework, with no network: scripted fake servers and agents over in-memory streams, and a fake clock |
 | Known-answer vectors | RFC and reference vectors, OpenSSL's Curve25519 vectors, the sntrup761 KAT, and about 6,400 [Project Wycheproof](https://github.com/C2SP/wycheproof) edge cases |
-| Real servers | OpenSSH (from 7.x to current, Linux and Windows), Dropbear, AsyncSSH, Apache MINA SSHD, Erlang/OTP `ssh`, and two SFTP-only servers, on every pull request |
+| Real servers | OpenSSH (from 7.x to current, Linux and Windows), Dropbear, AsyncSSH, Apache MINA SSHD, Erlang/OTP `ssh`, and three SFTP-only servers (ProFTPD among them), on every pull request |
 | Network faults | A proxy that cuts, stalls, slows down and fragments connections to real servers, at any point |
 | Fuzzing | Coverage-guided fuzzing of the parsers that read untrusted input, nightly; mutation fuzzing in every test run |
 | Mutation testing | Stryker.NET over the cryptography, the packet codec and the configuration parsers |
