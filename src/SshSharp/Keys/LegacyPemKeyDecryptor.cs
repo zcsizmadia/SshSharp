@@ -145,7 +145,8 @@ internal static class LegacyPemKeyDecryptor
         var begin = $"-----BEGIN {label}-----";
         var end = $"-----END {label}-----";
         var start = text.IndexOf(begin, StringComparison.Ordinal);
-        var stop = start < 0 ? -1 : text.IndexOf(end, start, StringComparison.Ordinal);
+        // The END line is looked for after the BEGIN line, not inside it: their dashes can overlap.
+        var stop = start < 0 ? -1 : text.IndexOf(end, start + begin.Length, StringComparison.Ordinal);
         if (stop < 0)
         {
             throw new FormatException($"Expected a PEM '{label}' block with an END line.");

@@ -169,6 +169,15 @@ public class EncryptedKeyFormatTests
     }
 
     [Test]
+    public async Task LegacyPem_EndLineOverlappingTheBeginLine_IsAFormatError()
+    {
+        // Found by the fuzzer: the END line's dashes overlap the BEGIN line's, so a search for END from the start of BEGIN found it
+        // inside BEGIN and sliced a negative length.
+        const string Pem = "Proc-Type: 4,ENCRYPTED\n-----BEGIN EC PRIVATE KEY---------END EC PRIVATE KEY-----\n";
+        await Assert.That(() => SshPrivateKey.Parse(Pem, NewPassphrase())).Throws<FormatException>().WithMessageContaining("END line");
+    }
+
+    [Test]
     public async Task LegacyPem_OtherKeyTypes_AndSmallRsa_AreRefused()
     {
         var passphrase = NewPassphrase();
