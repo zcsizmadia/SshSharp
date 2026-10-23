@@ -31,7 +31,7 @@ public sealed class BindAddressTests : IDisposable
         }
         catch (SocketException)
         {
-            return false; // macOS configures only 127.0.0.1 on lo0
+            return false; // macOS configures only 127.0.0.1 on lo0 (CI adds 127.0.0.2 as an alias)
         }
     }
 
