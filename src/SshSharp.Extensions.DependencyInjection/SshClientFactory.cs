@@ -36,6 +36,12 @@ internal sealed class SshEndpointRegistry
     }
 }
 
+/// <summary>
+/// The ssh_config that <see cref="SshEndpointOptions.ConfigAlias"/> endpoints resolve against, in place of the user's own files. The
+/// package never registers it; tests do, so that an alias connection runs end to end without depending on the machine's ~/.ssh.
+/// </summary>
+internal sealed record SshAliasConfiguration(SshConfig Config, SshConfigResolveOptions ResolveOptions);
+
 internal sealed partial class SshClientFactory(
     IServiceProvider services, SshEndpointRegistry registry, IOptionsMonitor<SshEndpointOptions> endpoints, ILoggerFactory? loggerFactory = null)
     : ISshClientFactory
@@ -60,9 +66,12 @@ internal sealed partial class SshClientFactory(
         timeout.CancelAfter(endpoint.ConnectTimeout);
         try
         {
+            var aliasConfiguration = services.GetService<SshAliasConfiguration>();
             return endpoint.ConfigAlias is { Length: > 0 } alias
                 ? await SshClient.ConnectAsync(alias, new SshConfigConnectOptions
                 {
+                    Config = aliasConfiguration?.Config,
+                    ResolveOptions = aliasConfiguration?.ResolveOptions,
                     Password = endpoint.Password,
                     Logger = _logger,
                     AddressFamily = endpoint.AddressFamily,

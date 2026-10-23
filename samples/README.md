@@ -1,11 +1,13 @@
 # Samples
 
-Runnable projects, built with the solution in CI, so they keep compiling as the API changes.
+Runnable projects, built with the solution in CI, so they keep compiling as the API changes. CI also runs two of them against its
+OpenSSH server, connecting through ssh_config with the agent's keys as a user would: the Native AOT sample's published binary, and the
+terminal sample in a pseudo-terminal (`tests/ci/run-terminal-sample.py` types a command and `exit 7`, and checks the exit status).
 
 | Sample | Shows |
 |---|---|
 | [SshSharp.Samples](SshSharp.Samples) | An `ssh`-like command-line tool, connecting through `~/.ssh/config` (aliases, ProxyJump, keys and the agent): commands, a streamed `tail`, a shell, port forwarding, a SOCKS proxy, SCP, SFTP transfers (times and permissions kept, progress, parallel ranges, resuming), a remote tree through `IFileSystem` (`SshSharp.IO.Abstractions`), and logging in with a Windows CNG key through a login-only `SshKeySigner` |
-| [SshSharp.Samples.AspNetCore](SshSharp.Samples.AspNetCore) | ASP.NET Core with `SshSharp.Extensions.DependencyInjection`: endpoints on the shared connection, a file streamed through SFTP, static files from the server (`SshSharp.FileProviders`), and a health check |
+| [SshSharp.Samples.AspNetCore](SshSharp.Samples.AspNetCore) | ASP.NET Core with `SshSharp.Extensions.DependencyInjection`: endpoints on the shared connection (also through a keyed `ISshEndpoint`), the connection's changes followed with `WatchAsync`, a file streamed through SFTP, static files from the server (`SshSharp.FileProviders`), an `HttpClient` tunnelled through the server (`UseSshTunnel`), and a health check |
 | [SshSharp.Samples.Worker](SshSharp.Samples.Worker) | A worker service that follows a remote log file across dropped connections |
 | [SshSharp.Samples.OpenTelemetry](SshSharp.Samples.OpenTelemetry) | SshSharp's traces (`SshSharp.Connect`, `SshSharp.Command`) and metrics exported with OpenTelemetry over OTLP, under a span of the application's own |
 | [SshSharp.Samples.Terminal](SshSharp.Samples.Terminal) | A terminal client: each key sent as it is pressed (arrows, function keys, Ctrl and Alt combinations), and the remote terminal resized with the window |

@@ -5,8 +5,11 @@ A minimal API that uses an SSH server through `SshSharp.Extensions.DependencyInj
 | Endpoint | Shows |
 |---|---|
 | `GET /uptime` | A command over the shared connection (`ISshConnectionProvider`), which is opened again when it drops |
+| `GET /disk` | The same, through the endpoint injected by name: `[FromKeyedServices("server")] ISshEndpoint` |
+| `GET /connection` | The shared connection's last change (`Connected`, `Disconnected`, `Reconnected`), which a hosted service follows with `WatchAsync` and logs |
 | `GET /files/{path}` | A file streamed through SFTP from one directory on the server (`Ssh:FilesRoot`) |
 | `GET /static/...` | Static files from a directory on the server (`Ssh:StaticRoot`), through `SftpFileProvider` |
+| `GET /tunnel` | An HTTP service only the server reaches (`Ssh:TunnelUrl`, for example `http://localhost:8080/` on the server), through an `HttpClient` made with `UseSshTunnel("server")` |
 | `GET /healthz` | The SSH health check (`AddHealthChecks().AddSsh("server")`) |
 
 ## Running it
@@ -17,7 +20,8 @@ A minimal API that uses an SSH server through `SshSharp.Extensions.DependencyInj
    `dotnet user-secrets set "Ssh:Server:Password" "..."` or `"Ssh:Server:PrivateKeyPassphrase"`.
 3. The server's host key must be in `~/.ssh/known_hosts` (connect once with `ssh`), or set `"AcceptNewHostKeys": true` to record it
    on first use.
-4. `dotnet run`, then open `/uptime`, `/files/<name>` or `/healthz`.
+4. `dotnet run`, then open `/uptime`, `/disk`, `/connection`, `/files/<name>` or `/healthz`. Set `Ssh:TunnelUrl` to try `/tunnel`
+   (the server must allow forwarding, sshd's `AllowTcpForwarding`).
 
 ### In a container
 
@@ -35,6 +39,10 @@ In development, the same go in user secrets: `dotnet user-secrets set "Ssh:Serve
 See [Dependency injection: containers and Kubernetes](https://zcsizmadia.github.io/SshSharp/dependency-injection.html#containers-and-kubernetes).
 
 The settings are checked when the application starts (`ValidateOnStart`), so a missing host or user name fails at once.
+
+`/connection` and the log show the shared connection's changes. Watching does not connect: the first request or health check opens
+the connection, and after a drop the next one opens it again. The events name the endpoint (`server`), never the host or user, and
+the reason for a drop (which can hold the server's text) is logged but not returned.
 
 The static file provider keeps one SFTP session on the shared connection (`ISshConnectionProvider.OpenSftpAsync` as its session
 factory), and opens a new one after the connection drops, so `/static` keeps working when the server comes back.

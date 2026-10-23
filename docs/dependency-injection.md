@@ -370,6 +370,7 @@ and, for a failure, `error.type`, but not with the endpoint's name. It is collec
 tests.
 
 Runnable examples: [an ASP.NET Core minimal API](https://github.com/zcsizmadia/SshSharp/tree/main/samples/SshSharp.Samples.AspNetCore)
+(the shared connection, a keyed `ISshEndpoint`, `WatchAsync`, `UseSshTunnel`, SFTP, static files and the health check)
 and [a worker service](https://github.com/zcsizmadia/SshSharp/tree/main/samples/SshSharp.Samples.Worker).
 
 ## See also
