@@ -267,9 +267,32 @@ jobs:
           set -euo pipefail
           dotnet publish tests/SshSharp.AotSmoke -c Release -o "$RUNNER_TEMP/aot"
           "$RUNNER_TEMP/aot/SshSharp.AotSmoke"
-      - name: Native AOT sample publishes
-        # The sample tool must stay publishable with Native AOT (trim and AOT warnings are errors).
-        run: dotnet publish samples/SshSharp.Samples.Aot -c Release -o "$RUNNER_TEMP/aot-sample"
+      - name: The server's host key in ~/.ssh/known_hosts, for the samples
+        # The samples connect through ssh_config as ssh does: the agent's keys (SSH_AUTH_SOCK, set above) and ~/.ssh/known_hosts. The
+        # plain host keys, and the CA that signed the Ed25519 one, so either way of presenting it is trusted. It runs after the tests,
+        # so they still see the runner's ~/.ssh as it was.
+        run: |
+          set -euo pipefail
+          install -d -m 700 ~/.ssh
+          ssh-keyscan -p 2222 127.0.0.1 2> /dev/null >> ~/.ssh/known_hosts
+          echo "@cert-authority [127.0.0.1]:2222 $(cat "$SSHSHARP_TEST_CERTDIR/ca.pub")" >> ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+          grep -c . ~/.ssh/known_hosts
+      - name: Native AOT sample publishes and runs against the real server
+        # The sample tool must stay publishable with Native AOT (trim and AOT warnings are errors), and the binary must work: it runs a
+        # command whose output differs from its text, and exits non-zero (failing the step) unless the command succeeded.
+        run: |
+          set -euo pipefail
+          dotnet publish samples/SshSharp.Samples.Aot -c Release -o "$RUNNER_TEMP/aot-sample"
+          out="$("$RUNNER_TEMP/aot-sample/sshrun" 'echo sshrun-$((6*7))' "ssh://$SSHSHARP_TEST_USER@127.0.0.1:2222")"
+          echo "$out"
+          grep -q '"exitStatus":0' <<< "$out"
+          grep -q 'sshrun-42' <<< "$out"
+      - name: Terminal sample runs against the real server
+        # In a pseudo-terminal, as at a keyboard: it waits for the prompt, types a command and exit 7, and checks the exit status.
+        env:
+          TERM: xterm-256color
+        run: python3 tests/ci/run-terminal-sample.py samples/SshSharp.Samples.Terminal/bin/Release/net10.0/SshSharp.Samples.Terminal "ssh://$SSHSHARP_TEST_USER@127.0.0.1:2222"
       - name: Skipped tests
         if: ${{ !cancelled() }}
         run: |

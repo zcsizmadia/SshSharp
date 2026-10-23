@@ -330,6 +330,45 @@ public sealed class EndpointJumpHostTests : IDisposable
     }
 
     [Test]
+    [Arguments(true)]
+    [Arguments(false)]
+    [Arguments(null)]
+    public async Task UseAgent_WithConfigAlias_TrueUsesTheRegisteredAgent_InPlaceOfIdentityAgent(bool? useAgent)
+    {
+        // The alias says IdentityAgent none, and the server accepts only the agent's key: UseAgent = true must still offer the agent the
+        // application registered (as without ConfigAlias); unset leaves the choice to ssh_config, and false turns the agent off.
+        using var agentKey = SshPrivateKey.Generate(SshKeyType.Ed25519);
+        await using var server = new TcpFakeSshServer { AuthorizedKeys = [agentKey.PublicKey.ToArray()] };
+        var knownHosts = Path.Combine(_dir, "known_hosts");
+        await File.WriteAllTextAsync(knownHosts, $"[127.0.0.1]:{server.Port.ToString(CultureInfo.InvariantCulture)} {server.HostKeyLine}\n");
+        var config = SshSharp.Config.SshConfig.Parse(
+            $"Host agent-box\n HostName 127.0.0.1\n Port {server.Port.ToString(CultureInfo.InvariantCulture)}\n User tester\n"
+            + $" UserKnownHostsFile \"{knownHosts.Replace('\\', '/')}\"\n StrictHostKeyChecking yes\n IdentityAgent none\n");
+
+        var services = new ServiceCollection();
+        services.AddSingleton(SshAgent.FromKeys(agentKey));
+        services.AddSingleton(new SshAliasConfiguration(config, new SshSharp.Config.SshConfigResolveOptions { HomeDirectory = _dir }));
+        services.AddSshClient("box", o =>
+        {
+            o.ConfigAlias = "agent-box";
+            o.UseAgent = useAgent;
+        });
+        await using var provider = services.BuildServiceProvider();
+        var factory = provider.GetRequiredService<ISshClientFactory>();
+
+        if (useAgent == true)
+        {
+            await using var client = await factory.ConnectAsync("box", Timeout());
+            await Assert.That(client.IsConnected).IsTrue();
+        }
+        else
+        {
+            var ex = await Assert.ThrowsAsync<SshException>(async () => await factory.ConnectAsync("box", Timeout()));
+            await Assert.That(ex!.Reason).IsEqualTo(SshFailureReason.AuthenticationFailed);
+        }
+    }
+
+    [Test]
     public async Task UseAgent_OnAJumpHost_OffersTheAgentToThatHopOnly()
     {
         using var agentKey = SshPrivateKey.Generate(SshKeyType.Ed25519);
