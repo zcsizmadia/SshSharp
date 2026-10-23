@@ -534,6 +534,62 @@ jobs:
           path: ${{ runner.temp }}/sshd.log
           if-no-files-found: ignore
 
+  # ML-KEM on Linux. .NET's ML-KEM on Linux needs OpenSSL 3.5, and the Ubuntu 24.04 runners have 3.0, so the ML-KEM tests skip in the
+  # Linux unit and interop jobs. Here the tests built on the runner run on .NET's Alpine 3.23 image (OpenSSL 3.5): the unit test
+  # classes with ML-KEM tests, and the handshakes against OpenSSH 10.0 (Alpine 3.22), which include mlkem768x25519-sha256 only where
+  # the platform has ML-KEM.
+  mlkem-linux:
+    name: mlkem (Alpine 3.23)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      RUNTIME_IMAGE: mcr.microsoft.com/dotnet/runtime:10.0-alpine3.23@sha256:889fbb22d1d0e31ecb2e8b33811045a570e96c0f3d50cd061ff137dac763d224
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Start OpenSSH 10.0 (Alpine 3.22) in a container
+        run: tests/docker/start-server.sh alpine@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8 openssh OpenSSH 1
+      - uses: ./.github/actions/setup-dotnet
+        with:
+          dotnet-8: 'false'
+          build: true
+      - name: Tests on OpenSSL 3.5
+        run: |
+          set -euo pipefail
+          docker pull -q "$RUNTIME_IMAGE"
+          # The runner's SSHSHARP_TEST_* settings (from start-server.sh) by name, so their values stay out of the command line.
+          read -ra settings <<< "$(env | grep -o '^SSHSHARP_TEST_[A-Z0-9_]*' | sed 's/^/-e /' | tr '\n' ' ')"
+          in_container() {
+            docker run --rm --network host --user "$(id -u):$(id -g)" -e HOME=/tmp "${settings[@]}" -v "$PWD:/src" -w /src "$RUNTIME_IMAGE" \
+              dotnet tests/SshSharp.Tests/bin/Release/net10.0/SshSharp.Tests.dll --results-directory TestResults "$@"
+          }
+          docker run --rm "$RUNTIME_IMAGE" sh -c 'echo "Alpine $(cat /etc/alpine-release), .NET $DOTNET_VERSION, $(apk info -v 2>/dev/null | grep ^libcrypto3)"' | tee -a "$GITHUB_STEP_SUMMARY"
+          in_container --treenode-filter "/*/*/(MlKemKexTests)|(NegotiatedAlgorithmsTests)|(WycheproofTests)/*[(Category!=Integration)&(Category!=Measure)]" \
+            --report-trx --report-trx-filename mlkem-unit.trx
+          in_container --treenode-filter "/*/*/TransportInteropTests/HandshakeAndEncryptedRoundTrip" --maximum-parallel-tests 4 \
+            --report-trx --report-trx-filename mlkem-interop.trx
+      # Every test must run (the lists are empty), and the ML-KEM cases must be among them: the hybrid handshake is in the run only
+      # when the platform has ML-KEM, so its absence would not show up as a skip.
+      - name: Skipped tests
+        if: ${{ !cancelled() }}
+        run: |
+          status=0
+          pwsh tests/ci/check-skips.ps1 -Job "mlkem (Alpine 3.23) unit" -Trx TestResults/mlkem-unit.trx || status=1
+          pwsh tests/ci/check-skips.ps1 -Job "mlkem (Alpine 3.23) interop" -Trx TestResults/mlkem-interop.trx || status=1
+          for name in 'MlKem_DecapsulatesAsWycheproofExpects(mlkem_768_test' 'TheHybrid_Handshakes_AndRekeys_WithDataInFlight' \
+            'HandshakeAndEncryptedRoundTrip(mlkem768x25519-sha256'; do
+            passed="$(grep -hF "testName=\"$name" TestResults/mlkem-*.trx | grep -c 'outcome="Passed"' || true)"
+            if [ "$passed" = 0 ]; then
+              echo "::error::$name did not pass here"
+              status=1
+            fi
+          done
+          exit "$status"
+      - name: Server log
+        if: failure()
+        run: docker logs server 2>&1 | grep -vE 'debug1: (enqueue packet|dequeue packet|ssh_set_newkeys)' | tail -n 200
+
   # ssh-audit in client mode (#218): it listens as a server, records the algorithms SshSharp offers (default options and FIPS mode),
   # and rates them. tests/ssh-audit/check_client_audit.py fails the job on any rating it does not explain, a CVE, a missing strict
   # key exchange, a default list that does not start with a post-quantum hybrid, or a non-FIPS algorithm in FIPS mode. ssh-audit's own
