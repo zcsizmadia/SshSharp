@@ -13,7 +13,10 @@ public static class SshScpExtensions
 
     /// <summary>Uploads <paramref name="localPath"/> to <paramref name="remotePath"/> (a file, or an existing directory to put it in).</summary>
     /// <exception cref="SshException">The remote scp refused or failed (<see cref="SshFailureReason.TransferFailed"/>).</exception>
-    public static async Task UploadFileAsync(this SshClient client, string localPath, string remotePath, SshScpOptions? options = null, CancellationToken cancellationToken = default)
+    public static Task UploadFileAsync(this SshClient client, string localPath, string remotePath, SshScpOptions? options = null, CancellationToken cancellationToken = default) =>
+        TracedAsync("SshSharp.Scp.Upload", directory: false, () => UploadLocalFileAsync(client, localPath, remotePath, options, cancellationToken));
+
+    private static async Task<ScpTransferred> UploadLocalFileAsync(SshClient client, string localPath, string remotePath, SshScpOptions? options, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(client);
         ArgumentException.ThrowIfNullOrEmpty(remotePath);
@@ -25,6 +28,7 @@ public static class SshScpExtensions
         await scp.ReadAckAsync(cancellationToken).ConfigureAwait(false);
         await SendFileAsync(scp, file.Name, source, file.Length, FileModeOf(file, options), Times(file), remotePath, options, cancellationToken).ConfigureAwait(false);
         await scp.FinishAsync(cancellationToken).ConfigureAwait(false);
+        return scp.Transferred;
     }
 
     /// <summary>
@@ -32,7 +36,10 @@ public static class SshScpExtensions
     /// needed up front (SCP sends it before the data); a seekable stream's remaining length is used when it is null.
     /// </summary>
     /// <exception cref="SshException">The remote scp refused or failed (<see cref="SshFailureReason.TransferFailed"/>).</exception>
-    public static async Task UploadAsync(this SshClient client, Stream source, string remotePath, long? length = null, SshScpOptions? options = null, CancellationToken cancellationToken = default)
+    public static Task UploadAsync(this SshClient client, Stream source, string remotePath, long? length = null, SshScpOptions? options = null, CancellationToken cancellationToken = default) =>
+        TracedAsync("SshSharp.Scp.Upload", directory: false, () => UploadStreamAsync(client, source, remotePath, length, options, cancellationToken));
+
+    private static async Task<ScpTransferred> UploadStreamAsync(SshClient client, Stream source, string remotePath, long? length, SshScpOptions? options, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(client);
         ArgumentException.ThrowIfNullOrEmpty(remotePath);
@@ -45,6 +52,7 @@ public static class SshScpExtensions
         await scp.ReadAckAsync(cancellationToken).ConfigureAwait(false);
         await SendFileAsync(scp, name, source, size, (int)options.FileMode, null, remotePath, options, cancellationToken).ConfigureAwait(false);
         await scp.FinishAsync(cancellationToken).ConfigureAwait(false);
+        return scp.Transferred;
     }
 
     /// <summary>
@@ -52,7 +60,10 @@ public static class SshScpExtensions
     /// <paramref name="remotePath"/> when that does not exist, or a directory inside it when it does.
     /// </summary>
     /// <exception cref="SshException">The remote scp refused or failed (<see cref="SshFailureReason.TransferFailed"/>).</exception>
-    public static async Task UploadDirectoryAsync(this SshClient client, string localDirectory, string remotePath, SshScpOptions? options = null, CancellationToken cancellationToken = default)
+    public static Task UploadDirectoryAsync(this SshClient client, string localDirectory, string remotePath, SshScpOptions? options = null, CancellationToken cancellationToken = default) =>
+        TracedAsync("SshSharp.Scp.UploadDirectory", directory: true, () => UploadLocalDirectoryAsync(client, localDirectory, remotePath, options, cancellationToken));
+
+    private static async Task<ScpTransferred> UploadLocalDirectoryAsync(SshClient client, string localDirectory, string remotePath, SshScpOptions? options, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(client);
         ArgumentException.ThrowIfNullOrEmpty(remotePath);
@@ -68,6 +79,7 @@ public static class SshScpExtensions
         await scp.ReadAckAsync(cancellationToken).ConfigureAwait(false);
         await SendDirectoryAsync(scp, root, root.Name, options, cancellationToken).ConfigureAwait(false);
         await scp.FinishAsync(cancellationToken).ConfigureAwait(false);
+        return scp.Transferred;
     }
 
     private static async Task SendDirectoryAsync(ScpChannel scp, DirectoryInfo directory, string relative, SshScpOptions options, CancellationToken cancellationToken)
@@ -93,6 +105,7 @@ public static class SshScpExtensions
                 continue; // like scp: a directory symlink is not followed, so a loop cannot make the transfer endless
             }
 
+            scp.CountDirectory();
             await SendDirectoryAsync(scp, child, $"{relative}/{child.Name}", options, cancellationToken).ConfigureAwait(false);
         }
 
@@ -123,7 +136,10 @@ public static class SshScpExtensions
     /// in under the remote name).
     /// </summary>
     /// <exception cref="SshException">The file does not exist, is a directory, or the transfer failed (<see cref="SshFailureReason.TransferFailed"/>).</exception>
-    public static async Task DownloadFileAsync(this SshClient client, string remotePath, string localPath, SshScpOptions? options = null, CancellationToken cancellationToken = default)
+    public static Task DownloadFileAsync(this SshClient client, string remotePath, string localPath, SshScpOptions? options = null, CancellationToken cancellationToken = default) =>
+        TracedAsync("SshSharp.Scp.Download", directory: false, () => DownloadLocalFileAsync(client, remotePath, localPath, options, cancellationToken));
+
+    private static async Task<ScpTransferred> DownloadLocalFileAsync(SshClient client, string remotePath, string localPath, SshScpOptions? options, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(client);
         ArgumentException.ThrowIfNullOrEmpty(remotePath);
@@ -136,11 +152,16 @@ public static class SshScpExtensions
         {
             throw await scp.FailureAsync($"'{remotePath}' was not downloaded.").ConfigureAwait(false);
         }
+
+        return scp.Transferred;
     }
 
     /// <summary>Downloads the remote file <paramref name="remotePath"/> into <paramref name="destination"/>.</summary>
     /// <exception cref="SshException">The file does not exist, is a directory, or the transfer failed (<see cref="SshFailureReason.TransferFailed"/>).</exception>
-    public static async Task DownloadAsync(this SshClient client, string remotePath, Stream destination, SshScpOptions? options = null, CancellationToken cancellationToken = default)
+    public static Task DownloadAsync(this SshClient client, string remotePath, Stream destination, SshScpOptions? options = null, CancellationToken cancellationToken = default) =>
+        TracedAsync("SshSharp.Scp.Download", directory: false, () => DownloadStreamAsync(client, remotePath, destination, options, cancellationToken));
+
+    private static async Task<ScpTransferred> DownloadStreamAsync(SshClient client, string remotePath, Stream destination, SshScpOptions? options, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(client);
         ArgumentException.ThrowIfNullOrEmpty(remotePath);
@@ -153,6 +174,8 @@ public static class SshScpExtensions
         {
             throw await scp.FailureAsync($"'{remotePath}' was not downloaded.").ConfigureAwait(false);
         }
+
+        return scp.Transferred;
     }
 
     /// <summary>
@@ -160,7 +183,10 @@ public static class SshScpExtensions
     /// <paramref name="localDirectory"/> when that does not exist, or a directory inside it when it does.
     /// </summary>
     /// <exception cref="SshException">The transfer failed (<see cref="SshFailureReason.TransferFailed"/>).</exception>
-    public static async Task DownloadDirectoryAsync(this SshClient client, string remotePath, string localDirectory, SshScpOptions? options = null, CancellationToken cancellationToken = default)
+    public static Task DownloadDirectoryAsync(this SshClient client, string remotePath, string localDirectory, SshScpOptions? options = null, CancellationToken cancellationToken = default) =>
+        TracedAsync("SshSharp.Scp.DownloadDirectory", directory: true, () => DownloadLocalDirectoryAsync(client, remotePath, localDirectory, options, cancellationToken));
+
+    private static async Task<ScpTransferred> DownloadLocalDirectoryAsync(SshClient client, string remotePath, string localDirectory, SshScpOptions? options, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(client);
         ArgumentException.ThrowIfNullOrEmpty(remotePath);
@@ -169,6 +195,32 @@ public static class SshScpExtensions
         await using var scp = await ScpChannel.StartAsync(client, options, "-r -f", remotePath, cancellationToken).ConfigureAwait(false);
         var sink = new FileSink(localDirectory, directoryTarget: Directory.Exists(localDirectory), recursive: true, options);
         await ReceiveAsync(scp, sink, options, cancellationToken).ConfigureAwait(false);
+        return scp.Transferred;
+    }
+
+    /// <summary>
+    /// Runs a transfer in its span (<c>SshSharp.Scp.Upload</c>, <c>Download</c>, <c>UploadDirectory</c> or <c>DownloadDirectory</c>), tagged
+    /// with what it moved (the bytes, and for a directory the files and directories too) or, when it fails, <c>error.type</c>. The paths
+    /// are not recorded. A directory transfer is one scp run over one channel, so its files are not spans of their own.
+    /// </summary>
+    private static async Task TracedAsync(string name, bool directory, Func<Task<ScpTransferred>> transfer)
+    {
+        using var activity = SshTelemetry.StartTransfer(name);
+        try
+        {
+            var moved = await transfer().ConfigureAwait(false);
+            activity?.SetTag("ssh.scp.bytes", moved.Bytes);
+            if (directory)
+            {
+                activity?.SetTag("ssh.scp.files", moved.Files);
+                activity?.SetTag("ssh.scp.directories", moved.Directories);
+            }
+        }
+        catch (Exception ex)
+        {
+            SshTelemetry.Failed(activity, ex);
+            throw;
+        }
     }
 
     /// <summary>The source side's messages, until it ends: files, directories, times, and errors for files it could not send.</summary>
@@ -177,6 +229,7 @@ public static class SshScpExtensions
         await scp.SendAckAsync(cancellationToken).ConfigureAwait(false); // ready
         (DateTime Modified, DateTime Accessed)? times = null;
         var errors = new List<string>();
+        var depth = 0;
         while (true)
         {
             var type = await scp.ReadByteAsync(cancellationToken).ConfigureAwait(false);
@@ -235,6 +288,11 @@ public static class SshScpExtensions
                     var (mode, _, name) = ParseEntry(await scp.ReadLineAsync(cancellationToken).ConfigureAwait(false))
                         ?? throw await scp.FailureAsync("The remote scp sent a malformed directory line.").ConfigureAwait(false);
                     sink.EnterDirectory(name, mode, times);
+                    if (depth++ > 0)
+                    {
+                        scp.CountDirectory(); // below the top one, as SftpTransferSummary counts them
+                    }
+
                     times = null;
                     await scp.SendAckAsync(cancellationToken).ConfigureAwait(false);
                     break;
@@ -243,6 +301,7 @@ public static class SshScpExtensions
                 case 'E':
                     await scp.ReadLineAsync(cancellationToken).ConfigureAwait(false);
                     sink.LeaveDirectory();
+                    depth--;
                     await scp.SendAckAsync(cancellationToken).ConfigureAwait(false);
                     break;
 

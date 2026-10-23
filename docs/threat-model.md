@@ -396,7 +396,7 @@ connection, but not read or change it: each host's key is verified end to end, b
 - Log values that carry an exception (an agent failure, say) are formatted to a sanitized reason and expose no public property
   holding the exception, so a structured log sink that records properties cannot record the agent's path from it either.
 - Traces and metrics carry no user name, host name, file or directory path, forwarding address, port or socket path, SOCKS
-  destination, or dependency injection endpoint name. SFTP transfer spans carry byte and file counts, forwarding instruments only the
+  destination, or dependency injection endpoint name. SFTP and SCP transfer spans carry byte and file counts, forwarding instruments only the
   kind of forwarding, and the authentication span the method that succeeded and the number of requests, never which key was
   offered.
 - `SshAuthenticationException` (its message and `Attempts`) names methods, outcomes and the SHA-256 fingerprints of the keys

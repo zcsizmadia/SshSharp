@@ -36,6 +36,9 @@ As with `scp -r`, the directory becomes the target when that does not exist, or 
   so a server cannot write outside the target or add files (CVE-2019-6111). Set-id and sticky bits are never applied.
 - **No resume, no listing.** SCP has neither; use SFTP for those.
 - **`ScpCommand`.** `SshScpOptions.ScpCommand` names the program to run on the server, when `scp` is not on its `PATH`.
+- **Tracing.** Each transfer is a span (`SshSharp.Scp.Upload`, `Download`, `UploadDirectory`, `DownloadDirectory`) with the bytes
+  it moved, and `sshsharp.scp.bytes` counts the file data; no path is recorded. See
+  [Tracing and metrics](../diagnostics.md#tracing-and-metrics).
 
 ## See also
 

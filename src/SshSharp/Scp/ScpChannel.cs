@@ -28,6 +28,20 @@ internal sealed class ScpChannel : IAsyncDisposable
     private int _position;
     private int _length;
 
+    /// <summary>File data moved so far, in either direction, for the transfer's span.</summary>
+    public long Bytes { get; private set; }
+
+    /// <summary>Files whose data has been sent or received in full.</summary>
+    public int Files { get; private set; }
+
+    /// <summary>Directories sent or entered below the top one of a recursive transfer (counted by the caller, which knows the tree).</summary>
+    public int Directories { get; private set; }
+
+    public void CountDirectory() => Directories++;
+
+    /// <summary>What the transfer moved, for its span.</summary>
+    public ScpTransferred Transferred => new(Bytes, Files, Directories);
+
     private ScpChannel(SshSession session, ArrayPool<byte> pool)
     {
         _session = session;
@@ -136,8 +150,12 @@ internal sealed class ScpChannel : IAsyncDisposable
             await destination.WriteAsync(Buffer.AsMemory(_position, take), cancellationToken).ConfigureAwait(false);
             _position += take;
             done += take;
+            Bytes += take;
+            SshTelemetry.ScpBytes.Add(take, SshTelemetry.ScpDownload);
             progress(done);
         }
+
+        Files++;
     }
 
     private async ValueTask<bool> FillAsync(CancellationToken cancellationToken)
@@ -188,8 +206,12 @@ internal sealed class ScpChannel : IAsyncDisposable
 
                 await WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
                 done += read;
+                Bytes += read;
+                SshTelemetry.ScpBytes.Add(read, SshTelemetry.ScpUpload);
                 progress(done);
             }
+
+            Files++;
         }
         finally
         {
@@ -280,3 +302,6 @@ internal sealed class ScpChannel : IAsyncDisposable
         }
     }
 }
+
+/// <summary>What one SCP transfer moved: file data bytes, files, and directories below the top one.</summary>
+internal readonly record struct ScpTransferred(long Bytes, int Files, int Directories);

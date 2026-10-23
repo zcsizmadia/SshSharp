@@ -7,15 +7,17 @@ using System.Text;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Time.Testing;
 using SshSharp.Extensions.DependencyInjection;
+using SshSharp.Scp;
 using SshSharp.Sftp;
 using SshSharp.Tests.DependencyInjection;
 using SshSharp.Tests.Protocol;
+using SshSharp.Tests.Scp;
 using SshSharp.Tests.Sftp;
 
 namespace SshSharp.Tests;
 
 /// <summary>
-/// The authentication span, the SFTP transfer spans and byte counter, the forwarding counters, the keep-alive round trip and the
+/// The authentication span, the SFTP and SCP transfer spans and byte counters, the forwarding counters, the keep-alive round trip and the
 /// connection provider's reconnections (#368); and that none of them records a path, a user name or a host name. Other tests record
 /// into the same instruments in parallel, so the metrics are looked for among theirs; the spans are isolated by a root span of the test's.
 /// </summary>
@@ -261,6 +263,123 @@ public sealed class SshTelemetryTests : IDisposable
         await Assert.That(download.GetTagItem("error.type")).IsEqualTo(nameof(SshFailureReason.SftpFailed));
         await Assert.That(download.GetTagItem("ssh.sftp.bytes")).IsNull();
         await AssertNoneRecordedAsync([download], "missing-secret");
+    }
+
+    // ---- SCP (#381) ----
+
+    /// <summary>A client of a fake server that runs <paramref name="scp"/> (a sink or source script of <see cref="ScpTests"/>) for each command.</summary>
+    private async Task<(FakeSessionServer Ssh, SshClient Client)> StartScpAsync(Func<ExecScript, Task> scp)
+    {
+        var ssh = new FakeSessionServer { UserName = User, Password = _password, OnExec = scp };
+        return (ssh, await ConnectAsync(ssh));
+    }
+
+    private static async Task StopAsync((FakeSessionServer Ssh, SshClient Client) rig)
+    {
+        await rig.Client.DisposeAsync();
+        await rig.Ssh.DisposeAsync();
+    }
+
+    [Test]
+    public async Task ScpTransfers_AreSpans_WithTheirBytes_AndTheBytesAreCounted()
+    {
+        SshSpans.Listen();
+        using var measurements = new Measurements();
+        var content = new string('x', 150_001);
+        var local = Path.Combine(_dir, "secret-name.bin");
+        await File.WriteAllTextAsync(local, content);
+        var sink = await StartScpAsync(ScpTests.Sink([], []));
+        var source = await StartScpAsync(ScpTests.Source(ScpTests.File("secret-name.bin", content)));
+        using var root = new Activity("telemetry-scp").Start();
+        try
+        {
+            await sink.Client.UploadFileAsync(local, "/srv/secret-copy.bin", cancellationToken: Timeout());
+            await sink.Client.UploadAsync(new MemoryStream(new byte[1000]), "/srv/secret-stream.bin", cancellationToken: Timeout());
+            await source.Client.DownloadFileAsync("/srv/secret-name.bin", Path.Combine(_dir, "secret-download.bin"), cancellationToken: Timeout());
+            await source.Client.DownloadAsync("/srv/secret-name.bin", new MemoryStream(), cancellationToken: Timeout());
+        }
+        finally
+        {
+            await StopAsync(sink);
+            await StopAsync(source);
+        }
+
+        var spans = SshSpans.InTrace(root.TraceId);
+        var uploads = spans.Where(a => a.OperationName == "SshSharp.Scp.Upload").Select(a => a.GetTagItem("ssh.scp.bytes")).ToList();
+        var downloads = spans.Where(a => a.OperationName == "SshSharp.Scp.Download").Select(a => a.GetTagItem("ssh.scp.bytes")).ToList();
+        await Assert.That(uploads).IsEquivalentTo(new object?[] { (long)content.Length, 1000L });
+        await Assert.That(downloads).IsEquivalentTo(new object?[] { (long)content.Length, (long)content.Length });
+
+        // A single-file transfer has no file or directory counts: they are the directory spans' tags, as for SFTP.
+        await Assert.That(spans.Any(a => a.GetTagItem("ssh.scp.files") is not null || a.GetTagItem("ssh.scp.directories") is not null)).IsFalse();
+        await AssertNoneRecordedAsync(spans, "secret", "/srv", _dir, "telemetry-user");
+
+        // Others transfer in parallel: at least these bytes, each counted once per direction.
+        double Sum(string direction) => measurements.Of("sshsharp.scp.bytes").Where(m => Measurements.Has(m.Tags, "ssh.scp.direction", direction)).Sum(m => m.Value);
+        await Assert.That(Sum("upload")).IsGreaterThanOrEqualTo(content.Length + 1000);
+        await Assert.That(Sum("download")).IsGreaterThanOrEqualTo(2 * content.Length);
+        await Assert.That(measurements.Of("sshsharp.scp.bytes").All(m => m.Tags.Length == 1)).IsTrue();
+    }
+
+    [Test]
+    public async Task AnScpDirectoryTransfer_IsOneSpan_WithItsBytesFilesAndDirectories()
+    {
+        SshSpans.Listen();
+        var tree = Directory.CreateDirectory(Path.Combine(_dir, "tree"));
+        await File.WriteAllTextAsync(Path.Combine(tree.FullName, "a.txt"), "alpha");
+        Directory.CreateDirectory(Path.Combine(tree.FullName, "sub"));
+        await File.WriteAllBytesAsync(Path.Combine(tree.FullName, "sub", "b.bin"), new byte[70_000]);
+        var sink = await StartScpAsync(ScpTests.Sink([], []));
+        var source = await StartScpAsync(ScpTests.Source([
+            ScpTests.Text("D0755 0 tree\n"), .. ScpTests.File("a.txt", "alpha"),
+            ScpTests.Text("D0755 0 sub\n"), .. ScpTests.File("b.bin", new string('\0', 70_000)), ScpTests.Text("E\n"),
+            ScpTests.Text("E\n")]));
+        using var root = new Activity("telemetry-scp-dir").Start();
+        try
+        {
+            await sink.Client.UploadDirectoryAsync(tree.FullName, "/srv/up", cancellationToken: Timeout());
+            await source.Client.DownloadDirectoryAsync("/srv/tree", Path.Combine(_dir, "down"), cancellationToken: Timeout());
+        }
+        finally
+        {
+            await StopAsync(sink);
+            await StopAsync(source);
+        }
+
+        var spans = SshSpans.InTrace(root.TraceId);
+        foreach (var name in new[] { "SshSharp.Scp.UploadDirectory", "SshSharp.Scp.DownloadDirectory" })
+        {
+            var span = spans.Single(a => a.OperationName == name);
+            await Assert.That(span.GetTagItem("ssh.scp.bytes")).IsEqualTo(70_005L);
+            await Assert.That(span.GetTagItem("ssh.scp.files")).IsEqualTo(2);
+            await Assert.That(span.GetTagItem("ssh.scp.directories")).IsEqualTo(1); // below the top one, as SftpTransferSummary counts
+        }
+
+        // One scp run moves the whole tree, so there are no file spans inside.
+        await Assert.That(spans.Count(a => a.OperationName is "SshSharp.Scp.Upload" or "SshSharp.Scp.Download")).IsEqualTo(0);
+        await AssertNoneRecordedAsync(spans, "tree", "a.txt", "b.bin", "/srv", _dir);
+    }
+
+    [Test]
+    public async Task AFailedScpTransfer_IsAnErrorSpan_WithoutThePath()
+    {
+        SshSpans.Listen();
+        var refused = await StartScpAsync(ScpTests.Sink([], [], refuseWith: "scp: /root/missing-secret: Permission denied"));
+        using var root = new Activity("telemetry-scp-failed").Start();
+        try
+        {
+            await Assert.That(async () => await refused.Client.UploadAsync(new MemoryStream(new byte[10]), "/root/missing-secret", cancellationToken: Timeout())).Throws<SshException>();
+        }
+        finally
+        {
+            await StopAsync(refused);
+        }
+
+        var upload = SshSpans.InTrace(root.TraceId).Single(a => a.OperationName == "SshSharp.Scp.Upload");
+        await Assert.That(upload.Status).IsEqualTo(ActivityStatusCode.Error);
+        await Assert.That(upload.GetTagItem("error.type")).IsEqualTo(nameof(SshFailureReason.TransferFailed));
+        await Assert.That(upload.GetTagItem("ssh.scp.bytes")).IsNull();
+        await AssertNoneRecordedAsync([upload], "missing-secret", "/root");
     }
 
     // ---- forwarding ----

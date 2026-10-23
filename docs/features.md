@@ -160,6 +160,6 @@ The four packages share one version: `SshSharp` (the client), `SshSharp.Extensio
 | Feature | What it does | API | Docs |
 |---|---|---|---|
 | Logging | `ILogger` events; never host names, user names, passwords or key material | `SshClientOptions.Logger` | [Logging and diagnostics](how-to/logging-and-diagnostics.md) |
-| Traces | `ActivitySource` spans for connecting (`SshSharp.Connect`, with `SshSharp.Authenticate` inside it), running commands (`SshSharp.Command`) and SFTP transfers (`SshSharp.Sftp.*`), following OpenTelemetry's conventions | `SshTelemetry.SourceName` (`"SshSharp"`) | [Errors and diagnostics](diagnostics.md) |
-| Metrics | `Meter` instruments: open connections and channels, connect duration, bytes sent and received, key exchanges, commands, SFTP file data, forwarded connections, keep-alive round trips, the shared connection's reconnections | `SshTelemetry.SourceName` | [Errors and diagnostics](diagnostics.md) |
+| Traces | `ActivitySource` spans for connecting (`SshSharp.Connect`, with `SshSharp.Authenticate` inside it), running commands (`SshSharp.Command`) and SFTP and SCP transfers (`SshSharp.Sftp.*`, `SshSharp.Scp.*`), following OpenTelemetry's conventions | `SshTelemetry.SourceName` (`"SshSharp"`) | [Errors and diagnostics](diagnostics.md) |
+| Metrics | `Meter` instruments: open connections and channels, connect duration, bytes sent and received, key exchanges, commands, SFTP and SCP file data, forwarded connections, keep-alive round trips, the shared connection's reconnections | `SshTelemetry.SourceName` | [Errors and diagnostics](diagnostics.md) |
 | Errors | One exception type with a machine-readable reason | `SshException.Reason` (<xref:SshSharp.SshFailureReason>) | [Errors and failure reasons](reference/errors.md) |
