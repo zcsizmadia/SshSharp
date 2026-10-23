@@ -10,10 +10,11 @@ permissions:
 
 # Which tests each kind of job runs, by the [Category] on the test classes (docs/testing.md, "Test categories"): the unit jobs
 # leave out the tests that need a real server (Integration) and the opt-in measurements (Measure); the interop jobs run the
-# Integration tests, but not the ssh-audit one, which needs ssh-audit listening (the audit job).
+# Integration tests, but not the ssh-audit one, which needs ssh-audit listening (the audit job), nor the opt-in key-exchange volume test
+# (Handshakes).
 env:
   UNIT_TESTS: /*/*/*/*[(Category!=Integration)&(Category!=Measure)]
-  INTEROP_TESTS: /*/*/*/*[(Category=Integration)&(Category!=SshAudit)&(Category!=Measure)]
+  INTEROP_TESTS: /*/*/*/*[(Category=Integration)&(Category!=SshAudit)&(Category!=Measure)&(Category!=Handshakes)]
 
 # A newer push to the same PR or branch makes the running workflow obsolete.
 concurrency:
@@ -39,6 +40,8 @@ jobs:
           build: true
       # PuTTY's command-line puttygen, for the .ppk interop tests (KeyExportInteropTests). Not on Windows: PuTTY's puttygen.exe there is
       # the key generator's window, with no command-line conversion, so those tests skip there (tests/ci/skips/unit-windows-*.txt).
+      # On macOS also Homebrew's OpenSSH: its ssh-keygen (10.x, built with OpenSSL 3) reads Ed25519 PKCS#8 keys, which macOS's own
+      # (LibreSSL), Ubuntu 24.04's (9.6p1) and Windows' (9.5) do not (docs/testing.md, "Expected skips").
       - name: puttygen
         if: runner.os != 'Windows'
         shell: bash
@@ -48,10 +51,18 @@ jobs:
             sudo apt-get update -qq > /dev/null
             sudo apt-get install -y -qq putty-tools > /dev/null
           else
-            HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_CLEANUP=1 brew install --quiet putty
+            HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_CLEANUP=1 brew install --quiet putty openssh
+            command -v ssh-keygen
+            ssh -V
           fi
           command -v puttygen
           puttygen --version
+      # macOS configures only 127.0.0.1 on lo0; BindAddressTests bind to 127.0.0.2, as the other platforms let them.
+      - name: Loopback alias 127.0.0.2
+        if: runner.os == 'macOS'
+        run: |
+          sudo ifconfig lo0 alias 127.0.0.2 up
+          ifconfig lo0 | grep -F 'inet 127.0.0.2'
       - name: Test net8.0
         run: dotnet test --project tests/SshSharp.Tests -c Release -f net8.0 --no-build --treenode-filter "${{ env.UNIT_TESTS }}" --report-trx --report-trx-filename unit-net8.0.trx --results-directory TestResults
       - name: Test net10.0 with coverage
@@ -256,11 +267,11 @@ jobs:
       - name: Interop tests against the real server (net8.0)
         run: dotnet test --project tests/SshSharp.Tests -c Release -f net8.0 --no-build --treenode-filter "$TESTS" --report-trx --report-trx-filename interop-net8.0.trx --results-directory TestResults
         env:
-          TESTS: /*/*/*/*[((Category=Integration)|(Category=LocalTools))&(Category!=SshAudit)&(Category!=Measure)]
+          TESTS: /*/*/*/*[((Category=Integration)|(Category=LocalTools))&(Category!=SshAudit)&(Category!=Measure)&(Category!=Handshakes)]
       - name: Interop tests against the real server (net10.0)
         run: dotnet test --project tests/SshSharp.Tests -c Release -f net10.0 --no-build --treenode-filter "$TESTS" --report-trx --report-trx-filename interop-net10.0.trx --results-directory TestResults
         env:
-          TESTS: /*/*/*/*[((Category=Integration)|(Category=LocalTools))&(Category!=SshAudit)&(Category!=Measure)]
+          TESTS: /*/*/*/*[((Category=Integration)|(Category=LocalTools))&(Category!=SshAudit)&(Category!=Measure)&(Category!=Handshakes)]
       - name: Native AOT smoke test against the real server
         # Trim and AOT warnings fail the publish; the binary then connects and uses every main feature.
         run: |
@@ -372,7 +383,7 @@ jobs:
             software: Erlang
             strict: '1'
             port: '2222'
-            filter: /*/*/(TransportInteropTests)|(HostKeyInteropTests)|(HostKeyScanInteropTests)|(SftpInteropTests)|(ForwardingInteropTests)|(FaultInteropTests)/*[(Category=Integration)&(Category!=Measure)]
+            filter: /*/*/(TransportInteropTests)|(HostKeyInteropTests)|(HostKeyScanInteropTests)|(SftpInteropTests)|(ForwardingInteropTests)|(FaultInteropTests)/*[(Category=Integration)&(Category!=Measure)&(Category!=Handshakes)]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

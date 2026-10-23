@@ -78,8 +78,13 @@ The interop tests run against real servers on every pull request. Each server ca
 | **Erlang/OTP `ssh`** | An implementation known for following the RFCs strictly: the transport with every algorithm it offers, host keys, SFTP, forwarding and network faults (no shells or commands, which run Erlang there). Its SFTP server ignores a new file size and still answers OK |
 | **atmoz/sftp** and a **Go `pkg/sftp`** server | Chrooted, SFTP-only servers, the kind behind many hosted file-transfer services |
 
-A key-exchange volume test can run thousands of handshakes per host key type against a server. It is off by default and turned on
-with `SSHSHARP_TEST_HANDSHAKES`.
+A key-exchange volume test can run thousands of handshakes per host key type against a server. It is off by default: it is in the
+`Handshakes` category, which CI leaves out, and runs when selected with `SSHSHARP_TEST_HANDSHAKES` set to the number of handshakes
+per host key type.
+
+The servers re-key on their own every 32 KiB (`RekeyLimit 32K` in OpenSSH, Linux and Windows, and `rekey_bytes` in AsyncSSH), so
+server-initiated key re-exchanges with data in flight are tested against them. Dropbear has no such setting, and Apache MINA SSHD
+keeps its default limit (see its row above).
 
 **[ssh-audit](https://github.com/jtesta/ssh-audit)** checks what the client offers. In client mode it listens as a server, records
 the key exchanges, host keys, ciphers and MACs in SshSharp's first message, and rates each one. A CI job runs it on every pull
@@ -157,14 +162,16 @@ The test classes carry a TUnit `[Category]`, and each CI job selects its tests b
 | `Integration` | Tests against a real server (`SSHSHARP_TEST_SSHD` and the other `SSHSHARP_TEST_*` variables) | The interop jobs |
 | `SshAudit` | The client audit; also `Integration`, but it needs ssh-audit listening, not an SSH server | The audit job |
 | `Measure` | Measurements, not checks (`SSHSHARP_MEASURE=1`) | Nowhere in CI; by hand |
+| `Handshakes` | The key-exchange volume test against a real server; also `Integration`. It needs `SSHSHARP_TEST_HANDSHAKES` (handshakes per host key type) | Nowhere in CI; by hand, when hunting an intermittent key exchange failure |
 
 The selections, as TUnit tree filters (Microsoft.Testing.Platform's `--treenode-filter`):
 
 | Run | Filter |
 |---|---|
 | Unit tests | `/*/*/*/*[(Category!=Integration)&(Category!=Measure)]` |
-| Interop tests | `/*/*/*/*[(Category=Integration)&(Category!=SshAudit)&(Category!=Measure)]` |
+| Interop tests | `/*/*/*/*[(Category=Integration)&(Category!=SshAudit)&(Category!=Measure)&(Category!=Handshakes)]` |
 | A measurement | `/*/*/*/*[Category=Measure]`, with `SSHSHARP_MEASURE=1` |
+| The key-exchange volume test | `/*/*/TransportInteropTests/*[Category=Handshakes]`, with a server and, for example, `SSHSHARP_TEST_HANDSHAKES=2000` |
 
 A new test class that needs a real server gets `[Category("Integration")]`. Without it, the class runs in the unit jobs, where it
 skips, and the skip check fails the job.
@@ -179,7 +186,7 @@ dotnet build tests/SshSharp.Tests -c Release
 # the unit tests
 dotnet tests/SshSharp.Tests/bin/Release/net10.0/SshSharp.Tests.dll --treenode-filter "/*/*/*/*[(Category!=Integration)&(Category!=Measure)]"
 # the interop tests, against a server named by SSHSHARP_TEST_SSHD, SSHSHARP_TEST_USER and so on (without one they all skip)
-dotnet tests/SshSharp.Tests/bin/Release/net10.0/SshSharp.Tests.dll --treenode-filter "/*/*/*/*[(Category=Integration)&(Category!=SshAudit)&(Category!=Measure)]"
+dotnet tests/SshSharp.Tests/bin/Release/net10.0/SshSharp.Tests.dll --treenode-filter "/*/*/*/*[(Category=Integration)&(Category!=SshAudit)&(Category!=Measure)&(Category!=Handshakes)]"
 ```
 
 Without a filter everything runs, and the Integration tests skip at once when no server is configured.
@@ -198,11 +205,18 @@ list:
 - the job summary counts the skips by reason.
 
 The lists hold only what a job cannot run: .NET 8 without ML-KEM or `gssapi-with-mic`, a Linux without ML-KEM in its OpenSSL,
-Windows without FIFOs, servers without an algorithm, an extension or a key setup. A new skip is not added to a list until it is
-understood. A skip can hide a regression as well as a limit of the platform.
+Windows without FIFOs, servers without an algorithm, an extension or a key setup, and tools too old for a check: `ssh-keygen` reads
+Ed25519 PKCS#8 keys only from OpenSSH 9.8p1 on (9.6p1 has the code, but its build never turned it on), so
+`KeyExportInteropTests.SshKeygen_ReadsPkcs8(Ed25519, ...)` skips with Ubuntu 24.04's OpenSSH 9.6p1 and OpenSSH for Windows 9.5,
+and runs on macOS, where CI installs Homebrew's OpenSSH. A new skip is not added to a list until it is understood. A skip can hide a
+regression as well as a limit of the platform. A line starting with `#` in a list is a comment, for the reason behind an entry.
+
+When a runner can be set up to run a test, CI sets it up rather than list the skip. For example, macOS configures only `127.0.0.1`
+on its loopback interface, so the macOS unit jobs add `127.0.0.2` as an alias for the `BindAddress` tests.
 
 When a job's skips change on purpose, update its list. To regenerate one from a TRX report (the `coverage-<os>` artifact holds
-the unit jobs'), run the script with `-Update` and review the diff before committing it:
+the unit jobs'), run the script with `-Update` and review the diff before committing it. It writes the skips only, so put back
+any comments:
 
 ```shell
 pwsh tests/ci/check-skips.ps1 -Job "unit (ubuntu-latest) net10.0" -Trx TestResults/unit-net10.0.trx -Update

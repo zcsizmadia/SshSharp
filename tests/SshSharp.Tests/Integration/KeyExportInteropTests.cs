@@ -41,8 +41,10 @@ public class KeyExportInteropTests
         using var directory = new TempDirectory();
         if (type == SshKeyType.Ed25519)
         {
-            // OpenSSH reads Ed25519 PKCS#8 only when built with an OpenSSL that has Ed25519 and recent enough (OpenSSH for Windows 9.5
-            // does not); RFC 8410's own example key, which the unit tests show is what SshSharp writes, tells whether this one does.
+            // ssh-keygen reads Ed25519 PKCS#8 from OpenSSH 9.8p1 on, built with an OpenSSL that has Ed25519: 9.6p1 added the code, but
+            // its configure check never enabled it until 9.8p1 fixed the check. So Ubuntu 24.04's 9.6p1, OpenSSH for Windows 9.5 and
+            // macOS's own (LibreSSL) do not, and CI runs this on macOS with Homebrew's OpenSSH. RFC 8410's own example key, which the
+            // unit tests show is what SshSharp writes, tells whether this one does.
             var probe = directory.NewPath("rfc8410");
             using var example = SshPrivateKey.Parse(Rfc8410Example);
             await example.SaveAsync(probe, SshPrivateKeyFormat.Pkcs8);

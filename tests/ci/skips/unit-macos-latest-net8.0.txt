@@ -1,5 +1,3 @@
-BindAddressTests.BindAddress_InSshConfig_IsWhereTheConnectionComesFrom
-BindAddressTests.LocalEndPoint_IsWhereTheConnectionComesFrom
 ExternalKeyTests.FromECDsa_RefusesACurveSshDoesNotUse
 GssapiTests.AServerThatChoosesAnotherMechanism_IsAProtocolError
 GssapiTests.AStatusMessageFromTheServer_IsSkipped
@@ -12,7 +10,6 @@ GssapiTests.WhenKerberosFails_TheNextMethodIsTried(mic-rejected)
 GssapiTests.WhenKerberosFails_TheNextMethodIsTried(no-ticket)
 GssapiTests.WhenKerberosFails_TheNextMethodIsTried(refused)
 GssapiTests.WhenKerberosFails_TheNextMethodIsTried(ticket-fails-later)
-KeyExportInteropTests.SshKeygen_ReadsPkcs8(Ed25519, ssh-ed25519)
 MlKemKexTests.AMalformedNistHybridReply_IsRefused(mlkem1024nistp384-sha384, off-curve)
 MlKemKexTests.AMalformedNistHybridReply_IsRefused(mlkem1024nistp384-sha384, short)
 MlKemKexTests.AMalformedNistHybridReply_IsRefused(mlkem768nistp256-sha256, compressed)

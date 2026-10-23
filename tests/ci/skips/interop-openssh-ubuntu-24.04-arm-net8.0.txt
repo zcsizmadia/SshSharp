@@ -1,6 +1,6 @@
 KerberosInteropTests.OpenSsh_AcceptsAKerberosTicket_WithNoPasswordOrKey
+# A limit of the tool: ssh-keygen reads Ed25519 PKCS#8 only from OpenSSH 9.8p1 (docs/testing.md, "Expected skips").
 KeyExportInteropTests.SshKeygen_ReadsPkcs8(Ed25519, ssh-ed25519)
 PageantInteropTests.ARunningPageant_IsFound_AndSignsWithItsKeys
 SftpInteropTests.AFileHash_FromTheServer_MatchesTheLocalOne
 TransportInteropTests.HandshakeAndEncryptedRoundTrip(sntrup761x25519-sha512, chacha20-poly1305@openssh·com, ssh-ed25519)
-TransportInteropTests.ManyKeyExchanges_PerHostKey_AllVerify
