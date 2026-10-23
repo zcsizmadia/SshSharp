@@ -78,7 +78,7 @@ public sealed class ScpTests : IDisposable
     }
 
     /// <summary>The remote scp in sink mode (-t): records what arrives, as a list of entries, into <paramref name="received"/>.</summary>
-    private static Func<ExecScript, Task> Sink(List<string> received, Dictionary<string, byte[]> files, string? refuseWith = null) => async script =>
+    internal static Func<ExecScript, Task> Sink(List<string> received, Dictionary<string, byte[]> files, string? refuseWith = null) => async script =>
     {
         var input = new Input(script);
         var path = new List<string>();
@@ -122,7 +122,7 @@ public sealed class ScpTests : IDisposable
     };
 
     /// <summary>The remote scp in source mode (-f): sends <paramref name="messages"/>, waiting for the client's acknowledgement before each.</summary>
-    private static Func<ExecScript, Task> Source(params byte[][] messages) => async script =>
+    internal static Func<ExecScript, Task> Source(params byte[][] messages) => async script =>
     {
         var input = new Input(script);
         await input.ByteAsync(); // the client's "ready"
@@ -138,10 +138,10 @@ public sealed class ScpTests : IDisposable
         await script.FinishAsync(0);
     };
 
-    private static byte[] Text(string text) => Encoding.UTF8.GetBytes(text);
+    internal static byte[] Text(string text) => Encoding.UTF8.GetBytes(text);
 
     /// <summary>A file in source mode: its C line, then (after the acknowledgement) the data and the end-of-data byte.</summary>
-    private static byte[][] File(string name, string content, string mode = "0644") =>
+    internal static byte[][] File(string name, string content, string mode = "0644") =>
         [Text($"C{mode} {Encoding.UTF8.GetByteCount(content)} {name}\n"), [.. Text(content), 0]];
 
     [Test]

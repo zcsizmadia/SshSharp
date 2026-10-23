@@ -80,6 +80,8 @@ builder.Services.AddOpenTelemetry()
 | `SshSharp.Command` | Internal | `ssh.command.exit_status`; on failure `error.type` |
 | `SshSharp.Sftp.Upload` / `SshSharp.Sftp.Download` | Internal | One per `UploadAsync`, `UploadFileAsync`, `DownloadAsync` and `DownloadFileAsync` (and the conveniences built on them, such as `WriteAllBytesAsync`): `ssh.sftp.bytes` (what the call returns); on failure `error.type` |
 | `SshSharp.Sftp.UploadDirectory` / `SshSharp.Sftp.DownloadDirectory` | Internal | One per `UploadDirectoryAsync` and `DownloadDirectoryAsync`, with a file span inside it for each file: `ssh.sftp.bytes`, `ssh.sftp.files`, `ssh.sftp.directories` (as in `SftpTransferSummary`); on failure `error.type` |
+| `SshSharp.Scp.Upload` / `SshSharp.Scp.Download` | Internal | One per SCP `UploadAsync`, `UploadFileAsync`, `DownloadAsync` and `DownloadFileAsync` (`SshScpExtensions`): `ssh.scp.bytes` (the file data moved); on failure `error.type` |
+| `SshSharp.Scp.UploadDirectory` / `SshSharp.Scp.DownloadDirectory` | Internal | One per SCP `UploadDirectoryAsync` and `DownloadDirectoryAsync`: `ssh.scp.bytes`, `ssh.scp.files`, `ssh.scp.directories` (directories below the top one, as SFTP counts them); on failure `error.type`. The whole tree goes through one `scp` run, so its files are not spans of their own |
 
 | Instrument | Unit | Description |
 |---|---|---|
@@ -90,6 +92,7 @@ builder.Services.AddOpenTelemetry()
 | `sshsharp.channels` | `{channel}` | Open channels |
 | `sshsharp.commands` | `{command}` | Commands run, tagged `result` (`success`, `failure` for a non-zero exit status, `error`) and, for errors, `error.type` |
 | `sshsharp.sftp.bytes` | `By` | File data moved by SFTP transfers (the methods of the transfer spans above), tagged `ssh.sftp.direction` (`upload`, `download`). Counted as it moves, so a transfer that fails counts what it moved first; an upload counts what the server acknowledged. Reads and writes through `OpenAsync`'s streams are not counted |
+| `sshsharp.scp.bytes` | `By` | File data moved by SCP transfers, tagged `ssh.scp.direction` (`upload`, `download`). Counted as it moves, so a transfer that fails counts what it moved first. SCP acknowledges a file only once all of it has arrived, so an upload counts what was written to the channel |
 | `sshsharp.forwarding.connections` | `{connection}` | Forwarded connections, tagged `ssh.forwarding.type` and `result`: `opened` when one reaches its destination (or its handler), `failed` when it does not (the server refuses the channel, nothing listens at the local destination, a SOCKS request is refused or malformed, a forwarding's connection limit is reached). Connections cut short because their forwarding is stopping are not counted |
 | `sshsharp.forwarding.active` | `{connection}` | Open forwarded connections, tagged `ssh.forwarding.type` |
 | `sshsharp.keep_alive.round_trip_time` | `s` | Time from a keep-alive probe (`KeepAliveInterval`) to the server's answer: a `ping@openssh.com` transport ping where the server has one, otherwise the `keepalive@openssh.com` request. A ping sent while the last one is still unanswered is not timed. `PingAsync` returns its own round trip and is not recorded here |
@@ -101,7 +104,8 @@ forwarding to a handler, and `RemoteForward` with a destination) or `remote_dyna
 `RemoteForward` without one). `OpenTcpTunnelAsync` and `OpenUnixSocketTunnelAsync` are channels of their own, counted in
 `sshsharp.channels` only.
 
-The spans nest like this; each file of a directory transfer is a span of its own:
+The spans nest like this; each file of an SFTP directory transfer is a span of its own, while an SCP directory transfer is one
+span:
 
 ```mermaid
 flowchart TD
@@ -111,6 +115,7 @@ flowchart TD
     app --> tree["SshSharp.Sftp.DownloadDirectory"]
     tree --> file1["SshSharp.Sftp.Download (a file)"]
     tree --> file2["SshSharp.Sftp.Download (another file)"]
+    app --> scp["SshSharp.Scp.UploadDirectory (the whole tree)"]
 ```
 
 `error.type` follows OpenTelemetry's semantic conventions: an `SshException`'s `Reason` (`AuthenticationFailed`, `Timeout`,
@@ -126,7 +131,7 @@ span?.SetTag("server.address", host);
 await using var client = await SshClient.ConnectAsync(host, 22, options);
 ```
 
-For the same reason, no span or instrument records a user name, a file or directory path, a forwarding's addresses, ports or
+For the same reason, no span or instrument records a user name, a file or directory path (SFTP or SCP), a forwarding's addresses, ports or
 socket paths, a SOCKS destination, or the name of a dependency injection endpoint (often a host name). Add what your policy allows
 to a span of your own around the call, as above.
 

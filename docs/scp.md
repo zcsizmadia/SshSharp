@@ -56,6 +56,14 @@ downloading, every name the server sends must be a single path component (no `/`
 and a single-file download accepts exactly one file: a hostile server cannot write outside the target or slip in extra files
 (CVE-2019-6111). Permission bits from the server are applied without set-id or sticky bits, and only with `Preserve`.
 
+## Tracing and metrics
+
+Each `UploadFileAsync`, `UploadAsync`, `DownloadFileAsync` and `DownloadAsync` is a span (`SshSharp.Scp.Upload` or
+`SshSharp.Scp.Download`) tagged with the bytes it moved, and each directory transfer is one (`SshSharp.Scp.UploadDirectory` or
+`SshSharp.Scp.DownloadDirectory`) tagged with its bytes, files and directories. The `sshsharp.scp.bytes` metric counts the file
+data as it moves, by direction. Paths are never recorded: add them to a span of your own if your policy allows. See
+[Tracing and metrics](diagnostics.md#tracing-and-metrics).
+
 ## See also
 
 - [Transfer files with SCP](how-to/transfer-files-scp.md)

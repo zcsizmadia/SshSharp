@@ -16,10 +16,13 @@ namespace SshSharp;
 /// <c>error.type</c>), <c>SshSharp.Command</c> (<c>ssh.command.exit_status</c>, <c>error.type</c>), and the SFTP transfers
 /// <c>SshSharp.Sftp.Upload</c> and <c>SshSharp.Sftp.Download</c> (<c>ssh.sftp.bytes</c>, <c>error.type</c>) and
 /// <c>SshSharp.Sftp.UploadDirectory</c> and <c>SshSharp.Sftp.DownloadDirectory</c> (also <c>ssh.sftp.files</c> and
-/// <c>ssh.sftp.directories</c>). Instruments: <c>sshsharp.connections</c>, <c>sshsharp.connect.duration</c> (s; successful and failed
+/// <c>ssh.sftp.directories</c>), and the SCP transfers <c>SshSharp.Scp.Upload</c> and <c>SshSharp.Scp.Download</c> (<c>ssh.scp.bytes</c>,
+/// <c>error.type</c>) and <c>SshSharp.Scp.UploadDirectory</c> and <c>SshSharp.Scp.DownloadDirectory</c> (also <c>ssh.scp.files</c> and
+/// <c>ssh.scp.directories</c>). Instruments: <c>sshsharp.connections</c>, <c>sshsharp.connect.duration</c> (s; successful and failed
 /// connects, the failed ones tagged <c>error.type</c>), <c>sshsharp.bytes.sent</c>, <c>sshsharp.bytes.received</c>,
 /// <c>sshsharp.key_exchanges</c>, <c>sshsharp.channels</c>, <c>sshsharp.commands</c> (tagged <c>result</c> and, for errors,
-/// <c>error.type</c>), <c>sshsharp.sftp.bytes</c> (By, tagged <c>ssh.sftp.direction</c>), <c>sshsharp.forwarding.connections</c> (tagged
+/// <c>error.type</c>), <c>sshsharp.sftp.bytes</c> (By, tagged <c>ssh.sftp.direction</c>), <c>sshsharp.scp.bytes</c> (By, tagged
+/// <c>ssh.scp.direction</c>), <c>sshsharp.forwarding.connections</c> (tagged
 /// <c>ssh.forwarding.type</c> and <c>result</c>), <c>sshsharp.forwarding.active</c> (tagged <c>ssh.forwarding.type</c>) and
 /// <c>sshsharp.keep_alive.round_trip_time</c> (s); SshSharp.Extensions.DependencyInjection adds
 /// <c>sshsharp.connection_provider.reconnects</c> under the same meter name. No host names, user names or paths are recorded.
@@ -59,6 +62,9 @@ public static class SshTelemetry
     internal static readonly Counter<long> SftpBytes = Instruments.CreateCounter<long>(
         "sshsharp.sftp.bytes", "By", "File data moved by SFTP transfers, tagged by direction (upload, download).");
 
+    internal static readonly Counter<long> ScpBytes = Instruments.CreateCounter<long>(
+        "sshsharp.scp.bytes", "By", "File data moved by SCP transfers, tagged by direction (upload, download).");
+
     internal static readonly Counter<long> ForwardedConnections = Instruments.CreateCounter<long>(
         "sshsharp.forwarding.connections", "{connection}", "Forwarded connections, tagged by forwarding type and result (opened, failed).");
 
@@ -68,13 +74,15 @@ public static class SshTelemetry
     internal static readonly Histogram<double> KeepAliveRoundTrip = Instruments.CreateHistogram<double>(
         "sshsharp.keep_alive.round_trip_time", "s", "Time from a keep-alive probe to the server's answer.");
 
-    // Made once: the SFTP byte counter is added to for every read and write of a transfer.
+    // Made once: the SFTP and SCP byte counters are added to for every read and write of a transfer.
     internal static readonly KeyValuePair<string, object?> Upload = new("ssh.sftp.direction", "upload");
     internal static readonly KeyValuePair<string, object?> Download = new("ssh.sftp.direction", "download");
+    internal static readonly KeyValuePair<string, object?> ScpUpload = new("ssh.scp.direction", "upload");
+    internal static readonly KeyValuePair<string, object?> ScpDownload = new("ssh.scp.direction", "download");
 
     /// <summary>
-    /// Starts the span of an SFTP transfer (<c>SshSharp.Sftp.Upload</c>, <c>Download</c>, <c>UploadDirectory</c> or
-    /// <c>DownloadDirectory</c>). Paths are never recorded: they can hold user names, and are the application's to add.
+    /// Starts the span of an SFTP or SCP transfer (<c>SshSharp.Sftp.Upload</c>, <c>SshSharp.Scp.Upload</c>, <c>Download</c>,
+    /// <c>UploadDirectory</c> or <c>DownloadDirectory</c>). Paths are never recorded: they can hold user names, and are the application's to add.
     /// </summary>
     internal static Activity? StartTransfer(string name) => Activities.StartActivity(name);
 
