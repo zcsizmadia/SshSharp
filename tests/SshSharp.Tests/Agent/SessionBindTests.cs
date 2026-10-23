@@ -25,7 +25,7 @@ public class SessionBindTests
         {
             UserName = "tester",
             PrivateKeys = keys,
-            Password = forward is null ? null : "secret",
+            Password = forward is null ? null : TestSecrets.Password,
             HostKeyVerifier = SshHostKeyVerifier.FromDelegate((_, _) => ValueTask.FromResult(true)),
             ForwardAgent = forward,
         }, leaveOpen: true, Timeout());

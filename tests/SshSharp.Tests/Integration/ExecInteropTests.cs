@@ -184,7 +184,7 @@ public class ExecInteropTests
         var options = new SshClientOptions
         {
             UserName = Environment.GetEnvironmentVariable("SSHSHARP_TEST_USER")!,
-            Password = "definitely-wrong",
+            Password = TestSecrets.New(), // generated, so never the account's
             HostKeyVerifier = SshHostKeyVerifier.FromDelegate((_, _) => ValueTask.FromResult(true)),
         };
         var ex = await Assert.ThrowsAsync<SshException>(async () => await SshClient.ConnectAsync(host, port, options, Timeout()));

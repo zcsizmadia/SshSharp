@@ -1,4 +1,3 @@
-using System.Security.Cryptography;
 using SshSharp.Tests.Keys;
 using SshSharp.Tests.Protocol;
 using Round = SshSharp.Tests.Protocol.FakeSessionServer.KeyboardRound;
@@ -14,8 +13,6 @@ public class PasswordAuthenticationTests
     private static CancellationToken Timeout() => new CancellationTokenSource(TimeSpan.FromSeconds(60)).Token;
 
     /// <summary>A password made up for one test, never a literal.</summary>
-    private static string NewPassword() => Convert.ToHexString(RandomNumberGenerator.GetBytes(12));
-
     private static async Task<SshClient> ConnectAsync(FakeSessionServer server, SshClientOptions options, CancellationToken cancellationToken = default)
     {
         _ = server.StartAsync();
@@ -66,7 +63,7 @@ public class PasswordAuthenticationTests
     public async Task TheProvider_IsNotAsked_WhenAKeyLogsIn()
     {
         using var key = SshPrivateKey.Parse(TestKeys.OpenSshEd25519(out var blob));
-        await using var server = new FakeSessionServer { Password = NewPassword(), AuthorizedKeys = [blob], AdvertisedMethods = ["publickey", "password"] };
+        await using var server = new FakeSessionServer { Password = TestSecrets.New(), AuthorizedKeys = [blob], AdvertisedMethods = ["publickey", "password"] };
         var seen = new List<SshPasswordPrompt>();
         await using var client = await ConnectAsync(server, Options(provider: Provider(seen, server.Password), keys: [key]));
 
@@ -78,7 +75,7 @@ public class PasswordAuthenticationTests
     public async Task TheProvider_IsAskedOnceTheKeysAreRefused_WithWhatAPromptShows()
     {
         using var key = SshPrivateKey.Parse(TestKeys.OpenSshEd25519(out _));
-        await using var server = new FakeSessionServer { Password = NewPassword(), AdvertisedMethods = ["publickey", "password"] };
+        await using var server = new FakeSessionServer { Password = TestSecrets.New(), AdvertisedMethods = ["publickey", "password"] };
         var seen = new List<SshPasswordPrompt>();
         await using var client = await ConnectAsync(server, Options(provider: Provider(seen, server.Password), keys: [key]));
 
@@ -93,9 +90,9 @@ public class PasswordAuthenticationTests
     [Test]
     public async Task ARefusedPassword_IsAskedForAgain_UntilOneWorks()
     {
-        await using var server = new FakeSessionServer { Password = NewPassword() };
+        await using var server = new FakeSessionServer { Password = TestSecrets.New() };
         var seen = new List<SshPasswordPrompt>();
-        await using var client = await ConnectAsync(server, Options(provider: Provider(seen, NewPassword(), NewPassword(), server.Password)));
+        await using var client = await ConnectAsync(server, Options(provider: Provider(seen, TestSecrets.New(), TestSecrets.New(), server.Password)));
 
         await Assert.That(seen.Select(p => p.Attempt)).IsEquivalentTo(new[] { 1, 2, 3 });
         await Assert.That(seen.Select(p => p.IsRetry)).IsEquivalentTo(new[] { false, true, true });
@@ -108,9 +105,9 @@ public class PasswordAuthenticationTests
     [Arguments(3)]
     public async Task NumberOfPasswordPrompts_BoundsTheProvider_AndEachRefusalIsListed(int prompts)
     {
-        await using var server = new FakeSessionServer { Password = NewPassword() };
+        await using var server = new FakeSessionServer { Password = TestSecrets.New() };
         var seen = new List<SshPasswordPrompt>();
-        var wrong = Enumerable.Range(0, 10).Select(_ => NewPassword()).ToArray();
+        var wrong = Enumerable.Range(0, 10).Select(_ => TestSecrets.New()).ToArray();
         var error = await Assert.ThrowsAsync<SshAuthenticationException>(() => ConnectAsync(server, Options(provider: Provider(seen, wrong), prompts: prompts)));
 
         await Assert.That(seen.Count).IsEqualTo(prompts);
@@ -132,7 +129,7 @@ public class PasswordAuthenticationTests
     [Test]
     public async Task ZeroPrompts_NeverAsks()
     {
-        await using var server = new FakeSessionServer { Password = NewPassword() };
+        await using var server = new FakeSessionServer { Password = TestSecrets.New() };
         var seen = new List<SshPasswordPrompt>();
         var error = await Assert.ThrowsAsync<SshAuthenticationException>(() => ConnectAsync(server, Options(provider: Provider(seen, server.Password), prompts: 0)));
         await Assert.That(seen).IsEmpty();
@@ -142,7 +139,7 @@ public class PasswordAuthenticationTests
     [Test]
     public async Task AProviderThatReturnsNull_StopsAsking_AndIsListedAsDeclined()
     {
-        await using var server = new FakeSessionServer { Password = NewPassword() };
+        await using var server = new FakeSessionServer { Password = TestSecrets.New() };
         var seen = new List<SshPasswordPrompt>();
         var error = await Assert.ThrowsAsync<SshAuthenticationException>(() => ConnectAsync(server, Options(provider: Provider(seen))));
 
@@ -154,8 +151,8 @@ public class PasswordAuthenticationTests
     [Test]
     public async Task TheGivenPassword_IsTriedFirst_AndTheProviderOnlyAfterItIsRefused()
     {
-        var stale = NewPassword();
-        await using var server = new FakeSessionServer { Password = NewPassword() };
+        var stale = TestSecrets.New();
+        await using var server = new FakeSessionServer { Password = TestSecrets.New() };
         var seen = new List<SshPasswordPrompt>();
         await using var client = await ConnectAsync(server, Options(password: stale, provider: Provider(seen, server.Password), prompts: 1));
 
@@ -167,7 +164,7 @@ public class PasswordAuthenticationTests
     [Test]
     public async Task TheGivenPassword_WhenRight_NeverAsks()
     {
-        await using var server = new FakeSessionServer { Password = NewPassword() };
+        await using var server = new FakeSessionServer { Password = TestSecrets.New() };
         var seen = new List<SshPasswordPrompt>();
         await using var client = await ConnectAsync(server, Options(password: server.Password, provider: Provider(seen)));
         await Assert.That(seen).IsEmpty();
@@ -176,7 +173,7 @@ public class PasswordAuthenticationTests
     [Test]
     public async Task CancellingInTheProvider_CancelsTheConnect()
     {
-        await using var server = new FakeSessionServer { Password = NewPassword() };
+        await using var server = new FakeSessionServer { Password = TestSecrets.New() };
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         var options = Options(provider: async (_, ct) =>
         {
@@ -192,11 +189,11 @@ public class PasswordAuthenticationTests
     public async Task TheProvider_AnswersAServerThatAsksForThePasswordThroughKeyboardInteractive()
     {
         // sshd with PAM and PasswordAuthentication no: each try is a keyboard-interactive exchange with one hidden question.
-        var password = NewPassword();
+        var password = TestSecrets.New();
         var round = new Round("", "", [("Password: ", false)], [password]);
         await using var server = new FakeSessionServer { AdvertisedMethods = ["keyboard-interactive"], KeyboardInteractiveRounds = [round] };
         var seen = new List<SshPasswordPrompt>();
-        var wrong = NewPassword();
+        var wrong = TestSecrets.New();
         await using var client = await ConnectAsync(server, Options(provider: Provider(seen, wrong, password)));
 
         await Assert.That(seen.Select(p => p.Method)).IsEquivalentTo(new[] { "keyboard-interactive", "keyboard-interactive" });
@@ -210,7 +207,7 @@ public class PasswordAuthenticationTests
         var code = new Round("", "", [("Verification code: ", true)], ["000000"]);
         await using var server = new FakeSessionServer { AdvertisedMethods = ["keyboard-interactive"], KeyboardInteractiveRounds = [code] };
         var seen = new List<SshPasswordPrompt>();
-        var error = await Assert.ThrowsAsync<SshAuthenticationException>(() => ConnectAsync(server, Options(provider: Provider(seen, NewPassword()))));
+        var error = await Assert.ThrowsAsync<SshAuthenticationException>(() => ConnectAsync(server, Options(provider: Provider(seen, TestSecrets.New()))));
 
         await Assert.That(seen).IsEmpty();
         await Assert.That(error!.Attempts.Single()).IsEqualTo(new SshAuthenticationAttempt("keyboard-interactive", SshAuthenticationOutcome.Declined));
@@ -219,8 +216,8 @@ public class PasswordAuthenticationTests
     [Test]
     public async Task AKeyboardInteractiveHandler_AnswersKeyboardInteractive_AndTheProviderThePasswordMethod()
     {
-        var password = NewPassword();
-        var round = new Round("", "", [("Password: ", false)], [NewPassword()]);
+        var password = TestSecrets.New();
+        var round = new Round("", "", [("Password: ", false)], [TestSecrets.New()]);
         await using var server = new FakeSessionServer
         {
             Password = password,
@@ -251,8 +248,8 @@ public class PasswordAuthenticationTests
     [Test]
     public async Task AnExpiredPassword_IsChanged_AndTheConnectSucceeds()
     {
-        var replacement = NewPassword();
-        await using var server = new FakeSessionServer { Password = NewPassword(), PasswordExpired = true };
+        var replacement = TestSecrets.New();
+        await using var server = new FakeSessionServer { Password = TestSecrets.New(), PasswordExpired = true };
         var seen = new List<SshPasswordChangeRequest>();
         await using var client = await ConnectAsync(server, Options(password: server.Password, changePassword: Changer(seen, replacement)));
 
@@ -270,8 +267,8 @@ public class PasswordAuthenticationTests
     [Test]
     public async Task ARefusedNewPassword_IsAskedForAgain_WithTheServersReason()
     {
-        var replacement = NewPassword();
-        await using var server = new FakeSessionServer { Password = NewPassword(), PasswordExpired = true, NewPasswordsRefused = 1 };
+        var replacement = TestSecrets.New();
+        await using var server = new FakeSessionServer { Password = TestSecrets.New(), PasswordExpired = true, NewPasswordsRefused = 1 };
         var seen = new List<SshPasswordChangeRequest>();
         await using var client = await ConnectAsync(server, Options(password: server.Password, changePassword: Changer(seen, "short", replacement)));
 
@@ -283,12 +280,12 @@ public class PasswordAuthenticationTests
     [Test]
     public async Task AServerThatRefusesEveryNewPassword_IsAskedABoundedNumberOfTimes()
     {
-        await using var server = new FakeSessionServer { Password = NewPassword(), PasswordExpired = true, NewPasswordsRefused = 100 };
+        await using var server = new FakeSessionServer { Password = TestSecrets.New(), PasswordExpired = true, NewPasswordsRefused = 100 };
         var asked = 0;
         var error = await Assert.ThrowsAsync<SshAuthenticationException>(() => ConnectAsync(server, Options(password: server.Password, changePassword: (_, _) =>
         {
             asked++;
-            return ValueTask.FromResult<string?>(NewPassword());
+            return ValueTask.FromResult<string?>(TestSecrets.New());
         })));
 
         await Assert.That(asked).IsEqualTo(SshClient.MaxPasswordChangeRequests);
@@ -298,7 +295,7 @@ public class PasswordAuthenticationTests
     [Test]
     public async Task WithoutAHandler_AnExpiredPassword_FailsAsAnAuthenticationFailure_AndIsNotAskedForAgain()
     {
-        await using var server = new FakeSessionServer { Password = NewPassword(), PasswordExpired = true };
+        await using var server = new FakeSessionServer { Password = TestSecrets.New(), PasswordExpired = true };
         var seen = new List<SshPasswordPrompt>();
         var error = await Assert.ThrowsAsync<SshAuthenticationException>(() => ConnectAsync(server, Options(provider: Provider(seen, server.Password, server.Password))));
 
@@ -311,7 +308,7 @@ public class PasswordAuthenticationTests
     [Test]
     public async Task DecliningTheChange_SendsNoNewPassword()
     {
-        await using var server = new FakeSessionServer { Password = NewPassword(), PasswordExpired = true };
+        await using var server = new FakeSessionServer { Password = TestSecrets.New(), PasswordExpired = true };
         var seen = new List<SshPasswordChangeRequest>();
         var error = await Assert.ThrowsAsync<SshAuthenticationException>(() => ConnectAsync(server, Options(password: server.Password, changePassword: Changer(seen))));
 
@@ -323,9 +320,9 @@ public class PasswordAuthenticationTests
     [Test]
     public async Task AChangeTheServerRefuses_IsListedAsRejected()
     {
-        await using var server = new FakeSessionServer { Password = NewPassword(), PasswordExpired = true, NewPasswordsRefused = -1 };
+        await using var server = new FakeSessionServer { Password = TestSecrets.New(), PasswordExpired = true, NewPasswordsRefused = -1 };
         var error = await Assert.ThrowsAsync<SshAuthenticationException>(() => ConnectAsync(server,
-            Options(password: server.Password, changePassword: Changer([], NewPassword()))));
+            Options(password: server.Password, changePassword: Changer([], TestSecrets.New()))));
 
         await Assert.That(error!.Attempts.Single()).IsEqualTo(new SshAuthenticationAttempt("password", SshAuthenticationOutcome.Rejected));
         await Assert.That(server.ChangedPassword).IsNull();
@@ -335,10 +332,10 @@ public class PasswordAuthenticationTests
     public async Task AChangeWithPartialSuccess_GoesOnToTheNextMethod()
     {
         using var key = SshPrivateKey.Parse(TestKeys.OpenSshEd25519(out var blob));
-        var replacement = NewPassword();
+        var replacement = TestSecrets.New();
         await using var server = new FakeSessionServer
         {
-            Password = NewPassword(),
+            Password = TestSecrets.New(),
             PasswordExpired = true,
             AuthorizedKeys = [blob],
             AuthenticationChain = ["password", "publickey"],
@@ -352,7 +349,7 @@ public class PasswordAuthenticationTests
     [Test]
     public async Task CancellingInTheChangeHandler_CancelsTheConnect()
     {
-        await using var server = new FakeSessionServer { Password = NewPassword(), PasswordExpired = true };
+        await using var server = new FakeSessionServer { Password = TestSecrets.New(), PasswordExpired = true };
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         var options = Options(password: server.Password, changePassword: async (_, ct) =>
         {
@@ -393,8 +390,8 @@ public class PasswordAuthenticationTests
     public async Task CredentialsForAMethodTheServerDoesNotOffer_AreListedAsNotOffered()
     {
         using var key = SshPrivateKey.Generate(SshKeyType.Ed25519);
-        await using var server = new FakeSessionServer { Password = NewPassword(), AdvertisedMethods = ["password"] };
-        var error = await Assert.ThrowsAsync<SshAuthenticationException>(() => ConnectAsync(server, Options(password: NewPassword(), keys: [key])));
+        await using var server = new FakeSessionServer { Password = TestSecrets.New(), AdvertisedMethods = ["password"] };
+        var error = await Assert.ThrowsAsync<SshAuthenticationException>(() => ConnectAsync(server, Options(password: TestSecrets.New(), keys: [key])));
 
         await Assert.That(error!.Attempts).IsEquivalentTo(new[]
         {
@@ -442,11 +439,11 @@ public class PasswordAuthenticationTests
     [Test]
     public async Task KerberosThatCannotRunHere_IsListedAsUnavailable()
     {
-        await using var server = new FakeSessionServer { Password = NewPassword(), AdvertisedMethods = ["gssapi-with-mic", "password"] };
+        await using var server = new FakeSessionServer { Password = TestSecrets.New(), AdvertisedMethods = ["gssapi-with-mic", "password"] };
         var options = new SshClientOptions
         {
             UserName = "tester",
-            Password = NewPassword(),
+            Password = TestSecrets.New(),
             Gssapi = new SshGssapiOptions { TargetHost = "kdc-test.example", ContextFactory = (_, _, _) => throw new PlatformNotSupportedException() },
             HostKeyVerifier = SshHostKeyVerifier.FromDelegate((_, _) => ValueTask.FromResult(true)),
         };

@@ -127,7 +127,7 @@ public sealed class CertificateTests : IDisposable
         var options = new SshClientOptions
         {
             UserName = "tester",
-            Password = "secret",
+            Password = TestSecrets.Password,
             HostKeyAlias = Host,
             HostKeyVerifier = new KnownHostsVerifier([KnownHosts]) { Policy = policy },
         };
@@ -164,7 +164,7 @@ public sealed class CertificateTests : IDisposable
         await using var client = await SshClient.ConnectAsync(server.ClientStream, new SshClientOptions
         {
             UserName = "tester",
-            Password = "secret",
+            Password = TestSecrets.Password,
             HostKeyAlias = Host,
             HostKeyVerifier = new KnownHostsVerifier([KnownHosts]),
             HostKeyAlgorithms = SshAlgorithmList.Only("ssh-ed25519-cert-v01@openssh.com"),

@@ -40,7 +40,7 @@ public sealed class RevokedHostKeysTests : IDisposable
         return await SshClient.ConnectAsync(fake.ClientStream, new SshClientOptions
         {
             UserName = "tester",
-            Password = "secret",
+            Password = TestSecrets.Password,
             HostKeyAlias = Host,
             HostKeyVerifier = new KnownHostsVerifier([KnownHosts]) { Policy = policy, RevokedHostKeys = revoked == "" ? RevokedFile : revoked },
         }, leaveOpen: true, Timeout());
@@ -341,7 +341,7 @@ public sealed class RevokedHostKeysTests : IDisposable
                 {
                     Config = SshConfig.Parse("Host *\n User tester\n StrictHostKeyChecking no\n UserKnownHostsFile none\n RevokedHostKeys ~/revoked-%h\n"),
                     ResolveOptions = resolve,
-                    Password = "secret",
+                    Password = TestSecrets.Password,
                     UseAgent = false,
                     TcpConnector = (_, _, _, _) =>
                     {

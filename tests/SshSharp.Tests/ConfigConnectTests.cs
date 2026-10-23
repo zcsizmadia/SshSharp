@@ -89,7 +89,7 @@ public sealed class ConfigConnectTests : IDisposable
             Agent = SshAgent.FromKeys(HopKey), // the hops' key (PrivateKeys is the destination's only); also keeps the developer's agent out
             Config = SshConfig.Parse(Config("accept-new")),
             ResolveOptions = Resolve,
-            Password = "secret",
+            Password = TestSecrets.Password,
             TcpConnector = Network(("j1.example.com", jump1)),
         }, Timeout());
 
@@ -125,7 +125,7 @@ public sealed class ConfigConnectTests : IDisposable
             Agent = SshAgent.FromKeys(HopKey), // the hops' key (PrivateKeys is the destination's only); also keeps the developer's agent out
             Config = SshConfig.Parse(Config("yes")),
             ResolveOptions = Resolve,
-            Password = "secret",
+            Password = TestSecrets.Password,
             TcpConnector = Network(("j1.example.com", again1)),
         }, Timeout());
         await Assert.That(again.IsConnected).IsTrue();
@@ -145,11 +145,11 @@ public sealed class ConfigConnectTests : IDisposable
             UseAgent = false,
             Config = SshConfig.Parse("Host t\n ProxyJump j\nHost *\n User tester\n StrictHostKeyChecking no\n UserKnownHostsFile none\n"),
             ResolveOptions = Resolve,
-            Password = "secret",
+            Password = TestSecrets.Password,
             KeyboardInteractive = (_, _) =>
             {
                 Interlocked.Increment(ref answered);
-                return ValueTask.FromResult<IReadOnlyList<string>?>(["secret"]);
+                return ValueTask.FromResult<IReadOnlyList<string>?>([TestSecrets.Password]);
             },
             TcpConnector = Network(("j", jump)),
         }, Timeout()));
@@ -211,13 +211,13 @@ public sealed class ConfigConnectTests : IDisposable
     [Arguments("2147483647")] // the longest ssh_config allows
     public async Task AConnectTimeoutLongerThanATimerCanWait_IsNoLimit(string connectTimeout)
     {
-        await using var server = new FakeSessionServer { Password = "secret" };
+        await using var server = new FakeSessionServer { Password = TestSecrets.Password };
         await using var client = await SshClient.ConnectAsync("t", new SshConfigConnectOptions
         {
             UseAgent = false,
             Config = SshConfig.Parse($"Host *\n User tester\n StrictHostKeyChecking no\n UserKnownHostsFile none\n ConnectTimeout {connectTimeout}\n"),
             ResolveOptions = Resolve,
-            Password = "secret",
+            Password = TestSecrets.Password,
             TcpConnector = Network(("t", server)),
         }, Timeout());
         await Assert.That(client.IsConnected).IsTrue();
@@ -239,7 +239,7 @@ public sealed class ConfigConnectTests : IDisposable
             Agent = SshAgent.FromKeys(HopKey), // the hops' key (PrivateKeys is the destination's only); also keeps the developer's agent out
             Config = SshConfig.Parse("Host t\n ProxyJump j\nHost *\n User tester\n StrictHostKeyChecking no\n UserKnownHostsFile none\n"),
             ResolveOptions = Resolve,
-            Password = "secret",
+            Password = TestSecrets.Password,
             TcpConnector = Network(("j", jump)),
         }, Timeout());
 
@@ -256,8 +256,9 @@ public sealed class ConfigConnectTests : IDisposable
     [Test]
     public async Task IdentityFiles_AreUsed_IncludingEncryptedOnesThroughThePassphraseProvider()
     {
+        var passphrase = TestSecrets.New();
         File.WriteAllText(Path.Combine(_dir, "plain"), TestKeys.OpenSshEd25519(out var plainBlob));
-        File.WriteAllText(Path.Combine(_dir, "locked"), TestKeys.OpenSshEd25519(out var lockedBlob, passphrase: "pw"));
+        File.WriteAllText(Path.Combine(_dir, "locked"), TestKeys.OpenSshEd25519(out var lockedBlob, passphrase: passphrase));
 
         await using (var server = new FakeSessionServer { AdvertisedMethods = ["publickey"], AuthorizedKeys = [plainBlob] })
         {
@@ -279,7 +280,7 @@ public sealed class ConfigConnectTests : IDisposable
                 UseAgent = false, // the developer's own agent must not change the outcome
                 Config = SshConfig.Parse("Host srv\n User tester\n IdentityFile ~/locked\n StrictHostKeyChecking no\n UserKnownHostsFile none\n"),
                 ResolveOptions = Resolve,
-                PassphraseProvider = (path, _) => { asked.Add(Path.GetFileName(path)); return ValueTask.FromResult<string?>("pw"); },
+                PassphraseProvider = (path, _) => { asked.Add(Path.GetFileName(path)); return ValueTask.FromResult<string?>(passphrase); },
                 TcpConnector = Network(("srv", server)),
             }, Timeout());
             await Assert.That(asked).IsEquivalentTo(new[] { "locked" });
@@ -294,7 +295,7 @@ public sealed class ConfigConnectTests : IDisposable
                 UseAgent = false, // the developer's own agent must not change the outcome
                 Config = SshConfig.Parse("Host srv\n User tester\n IdentityFile ~/locked\n BatchMode yes\n StrictHostKeyChecking no\n UserKnownHostsFile none\n"),
                 ResolveOptions = Resolve,
-                PassphraseProvider = (path, _) => { asked.Add(path); return ValueTask.FromResult<string?>("pw"); },
+                PassphraseProvider = (path, _) => { asked.Add(path); return ValueTask.FromResult<string?>(passphrase); },
                 TcpConnector = Network(("srv", server)),
             }, Timeout())).Throws<SshAuthenticationException>();
             await Assert.That(asked).IsEmpty();
@@ -313,7 +314,7 @@ public sealed class ConfigConnectTests : IDisposable
                 UseAgent = false, // the developer's own agent must not change the outcome
                 Config = config,
                 ResolveOptions = Resolve,
-                Password = "secret",
+                Password = TestSecrets.Password,
                 TcpConnector = Network(("srv", refusing)),
             }, Timeout())).Throws<SshHostKeyException>();
         }
@@ -325,7 +326,7 @@ public sealed class ConfigConnectTests : IDisposable
             UseAgent = false, // the developer's own agent must not change the outcome
             Config = config,
             ResolveOptions = Resolve,
-            Password = "secret",
+            Password = TestSecrets.Password,
             AskHostKey = (_, _) => ValueTask.FromResult(true),
             TcpConnector = Network(("srv", server)),
         }, Timeout());

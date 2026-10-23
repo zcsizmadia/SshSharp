@@ -28,6 +28,7 @@ internal static class Targets
         ["publickey"] = data => Protocol(() => VerifyingKey.Parse(data).VerifySignature(SshAlgorithms.SshEd25519, data, data)),
         ["publickey-text"] = data => Format(() => PublicKeyText(Encoding.UTF8.GetString(data), data)),
         ["certificate"] = data => Protocol(() => SshCertificate.FromBlob(data).CheckForHost("host", DateTimeOffset.UtcNow)),
+        // A fixed passphrase, so a crash the fuzzer finds replays from its input alone: an input of the harness, not a credential.
         ["privatekey"] = data => Format(() => SshPrivateKey.Parse(Encoding.UTF8.GetString(data), "passphrase").Dispose()),
         ["privatekey-binary"] = data => Format(() => SshPrivateKey.Parse(
             "-----BEGIN OPENSSH PRIVATE KEY-----\n" + Convert.ToBase64String(data) + "\n-----END OPENSSH PRIVATE KEY-----\n", "passphrase").Dispose()),

@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using SshSharp.Crypto;
 
 namespace SshSharp.Tests.Crypto;
@@ -23,6 +24,7 @@ public class BcryptPbkdfTests
     [Test]
     public async Task KnownAnswer_FromThePycaBcryptTestSuite()
     {
+        // The published vector's inputs, kept as they are: fixed inputs of the algorithm's test, not a credential.
         var key = new byte[32];
         BcryptPbkdf.DeriveKey("password"u8, "salt"u8, 4, key);
         await Assert.That(Convert.ToHexString(key)).IsEqualTo("5BBF0CC293587F1C3635555C27796598D47E579071BF427E9D8FBE842ABA34D9");
@@ -32,30 +34,32 @@ public class BcryptPbkdfTests
     public async Task OutputIsSpreadAcrossTheKey_NotWrittenBlockByBlock()
     {
         // Longer outputs interleave the blocks: a 64-byte key is not the 32-byte key followed by more bytes.
+        var password = RandomNumberGenerator.GetBytes(12);
         var short32 = new byte[32];
         var long64 = new byte[64];
-        BcryptPbkdf.DeriveKey("pw"u8, "salt"u8, 2, short32);
-        BcryptPbkdf.DeriveKey("pw"u8, "salt"u8, 2, long64);
+        BcryptPbkdf.DeriveKey(password, "salt"u8, 2, short32);
+        BcryptPbkdf.DeriveKey(password, "salt"u8, 2, long64);
         await Assert.That(long64.AsSpan(0, 32).SequenceEqual(short32)).IsFalse();
         await Assert.That(long64[0]).IsEqualTo(short32[0]);
         await Assert.That(long64[2]).IsEqualTo(short32[1]);
 
         // Deterministic, and sensitive to every input.
         var again = new byte[64];
-        BcryptPbkdf.DeriveKey("pw"u8, "salt"u8, 2, again);
+        BcryptPbkdf.DeriveKey(password, "salt"u8, 2, again);
         await Assert.That(again).IsEquivalentTo(long64);
         var otherRounds = new byte[64];
-        BcryptPbkdf.DeriveKey("pw"u8, "salt"u8, 3, otherRounds);
+        BcryptPbkdf.DeriveKey(password, "salt"u8, 3, otherRounds);
         await Assert.That(otherRounds).IsNotEquivalentTo(long64);
     }
 
     [Test]
     public async Task InvalidParameters_AreRefused()
     {
+        var password = RandomNumberGenerator.GetBytes(12);
         var key = new byte[32];
         await Assert.That(() => BcryptPbkdf.DeriveKey(""u8, "salt"u8, 4, key)).Throws<ArgumentException>();
-        await Assert.That(() => BcryptPbkdf.DeriveKey("pw"u8, ""u8, 4, key)).Throws<ArgumentException>();
-        await Assert.That(() => BcryptPbkdf.DeriveKey("pw"u8, "salt"u8, 0, key)).Throws<ArgumentException>();
-        await Assert.That(() => BcryptPbkdf.DeriveKey("pw"u8, "salt"u8, 4, new byte[1025])).Throws<ArgumentException>();
+        await Assert.That(() => BcryptPbkdf.DeriveKey(password, ""u8, 4, key)).Throws<ArgumentException>();
+        await Assert.That(() => BcryptPbkdf.DeriveKey(password, "salt"u8, 0, key)).Throws<ArgumentException>();
+        await Assert.That(() => BcryptPbkdf.DeriveKey(password, "salt"u8, 4, new byte[1025])).Throws<ArgumentException>();
     }
 }

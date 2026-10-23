@@ -63,7 +63,7 @@ public class PublicKeyAuthTests
 
         await using (var server = new FakeSessionServer { AdvertisedMethods = ["publickey", "password"] })
         {
-            await using var client = await ConnectAsync(server, [stranger], password: "secret");
+            await using var client = await ConnectAsync(server, [stranger], password: TestSecrets.Password);
             await Assert.That(Attempts(server)).IsEquivalentTo(new[] { "none", "publickey", "password" });
         }
     }
@@ -143,7 +143,7 @@ public class PublicKeyAuthTests
     {
         using var key = SshPrivateKey.Parse(TestKeys.OpenSshEd25519(out var blob));
         await using var server = new FakeSessionServer { AdvertisedMethods = ["publickey"], AuthorizedKeys = [blob], RequirePasswordAfterPublicKey = true };
-        await using var client = await ConnectAsync(server, [key], password: "secret");
+        await using var client = await ConnectAsync(server, [key], password: TestSecrets.Password);
         await Assert.That(Attempts(server)).IsEquivalentTo(new[] { "none", "publickey", "publickey-signed:ssh-ed25519", "password" });
     }
 

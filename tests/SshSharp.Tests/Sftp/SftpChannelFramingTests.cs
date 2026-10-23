@@ -30,7 +30,7 @@ public class SftpChannelFramingTests
             rig.Client = await SshClient.ConnectAsync(rig.Ssh.ClientStream, new SshClientOptions
             {
                 UserName = "tester",
-                Password = "secret",
+                Password = TestSecrets.Password,
                 HostKeyVerifier = SshHostKeyVerifier.FromDelegate((_, _) => ValueTask.FromResult(true)),
             }, leaveOpen: true, Timeout());
             return rig;

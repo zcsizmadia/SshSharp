@@ -13,9 +13,6 @@ public class EncryptedKeyFormatTests
 {
     private const string ChaCha = "chacha20-poly1305@openssh.com";
 
-    // Generated per run, never written down.
-    private static string NewPassphrase() => Convert.ToHexString(RandomNumberGenerator.GetBytes(12));
-
     private static (string Pem, byte[] PublicBlob) LegacyRsa(string passphrase, string cipher = "AES-128-CBC", byte[]? iv = null)
     {
         using var rsa = RSA.Create(2048);
@@ -28,7 +25,7 @@ public class EncryptedKeyFormatTests
     [Arguments("AES-256-CBC")]
     public async Task LegacyPem_Rsa_EachAesCipher(string cipher)
     {
-        var passphrase = NewPassphrase();
+        var passphrase = TestSecrets.New();
         var (pem, blob) = LegacyRsa(passphrase, cipher);
         using (var key = SshPrivateKey.Parse(pem, passphrase))
         {
@@ -53,7 +50,7 @@ public class EncryptedKeyFormatTests
     {
         var curve = curveName switch { "nistp256" => ECCurve.NamedCurves.nistP256, "nistp384" => ECCurve.NamedCurves.nistP384, _ => ECCurve.NamedCurves.nistP521 };
         using var ecdsa = ECDsa.Create(curve);
-        var passphrase = NewPassphrase();
+        var passphrase = TestSecrets.New();
         var pem = TestKeys.LegacyEncryptedPem("EC PRIVATE KEY", ecdsa.ExportECPrivateKey(), passphrase, "AES-256-CBC");
 
         using var key = SshPrivateKey.Parse(pem, passphrase);
@@ -64,13 +61,13 @@ public class EncryptedKeyFormatTests
     [Test]
     public async Task LegacyPem_PassphraseMissingOrWrong()
     {
-        var passphrase = NewPassphrase();
+        var passphrase = TestSecrets.New();
         var (pem, _) = LegacyRsa(passphrase);
         await Assert.That(() => SshPrivateKey.Parse(pem)).Throws<FormatException>().WithMessageContaining("passphrase is required");
         await Assert.That(() => SshPrivateKey.Parse(pem, string.Empty)).Throws<FormatException>().WithMessageContaining("passphrase is required");
         for (var i = 0; i < 20; i++)
         {
-            await Assert.That(() => SshPrivateKey.Parse(pem, NewPassphrase())).Throws<FormatException>().WithMessageContaining("passphrase is wrong");
+            await Assert.That(() => SshPrivateKey.Parse(pem, TestSecrets.New())).Throws<FormatException>().WithMessageContaining("passphrase is wrong");
         }
     }
 
@@ -79,7 +76,7 @@ public class EncryptedKeyFormatTests
     {
         // About one wrong passphrase in 256 leaves valid padding; what it decrypts to is then not a key. Built directly, so the test does
         // not depend on luck: garbage, a key with bytes after it, and an RSA key labelled EC.
-        var passphrase = NewPassphrase();
+        var passphrase = TestSecrets.New();
         using var rsa = RSA.Create(2048);
         var der = rsa.ExportRSAPrivateKey();
         foreach (var (label, body) in new[]
@@ -103,7 +100,7 @@ public class EncryptedKeyFormatTests
     {
         // Refused before the passphrase is asked for: there is nothing to prompt for when the key cannot be read anyway.
         var pem = $"-----BEGIN RSA PRIVATE KEY-----\nProc-Type: 4,ENCRYPTED\nDEK-Info: {cipher},0001020304050607\n\nAAAAAAAAAAA=\n-----END RSA PRIVATE KEY-----\n";
-        foreach (var passphrase in new[] { null, NewPassphrase() })
+        foreach (var passphrase in new[] { null, TestSecrets.New() })
         {
             var error = Assert.Throws<FormatException>(() => SshPrivateKey.Parse(pem, passphrase));
             await Assert.That(error.Message).Contains(cipher);
@@ -120,13 +117,13 @@ public class EncryptedKeyFormatTests
     public async Task LegacyPem_OtherCiphers_AreUnsupported(string cipher)
     {
         var pem = $"-----BEGIN RSA PRIVATE KEY-----\nProc-Type: 4,ENCRYPTED\nDEK-Info: {cipher},000102030405060708090A0B0C0D0E0F\n\nAAAAAAAAAAAAAAAAAAAAAA==\n-----END RSA PRIVATE KEY-----\n";
-        await Assert.That(() => SshPrivateKey.Parse(pem, NewPassphrase())).Throws<FormatException>().WithMessageContaining("Unsupported cipher");
+        await Assert.That(() => SshPrivateKey.Parse(pem, TestSecrets.New())).Throws<FormatException>().WithMessageContaining("Unsupported cipher");
     }
 
     [Test]
     public async Task LegacyPem_MalformedHeaders_AreFormatErrors()
     {
-        var passphrase = NewPassphrase();
+        var passphrase = TestSecrets.New();
         var (pem, _) = LegacyRsa(passphrase);
         var dekInfo = pem.Split('\n').Single(l => l.StartsWith("DEK-Info: ", StringComparison.Ordinal));
         var iv = dekInfo[(dekInfo.IndexOf(',', StringComparison.Ordinal) + 1)..];
@@ -148,7 +145,7 @@ public class EncryptedKeyFormatTests
     [Test]
     public async Task LegacyPem_TruncatedOrDamagedBody_IsAFormatError()
     {
-        var passphrase = NewPassphrase();
+        var passphrase = TestSecrets.New();
         var (pem, _) = LegacyRsa(passphrase);
         var lines = pem.Split('\n').ToList();
         var bodyStart = lines.IndexOf(string.Empty) + 1;
@@ -174,13 +171,13 @@ public class EncryptedKeyFormatTests
         // Found by the fuzzer: the END line's dashes overlap the BEGIN line's, so a search for END from the start of BEGIN found it
         // inside BEGIN and sliced a negative length.
         const string Pem = "Proc-Type: 4,ENCRYPTED\n-----BEGIN EC PRIVATE KEY---------END EC PRIVATE KEY-----\n";
-        await Assert.That(() => SshPrivateKey.Parse(Pem, NewPassphrase())).Throws<FormatException>().WithMessageContaining("END line");
+        await Assert.That(() => SshPrivateKey.Parse(Pem, TestSecrets.New())).Throws<FormatException>().WithMessageContaining("END line");
     }
 
     [Test]
     public async Task LegacyPem_OtherKeyTypes_AndSmallRsa_AreRefused()
     {
-        var passphrase = NewPassphrase();
+        var passphrase = TestSecrets.New();
         var dsa = "-----BEGIN DSA PRIVATE KEY-----\nProc-Type: 4,ENCRYPTED\nDEK-Info: AES-128-CBC,000102030405060708090A0B0C0D0E0F\n\nAAAA\n-----END DSA PRIVATE KEY-----\n";
         await Assert.That(() => SshPrivateKey.Parse(dsa, passphrase)).Throws<FormatException>().WithMessageContaining("Only RSA and EC");
 
@@ -230,7 +227,7 @@ public class EncryptedKeyFormatTests
             await Assert.That(key.PublicKey.ToArray()).IsEquivalentTo(blob);
         }
 
-        var passphrase = NewPassphrase();
+        var passphrase = TestSecrets.New();
         using (var key = SshPrivateKey.Parse(TestKeys.LegacyEncryptedPem("EC PRIVATE KEY", der, passphrase), passphrase))
         {
             await Assert.That(key.PublicKey.ToArray()).IsEquivalentTo(blob);
@@ -288,7 +285,7 @@ public class EncryptedKeyFormatTests
             return writer.Encode();
         }
 
-        var passphrase = NewPassphrase();
+        var passphrase = TestSecrets.New();
         using (var key = SshPrivateKey.Parse(PemEncoding.WriteString("EC PRIVATE KEY", Sec1(p))))
         {
             await Assert.That(key.PublicKey.ToArray()).IsEquivalentTo(blob);
@@ -320,7 +317,7 @@ public class EncryptedKeyFormatTests
     public async Task EvpBytesToKey_MatchesTheDefinition_ForEachLength()
     {
         // D_1 = MD5(passphrase || salt), D_i = MD5(D_(i-1) || passphrase || salt); key = D_1 || D_2 || ... cut to length.
-        var passphrase = Encoding.UTF8.GetBytes(NewPassphrase());
+        var passphrase = Encoding.UTF8.GetBytes(TestSecrets.New());
         var salt = RandomNumberGenerator.GetBytes(8);
 #pragma warning disable CA5351 // the definition being checked is MD5's
         var d1 = MD5.HashData([.. passphrase, .. salt]);
@@ -339,7 +336,7 @@ public class EncryptedKeyFormatTests
     [Test]
     public async Task OpenSshChaCha20Poly1305_Decrypts()
     {
-        var passphrase = NewPassphrase();
+        var passphrase = TestSecrets.New();
         var pem = TestKeys.OpenSshEd25519(out var blob, comment: "chacha@example", passphrase: passphrase, cipher: ChaCha);
         using var key = SshPrivateKey.Parse(pem, passphrase);
         await Assert.That(key.KeyType).IsEqualTo("ssh-ed25519");
@@ -347,13 +344,13 @@ public class EncryptedKeyFormatTests
         await Assert.That(key.Comment).IsEqualTo("chacha@example");
 
         await Assert.That(() => SshPrivateKey.Parse(pem)).Throws<FormatException>().WithMessageContaining("passphrase is required");
-        await Assert.That(() => SshPrivateKey.Parse(pem, NewPassphrase())).Throws<FormatException>().WithMessageContaining("passphrase is wrong");
+        await Assert.That(() => SshPrivateKey.Parse(pem, TestSecrets.New())).Throws<FormatException>().WithMessageContaining("passphrase is wrong");
     }
 
     [Test]
     public async Task OpenSshChaCha20Poly1305_TamperedTagOrSection_FailsAuthentication()
     {
-        var passphrase = NewPassphrase();
+        var passphrase = TestSecrets.New();
         var body = Body(TestKeys.OpenSshEd25519(out _, passphrase: passphrase, cipher: ChaCha));
 
         // The tag is the last 16 bytes, the encrypted section the bytes before it: any flipped bit is caught by the tag, never parsed.
@@ -373,7 +370,7 @@ public class EncryptedKeyFormatTests
     public async Task OpenSshChaCha20Poly1305_SectionNotAMultipleOfItsBlockSize_IsRefused()
     {
         // chacha20-poly1305's block size is 8: a 16-byte multiple is not required, but an 8-byte one is.
-        var passphrase = NewPassphrase();
+        var passphrase = TestSecrets.New();
         var aligned = TestKeys.OpenSshEd25519(out _, passphrase: passphrase, cipher: ChaCha);
         using (var key = SshPrivateKey.Parse(aligned, passphrase))
         {

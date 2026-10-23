@@ -88,7 +88,7 @@ public sealed class BindAddressTests : IDisposable
         await using var client = await SshClient.ConnectAsync("127.0.0.1", bridge.Port, new SshClientOptions
         {
             UserName = "tester",
-            Password = "secret",
+            Password = TestSecrets.Password,
             HostKeyVerifier = SshHostKeyVerifier.FromDelegate((_, _) => ValueTask.FromResult(true)),
             LocalEndPoint = new IPEndPoint(Alternate, 0),
         }, Timeout());
@@ -113,7 +113,7 @@ public sealed class BindAddressTests : IDisposable
         {
             Config = SshConfig.Parse($"Host target\n HostName 127.0.0.1\n Port {bridge.Port}\n User tester\n BindAddress 127.0.0.2\n StrictHostKeyChecking no\n UserKnownHostsFile none\n"),
             ResolveOptions = new SshConfigResolveOptions { LocalUser = "local", HomeDirectory = _dir },
-            Password = "secret",
+            Password = TestSecrets.Password,
             UseAgent = false,
         }, Timeout());
 

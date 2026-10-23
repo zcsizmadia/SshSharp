@@ -24,8 +24,6 @@ public class KeyExportInteropTests
     private const string Rfc8410Example = "-----BEGIN PRIVATE KEY-----\nMC4CAQAwBQYDK2VwBCIEINTuctv5E1hK1bbY8fdp+K06/nwoy/HU++CXqI9EdVhC\n-----END PRIVATE KEY-----\n";
 
     // Generated per run, never written down; tools read it from a file or an argument.
-    private static string NewPassphrase() => Convert.ToHexString(RandomNumberGenerator.GetBytes(12));
-
     private static SshPrivateKey Generate(SshKeyType type) => SshPrivateKey.Generate(type, "export@example", type == SshKeyType.Rsa ? 2048 : 3072);
 
     [Test]
@@ -54,7 +52,7 @@ public class KeyExportInteropTests
         }
 
         using var key = Generate(type);
-        var passphrases = type == SshKeyType.Ed25519 ? [string.Empty] : new[] { string.Empty, NewPassphrase() };
+        var passphrases = type == SshKeyType.Ed25519 ? [string.Empty] : new[] { string.Empty, TestSecrets.New() };
         foreach (var passphrase in passphrases)
         {
             var path = directory.NewPath("pkcs8");
@@ -87,7 +85,7 @@ public class KeyExportInteropTests
         }
 
         using var key = Generate(type);
-        var passphrase = NewPassphrase();
+        var passphrase = TestSecrets.New();
         var passphraseFile = directory.NewPath("phrase");
         await File.WriteAllTextAsync(passphraseFile, passphrase);
         var encrypted = type != SshKeyType.Ed25519;
@@ -103,7 +101,7 @@ public class KeyExportInteropTests
 
         if (encrypted)
         {
-            await File.WriteAllTextAsync(passphraseFile, NewPassphrase());
+            await File.WriteAllTextAsync(passphraseFile, TestSecrets.New());
             var (wrongExit, _, _) = await RunAsync(openssl, "pkey", "-in", path, "-passin", "file:" + passphraseFile);
             await Assert.That(wrongExit).IsNotEqualTo(0);
         }
@@ -181,7 +179,7 @@ public class KeyExportInteropTests
 
         using var directory = new TempDirectory();
         using var key = Generate(type);
-        var passphrase = NewPassphrase();
+        var passphrase = TestSecrets.New();
         var passphraseFile = directory.NewPath("phrase");
         await File.WriteAllTextAsync(passphraseFile, passphrase);
         var emptyFile = directory.NewPath("empty");

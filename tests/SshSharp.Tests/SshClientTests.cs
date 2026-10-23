@@ -8,10 +8,12 @@ public class SshClientTests
 {
     private static CancellationToken Timeout() => new CancellationTokenSource(TimeSpan.FromSeconds(60)).Token;
 
-    private static SshClientOptions Options(string? password = "secret", Func<SshHostKeyContext, CancellationToken, ValueTask<bool>>? verify = null, long maxOutput = 128L * 1024 * 1024) => new()
+    /// <summary>Options that sign in with <paramref name="password"/>, the fake server's password when it is null, or none at all when <paramref name="noPassword"/>.</summary>
+    private static SshClientOptions Options(string? password = null, Func<SshHostKeyContext, CancellationToken, ValueTask<bool>>? verify = null, long maxOutput = 128L * 1024 * 1024,
+        bool noPassword = false) => new()
     {
         UserName = "tester",
-        Password = password,
+        Password = noPassword ? null : password ?? TestSecrets.Password,
         HostKeyVerifier = SshHostKeyVerifier.FromDelegate(verify ?? ((_, _) => ValueTask.FromResult(true))),
         MaxCommandOutputBytes = maxOutput,
     };
@@ -219,11 +221,11 @@ public class SshClientTests
     {
         await using var strict = new FakeSessionServer { AdvertisedMethods = ["publickey"] };
         _ = strict.StartAsync();
-        var ex = await Assert.ThrowsAsync<SshException>(async () => await SshClient.ConnectAsync(strict.ClientStream, Options(password: null), true, Timeout()));
+        var ex = await Assert.ThrowsAsync<SshException>(async () => await SshClient.ConnectAsync(strict.ClientStream, Options(noPassword: true), true, Timeout()));
         await Assert.That(ex!.Message).Contains("publickey");
 
         await using var open = new FakeSessionServer { AllowNone = true };
-        await using var client = await ConnectAsync(open, Options(password: null));
+        await using var client = await ConnectAsync(open, Options(noPassword: true));
         var result = await client.RunCommandAsync("anon", Timeout());
         await Assert.That(result.ExitStatus).IsEqualTo(0);
     }
@@ -504,7 +506,7 @@ public class SshClientTests
         await using var server = new FakeSessionServer { AdvertisedMethods = ["publickey", "password"] };
         _ = server.StartAsync();
         var ex = await Assert.ThrowsAsync<SshAuthenticationException>(async () =>
-            await SshClient.ConnectAsync(server.ClientStream, Options(password: "wrong"), leaveOpen: true, Timeout()));
+            await SshClient.ConnectAsync(server.ClientStream, Options(password: TestSecrets.New()), leaveOpen: true, Timeout()));
         await Assert.That(ex!.Reason).IsEqualTo(SshFailureReason.AuthenticationFailed);
         await Assert.That(ex.AllowedMethods).IsEquivalentTo(new[] { "publickey", "password" });
     }
@@ -516,7 +518,7 @@ public class SshClientTests
         _ = server.StartAsync();
         SshHostKeyContext? seen = null;
         var verifier = new RecordingVerifier(context => { seen = context; return SshHostKeyVerdict.Reject("not on my list"); });
-        var options = new SshClientOptions { UserName = "tester", Password = "secret", HostKeyVerifier = verifier, HostKeyAlias = "my-alias" };
+        var options = new SshClientOptions { UserName = "tester", Password = TestSecrets.Password, HostKeyVerifier = verifier, HostKeyAlias = "my-alias" };
 
         var ex = await Assert.ThrowsAsync<SshHostKeyException>(async () => await SshClient.ConnectAsync(server.ClientStream, options, leaveOpen: true, Timeout()));
         await Assert.That(ex!.Message).IsEqualTo("not on my list");
@@ -538,7 +540,7 @@ public class SshClientTests
         // A new fake server has a new random host key; pinning the earlier fingerprint refuses it, pinning its own accepts it.
         await using var second = new FakeSessionServer();
         _ = second.StartAsync();
-        var pinned = new SshClientOptions { UserName = "tester", Password = "secret", HostKeyVerifier = SshHostKeyVerifier.Pinned(fingerprint!) };
+        var pinned = new SshClientOptions { UserName = "tester", Password = TestSecrets.Password, HostKeyVerifier = SshHostKeyVerifier.Pinned(fingerprint!) };
         var ex = await Assert.ThrowsAsync<SshHostKeyException>(async () => await SshClient.ConnectAsync(second.ClientStream, pinned, leaveOpen: true, Timeout()));
         await Assert.That(ex!.Message).Contains("pinned");
         await Assert.That(() => SshHostKeyVerifier.Pinned(Array.Empty<string>())).Throws<ArgumentException>();

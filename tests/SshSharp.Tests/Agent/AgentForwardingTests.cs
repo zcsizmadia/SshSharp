@@ -22,7 +22,7 @@ public sealed class AgentForwardingTests : IDisposable
         return await SshClient.ConnectAsync(server.ClientStream, new SshClientOptions
         {
             UserName = "tester",
-            Password = "secret",
+            Password = TestSecrets.Password,
             HostKeyVerifier = SshHostKeyVerifier.FromDelegate((_, _) => ValueTask.FromResult(true)),
             ForwardAgent = forward,
         }, leaveOpen: true, Timeout());
@@ -185,7 +185,7 @@ public sealed class AgentForwardingTests : IDisposable
         {
             Config = SshConfig.Parse(config),
             ResolveOptions = new SshConfigResolveOptions { LocalUser = "local", HomeDirectory = _dir },
-            Password = "secret",
+            Password = TestSecrets.Password,
             TcpConnector = (_, _, _, _) =>
             {
                 _ = server.StartAsync();

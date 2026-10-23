@@ -73,7 +73,8 @@ public class SshPrivateKeyTests
         }
 
         var pbe = new PbeParameters(PbeEncryptionAlgorithm.Aes256Cbc, HashAlgorithmName.SHA256, 10_000);
-        using (var key = SshPrivateKey.Parse(rsa.ExportEncryptedPkcs8PrivateKeyPem("pass phrase", pbe), "pass phrase"))
+        var passphrase = TestSecrets.New();
+        using (var key = SshPrivateKey.Parse(rsa.ExportEncryptedPkcs8PrivateKeyPem(passphrase, pbe), passphrase))
         {
             await AssertSignsAndVerifies(key, rsaBlob);
         }
@@ -90,7 +91,7 @@ public class SshPrivateKeyTests
             await AssertSignsAndVerifies(key, ecBlob);
         }
 
-        using (var key = SshPrivateKey.Parse(ecdsa.ExportEncryptedPkcs8PrivateKeyPem("pw", pbe), "pw"))
+        using (var key = SshPrivateKey.Parse(ecdsa.ExportEncryptedPkcs8PrivateKeyPem(passphrase, pbe), passphrase))
         {
             await AssertSignsAndVerifies(key, ecBlob);
         }
@@ -153,9 +154,9 @@ public class SshPrivateKeyTests
     public async Task EncryptedPkcs8_NeedsTheRightPassphrase()
     {
         using var rsa = RSA.Create(2048);
-        var pem = rsa.ExportEncryptedPkcs8PrivateKeyPem("right", new PbeParameters(PbeEncryptionAlgorithm.Aes128Cbc, HashAlgorithmName.SHA256, 1000));
+        var pem = rsa.ExportEncryptedPkcs8PrivateKeyPem(TestSecrets.New(), new PbeParameters(PbeEncryptionAlgorithm.Aes128Cbc, HashAlgorithmName.SHA256, 1000));
         await Assert.That(() => SshPrivateKey.Parse(pem)).Throws<FormatException>().WithMessageContaining("passphrase");
-        await Assert.That(() => SshPrivateKey.Parse(pem, "wrong")).Throws<FormatException>().WithMessageContaining("passphrase");
+        await Assert.That(() => SshPrivateKey.Parse(pem, TestSecrets.New())).Throws<FormatException>().WithMessageContaining("passphrase");
     }
 
     [Test]
@@ -191,59 +192,45 @@ public class SshPrivateKeyTests
     }
 
     [Test]
-    [Arguments("aes256-ctr")]
-    [Arguments("aes256-gcm@openssh.com")]
-    public async Task EncryptedOpenSshKeys_NeedTheRightPassphrase(string cipher)
-    {
-        var pem = TestKeys.OpenSshEd25519(out var blob, passphrase: "correct horse", cipher: cipher);
-        using (var key = SshPrivateKey.Parse(pem, "correct horse"))
-        {
-            await AssertSignsAndVerifies(key, blob);
-        }
-
-        await Assert.That(() => SshPrivateKey.Parse(pem)).Throws<FormatException>().WithMessageContaining("passphrase is required");
-
-        // A wrong passphrase shows up as differing check values (CTR) or a failed tag (GCM).
-        var wrong = Assert.Throws<FormatException>(() => SshPrivateKey.Parse(pem, "battery staple"));
-        await Assert.That(wrong.Message).Contains("passphrase");
-    }
-
-    [Test]
     [Arguments("aes128-ctr")]
     [Arguments("aes192-ctr")]
     [Arguments("aes256-ctr")]
     [Arguments("aes128-cbc")]
     [Arguments("aes192-cbc")]
     [Arguments("aes256-cbc")]
-    [Arguments("aes128-gcm")]
-    [Arguments("aes256-gcm")]
-    public async Task KeysEncryptedBySshKeygen_WithEachCipher_Decrypt(string cipher)
+    [Arguments("aes128-gcm@openssh.com")]
+    [Arguments("aes256-gcm@openssh.com")]
+    [Arguments("chacha20-poly1305@openssh.com")]
+    public async Task EncryptedOpenSshKeys_WithEachCipher_NeedTheRightPassphrase(string cipher)
     {
-        // Made by OpenSSH's ssh-keygen -Z (Fixtures/encrypted-keys/README.md), so the decryption is checked against another
-        // implementation's encryption, not only against this test suite's.
-        var path = Path.Combine(AppContext.BaseDirectory, "Fixtures", "encrypted-keys", "ed25519-" + cipher);
-        var pem = await File.ReadAllTextAsync(path);
-        var publicBlob = Convert.FromBase64String((await File.ReadAllTextAsync(path + ".pub")).Split(' ')[1]);
-
-        using (var key = SshPrivateKey.Parse(pem, "fixture passphrase"))
+        // Every cipher ssh-keygen -Z can encrypt a key file with, built here with the platform's AES (and the managed ChaCha20-Poly1305),
+        // so the decryptor is covered without ssh-keygen. The LocalTools tests (Integration/EncryptedKeyInteropTests.cs) read the
+        // same ciphers from files ssh-keygen made, which checks it against another implementation's encryption.
+        var passphrase = TestSecrets.New();
+        var pem = TestKeys.OpenSshEd25519(out var blob, comment: cipher + "@example", passphrase: passphrase, cipher: cipher);
+        using (var key = SshPrivateKey.Parse(pem, passphrase))
         {
-            await AssertSignsAndVerifies(key, publicBlob);
-            await Assert.That(key.Comment).IsEqualTo("sshsharp-fixture-" + (cipher.EndsWith("-gcm", StringComparison.Ordinal) ? cipher + "@openssh.com" : cipher));
+            await AssertSignsAndVerifies(key, blob);
+            await Assert.That(key.Comment).IsEqualTo(cipher + "@example");
         }
 
-        var wrong = Assert.Throws<FormatException>(() => SshPrivateKey.Parse(pem, "another passphrase"));
+        await Assert.That(() => SshPrivateKey.Parse(pem)).Throws<FormatException>().WithMessageContaining("passphrase is required");
+
+        // A wrong passphrase shows up as differing check values (CTR, CBC) or a failed tag (GCM, chacha20-poly1305).
+        var wrong = Assert.Throws<FormatException>(() => SshPrivateKey.Parse(pem, TestSecrets.New()));
         await Assert.That(wrong.Message).Contains("passphrase");
     }
 
     [Test]
-    [Arguments(2, "ssh-ed25519", null)]
-    [Arguments(2, "ecdsa-sha2-nistp256", "pw")]
-    [Arguments(2, "ssh-rsa", "pw")]
-    [Arguments(3, "ssh-ed25519", "pw")]
-    [Arguments(3, "ecdsa-sha2-nistp256", null)]
-    [Arguments(3, "ssh-rsa", null)]
-    public async Task PuttyKeys_Version2And3_PlainAndEncrypted(int version, string keyType, string? passphrase)
+    [Arguments(2, "ssh-ed25519", false)]
+    [Arguments(2, "ecdsa-sha2-nistp256", true)]
+    [Arguments(2, "ssh-rsa", true)]
+    [Arguments(3, "ssh-ed25519", true)]
+    [Arguments(3, "ecdsa-sha2-nistp256", false)]
+    [Arguments(3, "ssh-rsa", false)]
+    public async Task PuttyKeys_Version2And3_PlainAndEncrypted(int version, string keyType, bool encrypted)
     {
+        var passphrase = encrypted ? TestSecrets.New() : null;
         var ppk = TestKeys.Ppk(version, keyType, out var blob, passphrase);
         using (var key = SshPrivateKey.Parse(ppk, passphrase))
         {
@@ -255,7 +242,7 @@ public class SshPrivateKeyTests
         if (passphrase is not null)
         {
             await Assert.That(() => SshPrivateKey.Parse(ppk)).Throws<FormatException>().WithMessageContaining("passphrase is required");
-            await Assert.That(() => SshPrivateKey.Parse(ppk, "wrong")).Throws<FormatException>().WithMessageContaining("passphrase is wrong");
+            await Assert.That(() => SshPrivateKey.Parse(ppk, TestSecrets.New())).Throws<FormatException>().WithMessageContaining("passphrase is wrong");
         }
 
         // Windows line endings are fine; a changed MAC (or any edit) is not.
@@ -275,9 +262,10 @@ public class SshPrivateKeyTests
     [Test]
     public async Task UnsupportedKeyCiphers_SayHowToConvert()
     {
-        var body = Body(TestKeys.OpenSshEd25519(out _, passphrase: "pw"));
+        var passphrase = TestSecrets.New();
+        var body = Body(TestKeys.OpenSshEd25519(out _, passphrase: passphrase));
         var text = Encoding.Latin1.GetString(body).Replace("aes256-ctr", "aes256-xyz", StringComparison.Ordinal);
-        await Assert.That(() => SshPrivateKey.Parse(Rewrap(Encoding.Latin1.GetBytes(text)), "pw")).Throws<FormatException>().WithMessageContaining("ssh-keygen -p");
+        await Assert.That(() => SshPrivateKey.Parse(Rewrap(Encoding.Latin1.GetBytes(text)), passphrase)).Throws<FormatException>().WithMessageContaining("ssh-keygen -p");
     }
 
     [Test]

@@ -19,7 +19,7 @@ public class SftpExtensionTests
         var client = await SshClient.ConnectAsync(ssh.ClientStream, new SshClientOptions
         {
             UserName = "tester",
-            Password = "secret",
+            Password = TestSecrets.Password,
             HostKeyVerifier = SshHostKeyVerifier.FromDelegate((_, _) => ValueTask.FromResult(true)),
         }, leaveOpen: true, Timeout());
         return (ssh, client, await client.OpenSftpAsync(Timeout()));

@@ -16,7 +16,7 @@ public class KeepAliveTests
         var options = new SshClientOptions
         {
             UserName = "tester",
-            Password = "secret",
+            Password = TestSecrets.Password,
             HostKeyVerifier = SshHostKeyVerifier.FromDelegate((_, _) => ValueTask.FromResult(true)),
             KeepAliveInterval = Interval,
             KeepAliveCountMax = countMax,
@@ -190,7 +190,7 @@ public class KeepAliveTests
         var options = new SshClientOptions
         {
             UserName = "tester",
-            Password = "secret",
+            Password = TestSecrets.Password,
             HostKeyVerifier = SshHostKeyVerifier.FromDelegate((_, _) => ValueTask.FromResult(true)),
             KeepAliveInterval = TimeSpan.FromTicks(ticks),
             TimeProvider = time,
