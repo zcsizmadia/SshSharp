@@ -104,6 +104,16 @@ public sealed class SftpExtensionRepliesTests
     }
 
     [Test]
+    public async Task ParseCheckFile_WithoutTheLeadingName_AsProFtpdSendsIt_ReadsTheAlgorithmAndTheHash()
+    {
+        var hash = Enumerable.Range(1, 64).Select(i => (byte)i).ToArray();
+        var (algorithm, parsed) = CheckFile(Build(w => { w.WriteString("sha512"); w.WriteBytes(hash); }), "sha256", "sha512");
+
+        await Assert.That(algorithm).IsEqualTo("sha512");
+        await Assert.That(parsed.SequenceEqual(hash)).IsTrue();
+    }
+
+    [Test]
     public async Task ParseCheckFile_OfAnUnknownAlgorithm_TakesAHashOfAnyLength()
     {
         var (algorithm, hash) = CheckFile(Build(w => { w.WriteString("check-file"); w.WriteString("vendor@example.com"); w.WriteBytes([1, 2, 3]); }), "vendor@example.com");
@@ -125,6 +135,11 @@ public sealed class SftpExtensionRepliesTests
             Build(w => { w.WriteString("check-file"); w.WriteString("sha256"); }),
             Build(w => w.WriteString("check-file")),
             [],
+
+            // ProFTPD's form, without the leading name, is held to the same rules.
+            Build(w => { w.WriteString("md5"); w.WriteBytes(new byte[16]); }),
+            Build(w => { w.WriteString("sha256"); w.WriteBytes(new byte[31]); }),
+            Build(w => w.WriteString("sha256")),
         ];
 
         foreach (var body in bad)

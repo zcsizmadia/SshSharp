@@ -242,6 +242,14 @@ The server took the file over fewer sessions: it allows one writer per file, or 
 SFTP), and the upload fell back without failing. It may also cap sessions (sshd's `MaxSessions`). Use `Segments = 1` with such
 servers, or raise `ChannelWindowSize` instead. See [Transfer large files faster](../how-to/transfer-files-sftp.md#transfer-large-files-faster).
 
+### ProFTPD closes the connection during a segmented upload
+
+The server answers "Invalid handle" and the connection closes (reason 11, "Application disconnected") while several SFTP sessions
+of one connection write at once: a segmented upload (`Segments` above 1), or several `SftpClient`s uploading in parallel. ProFTPD's
+`mod_sftp` (1.3.9) keeps one buffer per connection for an SFTP request that arrives in several pieces, not one per session, so
+writes larger than a piece sent over several sessions at the same time are mixed up. Use `Segments = 1` against ProFTPD, and one
+session per connection for parallel transfers (more files at once in one session, with `MaxConcurrentFiles`, are fine).
+
 ### An SFTP call never returns
 
 The server stopped answering while the connection stayed up (a stuck disk or NFS mount on the server, a firewall that drops packets

@@ -9,7 +9,7 @@ does. This page describes what is tested, against what, how intermittent failure
 |---|---|
 | Unit tests | About 1,300 per target framework, with no network: scripted fake servers and agents over in-memory streams, and a fake clock |
 | Known-answer vectors | RFC and reference vectors, OpenSSL's Curve25519 vectors, the sntrup761 KAT, and about 6,400 [Project Wycheproof](https://github.com/C2SP/wycheproof) edge cases |
-| Real servers | OpenSSH (from 7.x to current, Linux and Windows), Dropbear, AsyncSSH, Apache MINA SSHD, Erlang/OTP `ssh`, and two SFTP-only servers, on every pull request |
+| Real servers | OpenSSH (from 7.x to current, Linux and Windows), Dropbear, AsyncSSH, Apache MINA SSHD, Erlang/OTP `ssh`, and three SFTP-only servers (ProFTPD among them), on every pull request |
 | Network faults | A proxy that cuts, stalls, slows down and fragments connections to real servers, at any point |
 | Fuzzing | Coverage-guided fuzzing of the parsers that read untrusted input, nightly; mutation fuzzing in every test run |
 | Mutation testing | Stryker.NET over the cryptography, the packet codec and the configuration parsers |
@@ -77,6 +77,7 @@ The interop tests run against real servers on every pull request. Each server ca
 | **Apache MINA SSHD** | An independent implementation in Java, the server inside Jenkins, Gerrit and Eclipse. It answers keep-alive requests, reports a killed command as an exit status, and has no pseudo-terminal. It re-keys only when the client does: with a small limit of its own, MINA 2.20.0 sometimes failed sessions while both sides re-keyed |
 | **Erlang/OTP `ssh`** | An implementation known for following the RFCs strictly: the transport with every algorithm it offers, host keys, SFTP, forwarding and network faults (no shells or commands, which run Erlang there). Its SFTP server ignores a new file size and still answers OK |
 | **atmoz/sftp** and a **Go `pkg/sftp`** server | Chrooted, SFTP-only servers, the kind behind many hosted file-transfer services |
+| **ProFTPD `mod_sftp`** | A chrooted, SFTP-only server that is not OpenSSH, and the one that announces `check-file`, so the file hash test runs against it. It found that its `check-file` reply leaves out the extension's name, that it answers OK to creating a directory that exists (which made `SkipUnchanged` uploads send everything again), and that its LSTAT follows links. Its range hashes are wrong unless the length is a multiple of its read size, and it mixes up large writes over several sessions of one connection, so the segmented upload test skips there |
 
 A key-exchange volume test can run thousands of handshakes per host key type against a server. It is off by default: it is in the
 `Handshakes` category, which CI leaves out, and runs when selected with `SSHSHARP_TEST_HANDSHAKES` set to the number of handshakes

@@ -90,6 +90,12 @@ internal static class RealServer
     /// </summary>
     public static bool IsErlang => Software == "Erlang";
 
+    /// <summary>
+    /// Whether the server is ProFTPD's mod_sftp (the CI job's SFTP-only container), which identifies itself as <c>mod_sftp</c>. Its LSTAT
+    /// resolves the path through a link first, and it reassembles SFTP packets in one buffer for all of a connection's channels.
+    /// </summary>
+    public static bool IsProFtpd => Software == "mod_sftp";
+
     /// <summary>Skips a test that needs to run a command, against a server that runs none (the Erlang/OTP container).</summary>
     public static void SkipUnlessItRunsCommands()
     {

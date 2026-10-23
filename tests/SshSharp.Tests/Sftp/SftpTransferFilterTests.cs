@@ -30,10 +30,11 @@ public sealed class SftpTransferFilterTests : IDisposable
 
         public SftpClient Sftp { get; private set; } = null!;
 
-        public static async Task<Rig> StartAsync(Action<FakeSftpServer>? setup = null)
+        public static async Task<Rig> StartAsync(Action<FakeSftpServer>? setup = null, string? identification = null)
         {
             var password = Convert.ToHexString(RandomNumberGenerator.GetBytes(16));
-            var rig = new Rig { Ssh = new FakeSessionServer { Password = password } };
+            var options = identification is null ? null : new FakeServerOptions { Identification = identification };
+            var rig = new Rig { Ssh = new FakeSessionServer(options) { Password = password } };
             setup?.Invoke(rig.Files);
             rig.Files.Install(rig.Ssh);
             _ = rig.Ssh.StartAsync();
@@ -313,6 +314,36 @@ public sealed class SftpTransferFilterTests : IDisposable
 
         await Assert.That(again).IsEqualTo(new SftpTransferSummary(2, 1, 3, 0));
         await Assert.That(unchanged).IsEqualTo(new SftpTransferSummary(0, 1, 0, 0) { Unchanged = 2 });
+    }
+
+    [Test]
+    [Arguments(1)]
+    [Arguments(4)]
+    public async Task UploadDirectory_SkipUnchanged_ToProFtpd_WhoseMkdirAnswersOkForAnExistingDirectory(int concurrentFiles)
+    {
+        // ProFTPD's mod_sftp ignores EEXIST and answers OK, so the OK does not show that the directory is new: it is listed anyway, and
+        // the files there that have not changed stay.
+        var source = Path.Combine(_dir, "up");
+        Directory.CreateDirectory(Path.Combine(source, "sub"));
+        await File.WriteAllTextAsync(Path.Combine(source, "a.txt"), "a");
+        await File.WriteAllTextAsync(Path.Combine(source, "sub", "b.txt"), "bb");
+        await using var rig = await Rig.StartAsync(f => f.MkdirExistingStatus = (0, string.Empty), "SSH-2.0-mod_sftp");
+        var options = new SftpTransferOptions { Preserve = true, SkipUnchanged = true, MaxConcurrentFiles = concurrentFiles };
+
+        var first = await rig.Sftp.UploadDirectoryAsync(source, "up", options, Timeout());
+        var unchanged = await rig.Sftp.UploadDirectoryAsync(source, "up", options, Timeout());
+
+        await Assert.That(first).IsEqualTo(new SftpTransferSummary(2, 1, 3, 0));
+        await Assert.That(unchanged).IsEqualTo(new SftpTransferSummary(0, 1, 0, 0) { Unchanged = 2 });
+    }
+
+    [Test]
+    public async Task AnswersMkdirOkWhenThere_IsProFtpdsModSftp()
+    {
+        await Assert.That(SftpClient.AnswersMkdirOkWhenThere("mod_sftp")).IsTrue();
+        await Assert.That(SftpClient.AnswersMkdirOkWhenThere("mod_sftp/1.2.0")).IsTrue();
+        await Assert.That(SftpClient.AnswersMkdirOkWhenThere("OpenSSH_9.6p1")).IsFalse();
+        await Assert.That(SftpClient.AnswersMkdirOkWhenThere(null)).IsFalse();
     }
 
     [Test]
