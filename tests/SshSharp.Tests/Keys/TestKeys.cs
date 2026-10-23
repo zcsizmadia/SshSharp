@@ -102,6 +102,33 @@ internal static class TestKeys
         return PemEncoding.WriteString("PRIVATE KEY", writer.Encode()) + "\n";
     }
 
+    /// <summary>
+    /// A traditional encrypted PEM file, as OpenSSL's PEM writer makes it: <paramref name="der"/> (PKCS#1 or SEC1) under AES-CBC with
+    /// PKCS#7 padding, keyed by <c>EVP_BytesToKey</c>(MD5, salt = the first 8 bytes of the IV, one round). Written here independently of
+    /// the reader; the LocalTools tests check the reader against files OpenSSL and ssh-keygen made.
+    /// </summary>
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Security", "CA5351", Justification = "The traditional PEM encryption is defined with MD5.")]
+    public static string LegacyEncryptedPem(string label, byte[] der, string passphrase, string cipher = "AES-128-CBC", byte[]? iv = null)
+    {
+        var keyLength = cipher switch { "AES-128-CBC" => 16, "AES-192-CBC" => 24, _ => 32 };
+        iv ??= RandomNumberGenerator.GetBytes(16);
+        var phrase = Encoding.UTF8.GetBytes(passphrase);
+        var derived = new List<byte>();
+        byte[] previous = [];
+        while (derived.Count < keyLength)
+        {
+            previous = MD5.HashData([.. previous, .. phrase, .. iv[..8]]);
+            derived.AddRange(previous);
+        }
+
+        using var aes = Aes.Create();
+        aes.Key = [.. derived.Take(keyLength)];
+        var encrypted = aes.EncryptCbc(der, iv, PaddingMode.PKCS7);
+        var body = PemEncoding.WriteString(label, encrypted);
+        var firstLineEnd = body.IndexOf('\n', StringComparison.Ordinal) + 1;
+        return body[..firstLineEnd] + $"Proc-Type: 4,ENCRYPTED\nDEK-Info: {cipher},{Convert.ToHexString(iv)}\n\n" + body[firstLineEnd..] + "\n";
+    }
+
     /// <summary>A PuTTY .ppk file (version 2 or 3, optionally aes256-cbc encrypted) for a fresh Ed25519, ECDSA P-256 or RSA key.</summary>
     [System.Diagnostics.CodeAnalysis.SuppressMessage("Security", "CA5350", Justification = "PuTTY version 2 files are defined with SHA-1.")]
     public static string Ppk(int version, string keyType, out byte[] publicBlob, string? passphrase = null, string comment = "ppk-test",
@@ -295,7 +322,8 @@ internal static class TestKeys
             writeKey(w);
             w.WriteString(comment);
         });
-        var blockSize = passphrase is null ? 8 : 16;
+        var chacha = cipher == "chacha20-poly1305@openssh.com";
+        var blockSize = passphrase is null || chacha ? 8 : 16;
         var pad = padding ?? Enumerable.Range(1, (blockSize - (section.Length % blockSize)) % blockSize).Select(i => (byte)i).ToArray();
         byte[] privateSection = [.. section, .. pad];
 
@@ -305,9 +333,23 @@ internal static class TestKeys
         if (passphrase is not null)
         {
             var gcm = cipher == "aes256-gcm@openssh.com";
-            var keyAndIv = new byte[32 + (gcm ? 12 : 16)];
+            var keyAndIv = new byte[chacha ? 64 : 32 + (gcm ? 12 : 16)];
             BcryptPbkdf.DeriveKey(Encoding.UTF8.GetBytes(passphrase), salt, 16, keyAndIv);
-            if (gcm)
+            if (chacha)
+            {
+                // As sshkey.c encrypts: chachapoly_crypt with sequence number 0 and no additional data. The Poly1305 key is ChaCha20
+                // block 0 under the first 32 bytes, the section is encrypted from block 1, and the tag covers the encrypted section.
+                var mainKey = keyAndIv.AsSpan(0, 32);
+                var nonce = new byte[8];
+                var block = new byte[64];
+                ChaCha20.Block(mainKey, 0, 0, 0, 0, block);
+                var sealedSection = new byte[privateSection.Length];
+                ChaCha20.Xor(mainKey, nonce, 1, privateSection, sealedSection);
+                tag = new byte[16];
+                Poly1305.ComputeTag(block.AsSpan(0, 32), sealedSection, tag);
+                privateSection = sealedSection;
+            }
+            else if (gcm)
             {
                 tag = new byte[16];
                 var sealedSection = new byte[privateSection.Length];

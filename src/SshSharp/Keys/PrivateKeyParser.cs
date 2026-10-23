@@ -1,4 +1,5 @@
 using System.Formats.Asn1;
+using System.Numerics;
 using System.Security.Cryptography;
 using System.Text;
 using SshSharp.Crypto;
@@ -46,8 +47,7 @@ internal static class PrivateKeyParser
 
             if (text.Contains("Proc-Type: 4,ENCRYPTED", StringComparison.Ordinal))
             {
-                throw new FormatException(
-                    "Legacy encrypted PEM keys (Proc-Type: 4,ENCRYPTED) are not supported; convert with 'ssh-keygen -p -f <file>' (OpenSSH format) or to PKCS#8.");
+                return ParseLegacyEncryptedPem(text, passphrase);
             }
 
             if (text.Contains("-----BEGIN RSA PRIVATE KEY-----", StringComparison.Ordinal))
@@ -58,8 +58,24 @@ internal static class PrivateKeyParser
 
             if (text.Contains("-----BEGIN EC PRIVATE KEY-----", StringComparison.Ordinal))
             {
-                var ecdsa = ECDsa.Create();
-                return Import(ecdsa, () => ecdsa.ImportFromPem(text), () => FromEcdsa(ecdsa, null));
+                var der = PemBlock(text, "EC PRIVATE KEY");
+                try
+                {
+                    var ecdsa = ECDsa.Create();
+                    void ImportAll()
+                    {
+                        if (!ImportSec1(ecdsa, der))
+                        {
+                            throw new CryptographicException("The EC private key has trailing data.");
+                        }
+                    }
+
+                    return Import(ecdsa, ImportAll, () => FromEcdsa(ecdsa, null));
+                }
+                finally
+                {
+                    CryptographicOperations.ZeroMemory(der);
+                }
             }
 
             throw new FormatException("Not a supported private key format (expected an OpenSSH, PKCS#8, PKCS#1 or SEC1 private key).");
@@ -324,6 +340,201 @@ internal static class PrivateKeyParser
             ecdsa.Dispose();
             throw new FormatException("Could not decrypt the private key: the passphrase is wrong, or it is not an RSA or ECDSA key.", ex);
         }
+    }
+
+    /// <summary>
+    /// A traditional encrypted PEM key (<c>Proc-Type: 4,ENCRYPTED</c>), as <c>ssh-keygen -m PEM</c> and OpenSSL's <c>-traditional</c>
+    /// output write it: PKCS#1 (RSA) or SEC1 (ECDSA) DER under AES-CBC (<see cref="LegacyPemKeyDecryptor"/>).
+    /// </summary>
+    private static SshPrivateKey ParseLegacyEncryptedPem(string text, string? passphrase)
+    {
+        var isRsa = text.Contains("-----BEGIN RSA PRIVATE KEY-----", StringComparison.Ordinal);
+        if (!isRsa && !text.Contains("-----BEGIN EC PRIVATE KEY-----", StringComparison.Ordinal))
+        {
+            throw new FormatException("Only RSA and EC keys are read from encrypted traditional PEM files.");
+        }
+
+        var der = LegacyPemKeyDecryptor.Decrypt(text, isRsa ? "RSA PRIVATE KEY" : "EC PRIVATE KEY", passphrase);
+        try
+        {
+            if (isRsa)
+            {
+                var rsa = RSA.Create();
+                return ImportDecrypted(rsa, () => { rsa.ImportRSAPrivateKey(der, out var read); return read == der.Length; }, () => FromRsa(rsa, null));
+            }
+
+            var ecdsa = ECDsa.Create();
+            return ImportDecrypted(ecdsa, () => ImportSec1(ecdsa, der), () => FromEcdsa(ecdsa, null));
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(der);
+        }
+    }
+
+    /// <summary>
+    /// Imports decrypted DER. A wrong passphrase that happens to leave valid CBC padding (about one in 256) gives bytes that are not a key,
+    /// or not only a key, so a failure here is reported as a wrong passphrase too.
+    /// </summary>
+    private static SshPrivateKey ImportDecrypted(IDisposable algorithm, Func<bool> import, Func<SshPrivateKey> create)
+    {
+        const string Message = "Could not decrypt the private key: the passphrase is wrong, or the file is corrupt.";
+        try
+        {
+            return import() ? create() : throw new FormatException(Message);
+        }
+        catch (Exception ex) when (ex is CryptographicException or ArgumentException or PlatformNotSupportedException)
+        {
+            algorithm.Dispose();
+            throw new FormatException(Message, ex);
+        }
+        catch
+        {
+            algorithm.Dispose();
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Imports a SEC1 ECPrivateKey (RFC 5915) and returns whether it was all of <paramref name="der"/>. The key is first put in the form
+    /// every platform imports (<see cref="NormalizeSec1"/>).
+    /// </summary>
+    private static bool ImportSec1(ECDsa ecdsa, byte[] der)
+    {
+        var normalized = NormalizeSec1(der);
+        try
+        {
+            ecdsa.ImportECPrivateKey(normalized, out var read);
+            return read == normalized.Length;
+        }
+        finally
+        {
+            if (!ReferenceEquals(normalized, der))
+            {
+                CryptographicOperations.ZeroMemory(normalized);
+            }
+        }
+    }
+
+    // The SEC1 curve OIDs and field primes of the NIST curves SSH uses.
+    private static readonly (string Oid, NistCurve Curve, BigInteger Prime)[] Sec1Curves =
+    [
+        ("1.2.840.10045.3.1.7", NistCurve.P256, (BigInteger.One << 256) - (BigInteger.One << 224) + (BigInteger.One << 192) + (BigInteger.One << 96) - 1),
+        ("1.3.132.0.34", NistCurve.P384, (BigInteger.One << 384) - (BigInteger.One << 128) - (BigInteger.One << 96) + (BigInteger.One << 32) - 1),
+        ("1.3.132.0.35", NistCurve.P521, (BigInteger.One << 521) - 1),
+    ];
+
+    /// <summary>
+    /// <paramref name="der"/> rewritten as .NET imports it everywhere, or <paramref name="der"/> itself when it needs nothing (or is not
+    /// something this can fix, which the import then reports). LibreSSL, and so OpenSSH for Windows and macOS, writes keys two ways
+    /// .NET refuses: the private key without its leading zero bytes (about half of all nistp521 keys have 65 bytes, not 66), though
+    /// RFC 5915 fixes its length to the curve order's; and on macOS the curve as explicit parameters rather than its OID, which macOS
+    /// does not import. The key is put back with its full length and the named curve. A curve is recognized by its field prime alone:
+    /// the key is then used on the named curve, and the public key in the file must match the private key there (the import and the
+    /// signing check after it make sure), so explicit parameters that differ in anything else cannot make another curve be used.
+    /// </summary>
+    private static byte[] NormalizeSec1(byte[] der)
+    {
+        try
+        {
+            var outer = new AsnReader(der, AsnEncodingRules.DER);
+            var sequence = outer.ReadSequence();
+            var version = sequence.ReadEncodedValue();
+            if (outer.HasData || !sequence.TryReadPrimitiveOctetString(out var d))
+            {
+                return der;
+            }
+
+            var parametersTag = new Asn1Tag(TagClass.ContextSpecific, 0, isConstructed: true);
+            var publicKeyTag = new Asn1Tag(TagClass.ContextSpecific, 1, isConstructed: true);
+            var curveIndex = -1;
+            var explicitParameters = false;
+            if (sequence.HasData && sequence.PeekTag() == parametersTag)
+            {
+                var parameters = sequence.ReadSequence(parametersTag);
+                if (parameters.PeekTag() == Asn1Tag.ObjectIdentifier)
+                {
+                    var oid = parameters.ReadObjectIdentifier();
+                    curveIndex = Array.FindIndex(Sec1Curves, c => c.Oid == oid);
+                }
+                else
+                {
+                    // ECParameters (SEC1 C.2): version, fieldID { prime-field, p }, then the curve, base point, order and cofactor.
+                    var ecParameters = parameters.ReadSequence();
+                    ecParameters.ReadInteger();
+                    var field = ecParameters.ReadSequence();
+                    if (field.ReadObjectIdentifier() == "1.2.840.10045.1.1")
+                    {
+                        var prime = field.ReadInteger();
+                        curveIndex = Array.FindIndex(Sec1Curves, c => c.Prime == prime);
+                        explicitParameters = true;
+                    }
+                }
+            }
+
+            ReadOnlyMemory<byte>? publicKey = sequence.HasData && sequence.PeekTag() == publicKeyTag ? sequence.ReadEncodedValue() : null;
+            if (sequence.HasData || curveIndex < 0)
+            {
+                return der;
+            }
+
+            var known = Sec1Curves[curveIndex];
+            if (d.Length > known.Curve.FieldSize || (d.Length == known.Curve.FieldSize && !explicitParameters))
+            {
+                return der;
+            }
+
+            var size = known.Curve.FieldSize;
+            var key = new byte[size];
+            var writer = new AsnWriter(AsnEncodingRules.DER);
+            try
+            {
+                d.Span.CopyTo(key.AsSpan(size - d.Length));
+                using (writer.PushSequence())
+                {
+                    writer.WriteEncodedValue(version.Span);
+                    writer.WriteOctetString(key);
+                    using (writer.PushSequence(parametersTag))
+                    {
+                        writer.WriteObjectIdentifier(known.Oid);
+                    }
+
+                    if (publicKey is { } point)
+                    {
+                        writer.WriteEncodedValue(point.Span);
+                    }
+                }
+
+                return writer.Encode();
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(key);
+                writer.Reset();
+            }
+        }
+        catch (AsnContentException)
+        {
+            return der;
+        }
+    }
+
+    /// <summary>The DER of the first PEM block labelled <paramref name="label"/>, skipping others (an <c>EC PARAMETERS</c> block before it).</summary>
+    private static byte[] PemBlock(string text, string label)
+    {
+        var rest = text.AsSpan();
+        while (PemEncoding.TryFind(rest, out var fields))
+        {
+            if (rest[fields.Label].SequenceEqual(label))
+            {
+                var der = new byte[fields.DecodedDataLength];
+                return Convert.TryFromBase64Chars(rest[fields.Base64Data], der, out _) ? der : throw new FormatException($"The PEM '{label}' block is not valid base64.");
+            }
+
+            rest = rest[fields.Location.End..];
+        }
+
+        throw new FormatException($"Expected a PEM '{label}' block.");
     }
 
     /// <summary>

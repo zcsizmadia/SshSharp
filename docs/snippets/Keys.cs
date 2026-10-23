@@ -197,6 +197,17 @@ internal static class Keys
         // </save-rounds>
     }
 
+    public static async Task ConvertLegacyPemAsync(CancellationToken cancellationToken)
+    {
+        // <convert-legacy-pem>
+        // A key that ssh-keygen -m PEM or OpenSSL encrypted the traditional way (Proc-Type: 4,ENCRYPTED, AES-CBC): read it, and write
+        // it once in the OpenSSH format, whose bcrypt_pbkdf makes guessing the passphrase far slower than the old format's one MD5.
+        var passphrase = Environment.GetEnvironmentVariable("KEY_PASSPHRASE") ?? throw new InvalidOperationException("KEY_PASSPHRASE is not set.");
+        using var key = await SshPrivateKey.LoadAsync("legacy_rsa.pem", passphrase, cancellationToken);
+        await key.SaveAsync("id_rsa_openssh", passphrase, cancellationToken); // and id_rsa_openssh.pub
+        // </convert-legacy-pem>
+    }
+
     public static async Task ExportAsync(CancellationToken cancellationToken)
     {
         // <export>

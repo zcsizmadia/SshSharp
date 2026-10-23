@@ -166,8 +166,8 @@ public class SshPrivateKeyTests
         await Assert.That(() => SshPrivateKey.Parse(TestKeys.OpenSshRsa(1024, out _))).Throws<FormatException>().WithMessageContaining("2048");
 
         await Assert.That(() => SshPrivateKey.Parse("PuTTY-User-Key-File-3: ssh-ed25519\n")).Throws<FormatException>().WithMessageContaining(".ppk");
-        const string legacy = "-----BEGIN RSA PRIVATE KEY-----\nProc-Type: 4,ENCRYPTED\nDEK-Info: AES-128-CBC,00\n\nAAAA\n-----END RSA PRIVATE KEY-----\n";
-        await Assert.That(() => SshPrivateKey.Parse(legacy)).Throws<FormatException>().WithMessageContaining("Proc-Type");
+        const string legacy = "-----BEGIN RSA PRIVATE KEY-----\nProc-Type: 4,ENCRYPTED\nDEK-Info: DES-EDE3-CBC,0001020304050607\n\nAAAA\n-----END RSA PRIVATE KEY-----\n";
+        await Assert.That(() => SshPrivateKey.Parse(legacy)).Throws<FormatException>().WithMessageContaining("DES-EDE3-CBC");
         await Assert.That(() => SshPrivateKey.Parse("ssh-ed25519 AAAA user@host")).Throws<FormatException>();
     }
 

@@ -180,6 +180,12 @@ name it in the hop's `IdentityFile` (without the `.pub`), or the agent's key is 
 When connecting by alias, encrypted `IdentityFile`s need `SshConfigConnectOptions.PassphraseProvider` (and are skipped in
 `BatchMode`). The `Information` log names skipped identity files and why.
 
+### "The private key is encrypted with DES-EDE3-CBC, a legacy cipher SshSharp does not read"
+
+The key file is traditional PEM (`Proc-Type: 4,ENCRYPTED`) encrypted with 3DES or DES, which SshSharp leaves out by design. Re-encrypt
+it once with `ssh-keygen -p -f <file>`: it asks for the old passphrase and a new one, and writes the key in the OpenSSH format with AES.
+See [Encrypted key files](../how-to/agent-and-keys.md#encrypted-key-files).
+
 ### The agent is not used
 
 - `SshAgent.FromEnvironment()` returns null: `SSH_AUTH_SOCK` is not set, and on Windows neither the OpenSSH agent service nor

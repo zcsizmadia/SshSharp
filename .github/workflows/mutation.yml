@@ -53,6 +53,11 @@ jobs:
           - scope: bcrypt-pbkdf
             mutate: -m "**/Crypto/BcryptPbkdf.cs"
             tests: Crypto/BcryptPbkdfTests.cs;Keys/*Tests.cs
+          # Reading private key files: the parser, the OpenSSH key decryptor (bcrypt_pbkdf with AES or chacha20-poly1305) and the
+          # traditional encrypted PEM decryptor (EVP_BytesToKey with AES-CBC).
+          - scope: key-readers
+            mutate: -m "**/Keys/PrivateKeyParser.cs" -m "**/Keys/OpenSshKeyDecryptor.cs" -m "**/Keys/LegacyPemKeyDecryptor.cs"
+            tests: Keys/*Tests.cs;Fuzz/ParserRobustnessTests.cs
           - scope: ecdh-dh
             mutate: -m "**/Crypto/NistCurve.cs" -m "**/Crypto/ModpGroup.cs" -m "**/Crypto/DhGroupValidator.cs" -m "**/Protocol/ClientKeyExchange.cs" -m "**/Protocol/DhGroupExchangeKeyExchange.cs"
             tests: Crypto/NistCurveTests.cs;Crypto/ModpGroupTests.cs;Crypto/DhGroupValidatorTests.cs;Crypto/WycheproofTests.cs;Protocol/ClientKeyExchangeTests.cs;Protocol/DhGroupExchangeTests.cs;Protocol/MlKemKexTests.cs;Protocol/SntrupKexTests.cs;Keys/ExternalKeyTests.cs;Agent/AgentTests.cs

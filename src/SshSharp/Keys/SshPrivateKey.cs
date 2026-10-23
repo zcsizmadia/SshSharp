@@ -12,7 +12,9 @@ namespace SshSharp;
 /// A private key for public-key authentication. Load one with <see cref="Parse"/> or <see cref="LoadAsync"/>. Supported formats:
 /// the OpenSSH key format (<c>BEGIN OPENSSH PRIVATE KEY</c>, as <c>ssh-keygen</c> writes by default, also passphrase-protected), PuTTY
 /// <c>.ppk</c> (versions 2 and 3, also encrypted), PKCS#8 (<c>BEGIN PRIVATE KEY</c>,
-/// and <c>BEGIN ENCRYPTED PRIVATE KEY</c> for RSA and ECDSA), and PKCS#1/SEC1 PEM (<c>BEGIN RSA PRIVATE KEY</c>, <c>BEGIN EC PRIVATE KEY</c>).
+/// and <c>BEGIN ENCRYPTED PRIVATE KEY</c> for RSA and ECDSA), and PKCS#1/SEC1 PEM (<c>BEGIN RSA PRIVATE KEY</c>, <c>BEGIN EC PRIVATE KEY</c>),
+/// also encrypted the traditional way (<c>Proc-Type: 4,ENCRYPTED</c> with AES-128/192/256-CBC, as <c>ssh-keygen -m PEM</c> writes it).
+/// Passphrase-protected OpenSSH keys are read with every cipher <c>ssh-keygen -Z</c> offers, <c>chacha20-poly1305@openssh.com</c> included.
 /// Key types: Ed25519, ECDSA (nistp256/384/521) and RSA (2048 bits or more). A key held here can be written in the OpenSSH format
 /// (<see cref="ToOpenSshPrivateKey"/>), PKCS#8 (<see cref="ToPkcs8PrivateKey"/>) or PuTTY's (<see cref="ToPuttyPrivateKey"/>), or saved
 /// to a file in any of them (<see cref="SaveAsync(string, SshPrivateKeyFormat, string?, CancellationToken)"/>).
