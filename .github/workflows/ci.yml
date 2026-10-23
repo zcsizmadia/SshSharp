@@ -588,7 +588,8 @@ jobs:
           exit "$status"
       - name: Server log
         if: failure()
-        run: docker logs server 2>&1 | grep -vE 'debug1: (enqueue packet|dequeue packet|ssh_set_newkeys)' | tail -n 200
+        run: |
+          docker logs server 2>&1 | grep -vE 'debug1: (enqueue packet|dequeue packet|ssh_set_newkeys)' | tail -n 200
 
   # ssh-audit in client mode (#218): it listens as a server, records the algorithms SshSharp offers (default options and FIPS mode),
   # and rates them. tests/ssh-audit/check_client_audit.py fails the job on any rating it does not explain, a CVE, a missing strict
