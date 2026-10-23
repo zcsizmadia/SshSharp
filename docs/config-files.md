@@ -78,6 +78,17 @@ reports no canonical name, the rules have nothing to act on. Each name is looked
 `CanonicalizePermittedCNAMEs` without `CanonicalizeHostname` follows no CNAMEs here, unlike `ssh`. The built-in canonicalizer is
 off by default, because resolving a configuration then makes network queries.
 
+`Match canonical` and the second pass differ from `ssh` in edge cases:
+
+| | `ssh` | SshSharp |
+|---|---|---|
+| The configuration is read a second time when | `CanonicalizeHostname` is on (whether a name was found or not), or a `Match final` without `!` appears | a canonical name was found, or any `Match final` or `Match canonical` appears (with or without `!`) |
+| `Match canonical` is true | in the second pass, as `Match final` is | in the second pass, and only when a canonical name was found |
+
+They agree whenever a canonical name is found. They differ when canonicalization is on but finds nothing (`ssh` still reads the
+configuration again, and `canonical` is true in that pass), and when `Match final` forces the second pass with canonicalization
+off (`canonical` is true there in `ssh` only).
+
 Within one resolution, each distinct `Match exec` command runs once and its answer is reused, as is each canonicalization. That
 includes the second pass that `Match final` or canonicalization causes, where OpenSSH runs the command again. A command whose
 tokens expand differently in that pass (`%h` after canonicalization, say) is a different command, and runs.

@@ -13,7 +13,7 @@ value.
 | Directive | Notes |
 |---|---|
 | `Host` | Patterns with `*`, `?` and `!` negation. |
-| `Match` | `all`, `host`, `originalhost`, `user`, `localuser`, `canonical`, `final`, `exec`, `tagged`, `localnetwork`, `sessiontype`, `command`; negation with `!`. `exec` runs only with `SshConfigResolveOptions.ExecMatcher`; `sessiontype` and `command` match only when `SessionType` (and `Command`) are given; `version` never matches. |
+| `Match` | `all`, `host`, `originalhost`, `user`, `localuser`, `canonical`, `final`, `exec`, `tagged`, `localnetwork`, `sessiontype`, `command`; negation with `!`. `exec` runs only with `SshConfigResolveOptions.ExecMatcher`; `sessiontype` and `command` match only when `SessionType` (and `Command`) are given; `version` never matches. `canonical` differs from `ssh` in edge cases (see [Host name canonicalization](../config-files.md#host-name-canonicalization)). |
 | `Include` | Globs, relative to `~/.ssh` (user file) or the system directory; at most 16 levels and 1,024 files. |
 | `Tag` | Matched by `Match tagged`; `SshConfigResolveOptions.Tag` overrides it. |
 
