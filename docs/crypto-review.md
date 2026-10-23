@@ -1,7 +1,8 @@
 # Managed cryptography review
 
 SshSharp implements X25519, Ed25519, sntrup761, ChaCha20, Poly1305, bcrypt_pbkdf, BLAKE2b and Argon2 in managed code, because the .NET base
-library does not provide them on every target. Everything else (AES, SHA-2, HMAC, RSA, ECDSA, ECDH, random numbers) comes from the
+library does not provide them on every target. On .NET 11, X25519 comes from the platform (`X25519DiffieHellman`) where the OS
+provides it, and the managed one remains the fallback and the implementation on .NET 8 and .NET 10. Everything else (AES, SHA-2, HMAC, RSA, ECDSA, ECDH, random numbers) comes from the
 platform. This page records what was reviewed, how, and what is still open. It is an internal review, not an independent audit; an
 outside review is planned (1.0 shipped with this internal review as its basis).
 

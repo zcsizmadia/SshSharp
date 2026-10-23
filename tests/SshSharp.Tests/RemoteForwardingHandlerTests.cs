@@ -452,7 +452,14 @@ public class RemoteForwardingHandlerTests
             await Assert.That(advanced).IsLessThan(grace * 10).Because("disposal should have finished");
             time.Advance(step);
             advanced += step;
-            await Task.WhenAny(disposing, Task.Delay(20));
+            try
+            {
+                await disposing.WaitAsync(TimeSpan.FromMilliseconds(20)); // no Task.Delay left running (CA2027)
+            }
+            catch (TimeoutException)
+            {
+                // Not yet: move the clock on again.
+            }
         }
 
         await disposing;

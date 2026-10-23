@@ -63,7 +63,7 @@ jobs:
           puttygen --version
       - name: Loop
         shell: bash
-        run: tests/stress/loop.sh "$ITERATIONS" "$RUNNER_TEMP/stress" net8.0,net10.0 "${UNIT_FILTER:-$UNIT_TESTS}"
+        run: tests/stress/loop.sh "$ITERATIONS" "$RUNNER_TEMP/stress" net8.0,net10.0,net11.0 "${UNIT_FILTER:-$UNIT_TESTS}"
       - name: Summary
         if: always()
         shell: bash

@@ -1,6 +1,6 @@
 name: Set up .NET
 description: >-
-  The SDK from global.json, the .NET 8 runtime the tests also target, and optionally the NuGet cache and a Release build of the
+  The SDK from global.json (.NET 11), the .NET 10 runtime, the .NET 8 runtime the tests also target, and optionally the NuGet cache and a Release build of the
   solution. The repository must be checked out first, with fetch-depth 0 when the build runs (MinVer computes the version from tags
   and history).
 inputs:
@@ -23,19 +23,21 @@ runs:
     # On windows-11-arm, the PowerShell that runs install-dotnet.ps1 now and then crashes ("Internal CLR error. (0x80131506)", exit
     # code 0xC0000005) before our code runs (actions/setup-dotnet#793), so a failed install there gets one more try. Everywhere else a
     # failure fails the job at once. Remove the retry when the issue is fixed.
+    # The SDK is .NET 11's, which runs net11.0 only: the net10.0 tests and tools need the 10.0 runtime beside it, and the net8.0 ones
+    # the 8.0 runtime. fromJSON turns the escaped newline into the list setup-dotnet expects.
     - id: install
       uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
       continue-on-error: ${{ runner.os == 'Windows' && runner.arch == 'ARM64' }}
       with:
         global-json-file: global.json
-        dotnet-version: ${{ inputs.dotnet-8 == 'true' && '8.0.x' || '' }}
+        dotnet-version: ${{ inputs.dotnet-8 == 'true' && fromJSON('"8.0.x\n10.0.x"') || '10.0.x' }}
         cache: ${{ inputs.cache == 'true' }}
         cache-dependency-path: '**/Directory.Packages.props'
     - if: steps.install.outcome == 'failure'
       uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
       with:
         global-json-file: global.json
-        dotnet-version: ${{ inputs.dotnet-8 == 'true' && '8.0.x' || '' }}
+        dotnet-version: ${{ inputs.dotnet-8 == 'true' && fromJSON('"8.0.x\n10.0.x"') || '10.0.x' }}
         cache: ${{ inputs.cache == 'true' }}
         cache-dependency-path: '**/Directory.Packages.props'
     - if: inputs.build == 'true'

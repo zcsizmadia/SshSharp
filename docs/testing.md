@@ -14,7 +14,7 @@ does. This page describes what is tested, against what, how intermittent failure
 | Fuzzing | Coverage-guided fuzzing of the parsers that read untrusted input, nightly; mutation fuzzing in every test run |
 | Mutation testing | Stryker.NET over the cryptography, the packet codec and the configuration parsers |
 | Stress | The whole suite in a loop on every platform, with an instrumented build that checks buffer ownership and received data |
-| Platforms | Linux (x64, Arm64), Windows (x64, Arm64), macOS (Arm64), each on .NET 8 and .NET 10, plus a Native AOT smoke test |
+| Platforms | Linux (x64, Arm64), Windows (x64, Arm64), macOS (Arm64), each on .NET 8, .NET 10 and .NET 11, plus a Native AOT smoke test |
 | Algorithm audit | [ssh-audit](https://github.com/jtesta/ssh-audit) rates what the client offers, by default and in FIPS mode, on every pull request |
 | Static analysis | CodeQL, the .NET analyzers at their recommended level with warnings as errors, and tracked public API |
 
@@ -40,7 +40,8 @@ Inputs come from the real tools wherever possible:
 ## Cryptography
 
 SshSharp uses the .NET libraries for every primitive they provide on both target frameworks. It implements X25519, Ed25519,
-ChaCha20, Poly1305, AES-CTR and sntrup761 itself. Those implementations are checked against:
+ChaCha20, Poly1305, AES-CTR and sntrup761 itself (on .NET 11, X25519 comes from the platform where the OS provides it, and
+the managed one is the fallback; the tests run the RFC, OpenSSL and Wycheproof vectors through both). Those implementations are checked against:
 
 - **Reference vectors:** the RFCs' test vectors, OpenSSL's Curve25519 vectors, and the sntrup761 known-answer tests.
 - **[Project Wycheproof](https://github.com/C2SP/wycheproof):** about 6,400 edge cases, each of which broke a real implementation
