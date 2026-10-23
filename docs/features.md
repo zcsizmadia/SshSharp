@@ -1,7 +1,7 @@
 # Features
 
 Everything SshSharp does, one row per feature, with the API or `ssh_config` directive to use and the page that shows how.
-<span class="badge text-bg-primary">1.1</span> marks a feature added in 1.1.
+<span class="badge text-bg-primary">1.1</span> and <span class="badge text-bg-primary">1.2</span> mark a feature added in that release.
 
 The four packages share one version: `SshSharp` (the client), `SshSharp.Extensions.DependencyInjection`,
 `SshSharp.IO.Abstractions` and `SshSharp.FileProviders`. All target .NET 8 and .NET 10 and have no native dependencies.
@@ -96,8 +96,9 @@ The four packages share one version: `SshSharp` (the client), `SshSharp.Extensio
 | File transfers | Pipelined uploads and downloads (64 requests in flight by default), with progress, kept times and permissions, and resume | `UploadFileAsync`, `DownloadFileAsync`, `UploadAsync`, `DownloadAsync`; `SftpTransferOptions` | [Transfer files with SFTP](how-to/transfer-files-sftp.md) |
 | Segmented transfers | One large file in parallel ranges over several sessions, downloads and (since 1.1) uploads <span class="badge text-bg-primary">1.1</span> | `SftpTransferOptions.Segments` | [SFTP](sftp.md) |
 | Directory trees | Whole trees either way, several files at once <span class="badge text-bg-primary">1.1</span> | `UploadDirectoryAsync`, `DownloadDirectoryAsync`; `MaxConcurrentFiles` | [Transfer files with SFTP](how-to/transfer-files-sftp.md) |
-| Filters and skipping unchanged files | Choose what a directory transfer includes; skip files whose size and time match, as rsync does <span class="badge text-bg-primary">1.1</span> | `SftpTransferOptions.Filter`, `SkipUnchanged` | [Transfer files with SFTP](how-to/transfer-files-sftp.md) |
-| Listings | Pipelined directory reads; name patterns and recursion <span class="badge text-bg-primary">1.1</span> | `ListDirectoryAsync`, `SftpListOptions` | [Transfer files with SFTP](how-to/transfer-files-sftp.md) |
+| Filters and skipping unchanged files | Choose what a directory transfer includes; skip files whose size and time match, as rsync does <span class="badge text-bg-primary">1.1</span>, within a time tolerance for coarse file systems such as FAT <span class="badge text-bg-primary">1.2</span> | `SftpTransferOptions.Filter`, `SkipUnchanged`, `TimeTolerance` | [Transfer files with SFTP](how-to/transfer-files-sftp.md) |
+| Unreadable directories | Directory transfers and recursive listings go past the subdirectories this user may not read, and report them, instead of failing <span class="badge text-bg-primary">1.2</span> | `SftpTransferOptions.SkipUnreadableDirectories`, `SftpListOptions.SkipUnreadableDirectories` | [Transfer files with SFTP](how-to/transfer-files-sftp.md#go-past-directories-that-cannot-be-read) |
+| Listings | Pipelined directory reads; name patterns and recursion <span class="badge text-bg-primary">1.1</span>; patterns that ignore case <span class="badge text-bg-primary">1.2</span> | `ListDirectoryAsync`, `SftpListOptions` | [Transfer files with SFTP](how-to/transfer-files-sftp.md) |
 | Conveniences | `mkdir -p`, `rm -r` (never following links), whole-file reads and writes <span class="badge text-bg-primary">1.1</span> | `CreateDirectoryAsync(path, createParents: true)`, `DeleteDirectoryAsync(path, recursive: true)`, `ReadAllTextAsync`, `WriteAllBytesAsync`, ... | [Transfer files with SFTP](how-to/transfer-files-sftp.md) |
 | Files and links | Attributes, rename (with an atomic overwrite), symbolic and hard links, server-side copies, file system statistics | `GetAttributesAsync`, `RenameAsync`, `CreateSymbolicLinkAsync`, `CreateHardLinkAsync`, `CopyFileAsync`, `GetFileSystemInfoAsync` | [SFTP](sftp.md) |
 | Remote file streams | Seekable streams; writes behind (up to 16 in flight), errors never lost <span class="badge text-bg-primary">1.1</span>; `fsync` on flush | `OpenAsync`, `OpenReadAsync`, `OpenWriteAsync` | [SFTP](sftp.md) |

@@ -205,7 +205,8 @@ size and modification time, as rsync's quick check does:
 ### How it decides
 
 - Both sizes and both modification times must be known, the sizes equal and the times equal **to the second**: SFTP version 3
-  carries whole seconds, so the local time's fraction is dropped. Anything else (a time or size the server does not send, a
+  carries whole seconds, so the local time's fraction is dropped. With `TimeTolerance`, times that many whole seconds apart count
+  as equal (see [Coarse file system times](#coarse-file-system-times)). Anything else (a time or size the server does not send, a
   directory or link at the destination) counts as a change, and the file is transferred.
 - A download compares the server's listing with the local files, at no extra cost. An upload lists each remote directory that
   already existed once, when its first file is reached; a directory the transfer creates is empty, so nothing is listed for it.
@@ -218,10 +219,60 @@ size and modification time, as rsync's quick check does:
 - **It is not a content check.** A file changed without changing its size, whose time was then set back or that changed within the
   same second, is taken as unchanged. When that matters, compare the contents yourself.
 - A file system with coarser times than a second (FAT's 2 seconds) may never match, so every file is transferred, as without the
-  option.
+  option, unless `TimeTolerance` allows for the difference.
 - In a download, a server could make you keep stale local files by reporting the sizes and times they have. It cannot make anything
   be written that it did not send; see the [threat model](../threat-model.md).
 - `SkipUnchanged` and `Filter` apply to the directory methods only; the single-file methods ignore them.
+
+### Coarse file system times
+
+`TimeTolerance` lets the modification times differ by up to that much and still count as the same, as rsync's `--modify-window`
+does. It is zero by default: the times must be equal to the second.
+
+[!code-csharp[](../snippets/FileTransfer.cs#sftp-time-tolerance)]
+
+- **When to use**: one side keeps coarser times than a second, so the times `Preserve` copied come back rounded and never match.
+  FAT (USB drives, SD cards) keeps even seconds: use 2 seconds. A share or server that rounds to the nearest second, where SFTP
+  drops the fraction: use 1 second.
+- **How it decides**: the times are compared in whole seconds, so a tolerance below a second is the same as none, and a fraction above
+  whole seconds is dropped (2.5 seconds is 2). Either side may be the later one. The sizes must still be equal.
+- **Pitfalls**: a wider tolerance hides more real changes: a file rewritten with the same size within that time of the copy is taken
+  as unchanged. It is not meant for time zones (times travel as UTC) or for FAT's one-hour daylight-saving shift: a tolerance that
+  wide would miss most edits. A negative value throws `ArgumentOutOfRangeException`.
+
+## Go past directories that cannot be read
+
+By default a directory transfer fails at the first subdirectory it may not read, as `cp -r` does. With `SkipUnreadableDirectories`,
+`UploadDirectoryAsync` and `DownloadDirectoryAsync` leave such a directory out and go on with the rest; the summary lists what was
+left out:
+
+[!code-csharp[](../snippets/FileTransfer.cs#sftp-skip-unreadable)]
+
+### When to use
+
+- Copying a tree that holds directories of other users or of the system: a shared folder with restricted subfolders, a home
+  directory with a private cache, `/etc` or `/var/log` without root.
+- Whenever a partial copy is the expected outcome. When a complete copy matters, leave the option off, or check
+  `UnreadableDirectories` afterwards.
+
+### How it works
+
+- In a download, a remote subdirectory qualifies when the server refuses its listing with `PermissionDenied`. In an upload, a local
+  one qualifies when this system refuses to list it (`UnauthorizedAccessException`).
+- A directory left out is not created at the destination and not counted in `Directories`. Its path below the top directory
+  (`/`-separated, as the filter sees it, for example `projects/private`) is added to `SftpTransferSummary.UnreadableDirectories`, in
+  the order the transfer reached it.
+- It works the same with `MaxConcurrentFiles`, `Filter` and `SkipUnchanged`. A directory the filter declines is never read, so it is
+  never reported as unreadable.
+
+### Notes and pitfalls
+
+- **Only permission errors qualify.** A directory deleted meanwhile (`NoSuchFile`), any other status, a file that cannot be read,
+  and a broken session or connection still fail the transfer, so a real problem never looks like an empty directory.
+- **The top directory is not skipped**: when it cannot be read, the transfer fails as before.
+- Nothing is deleted at the destination: an earlier copy of a directory that is now unreadable stays as it was.
+- In a download, the server decides what it refuses, so a server can leave directories out of a download with this option on; they
+  are always listed in `UnreadableDirectories`.
 
 ## List files that match a pattern, or a whole tree
 
@@ -246,6 +297,18 @@ The pattern matches the whole name, not the path, and is case-sensitive, as on t
 shell, `*` and `?` match a leading dot, so `*` includes hidden files. A `]` first in a set is part of it (`[]a]`), a `-` first or last
 is itself, and a `[` without its `]` matches itself, as in fnmatch(3). Named classes such as `[[:digit:]]` are not supported.
 
+### Ignoring case
+
+With `IgnoreCase`, the pattern matches without regard to case, as fnmatch's `FNM_CASEFOLD` does: `*.jpg` also lists `IMG_01.JPG`,
+and a set takes a character when any of its cases is in it (`[a-z]` takes `Q`, `[!a-z]` does not). Use it for trees that came from
+Windows or a camera, or a server on Windows, where the case of a name is an accident.
+
+[!code-csharp[](../snippets/FileTransfer.cs#sftp-list-ignore-case)]
+
+Characters are compared by the invariant culture's one-to-one case mapping, so the result is the same on every machine (a Turkish
+culture does not change how `i` matches) and a character never matches two (`ß` does not match `SS`). It changes only which entries
+are returned: a recursive listing enters every directory either way.
+
 ### Recursive listings
 
 - **Order**: depth first, unsorted. Within a directory the entries come in the server's order, which is often the file system's
@@ -266,6 +329,12 @@ is itself, and a `[` without its `]` matches itself, as in fnmatch(3). Named cla
   directories it is inside, so a directory with many subdirectories is not listed ahead whole.
 - **Stopping**: leaving the `await foreach` or cancelling stops the listings read ahead and closes their handles. A subdirectory that
   cannot be listed (permission denied) throws its `SftpException` when the listing reaches it, after everything before it.
+- **Unreadable directories**: with `SkipUnreadableDirectories`, a subdirectory the server refuses with `PermissionDenied` is left out
+  instead, and the listing goes on with the entries after it, as `find` does after its warning. Its own entry is still returned
+  (it comes before its contents), and `UnreadableDirectory`, when set, is called with it right after. Other errors (a directory
+  deleted meanwhile, a broken session) and an unreadable top directory still end the listing.
+
+[!code-csharp[](../snippets/FileTransfer.cs#sftp-list-skip-unreadable)]
 
 ```mermaid
 flowchart TD

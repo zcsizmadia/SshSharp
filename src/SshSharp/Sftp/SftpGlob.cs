@@ -1,11 +1,14 @@
+using System.Text;
+
 namespace SshSharp.Sftp;
 
 /// <summary>
 /// A shell-style pattern for one file name (<see cref="SftpListOptions.Pattern"/>), matched as fnmatch(3) without flags matches it:
 /// <c>*</c> is any run of characters, <c>?</c> one character, <c>[...]</c> one of a set (<c>[abc]</c>, a range <c>[a-z]</c>, negated
 /// with <c>!</c> or <c>^</c>, a <c>]</c> first in the set is part of it), and <c>\</c> takes the next character literally. Everything
-/// else matches itself, case-sensitively (Unicode code points compared ordinally). A <c>[</c> without its closing <c>]</c> matches
-/// itself. Names starting with a dot are not special: <c>*</c> matches them too.
+/// else matches itself, case-sensitively (Unicode code points compared ordinally) unless compiled to ignore case
+/// (<see cref="SftpListOptions.IgnoreCase"/>). A <c>[</c> without its closing <c>]</c> matches itself. Names starting with a dot are not
+/// special: <c>*</c> matches them too.
 /// </summary>
 /// <remarks>
 /// It is compiled once into tokens and matched with one star remembered at a time (the classic greedy algorithm): a mismatch returns to
@@ -26,10 +29,20 @@ internal sealed class SftpGlob
 
     private readonly Token[] _tokens;
 
-    private SftpGlob(Token[] tokens) => _tokens = tokens;
+    private readonly bool _ignoreCase;
 
-    /// <summary>Compiles <paramref name="pattern"/>; every pattern is valid (a malformed set is taken literally).</summary>
-    public static SftpGlob Parse(string pattern)
+    private SftpGlob(Token[] tokens, bool ignoreCase)
+    {
+        _tokens = tokens;
+        _ignoreCase = ignoreCase;
+    }
+
+    /// <summary>
+    /// Compiles <paramref name="pattern"/>; every pattern is valid (a malformed set is taken literally). With
+    /// <paramref name="ignoreCase"/>, a character matches its upper- and lowercase forms too, by the invariant culture's simple case
+    /// mapping (as <c>FNM_CASEFOLD</c> folds both sides), so the same pattern matches the same names whatever this machine's culture is.
+    /// </summary>
+    public static SftpGlob Parse(string pattern, bool ignoreCase = false)
     {
         var runes = Runes(pattern);
         var tokens = new List<Token>();
@@ -68,7 +81,7 @@ internal sealed class SftpGlob
             }
         }
 
-        return new SftpGlob([.. tokens]);
+        return new SftpGlob([.. tokens], ignoreCase);
     }
 
     /// <summary>Whether <paramref name="name"/> matches the whole pattern.</summary>
@@ -84,7 +97,7 @@ internal sealed class SftpGlob
                 starToken = ++t;
                 starText = n;
             }
-            else if (t < _tokens.Length && Matches(_tokens[t], text[n]))
+            else if (t < _tokens.Length && Matches(_tokens[t], text[n], _ignoreCase))
             {
                 t++;
                 n++;
@@ -108,25 +121,34 @@ internal sealed class SftpGlob
         return t == _tokens.Length;
     }
 
-    private static bool Matches(Token token, int c) => token.Kind switch
+    private static bool Matches(Token token, int c, bool ignoreCase) => token.Kind switch
     {
-        Kind.Literal => token.Value == c,
+        Kind.Literal => token.Value == c || (ignoreCase && Fold(token.Value) == Fold(c)),
         Kind.AnyOne => true,
-        _ => InSet(token, c),
+
+        // Ignoring case, a character is in the set when any of its forms is: [a-z] takes 'Q', and [!a-z] does not.
+        _ => (InRanges(token, c) || (ignoreCase && (InRanges(token, Lower(c)) || InRanges(token, Upper(c))))) != token.Negated,
     };
 
-    private static bool InSet(Token token, int c)
+    private static bool InRanges(Token token, int c)
     {
         foreach (var (low, high) in token.Ranges!)
         {
             if (c >= low && c <= high)
             {
-                return !token.Negated;
+                return true;
             }
         }
 
-        return token.Negated;
+        return false;
     }
+
+    /// <summary>One form for a character and its other cases, to compare literals with; the invariant culture's, never this machine's.</summary>
+    private static int Fold(int c) => Lower(Upper(c));
+
+    private static int Lower(int c) => Rune.ToLowerInvariant(new Rune(c)).Value;
+
+    private static int Upper(int c) => Rune.ToUpperInvariant(new Rune(c)).Value;
 
     /// <summary>
     /// Parses the set that opens at <paramref name="start"/> (a <c>[</c>); false when it has no closing <c>]</c>, and the <c>[</c> is

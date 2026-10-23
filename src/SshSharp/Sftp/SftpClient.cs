@@ -1906,8 +1906,8 @@ public sealed class SftpTransferOptions
     /// The modification times are compared to the second: SFTP version 3 carries whole seconds, so the local time's fraction is dropped
     /// first. A time or size the server does not send counts as a difference, and the file is transferred. It is not a check of the
     /// contents: a file changed without changing its size, whose time was then set back (or that was changed within the same second),
-    /// is taken as unchanged. On a file system that keeps coarser times (FAT's 2 seconds) the times may never match, and every file is
-    /// transferred, as without this option.
+    /// is taken as unchanged. On a file system that keeps coarser times (FAT's 2 seconds, some SMB shares) the times may never match,
+    /// and every file is transferred, as without this option, unless <see cref="TimeTolerance"/> allows for the difference.
     /// </para>
     /// <para>
     /// The times only match when the earlier transfer copied them: set <see cref="Preserve"/> on every transfer of the tree, otherwise
@@ -1921,6 +1921,52 @@ public sealed class SftpTransferOptions
     /// </para>
     /// </remarks>
     public bool SkipUnchanged { get; init; }
+
+    /// <summary>
+    /// How far apart the modification times may be for <see cref="SkipUnchanged"/> to take a file as unchanged, as rsync's
+    /// <c>--modify-window</c> (default zero: the same second). Set it when one side keeps coarser times than a second, so the times copied
+    /// with <see cref="Preserve"/> come back rounded: 2 seconds for FAT and exFAT (USB drives, SD cards), and for SMB shares backed by
+    /// them; a second for a server or share that rounds to the nearest second rather than dropping the fraction. Without it every file on
+    /// such a file system is transferred again.
+    /// </summary>
+    /// <remarks>
+    /// The times are compared in whole seconds (SFTP version 3 carries no more), so a tolerance below a second is the same as none, and a
+    /// fraction above whole seconds is dropped. The sizes must still be equal. A wider tolerance hides more real changes: a file rewritten
+    /// with the same size within that time of the earlier copy is taken as unchanged. It is not meant for clocks in different time zones
+    /// or for a daylight-saving shift on FAT (an hour): a tolerance that wide would miss most edits.
+    /// </remarks>
+    /// <exception cref="ArgumentOutOfRangeException">The value is negative.</exception>
+    public TimeSpan TimeTolerance
+    {
+        get;
+        init
+        {
+            ArgumentOutOfRangeException.ThrowIfLessThan(value, TimeSpan.Zero);
+            field = value;
+        }
+    }
+
+    /// <summary>
+    /// In <see cref="SftpClient.UploadDirectoryAsync"/> and <see cref="SftpClient.DownloadDirectoryAsync"/>, leave out a subdirectory of the
+    /// source tree that this user may not read, and go on with the rest (default false: the transfer fails with the error, as
+    /// <c>cp -r</c> stops). A remote directory qualifies when the server refuses its listing with
+    /// <see cref="SftpStatusCode.PermissionDenied"/>, a local one when this system refuses it (<see cref="UnauthorizedAccessException"/>).
+    /// What was left out is in <see cref="SftpTransferSummary.UnreadableDirectories"/>. The single-file methods ignore it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A directory left out is not created at the destination, nor counted in <see cref="SftpTransferSummary.Directories"/>, and nothing
+    /// is deleted there: an earlier copy stays as it is. Only a refusal for want of permission qualifies: a directory deleted meanwhile,
+    /// any other status, a file that cannot be read, and a broken session or connection still fail the transfer. The top directory is
+    /// not skipped: when it cannot be read, the transfer fails.
+    /// </para>
+    /// <para>
+    /// Use it for a tree that holds directories of other users or of the system (a home directory with a private <c>.cache</c>, a share
+    /// with restricted folders), where a partial copy is the expected outcome. Check
+    /// <see cref="SftpTransferSummary.UnreadableDirectories"/> afterwards when a complete copy matters.
+    /// </para>
+    /// </remarks>
+    public bool SkipUnreadableDirectories { get; init; }
 
     /// <summary>
     /// The slots a directory transfer's files share for their reads and writes (<see cref="MaxRequestsInFlight"/> in all), or null in a
@@ -1940,6 +1986,8 @@ public sealed class SftpTransferOptions
         MaxConcurrentFiles = MaxConcurrentFiles,
         Filter = Filter,
         SkipUnchanged = SkipUnchanged,
+        TimeTolerance = TimeTolerance,
+        SkipUnreadableDirectories = SkipUnreadableDirectories,
         RequestBudget = budget,
     };
 }

@@ -195,6 +195,36 @@ internal static class FileTransfer
         // </sftp-skip-unchanged>
     }
 
+    public static async Task TimeToleranceAsync(SftpClient sftp, CancellationToken cancellationToken)
+    {
+        // <sftp-time-tolerance>
+        // Back up a remote tree to a FAT-formatted USB drive, which keeps modification times in steps of 2 seconds: without a tolerance
+        // the copies' times never match the server's, and every file would be fetched again on every run.
+        var options = new SftpTransferOptions
+        {
+            Preserve = true,
+            SkipUnchanged = true,
+            TimeTolerance = TimeSpan.FromSeconds(2),
+        };
+        var summary = await sftp.DownloadDirectoryAsync("/srv/projects", "/media/usb/projects", options, cancellationToken);
+        Console.WriteLine($"{summary.Files} files fetched, {summary.Unchanged} unchanged");
+        // </sftp-time-tolerance>
+    }
+
+    public static async Task SkipUnreadableAsync(SftpClient sftp, CancellationToken cancellationToken)
+    {
+        // <sftp-skip-unreadable>
+        // Copy what this account may read of a shared tree: directories the server refuses (permission denied) are left out, and the
+        // transfer goes on with the rest instead of failing. The summary says what was left out.
+        var options = new SftpTransferOptions { Preserve = true, SkipUnreadableDirectories = true };
+        var summary = await sftp.DownloadDirectoryAsync("/srv/shared", "shared", options, cancellationToken);
+        foreach (var directory in summary.UnreadableDirectories)
+        {
+            Console.WriteLine($"Not copied (permission denied): {directory}");
+        }
+        // </sftp-skip-unreadable>
+    }
+
     public static async Task ListPatternAsync(SftpClient sftp, CancellationToken cancellationToken)
     {
         // <sftp-list-pattern>
@@ -204,6 +234,36 @@ internal static class FileTransfer
             Console.WriteLine($"{entry.Name} {entry.Attributes.Size:N0}");
         }
         // </sftp-list-pattern>
+    }
+
+    public static async Task ListIgnoreCaseAsync(SftpClient sftp, CancellationToken cancellationToken)
+    {
+        // <sftp-list-ignore-case>
+        // Photos copied from Windows or a camera: IMG_0001.JPG, holiday.jpg and scan.Jpg all match *.jpg when case is ignored.
+        var options = new SftpListOptions { Pattern = "*.jpg", IgnoreCase = true, Recursive = true };
+        await foreach (var entry in sftp.ListDirectoryAsync("photos", options, cancellationToken))
+        {
+            Console.WriteLine(entry.FullPath);
+        }
+        // </sftp-list-ignore-case>
+    }
+
+    public static async Task ListSkipUnreadableAsync(SftpClient sftp, CancellationToken cancellationToken)
+    {
+        // <sftp-list-skip-unreadable>
+        // Find every *.conf under /etc, going past the directories this account may not read (as find does after its warning).
+        var options = new SftpListOptions
+        {
+            Pattern = "*.conf",
+            Recursive = true,
+            SkipUnreadableDirectories = true,
+            UnreadableDirectory = directory => Console.WriteLine($"Skipped (permission denied): {directory.FullPath}"),
+        };
+        await foreach (var entry in sftp.ListDirectoryAsync("/etc", options, cancellationToken))
+        {
+            Console.WriteLine(entry.FullPath);
+        }
+        // </sftp-list-skip-unreadable>
     }
 
     public static async Task ListRecursiveAsync(SftpClient sftp, CancellationToken cancellationToken)

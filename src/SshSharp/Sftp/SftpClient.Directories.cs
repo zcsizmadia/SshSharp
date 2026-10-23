@@ -88,20 +88,16 @@ public sealed partial class SftpClient
     private int ConcurrentFiles(SftpTransferOptions options) =>
         Limits.MaxOpenHandles is { } handles ? Math.Clamp(handles - 1, 1, options.MaxConcurrentFiles) : options.MaxConcurrentFiles;
 
-    private async Task DownloadTreeAsync(string remoteDirectory, string localDirectory, string root, string relative, int depth,
+    /// <summary>Downloads a directory's tree into <paramref name="localDirectory"/>; false when it was left out as unreadable.</summary>
+    private async Task<bool> DownloadTreeAsync(string remoteDirectory, string localDirectory, string root, string relative, int depth,
         SftpTransferOptions options, SummaryCounter summary, CancellationToken cancellationToken)
     {
-        if (depth > MaxDepth)
+        if (await RemoteEntriesAsync(remoteDirectory, relative, depth, options, summary, cancellationToken).ConfigureAwait(false) is not { } entries)
         {
-            throw new SshException(SshFailureReason.TransferFailed, $"The remote tree is deeper than {MaxDepth} levels.");
+            return false;
         }
 
-        // The listing is read whole before anything is transferred, so its handle is closed before files and subdirectories are opened.
-        var entries = new List<SftpFileInfo>();
-        await foreach (var entry in ListDirectoryAsync(remoteDirectory, cancellationToken).ConfigureAwait(false))
-        {
-            entries.Add(entry);
-        }
+        Directory.CreateDirectory(localDirectory);
 
         // A name listed twice (a broken or hostile server) is fetched once: a directory's permissions are applied after its contents, so a
         // second copy would be written into a directory already made read-only.
@@ -129,8 +125,11 @@ public sealed partial class SftpClient
 
             if (entry.Attributes.IsDirectory)
             {
-                Directory.CreateDirectory(local);
-                await DownloadTreeAsync(entry.FullPath, local, root, path, depth + 1, options, summary, cancellationToken).ConfigureAwait(false);
+                if (!await DownloadTreeAsync(entry.FullPath, local, root, path, depth + 1, options, summary, cancellationToken).ConfigureAwait(false))
+                {
+                    continue;
+                }
+
                 summary.AddDirectory();
                 if (options.Preserve)
                 {
@@ -152,20 +151,24 @@ public sealed partial class SftpClient
                 summary.Skip(); // a symbolic link, a device, or a type the server did not say
             }
         }
+
+        return true;
     }
 
-    private async Task UploadTreeAsync(DirectoryInfo local, string remoteDirectory, string relative, int depth, SftpTransferOptions options,
+    /// <summary>Uploads a local directory's tree to <paramref name="remoteDirectory"/>; false when it was left out as unreadable.</summary>
+    private async Task<bool> UploadTreeAsync(DirectoryInfo local, string remoteDirectory, string relative, int depth, SftpTransferOptions options,
         SummaryCounter summary, CancellationToken cancellationToken)
     {
-        if (depth > MaxDepth)
+        // Read before the remote directory is created, so one left out as unreadable leaves nothing behind.
+        if (LocalEntries(local, relative, depth, options, summary) is not { } entries)
         {
-            throw new IOException($"The local tree is deeper than {MaxDepth} levels.");
+            return false;
         }
 
         var created = await EnsureRemoteDirectoryAsync(remoteDirectory, cancellationToken).ConfigureAwait(false);
         Dictionary<string, SftpFileAttributes>? remoteFiles = null;
         var prefix = remoteDirectory.EndsWith('/') ? remoteDirectory : remoteDirectory + "/";
-        foreach (var entry in local.EnumerateFileSystemInfos())
+        foreach (var entry in entries)
         {
             if ((entry.Attributes & FileAttributes.ReparsePoint) != 0)
             {
@@ -192,7 +195,7 @@ public sealed partial class SftpClient
             {
                 // What is in the remote directory, listed once (when the first file needs it) rather than looked up file by file.
                 remoteFiles ??= await RemoteFilesAsync(remoteDirectory, cancellationToken).ConfigureAwait(false);
-                if (RemoteFileUnchanged(file, remoteFiles))
+                if (RemoteFileUnchanged(file, remoteFiles, options.TimeTolerance))
                 {
                     summary.Count(EntryAction.Unchanged);
                     continue;
@@ -201,7 +204,11 @@ public sealed partial class SftpClient
 
             if (entry is DirectoryInfo directory)
             {
-                await UploadTreeAsync(directory, remote, path, depth + 1, options, summary, cancellationToken).ConfigureAwait(false);
+                if (!await UploadTreeAsync(directory, remote, path, depth + 1, options, summary, cancellationToken).ConfigureAwait(false))
+                {
+                    continue;
+                }
+
                 summary.AddDirectory();
                 if (options.Preserve)
                 {
@@ -218,13 +225,15 @@ public sealed partial class SftpClient
                 summary.AddFile(await UploadFileAsync(entry.FullName, remote, options, cancellationToken).ConfigureAwait(false));
             }
         }
+
+        return true;
     }
 
     /// <summary>
     /// <see cref="DownloadDirectoryAsync"/> with <paramref name="concurrency"/> files at once: the tree is listed directory by directory,
     /// as the sequential walk does, and each file is handed to a download of its own once one of the <paramref name="concurrency"/> slots
-    /// is free, so the walk never runs far ahead of the transfers. A directory is created locally before its listing is read, so before
-    /// any file goes into it; its times and permissions (<see cref="SftpTransferOptions.Preserve"/>) are set once every file is in.
+    /// is free, so the walk never runs far ahead of the transfers. A directory is created locally once its listing is read, before any
+    /// file goes into it; its times and permissions (<see cref="SftpTransferOptions.Preserve"/>) are set once every file is in.
     /// </summary>
     private async Task DownloadTreeConcurrentlyAsync(string remoteDirectory, string root, int concurrency, SftpTransferOptions options,
         SummaryCounter summary, CancellationToken cancellationToken)
@@ -254,19 +263,15 @@ public sealed partial class SftpClient
             }
         }
 
-        async Task WalkAsync(string remote, string localDirectory, string relative, int depth, CancellationToken token)
+        // False when the directory was left out as unreadable.
+        async Task<bool> WalkAsync(string remote, string localDirectory, string relative, int depth, CancellationToken token)
         {
-            if (depth > MaxDepth)
+            if (await RemoteEntriesAsync(remote, relative, depth, options, summary, token).ConfigureAwait(false) is not { } entries)
             {
-                throw new SshException(SshFailureReason.TransferFailed, $"The remote tree is deeper than {MaxDepth} levels.");
+                return false;
             }
 
-            var entries = new List<SftpFileInfo>();
-            await foreach (var entry in ListDirectoryAsync(remote, token).ConfigureAwait(false))
-            {
-                entries.Add(entry);
-            }
-
+            Directory.CreateDirectory(localDirectory);
             var seen = new HashSet<string>(StringComparer.Ordinal);
             foreach (var entry in entries)
             {
@@ -291,8 +296,11 @@ public sealed partial class SftpClient
 
                 if (entry.Attributes.IsDirectory)
                 {
-                    Directory.CreateDirectory(local);
-                    await WalkAsync(entry.FullPath, local, path, depth + 1, token).ConfigureAwait(false);
+                    if (!await WalkAsync(entry.FullPath, local, path, depth + 1, token).ConfigureAwait(false))
+                    {
+                        continue;
+                    }
+
                     summary.AddDirectory();
                     preserved.Add((local, entry.Attributes, depth));
                 }
@@ -321,6 +329,8 @@ public sealed partial class SftpClient
                     summary.Skip(); // a symbolic link, a device, or a type the server did not say
                 }
             }
+
+            return true;
         }
     }
 
@@ -335,7 +345,7 @@ public sealed partial class SftpClient
     {
         var directories = new List<(DirectoryInfo Local, string Remote, string Relative, int Parent, int Depth)> { (root, remoteRoot, string.Empty, -1, 0) };
         var files = new List<(FileInfo Local, string Remote, int Directory)>();
-        Walk(0);
+        Walk(0, LocalEntries(root, string.Empty, 0, options, summary)!); // the top directory is never left out: it fails
 
         using var budget = new SemaphoreSlim(options.MaxRequestsInFlight, options.MaxRequestsInFlight);
         using var slots = new SemaphoreSlim(concurrency, concurrency);
@@ -378,7 +388,7 @@ public sealed partial class SftpClient
                             remoteFiles[directory] = there!;
                         }
 
-                        if (RemoteFileUnchanged(local, there!))
+                        if (RemoteFileUnchanged(local, there!, options.TimeTolerance))
                         {
                             summary.Count(EntryAction.Unchanged);
                             continue;
@@ -444,16 +454,11 @@ public sealed partial class SftpClient
             await group.WhenAllAsync().ConfigureAwait(false);
         }
 
-        void Walk(int index)
+        void Walk(int index, FileSystemInfo[] entries)
         {
-            var (local, remoteDirectory, relative, _, depth) = directories[index];
-            if (depth > MaxDepth)
-            {
-                throw new IOException($"The local tree is deeper than {MaxDepth} levels.");
-            }
-
+            var (_, remoteDirectory, relative, _, depth) = directories[index];
             var prefix = remoteDirectory.EndsWith('/') ? remoteDirectory : remoteDirectory + "/";
-            foreach (var entry in local.EnumerateFileSystemInfos())
+            foreach (var entry in entries)
             {
                 if ((entry.Attributes & FileAttributes.ReparsePoint) != 0)
                 {
@@ -478,8 +483,14 @@ public sealed partial class SftpClient
 
                 if (entry is DirectoryInfo directory)
                 {
+                    // Read before it is added, so a directory left out as unreadable is never created.
+                    if (LocalEntries(directory, path, depth + 1, options, summary) is not { } children)
+                    {
+                        continue;
+                    }
+
                     directories.Add((directory, remote, path, index, depth + 1));
-                    Walk(directories.Count - 1);
+                    Walk(directories.Count - 1, children);
                     summary.AddDirectory();
                 }
                 else
@@ -660,6 +671,58 @@ public sealed partial class SftpClient
         }
     }
 
+    /// <summary>
+    /// A remote directory's listing for a directory download, read whole (so its handle is closed before files and subdirectories are
+    /// opened); null when <see cref="SftpTransferOptions.SkipUnreadableDirectories"/> leaves it out because the server refused it. The
+    /// top directory (<paramref name="depth"/> 0) is never left out.
+    /// </summary>
+    private async Task<List<SftpFileInfo>?> RemoteEntriesAsync(string remoteDirectory, string relative, int depth, SftpTransferOptions options,
+        SummaryCounter summary, CancellationToken cancellationToken)
+    {
+        if (depth > MaxDepth)
+        {
+            throw new SshException(SshFailureReason.TransferFailed, $"The remote tree is deeper than {MaxDepth} levels.");
+        }
+
+        var entries = new List<SftpFileInfo>();
+        try
+        {
+            await foreach (var entry in ListDirectoryAsync(remoteDirectory, cancellationToken).ConfigureAwait(false))
+            {
+                entries.Add(entry);
+            }
+        }
+        catch (SftpException ex) when (depth > 0 && options.SkipUnreadableDirectories && IsUnreadable(ex))
+        {
+            summary.Unreadable(relative);
+            return null;
+        }
+
+        return entries;
+    }
+
+    /// <summary>
+    /// A local directory's entries for a directory upload, read whole; null when <see cref="SftpTransferOptions.SkipUnreadableDirectories"/>
+    /// leaves it out because this system refused it. The top directory (<paramref name="depth"/> 0) is never left out.
+    /// </summary>
+    private static FileSystemInfo[]? LocalEntries(DirectoryInfo directory, string relative, int depth, SftpTransferOptions options, SummaryCounter summary)
+    {
+        if (depth > MaxDepth)
+        {
+            throw new IOException($"The local tree is deeper than {MaxDepth} levels.");
+        }
+
+        try
+        {
+            return [.. directory.EnumerateFileSystemInfos()];
+        }
+        catch (UnauthorizedAccessException) when (depth > 0 && options.SkipUnreadableDirectories)
+        {
+            summary.Unreadable(relative);
+            return null;
+        }
+    }
+
     /// <summary>The path of <paramref name="name"/> relative to a directory transfer's root, from its directory's (<c>/</c>-separated).</summary>
     private static string ChildPath(string relative, string name) => relative.Length == 0 ? name : relative + "/" + name;
 
@@ -681,7 +744,7 @@ public sealed partial class SftpClient
         }
 
         return options.SkipUnchanged && attributes.IsRegularFile && new FileInfo(local) is { Exists: true } file
-            && IsUnchanged(attributes.Size, attributes.LastWriteTime, file.Length, file.LastWriteTimeUtc)
+            && IsUnchanged(attributes.Size, attributes.LastWriteTime, file.Length, file.LastWriteTimeUtc, options.TimeTolerance)
             ? EntryAction.Unchanged
             : EntryAction.Transfer;
     }
@@ -702,18 +765,20 @@ public sealed partial class SftpClient
 
     /// <summary>
     /// <see cref="SftpTransferOptions.SkipUnchanged"/>'s check: both sizes and both modification times known, the sizes equal and the
-    /// times equal to the second (SFTP version 3 carries whole seconds, so the local time's fraction is dropped).
+    /// times equal to the second (SFTP version 3 carries whole seconds, so the local time's fraction is dropped), or no more than
+    /// <paramref name="tolerance"/>'s whole seconds apart (<see cref="SftpTransferOptions.TimeTolerance"/>).
     /// </summary>
-    internal static bool IsUnchanged(long? sourceSize, DateTimeOffset? sourceTime, long? destinationSize, DateTimeOffset? destinationTime) =>
+    internal static bool IsUnchanged(long? sourceSize, DateTimeOffset? sourceTime, long? destinationSize, DateTimeOffset? destinationTime,
+        TimeSpan tolerance = default) =>
         sourceSize is { } size && destinationSize == size
         && sourceTime is { } source && destinationTime is { } destination
-        && source.ToUnixTimeSeconds() == destination.ToUnixTimeSeconds();
+        && Math.Abs(source.ToUnixTimeSeconds() - destination.ToUnixTimeSeconds()) <= tolerance.Ticks / TimeSpan.TicksPerSecond;
 
     /// <summary>Whether the remote copy of a local file, as its directory's listing describes it, is unchanged (<see cref="SftpTransferOptions.SkipUnchanged"/>).</summary>
-    private static bool RemoteFileUnchanged(FileInfo local, Dictionary<string, SftpFileAttributes> remoteFiles) =>
+    private static bool RemoteFileUnchanged(FileInfo local, Dictionary<string, SftpFileAttributes> remoteFiles, TimeSpan tolerance) =>
         remoteFiles.TryGetValue(local.Name, out var remote)
         && remote.FileType is SftpFileType.RegularFile or SftpFileType.Unknown
-        && IsUnchanged(local.Length, local.LastWriteTimeUtc, remote.Size, remote.LastWriteTime);
+        && IsUnchanged(local.Length, local.LastWriteTimeUtc, remote.Size, remote.LastWriteTime, tolerance);
 
     /// <summary>The entries of a remote directory by name, for <see cref="SftpTransferOptions.SkipUnchanged"/>.</summary>
     private async Task<Dictionary<string, SftpFileAttributes>> RemoteFilesAsync(string directory, CancellationToken cancellationToken)
@@ -795,6 +860,7 @@ public sealed partial class SftpClient
         private int _skipped;
         private int _excluded;
         private int _unchanged;
+        private readonly List<string> _unreadable = [];
 
         public void AddFile(long bytes)
         {
@@ -809,12 +875,27 @@ public sealed partial class SftpClient
         /// <summary>Counts an entry that <see cref="SftpTransferOptions.Filter"/> or <see cref="SftpTransferOptions.SkipUnchanged"/> left out.</summary>
         public void Count(EntryAction action) => Interlocked.Increment(ref action == EntryAction.Excluded ? ref _excluded : ref _unchanged);
 
-        public SftpTransferSummary ToSummary() =>
-            new(Volatile.Read(ref _files), Volatile.Read(ref _directories), Interlocked.Read(ref _bytes), Volatile.Read(ref _skipped))
+        /// <summary>Records a directory that <see cref="SftpTransferOptions.SkipUnreadableDirectories"/> left out.</summary>
+        public void Unreadable(string relative)
+        {
+            lock (_unreadable)
             {
-                Excluded = Volatile.Read(ref _excluded),
-                Unchanged = Volatile.Read(ref _unchanged),
-            };
+                _unreadable.Add(relative);
+            }
+        }
+
+        public SftpTransferSummary ToSummary()
+        {
+            lock (_unreadable)
+            {
+                return new(Volatile.Read(ref _files), Volatile.Read(ref _directories), Interlocked.Read(ref _bytes), Volatile.Read(ref _skipped))
+                {
+                    Excluded = Volatile.Read(ref _excluded),
+                    Unchanged = Volatile.Read(ref _unchanged),
+                    UnreadableDirectories = _unreadable.Count == 0 ? [] : [.. _unreadable],
+                };
+            }
+        }
     }
 }
 
@@ -830,6 +911,18 @@ public sealed record SftpTransferSummary(int Files, int Directories, long Bytes,
 
     /// <summary>Files not transferred because <see cref="SftpTransferOptions.SkipUnchanged"/> found the destination the same.</summary>
     public int Unchanged { get; init; }
+
+    /// <summary>
+    /// Subdirectories of the source tree left out because they could not be read (<see cref="SftpTransferOptions.SkipUnreadableDirectories"/>),
+    /// by their path below the top directory, <c>/</c>-separated as <see cref="SftpTransferEntry.RelativePath"/>, in the order the
+    /// transfer reached them; empty when none was (always, without that option, which fails the transfer instead). Nothing below them was
+    /// transferred.
+    /// </summary>
+    /// <remarks>
+    /// The record's equality compares this list by reference, as a record does any collection: two summaries with directories left out
+    /// are equal only when they share the list. Compare <see cref="UnreadableDirectories"/> itself by its contents.
+    /// </remarks>
+    public IReadOnlyList<string> UnreadableDirectories { get; init; } = [];
 }
 
 /// <summary>

@@ -339,6 +339,9 @@ internal sealed class FakeSftpServer
     /// <summary>Answers OPENDIR of the paths this matches with PERMISSION_DENIED (a directory the user may not read).</summary>
     public Func<string, bool>? DenyOpenDir { get; set; }
 
+    /// <summary>The status <see cref="DenyOpenDir"/> answers with: PERMISSION_DENIED unless set (a directory deleted meanwhile, a failure).</summary>
+    public (uint Code, string Message) DenyOpenDirStatus { get; set; } = (3, "Permission denied");
+
     /// <summary>
     /// List each directory in reverse name order, as a server whose order is the file system's (not alphabetical) may: listings are
     /// otherwise sorted, which would hide a client that sorts, or a test that expects sorted entries.
@@ -1049,7 +1052,7 @@ internal sealed class FakeSftpServer
 
                 if (DenyOpenDir?.Invoke(path) == true)
                 {
-                    return Status(id, 3, "Permission denied");
+                    return Status(id, DenyOpenDirStatus.Code, DenyOpenDirStatus.Message);
                 }
 
                 var handle = "d" + _nextHandle++;

@@ -27,7 +27,11 @@ failure: files already in place are skipped.
   so a retry continues where it stopped.
 - **Content changes with the same size and time** are not detected. When that matters, compare checksums: run `sha256sum` on the
   server for candidate files, in one command.
-- **Clock and time zones** do not matter: times travel as UTC seconds. Whole seconds only, which the comparison accounts for.
+- **Clock and time zones** do not matter: times travel as UTC seconds. Whole seconds only, which the comparison accounts for. A
+  file system with coarser times (FAT's 2 seconds) on either side needs `TimeTolerance` with `SkipUnchanged`, or the loop's own
+  comparison widened the same way.
+- **Directories this account may not read** fail a directory transfer. When a partial copy is fine, `SkipUnreadableDirectories`
+  leaves them out and lists them in the summary's `UnreadableDirectories`.
 - **Deletion** is off by default in the example's `MainAsync`. Turn it on only when the remote directory belongs to this job.
 - **Downloads.** The mirror image (server to local) is the same with `DownloadFileAsync`; for a plain copy of a tree, use
   `DownloadDirectoryAsync`, which already skips symbolic links and unsafe names.

@@ -40,6 +40,8 @@ latency. Each request is as large as the server allows (`limits@openssh.com`; 32
 | `MaxConcurrentFiles` (default 1) | Transfer up to 64 files of a directory at once over the same session (see [Several files at once](#several-files-at-once)). |
 | `Filter` | Directory transfers: a predicate on each file and directory (`SftpTransferEntry`: path relative to the top, attributes) that leaves out what it declines (see [Filters and unchanged files](#filters-and-unchanged-files)). |
 | `SkipUnchanged` | Directory transfers: leave a file alone when the destination's size and modification time already match, as rsync's quick check (see [Filters and unchanged files](#filters-and-unchanged-files)). |
+| `TimeTolerance` (default zero) | How far apart the modification times may be for `SkipUnchanged`, as rsync's `--modify-window`: 2 seconds for FAT, whose times come back rounded. |
+| `SkipUnreadableDirectories` | Directory transfers: leave out a subdirectory this user may not read (permission denied) and go on, instead of failing; the summary's `UnreadableDirectories` lists them (see [Filters and unchanged files](#filters-and-unchanged-files)). |
 
 A failed download leaves no partial local file behind, unless `Resume` is set, in which case what arrived is kept for the
 next attempt. A resume trusts that the destination's bytes are the start of the same file (nothing compares them), and a
@@ -226,10 +228,15 @@ is neither created nor entered. Links, special files and unsafe names are skippe
 whose modification time equals it to the second (SFTP version 3 carries whole seconds, so the local time's fraction is dropped). A
 size or time the server does not send counts as a change. It is a quick check, not a content check: a file rewritten with the same
 size and its time set back is taken as unchanged. The times match only when the earlier transfer copied them, so use it with
-`Preserve`. A download compares the listing with the local files at no extra cost; an upload lists each remote directory that
-existed already, once. The summary counts `Excluded` (the filter's) and `Unchanged` entries apart from `Skipped`. Neither option
+`Preserve`. On a file system with coarser times (FAT's 2 seconds), `TimeTolerance` lets them differ by that much. A download
+compares the listing with the local files at no extra cost; an upload lists each remote directory that existed already, once. The summary counts `Excluded` (the filter's) and `Unchanged` entries apart from `Skipped`. Neither option
 deletes anything at the destination. See [Choose what a directory transfer copies](how-to/transfer-files-sftp.md#choose-what-a-directory-transfer-copies)
 and [Skip files that have not changed](how-to/transfer-files-sftp.md#skip-files-that-have-not-changed).
+
+A subdirectory of the source that cannot be read (the server answers `PermissionDenied`, or this system refuses a local one) fails
+the transfer, unless `SkipUnreadableDirectories` is set: it is then left out, not created at the destination, and listed by its
+relative path in the summary's `UnreadableDirectories`. Other errors still fail the transfer. See
+[Go past directories that cannot be read](how-to/transfer-files-sftp.md#go-past-directories-that-cannot-be-read).
 
 ## Files as streams
 
@@ -285,7 +292,7 @@ waits are bounded by `OperationTimeout` when it is set, also when the server has
 | `GetOwnerNamesAsync(userIds, groupIds)` | User and group names for owner ids, as `ls -l` shows them (`users-groups-by-id@openssh.com`), as an `SftpOwnerNames` (`UserNames`, `GroupNames`). |
 | `ExistsAsync(path)` | Whether the path exists. |
 | `ListDirectoryAsync(path)` | The entries, as `IAsyncEnumerable<SftpFileInfo>`, without `.` and `..`, in the server's order. Up to 8 READDIR requests are in flight at once, so a large directory costs few round trips. A name that is not valid UTF-8 is listed with replacement characters (and cannot be opened by that name); a listing stops with an error after 1,000,000 entries. |
-| `ListDirectoryAsync(path, SftpListOptions)` | Only the names that match `Pattern` (`*`, `?`, `[a-z]`; case-sensitive), and with `Recursive` the whole tree, depth first (each subtree right after its directory's entry; within a directory, the server's order, unsorted), up to `MaxDepth` levels (64), a few subdirectories read ahead at once (`MaxConcurrentDirectories`, which also bounds the listings held in memory); links are entered only with `FollowSymbolicLinks` ([details](how-to/transfer-files-sftp.md#list-files-that-match-a-pattern-or-a-whole-tree)). |
+| `ListDirectoryAsync(path, SftpListOptions)` | Only the names that match `Pattern` (`*`, `?`, `[a-z]`; case-sensitive unless `IgnoreCase`), and with `Recursive` the whole tree, depth first (each subtree right after its directory's entry; within a directory, the server's order, unsorted), up to `MaxDepth` levels (64), a few subdirectories read ahead at once (`MaxConcurrentDirectories`, which also bounds the listings held in memory); links are entered only with `FollowSymbolicLinks`, and subdirectories that cannot be read are left out with `SkipUnreadableDirectories` ([details](how-to/transfer-files-sftp.md#list-files-that-match-a-pattern-or-a-whole-tree)). |
 | `CreateDirectoryAsync`, `DeleteDirectoryAsync` | One directory (deleting needs it empty). |
 | `CreateDirectoryAsync(path, createParents: true)` | As `mkdir -p`: the missing directories above it too, and an existing directory is not an error (a file in the path is). `permissions` apply to the last one. |
 | `DeleteDirectoryAsync(path, recursive: true)` | As `rm -r`: the directory and everything in it, many requests at once; links are removed, never followed, provided no one else changes the tree on the server meanwhile (SFTP has no `O_NOFOLLOW`, so the checks are not atomic). The first failure stops it and is thrown, leaving the rest ([details](how-to/transfer-files-sftp.md#delete-recursively)). |
