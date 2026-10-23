@@ -207,8 +207,15 @@ public sealed class SftpStalledServerTests : IDisposable
     {
         var (local, _) = await LocalFileAsync(4 * 1024 * 1024);
 
-        // The fourth range's session stops reading at its first write: the writes behind it cannot even be sent.
-        await using var rig = await Rig.StartAsync(f => f.StopReading = packet => FakeSftpServer.WriteOffset(packet) == 3 * 1024 * 1024);
+        // The fourth range's session stops reading at its first write, and never answers it: the writes behind it cannot even be sent.
+        // The server still handles the packet it stops at, so without the hold that write was answered, and when the client had not
+        // sent another on that session before the cancel (a loaded macOS runner), every write was settled and the cleanup really did
+        // finish: right not to say otherwise, but not what this test is about.
+        await using var rig = await Rig.StartAsync(f =>
+        {
+            f.StopReading = packet => FakeSftpServer.WriteOffset(packet) == 3 * 1024 * 1024;
+            f.Hold = packet => FakeSftpServer.WriteOffset(packet) == 3 * 1024 * 1024;
+        });
         using var cancel = new CancellationTokenSource();
         var upload = rig.Sftp.UploadFileAsync(local, "big.bin", new SftpTransferOptions { Segments = 4 }, cancel.Token);
         await rig.StoppedAsync();
