@@ -1,0 +1,1 @@
+# Every ML-KEM unit test runs here (OpenSSL 3.5): nothing may skip.

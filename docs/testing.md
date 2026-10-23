@@ -14,7 +14,7 @@ does. This page describes what is tested, against what, how intermittent failure
 | Fuzzing | Coverage-guided fuzzing of the parsers that read untrusted input, nightly; mutation fuzzing in every test run |
 | Mutation testing | Stryker.NET over the cryptography, the packet codec and the configuration parsers |
 | Stress | The whole suite in a loop on every platform, with an instrumented build that checks buffer ownership and received data |
-| Platforms | Linux (x64, Arm64), Windows (x64, Arm64), macOS (Arm64), each on .NET 8 and .NET 10, plus a Native AOT smoke test |
+| Platforms | Linux (x64, Arm64), Windows (x64, Arm64), macOS (Arm64), each on .NET 8 and .NET 10, plus a Native AOT smoke test and the ML-KEM tests on Linux with OpenSSL 3.5 |
 | Algorithm audit | [ssh-audit](https://github.com/jtesta/ssh-audit) rates what the client offers, by default and in FIPS mode, on every pull request |
 | Static analysis | CodeQL, the .NET analyzers at their recommended level with warnings as errors, and tracked public API |
 
@@ -213,6 +213,12 @@ regression as well as a limit of the platform. A line starting with `#` in a lis
 
 When a runner can be set up to run a test, CI sets it up rather than list the skip. For example, macOS configures only `127.0.0.1`
 on its loopback interface, so the macOS unit jobs add `127.0.0.2` as an alias for the `BindAddress` tests.
+
+.NET's ML-KEM on Linux needs OpenSSL 3.5, and the Ubuntu 24.04 runners have 3.0, so the ML-KEM tests skip in the Linux jobs.
+One more job (`mlkem (Alpine 3.23)`) runs them where they cannot skip. It runs the tests built on the runner
+in .NET's Alpine 3.23 container, which has OpenSSL 3.5: the unit test classes with ML-KEM tests, and the handshakes against OpenSSH
+10.0, `mlkem768x25519-sha256` among them. Its lists are empty, and the job also checks that the ML-KEM cases passed. The hybrid
+handshake is only generated where the platform has ML-KEM, so its absence would not show as a skip.
 
 When a job's skips change on purpose, update its list. To regenerate one from a TRX report (the `coverage-<os>` artifact holds
 the unit jobs'), run the script with `-Update` and review the diff before committing it. It writes the skips only, so put back
