@@ -244,6 +244,60 @@ public class ChaChaPolyTests
     }
 
     [Test]
+    public async Task OpenSsh_WithoutLength_IsTheKeyFileConstruction()
+    {
+        // sshkey.c encrypts a key file with chachapoly_crypt(seqnr, aadlen = 0): no encrypted length, K_2 = key[..32] from block 1,
+        // the Poly1305 key from K_2's block 0, and the tag over the ciphertext alone. K_1 = key[32..] plays no part.
+        using var cipher = NewCipher(out var key);
+        var rng = new Random(25);
+        foreach (var (length, seq) in new[] { (8, 0u), (64, 0u), (200, 0u), (40, 0x01020304u) })
+        {
+            var plain = new byte[length];
+            rng.NextBytes(plain);
+            var nonce = new byte[8];
+            BinaryPrimitives.WriteUInt64BigEndian(nonce, seq);
+            var sealedBytes = new byte[length];
+            ChaCha20.Xor(key.AsSpan(0, 32), nonce, 1, plain, sealedBytes);
+            var polyKey = new byte[32];
+            ChaCha20.Xor(key.AsSpan(0, 32), nonce, 0, new byte[32], polyKey);
+            var tag = Tag(polyKey, sealedBytes);
+
+            var opened = new byte[length];
+            await Assert.That(cipher.TryDecryptWithoutLength(seq, sealedBytes, tag, opened)).IsTrue();
+            await Assert.That(Hex(opened)).IsEqualTo(Hex(plain));
+
+            // A key whose second half differs opens it the same way: the length key is unused.
+            var otherLengthKey = (byte[])key.Clone();
+            otherLengthKey[40] ^= 1;
+            using (var other = new ChaCha20Poly1305OpenSsh(otherLengthKey))
+            {
+                var again = new byte[length];
+                await Assert.That(other.TryDecryptWithoutLength(seq, sealedBytes, tag, again)).IsTrue();
+                await Assert.That(Hex(again)).IsEqualTo(Hex(plain));
+            }
+
+            // Any changed bit of the ciphertext or the tag, or another sequence number, fails before anything is written.
+            var untouched = new byte[length];
+            for (var i = 0; i < length; i += 7)
+            {
+                var bad = (byte[])sealedBytes.Clone();
+                bad[i] ^= 0x40;
+                await Assert.That(cipher.TryDecryptWithoutLength(seq, bad, tag, untouched)).IsFalse();
+            }
+
+            for (var i = 0; i < 16; i += 3)
+            {
+                var badTag = (byte[])tag.Clone();
+                badTag[i] ^= 0x02;
+                await Assert.That(cipher.TryDecryptWithoutLength(seq, sealedBytes, badTag, untouched)).IsFalse();
+            }
+
+            await Assert.That(cipher.TryDecryptWithoutLength(seq + 1, sealedBytes, tag, untouched)).IsFalse();
+            await Assert.That(untouched.All(b => b == 0)).IsTrue();
+        }
+    }
+
+    [Test]
     public async Task OpenSsh_ArgumentChecks()
     {
         await Assert.That(() => new ChaCha20Poly1305OpenSsh(new byte[63])).Throws<ArgumentException>();
@@ -253,6 +307,9 @@ public class ChaChaPolyTests
         await Assert.That(() => cipher.TryDecrypt(0, new byte[3], new byte[16], [])).Throws<ArgumentException>();
         await Assert.That(() => cipher.TryDecrypt(0, new byte[8], new byte[15], new byte[4])).Throws<ArgumentException>();
         await Assert.That(() => cipher.TryDecrypt(0, new byte[8], new byte[16], new byte[5])).Throws<ArgumentException>();
+        await Assert.That(() => cipher.TryDecryptWithoutLength(0, new byte[8], new byte[15], new byte[8])).Throws<ArgumentException>();
+        await Assert.That(() => cipher.TryDecryptWithoutLength(0, new byte[8], new byte[16], new byte[7])).Throws<ArgumentException>();
+        await Assert.That(() => cipher.TryDecryptWithoutLength(0, new byte[8], new byte[16], new byte[9])).Throws<ArgumentException>();
     }
 
     [Test]

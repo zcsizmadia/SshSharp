@@ -7,8 +7,16 @@ namespace SshSharp.Keys;
 
 /// <summary>
 /// Decrypts the private section of a passphrase-protected OpenSSH key (PROTOCOL.key): the key and IV come from
-/// <c>bcrypt_pbkdf</c>(passphrase, salt, rounds), and the section is encrypted with AES-CTR (ssh-keygen's default), AES-CBC or AES-GCM.
+/// <c>bcrypt_pbkdf</c>(passphrase, salt, rounds), and the section is encrypted with AES-CTR (ssh-keygen's default), AES-CBC, AES-GCM or
+/// <c>chacha20-poly1305@openssh.com</c>.
 /// </summary>
+/// <remarks>
+/// For <c>chacha20-poly1305@openssh.com</c>, OpenSSH's <c>sshkey.c</c> (<c>private2_decrypt</c>) derives 64 bytes and no IV (the
+/// cipher's key length is 64 and its IV length 0 in <c>cipher.c</c>), and calls <c>cipher_crypt</c> with sequence number 0, no
+/// additional data and the 16-byte tag that follows the encrypted section. So, unlike a packet, there is no encrypted length: the tag
+/// covers the section alone, and the second half of the key (the packet cipher's length key) is never used. The cipher's block size is
+/// 8, which the section length must be a multiple of.
+/// </remarks>
 internal static class OpenSshKeyDecryptor
 {
     private const int MaxRounds = 1 << 16;
@@ -20,21 +28,22 @@ internal static class OpenSshKeyDecryptor
             throw new FormatException($"Unsupported key derivation '{kdf}' in the OpenSSH private key.");
         }
 
-        var (mode, keyLength, ivLength) = cipher switch
+        var (mode, keyLength, ivLength, blockSize) = cipher switch
         {
-            "aes128-ctr" => (Mode.Ctr, 16, 16),
-            "aes192-ctr" => (Mode.Ctr, 24, 16),
-            "aes256-ctr" => (Mode.Ctr, 32, 16),
-            "aes128-cbc" => (Mode.Cbc, 16, 16),
-            "aes192-cbc" => (Mode.Cbc, 24, 16),
-            "aes256-cbc" => (Mode.Cbc, 32, 16),
-            "aes128-gcm@openssh.com" => (Mode.Gcm, 16, 12),
-            "aes256-gcm@openssh.com" => (Mode.Gcm, 32, 12),
+            "aes128-ctr" => (Mode.Ctr, 16, 16, 16),
+            "aes192-ctr" => (Mode.Ctr, 24, 16, 16),
+            "aes256-ctr" => (Mode.Ctr, 32, 16, 16),
+            "aes128-cbc" => (Mode.Cbc, 16, 16, 16),
+            "aes192-cbc" => (Mode.Cbc, 24, 16, 16),
+            "aes256-cbc" => (Mode.Cbc, 32, 16, 16),
+            "aes128-gcm@openssh.com" => (Mode.Gcm, 16, 12, 16),
+            "aes256-gcm@openssh.com" => (Mode.Gcm, 32, 12, 16),
+            "chacha20-poly1305@openssh.com" => (Mode.ChaChaPoly, ChaCha20Poly1305OpenSsh.KeySize, 0, 8),
             _ => throw new FormatException($"Unsupported cipher '{cipher}' in the OpenSSH private key (re-encrypt it with 'ssh-keygen -p -Z aes256-ctr')."),
         };
 
-        var tag = mode == Mode.Gcm ? reader.ReadBytes(16) : default;
-        if (encrypted.Length == 0 || encrypted.Length % 16 != 0)
+        var tag = mode is Mode.Gcm or Mode.ChaChaPoly ? reader.ReadBytes(16) : default;
+        if (encrypted.Length == 0 || encrypted.Length % blockSize != 0)
         {
             throw new FormatException("The encrypted private key section has an invalid length.");
         }
@@ -80,6 +89,19 @@ internal static class OpenSshKeyDecryptor
                     break;
                 }
 
+                case Mode.ChaChaPoly:
+                {
+                    // The tag is checked (in constant time) before anything is decrypted, so a wrong passphrase or an edited file never
+                    // yields bytes to parse.
+                    using var chacha = new ChaCha20Poly1305OpenSsh(key);
+                    if (!chacha.TryDecryptWithoutLength(0, encrypted, tag, output))
+                    {
+                        throw new FormatException("Could not decrypt the private key: the passphrase is wrong.");
+                    }
+
+                    break;
+                }
+
                 default:
                 {
                     using var gcm = new AesGcm(key, 16);
@@ -115,5 +137,6 @@ internal static class OpenSshKeyDecryptor
         Ctr,
         Cbc,
         Gcm,
+        ChaChaPoly,
     }
 }

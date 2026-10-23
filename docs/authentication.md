@@ -93,8 +93,10 @@ using var rsa = await SshPrivateKey.LoadAsync("legacy.pem", passphrase: Environm
 var options = new SshClientOptions { UserName = "deploy", PrivateKeys = [ed25519, rsa], HostKeyVerifier = verifier };
 ```
 
-Formats: the OpenSSH format (`BEGIN OPENSSH PRIVATE KEY`, also encrypted), PKCS#8 (also encrypted, for RSA and ECDSA),
-PKCS#1 and SEC1 PEM, and PuTTY `.ppk` versions 2 and 3 (also encrypted). Key types: Ed25519, ECDSA (nistp256/384/521) and
+Formats: the OpenSSH format (`BEGIN OPENSSH PRIVATE KEY`, also encrypted, with any cipher `ssh-keygen -Z` offers), PKCS#8 (also
+encrypted, for RSA and ECDSA), PKCS#1 and SEC1 PEM (also encrypted the traditional way with AES-CBC, as `ssh-keygen -m PEM` writes
+it; DES and 3DES are not read), and PuTTY `.ppk` versions 2 and 3 (also encrypted); see
+[Encrypted key files](how-to/agent-and-keys.md#encrypted-key-files). Key types: Ed25519, ECDSA (nistp256/384/521) and
 RSA (2048 bits or more; signs with `rsa-sha2-256/512` as the server's `server-sig-algs` allows). `PubkeyAcceptedAlgorithms`
 (`SshClientOptions` or `ssh_config`) narrows which keys are offered and picks the RSA algorithm; see
 [Choose which keys are offered](how-to/algorithms-and-authentication-order.md#choose-which-keys-are-offered-and-how-they-sign). The client announces

@@ -46,8 +46,7 @@ internal static class PrivateKeyParser
 
             if (text.Contains("Proc-Type: 4,ENCRYPTED", StringComparison.Ordinal))
             {
-                throw new FormatException(
-                    "Legacy encrypted PEM keys (Proc-Type: 4,ENCRYPTED) are not supported; convert with 'ssh-keygen -p -f <file>' (OpenSSH format) or to PKCS#8.");
+                return ParseLegacyEncryptedPem(text, passphrase);
             }
 
             if (text.Contains("-----BEGIN RSA PRIVATE KEY-----", StringComparison.Ordinal))
@@ -58,8 +57,24 @@ internal static class PrivateKeyParser
 
             if (text.Contains("-----BEGIN EC PRIVATE KEY-----", StringComparison.Ordinal))
             {
-                var ecdsa = ECDsa.Create();
-                return Import(ecdsa, () => ecdsa.ImportFromPem(text), () => FromEcdsa(ecdsa, null));
+                var der = PemBlock(text, "EC PRIVATE KEY");
+                try
+                {
+                    var ecdsa = ECDsa.Create();
+                    void ImportAll()
+                    {
+                        if (!ImportSec1(ecdsa, der))
+                        {
+                            throw new CryptographicException("The EC private key has trailing data.");
+                        }
+                    }
+
+                    return Import(ecdsa, ImportAll, () => FromEcdsa(ecdsa, null));
+                }
+                finally
+                {
+                    CryptographicOperations.ZeroMemory(der);
+                }
             }
 
             throw new FormatException("Not a supported private key format (expected an OpenSSH, PKCS#8, PKCS#1 or SEC1 private key).");
@@ -324,6 +339,170 @@ internal static class PrivateKeyParser
             ecdsa.Dispose();
             throw new FormatException("Could not decrypt the private key: the passphrase is wrong, or it is not an RSA or ECDSA key.", ex);
         }
+    }
+
+    /// <summary>
+    /// A traditional encrypted PEM key (<c>Proc-Type: 4,ENCRYPTED</c>), as <c>ssh-keygen -m PEM</c> and OpenSSL's <c>-traditional</c>
+    /// output write it: PKCS#1 (RSA) or SEC1 (ECDSA) DER under AES-CBC (<see cref="LegacyPemKeyDecryptor"/>).
+    /// </summary>
+    private static SshPrivateKey ParseLegacyEncryptedPem(string text, string? passphrase)
+    {
+        var isRsa = text.Contains("-----BEGIN RSA PRIVATE KEY-----", StringComparison.Ordinal);
+        if (!isRsa && !text.Contains("-----BEGIN EC PRIVATE KEY-----", StringComparison.Ordinal))
+        {
+            throw new FormatException("Only RSA and EC keys are read from encrypted traditional PEM files.");
+        }
+
+        var der = LegacyPemKeyDecryptor.Decrypt(text, isRsa ? "RSA PRIVATE KEY" : "EC PRIVATE KEY", passphrase);
+        try
+        {
+            if (isRsa)
+            {
+                var rsa = RSA.Create();
+                return ImportDecrypted(rsa, () => { rsa.ImportRSAPrivateKey(der, out var read); return read == der.Length; }, () => FromRsa(rsa, null));
+            }
+
+            var ecdsa = ECDsa.Create();
+            return ImportDecrypted(ecdsa, () => ImportSec1(ecdsa, der), () => FromEcdsa(ecdsa, null));
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(der);
+        }
+    }
+
+    /// <summary>
+    /// Imports decrypted DER. A wrong passphrase that happens to leave valid CBC padding (about one in 256) gives bytes that are not a key,
+    /// or not only a key, so a failure here is reported as a wrong passphrase too.
+    /// </summary>
+    private static SshPrivateKey ImportDecrypted(IDisposable algorithm, Func<bool> import, Func<SshPrivateKey> create)
+    {
+        const string Message = "Could not decrypt the private key: the passphrase is wrong, or the file is corrupt.";
+        try
+        {
+            return import() ? create() : throw new FormatException(Message);
+        }
+        catch (Exception ex) when (ex is CryptographicException or ArgumentException or PlatformNotSupportedException)
+        {
+            algorithm.Dispose();
+            throw new FormatException(Message, ex);
+        }
+        catch
+        {
+            algorithm.Dispose();
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Imports a SEC1 ECPrivateKey (RFC 5915) and returns whether it was all of <paramref name="der"/>. LibreSSL, and so OpenSSH for
+    /// Windows, writes the private key without its leading zero bytes (about half of its nistp521 keys have 65 bytes, not 66). RFC 5915
+    /// fixes the length to the curve order's and .NET refuses a shorter one, so the zeros are put back first.
+    /// </summary>
+    private static bool ImportSec1(ECDsa ecdsa, byte[] der)
+    {
+        var padded = PadSec1PrivateKey(der);
+        try
+        {
+            ecdsa.ImportECPrivateKey(padded, out var read);
+            return read == padded.Length;
+        }
+        finally
+        {
+            if (!ReferenceEquals(padded, der))
+            {
+                CryptographicOperations.ZeroMemory(padded);
+            }
+        }
+    }
+
+    /// <summary>
+    /// <paramref name="der"/> with the private key left-padded with zeros to its curve's size, or <paramref name="der"/> itself when it
+    /// needs nothing (or is not something this can fix, which the import then reports).
+    /// </summary>
+    private static byte[] PadSec1PrivateKey(byte[] der)
+    {
+        try
+        {
+            var outer = new AsnReader(der, AsnEncodingRules.DER);
+            var sequence = outer.ReadSequence();
+            var version = sequence.ReadEncodedValue();
+            if (outer.HasData || !sequence.TryReadPrimitiveOctetString(out var d))
+            {
+                return der;
+            }
+
+            // The rest: [0] the curve, [1] the public key; both are copied as they are.
+            var rest = new List<ReadOnlyMemory<byte>>();
+            while (sequence.HasData)
+            {
+                rest.Add(sequence.ReadEncodedValue());
+            }
+
+            var parameters = new Asn1Tag(TagClass.ContextSpecific, 0, isConstructed: true);
+            string? curve = null;
+            if (rest.Count > 0 && new AsnReader(rest[0], AsnEncodingRules.DER) is var first && first.PeekTag() == parameters)
+            {
+                curve = first.ReadSequence(parameters).ReadObjectIdentifier();
+            }
+
+            var size = curve switch
+            {
+                "1.2.840.10045.3.1.7" => NistCurve.P256.FieldSize,
+                "1.3.132.0.34" => NistCurve.P384.FieldSize,
+                "1.3.132.0.35" => NistCurve.P521.FieldSize,
+                _ => 0,
+            };
+            if (d.Length >= size)
+            {
+                return der;
+            }
+
+            var key = new byte[size];
+            var writer = new AsnWriter(AsnEncodingRules.DER);
+            try
+            {
+                d.Span.CopyTo(key.AsSpan(size - d.Length));
+                using (writer.PushSequence())
+                {
+                    writer.WriteEncodedValue(version.Span);
+                    writer.WriteOctetString(key);
+                    foreach (var value in rest)
+                    {
+                        writer.WriteEncodedValue(value.Span);
+                    }
+                }
+
+                return writer.Encode();
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(key);
+                writer.Reset();
+            }
+        }
+        catch (AsnContentException)
+        {
+            return der;
+        }
+    }
+
+    /// <summary>The DER of the first PEM block labelled <paramref name="label"/>, skipping others (an <c>EC PARAMETERS</c> block before it).</summary>
+    private static byte[] PemBlock(string text, string label)
+    {
+        var rest = text.AsSpan();
+        while (PemEncoding.TryFind(rest, out var fields))
+        {
+            if (rest[fields.Label].SequenceEqual(label))
+            {
+                var der = new byte[fields.DecodedDataLength];
+                return Convert.TryFromBase64Chars(rest[fields.Base64Data], der, out _) ? der : throw new FormatException($"The PEM '{label}' block is not valid base64.");
+            }
+
+            rest = rest[fields.Location.End..];
+        }
+
+        throw new FormatException($"Expected a PEM '{label}' block.");
     }
 
     /// <summary>

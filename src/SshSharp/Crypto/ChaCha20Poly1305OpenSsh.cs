@@ -50,16 +50,37 @@ internal sealed class ChaCha20Poly1305OpenSsh : IDisposable
             throw new ArgumentException("Sizes do not match.");
         }
 
+        return TryOpen(sequenceNumber, encryptedPacket, LengthSize, tag, body);
+    }
+
+    /// <summary>
+    /// Verifies and decrypts data that has no encrypted length in front, which is how OpenSSH encrypts a key file with this cipher
+    /// (<c>sshkey.c</c> calls <c>cipher_crypt</c> with sequence number 0 and no additional data): the tag covers
+    /// <paramref name="ciphertext"/> alone, and K_1 is never used. Returns false (and writes nothing) on a bad tag.
+    /// </summary>
+    public bool TryDecryptWithoutLength(uint sequenceNumber, ReadOnlySpan<byte> ciphertext, ReadOnlySpan<byte> tag, Span<byte> plaintext)
+    {
+        if (tag.Length != TagSize || plaintext.Length != ciphertext.Length)
+        {
+            throw new ArgumentException("Sizes do not match.");
+        }
+
+        return TryOpen(sequenceNumber, ciphertext, 0, tag, plaintext);
+    }
+
+    /// <summary>Checks the tag over all of <paramref name="authenticated"/> in constant time, then decrypts what follows its first <paramref name="skip"/> bytes.</summary>
+    private bool TryOpen(uint sequenceNumber, ReadOnlySpan<byte> authenticated, int skip, ReadOnlySpan<byte> tag, Span<byte> body)
+    {
         Span<byte> nonce = stackalloc byte[8];
         Span<byte> polyKey = stackalloc byte[Poly1305.KeySize];
         Span<byte> expected = stackalloc byte[TagSize];
         Nonce(sequenceNumber, nonce);
         PolyKey(nonce, polyKey);
-        Poly1305.ComputeTag(polyKey, encryptedPacket, expected);
+        Poly1305.ComputeTag(polyKey, authenticated, expected);
         var valid = CryptographicOperations.FixedTimeEquals(expected, tag);
         if (valid)
         {
-            ChaCha20.Xor(_payloadKey, nonce, 1, encryptedPacket[LengthSize..], body);
+            ChaCha20.Xor(_payloadKey, nonce, 1, authenticated[skip..], body);
         }
 
         polyKey.Clear();

@@ -51,7 +51,7 @@ The four packages share one version: `SshSharp` (the client), `SshSharp.Extensio
 | Feature | What it does | API / `ssh_config` | Docs |
 |---|---|---|---|
 | Public keys | Ed25519, ECDSA and RSA (SHA-2 signatures), encrypted or not; certificates paired with their keys | `SshClientOptions.PrivateKeys`, `SshPrivateKey.LoadAsync`; `IdentityFile`, `CertificateFile` | [Keys and the SSH agent](how-to/agent-and-keys.md) |
-| Key formats | Reads OpenSSH, PKCS#1, PKCS#8, SEC1 and PuTTY `.ppk` | `SshPrivateKey.Parse`, `LoadAsync` | [Authentication](authentication.md) |
+| Key formats | Reads OpenSSH, PKCS#1, PKCS#8, SEC1 and PuTTY `.ppk`, each also encrypted (traditional `Proc-Type: 4,ENCRYPTED` PEM with AES; OpenSSH keys with every `ssh-keygen -Z` cipher) | `SshPrivateKey.Parse`, `LoadAsync` | [Encrypted key files](how-to/agent-and-keys.md#encrypted-key-files) |
 | Key generation | Ed25519, ECDSA and RSA keys, saved as `ssh-keygen` saves them | `SshPrivateKey.Generate`, `SaveAsync` | [Authentication](authentication.md) |
 | Key export | PKCS#8 and PuTTY `.ppk` v3, and OpenSSH with your own bcrypt rounds <span class="badge text-bg-primary">1.1</span> | `ToPkcs8PrivateKey`, `ToPuttyPrivateKey`, `SaveAsync(path, SshPrivateKeyFormat, ...)` | [Keys and the SSH agent](how-to/agent-and-keys.md) |
 | Public keys as a type | Parse `.pub` and `authorized_keys` lines, take fingerprints, verify signatures <span class="badge text-bg-primary">1.1</span> | <xref:SshSharp.SshPublicKey> | [Keys and the SSH agent](how-to/agent-and-keys.md) |

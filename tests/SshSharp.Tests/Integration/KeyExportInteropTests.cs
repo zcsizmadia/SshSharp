@@ -240,7 +240,7 @@ public class KeyExportInteropTests
         return (await RunAsync(openssl, "pkey", "-in", path, "-noout")).Exit == 0;
     }
 
-    private static string? Tool(string name)
+    internal static string? Tool(string name)
     {
         var file = OperatingSystem.IsWindows() ? name + ".exe" : name;
         return (Environment.GetEnvironmentVariable("PATH") ?? string.Empty)
@@ -249,7 +249,7 @@ public class KeyExportInteropTests
             .FirstOrDefault(File.Exists);
     }
 
-    private static async Task<(int Exit, string Output, string Error)> RunAsync(string tool, params string[] arguments)
+    internal static async Task<(int Exit, string Output, string Error)> RunAsync(string tool, params string[] arguments)
     {
         var start = new ProcessStartInfo(tool) { RedirectStandardOutput = true, RedirectStandardError = true, RedirectStandardInput = true };
         foreach (var argument in arguments)
@@ -266,7 +266,7 @@ public class KeyExportInteropTests
         return (process.ExitCode, await output, await error);
     }
 
-    private sealed class TempDirectory : IDisposable
+    internal sealed class TempDirectory : IDisposable
     {
         private readonly DirectoryInfo _directory = Directory.CreateTempSubdirectory("sshsharp-keyexport-");
         private int _count;

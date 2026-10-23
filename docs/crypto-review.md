@@ -12,7 +12,7 @@ outside review is planned (1.0 shipped with this internal review as its basis).
 | Field arithmetic (GF(2^255 - 19)) | `BigInteger` on random and edge values (non-canonical encodings, limb boundaries), long operation chains with limb bounds checked |
 | X25519 | RFC 7748 vectors including the 1,000-iteration one, OpenSSL-generated vectors, all-zero shared secret rejected |
 | Ed25519 | RFC 8032 vectors, OpenSSL and ssh-keygen signatures; non-canonical S, small-order and non-canonical public keys rejected |
-| ChaCha20, Poly1305, chacha20-poly1305@openssh.com | RFC 8439 vectors, the framework's RFC 8439 AEAD, OpenSSH's construction, interop with OpenSSH; the vectorized ChaCha20 against the scalar code, and Poly1305's 64-bit limbs against its 26-bit code and a `BigInteger` computation of the definition (below) |
+| ChaCha20, Poly1305, chacha20-poly1305@openssh.com | RFC 8439 vectors, the framework's RFC 8439 AEAD, OpenSSH's construction, interop with OpenSSH; the vectorized ChaCha20 against the scalar code, and Poly1305's 64-bit limbs against its 26-bit code and a `BigInteger` computation of the definition (below); key files that `ssh-keygen -Z chacha20-poly1305@openssh.com` encrypted (CI, [below](#encrypted-private-keys-read-from-files)) |
 | bcrypt_pbkdf | pyca/bcrypt known answer; keys encrypted by ssh-keygen with every supported cipher |
 | BLAKE2b | RFC 7693 |
 | Argon2d/i/id | RFC 9106 section 5 vectors; .ppk files written by PuTTY's puttygen (CI), and .ppk files SshSharp writes read by puttygen (CI) |
@@ -272,6 +272,35 @@ rules: their buffers zero what they hold, and only the returned string is left t
   where PuTTYgen uses bytes of a SHA-1 hash of the blob: any bytes do, as the MAC covers them, and no SHA-1 is used. Version 2
   (SHA-1) is never written. PuTTY 0.81's `puttygen` reads every exported key, plain and encrypted, and an unencrypted file
   `puttygen` made is written back byte for byte (CI).
+
+## Encrypted private keys read from files
+
+Reading an encrypted key file adds no primitive. Two formats that need some care are read, never written:
+
+- **Traditional encrypted PEM** (`BEGIN RSA PRIVATE KEY` or `BEGIN EC PRIVATE KEY` with `Proc-Type: 4,ENCRYPTED` and
+  `DEK-Info`), as `ssh-keygen -m PEM` and OpenSSL's `-traditional` output write it. The key comes from OpenSSL's legacy
+  `EVP_BytesToKey`: MD5, one iteration, and the first 8 bytes of the IV as the salt (D_1 = MD5(passphrase ‖ salt),
+  D_i = MD5(D_(i-1) ‖ passphrase ‖ salt), the key is their concatenation cut to length). That derivation is weak: one MD5 per
+  guess makes a stolen file cheap to attack, which is why SshSharp only reads it, to let such keys be used or converted, and
+  writes OpenSSH (bcrypt_pbkdf) or PKCS#8 (PBKDF2 with 600,000 iterations) instead. MD5 and AES-CBC are the platform's
+  (`MD5.HashData`, `Aes.DecryptCbc`). Only AES-128/192/256-CBC are read; DES and 3DES (`DES-CBC`, `DES-EDE3-CBC`,
+  `DES-EDE3-CFB`) stay out like every other legacy algorithm, and such a key is refused with a message that names the cipher and
+  says to re-encrypt it with `ssh-keygen -p -f <file>`. The PKCS#7 padding is checked by the platform; the check is not
+  constant-time, which does not matter here: the file is local and decrypted once, with no oracle to ask. A wrong passphrase
+  usually fails the padding check; the rare one that does not (about 1 in 256) yields bytes that do not parse as exactly one key,
+  and both are reported as a wrong passphrase. The derived key and the passphrase bytes are cleared after use, and so is the
+  decrypted DER once imported. Checked against `EVP_BytesToKey`'s definition, against files made in the tests, and against files
+  `ssh-keygen -m PEM` (OpenSSH with OpenSSL, and OpenSSH for Windows with LibreSSL) and `openssl rsa`/`openssl ec` wrote with each
+  AES key size (CI, LocalTools).
+- **OpenSSH keys encrypted with `chacha20-poly1305@openssh.com`** (`ssh-keygen -Z chacha20-poly1305@openssh.com`). The key file
+  uses the transport cipher differently, as OpenSSH's `sshkey.c` does (`private2_decrypt` calls `cipher_crypt` with sequence
+  number 0, no additional data and the cipher's 16-byte tag; `cipher.c` gives the cipher a 64-byte key, no IV and an 8-byte
+  block; `cipher-chachapoly.c` does the rest). So `bcrypt_pbkdf` derives 64 bytes; the Poly1305 key is ChaCha20 block 0 under
+  the first 32 bytes with an all-zero nonce; the tag, which follows the encrypted section in the file, covers the encrypted
+  section alone (there is no encrypted length); the section is decrypted from block 1; and the second 32 bytes, the packet
+  cipher's length key, are never used. The tag is compared with `CryptographicOperations.FixedTimeEquals` before anything is
+  decrypted, so a wrong passphrase or any edit to the section or the tag is rejected without bytes to parse. It reuses the managed
+  ChaCha20 and Poly1305 reviewed above; nothing in it branches on secret data.
 
 ## Accepted risks
 

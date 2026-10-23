@@ -20,8 +20,34 @@ Connecting by `ssh_config` alias needs none of this: `IdentityFile` and the agen
 
 [!code-csharp[](../snippets/Keys.cs#load-key)]
 
-Formats: OpenSSH (`BEGIN OPENSSH PRIVATE KEY`, encrypted too), PKCS#8 (encrypted too), PKCS#1 and SEC1 PEM, and PuTTY `.ppk` versions
-2 and 3. Key types: Ed25519, ECDSA (P-256, P-384, P-521) and RSA of 2048 bits or more.
+Formats: OpenSSH (`BEGIN OPENSSH PRIVATE KEY`, encrypted too), PKCS#8 (encrypted too), PKCS#1 and SEC1 PEM (encrypted too, the
+traditional way), and PuTTY `.ppk` versions 2 and 3. Key types: Ed25519, ECDSA (P-256, P-384, P-521) and RSA of 2048 bits or more.
+
+### Encrypted key files
+
+Every format can be read with its passphrase; these are the ciphers each is read with:
+
+| Format | Made by | Ciphers read |
+|---|---|---|
+| OpenSSH (`BEGIN OPENSSH PRIVATE KEY`) | `ssh-keygen` (the default), `ssh-keygen -Z <cipher>` | `aes128/192/256-ctr`, `aes128/192/256-cbc`, `aes128/256-gcm@openssh.com`, `chacha20-poly1305@openssh.com`; key from `bcrypt_pbkdf` |
+| PKCS#8 (`BEGIN ENCRYPTED PRIVATE KEY`), RSA and ECDSA | OpenSSL 3 (`openssl genpkey -aes256`, `openssl pkcs8`), .NET | what .NET's `ImportFromEncryptedPem` reads (PBES2 with AES, as OpenSSL 3 writes it) |
+| PKCS#1 or SEC1 with `Proc-Type: 4,ENCRYPTED` (`BEGIN RSA PRIVATE KEY`, `BEGIN EC PRIVATE KEY`) | `ssh-keygen -m PEM` with a passphrase, OpenSSL's `-traditional` output, OpenSSL 1.x | `AES-128-CBC`, `AES-192-CBC`, `AES-256-CBC`; key from OpenSSL's legacy `EVP_BytesToKey` (MD5) |
+| PuTTY `.ppk` versions 2 and 3 | PuTTYgen | `aes256-cbc` |
+
+The traditional PEM encryption is read so that such keys keep working, but its key derivation is one MD5 per guess: a stolen file
+is cheap to attack. Convert such a key once, to the OpenSSH format:
+
+[!code-csharp[](../snippets/Keys.cs#convert-legacy-pem)]
+
+`ssh-keygen -p -f <file>` does the same from the command line (it rewrites the file in the OpenSSH format).
+
+- **DES and 3DES are not read.** A traditional PEM key encrypted with `DES-EDE3-CBC`, `DES-EDE3-CFB` or `DES-CBC` (OpenSSL's
+  `-des3`, the default of some old tools) throws a `FormatException` that names the cipher. Like the other legacy algorithms, they
+  are left out by design. Re-encrypt the key with `ssh-keygen -p -f <file>`, which reads it and writes it in the OpenSSH format
+  with AES.
+- **No encrypted Ed25519 in PKCS#8,** and no ssh.com (`BEGIN SSH2 ENCRYPTED PRIVATE KEY`) keys: convert them with `ssh-keygen`.
+- A wrong passphrase is a `FormatException` that says so; a `chacha20-poly1305@openssh.com` or AES-GCM key file that was changed
+  fails the same way, because its tag no longer matches.
 
 ## Load a key from a secret
 

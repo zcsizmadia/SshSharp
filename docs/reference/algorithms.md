@@ -84,6 +84,22 @@ below). See [Compress a slow link](../how-to/tune-and-inspect-connections.md#com
 | FIDO security keys, through the agent | `sk-ssh-ed25519@openssh.com`, `sk-ecdsa-sha2-nistp256@openssh.com` |
 | OpenSSH certificates of the above | the matching `-cert-v01@openssh.com` algorithms |
 
+## Private key file encryption
+
+These protect key files on disk, not the connection. SshSharp reads all of them and writes only the first three rows' formats
+with the ciphers shown in [Export a key](../how-to/agent-and-keys.md#export-a-key-to-pkcs8-or-putty).
+
+| Format | Ciphers | Key derivation |
+|---|---|---|
+| OpenSSH | `aes128/192/256-ctr`, `aes128/192/256-cbc`, `aes128-gcm@openssh.com`, `aes256-gcm@openssh.com`, `chacha20-poly1305@openssh.com` | `bcrypt_pbkdf` |
+| PKCS#8 | what .NET reads (PBES2 with AES) | PBKDF2 |
+| PuTTY `.ppk` | `aes256-cbc` | Argon2 (version 3), SHA-1 (version 2) |
+| Traditional PEM (`Proc-Type: 4,ENCRYPTED`), read only | `AES-128-CBC`, `AES-192-CBC`, `AES-256-CBC` | OpenSSL's `EVP_BytesToKey` (MD5, one round) |
+
+Not read, by design: DES and 3DES (`DES-CBC`, `DES-EDE3-CBC`, `DES-EDE3-CFB`) in traditional PEM; convert such a key with
+`ssh-keygen -p -f <file>`. See [Encrypted key files](../how-to/agent-and-keys.md#encrypted-key-files) and the
+[cryptography review](../crypto-review.md#encrypted-private-keys-read-from-files).
+
 ## Not supported
 
 By design, none of these are implemented: CBC ciphers, 3DES, RC4, `hmac-sha1` and other SHA-1 MACs, `ssh-rsa` (SHA-1) signatures,
