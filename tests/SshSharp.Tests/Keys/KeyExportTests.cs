@@ -17,9 +17,6 @@ public class KeyExportTests
 
     public static IEnumerable<(SshKeyType Type, string KeyType, int Bits)> PlatformTypes() => Types().Where(t => t.Type != SshKeyType.Ed25519);
 
-    // Generated per run, never written down.
-    private static string NewPassphrase() => Convert.ToHexString(RandomNumberGenerator.GetBytes(12));
-
     private static SshPrivateKey Generate(SshKeyType type, int bits, string? comment = null) =>
         SshPrivateKey.Generate(type, comment, bits == 0 ? 3072 : bits);
 
@@ -56,7 +53,7 @@ public class KeyExportTests
     public async Task Pkcs8_RoundTrips_Encrypted_AndNeedsItsPassphrase(SshKeyType type, string keyType, int bits)
     {
         using var key = Generate(type, bits);
-        var passphrase = NewPassphrase();
+        var passphrase = TestSecrets.New();
         var text = key.ToPkcs8PrivateKey(passphrase);
 
         await Assert.That(text).StartsWith("-----BEGIN ENCRYPTED PRIVATE KEY-----\n");
@@ -64,14 +61,14 @@ public class KeyExportTests
         await Assert.That(parsed.KeyType).IsEqualTo(keyType);
         await Assert.That(parsed.PublicKey.ToArray()).IsEquivalentTo(key.PublicKey.ToArray());
         AssertSigns(parsed);
-        await Assert.That(() => SshPrivateKey.Parse(text, NewPassphrase())).Throws<FormatException>();
+        await Assert.That(() => SshPrivateKey.Parse(text, TestSecrets.New())).Throws<FormatException>();
         await Assert.That(() => SshPrivateKey.Parse(text)).Throws<FormatException>();
     }
 
     [Test]
     public async Task Pkcs8_IsWhatTheFrameworkReads()
     {
-        var passphrase = NewPassphrase();
+        var passphrase = TestSecrets.New();
         using (var key = Generate(SshKeyType.Rsa, 2048))
         {
             using var plain = RSA.Create();
@@ -97,7 +94,7 @@ public class KeyExportTests
     public async Task Pkcs8_EncryptsWithPbes2Aes256AndPbkdf2Sha256()
     {
         using var key = Generate(SshKeyType.EcdsaNistp256, 0);
-        var text = key.ToPkcs8PrivateKey(NewPassphrase());
+        var text = key.ToPkcs8PrivateKey(TestSecrets.New());
         var der = Convert.FromBase64String(string.Concat(text.Split('\n')[1..^2]));
 
         // EncryptedPrivateKeyInfo { AlgorithmIdentifier { PBES2, { { PBKDF2, { salt, iterations, ..., prf } }, { aes256-CBC, iv } } }, data }
@@ -145,7 +142,7 @@ public class KeyExportTests
     {
         using var key = Generate(SshKeyType.Ed25519, 0);
 
-        await Assert.That(() => key.ToPkcs8PrivateKey(NewPassphrase())).Throws<NotSupportedException>().WithMessageContaining("OpenSSH or PuTTY");
+        await Assert.That(() => key.ToPkcs8PrivateKey(TestSecrets.New())).Throws<NotSupportedException>().WithMessageContaining("OpenSSH or PuTTY");
         await Assert.That(key.ToPkcs8PrivateKey(string.Empty)).StartsWith("-----BEGIN PRIVATE KEY-----");
     }
 
@@ -171,7 +168,7 @@ public class KeyExportTests
     public async Task Putty_RoundTrips_Encrypted_AndNeedsItsPassphrase(SshKeyType type, string keyType, int bits)
     {
         using var key = Generate(type, bits, "putty@example");
-        var passphrase = NewPassphrase();
+        var passphrase = TestSecrets.New();
         var text = key.ToPuttyPrivateKey(passphrase);
 
         using var parsed = SshPrivateKey.Parse(text, passphrase);
@@ -179,7 +176,7 @@ public class KeyExportTests
         await Assert.That(parsed.PublicKey.ToArray()).IsEquivalentTo(key.PublicKey.ToArray());
         await Assert.That(parsed.Comment).IsEqualTo("putty@example");
         AssertSigns(parsed);
-        await Assert.That(() => SshPrivateKey.Parse(text, NewPassphrase())).Throws<FormatException>().WithMessageContaining("passphrase is wrong");
+        await Assert.That(() => SshPrivateKey.Parse(text, TestSecrets.New())).Throws<FormatException>().WithMessageContaining("passphrase is wrong");
         await Assert.That(() => SshPrivateKey.Parse(text)).Throws<FormatException>().WithMessageContaining("passphrase is required");
     }
 
@@ -187,7 +184,7 @@ public class KeyExportTests
     public async Task Putty_TheFile_IsLaidOutAsPuttygenWritesIt()
     {
         using var key = Generate(SshKeyType.Rsa, 2048, "layout@example");
-        var text = key.ToPuttyPrivateKey(NewPassphrase());
+        var text = key.ToPuttyPrivateKey(TestSecrets.New());
         var lines = text.Split('\n');
         var headers = lines.Where(l => l.Contains(": ", StringComparison.Ordinal)).Select(l => l[..l.IndexOf(": ", StringComparison.Ordinal)]).ToArray();
 
@@ -219,7 +216,7 @@ public class KeyExportTests
     public async Task Putty_TwoExports_UseDifferentSalts()
     {
         using var key = Generate(SshKeyType.Ed25519, 0);
-        var passphrase = NewPassphrase();
+        var passphrase = TestSecrets.New();
 
         await Assert.That(key.ToPuttyPrivateKey(passphrase)).IsNotEqualTo(key.ToPuttyPrivateKey(passphrase));
     }
@@ -272,9 +269,9 @@ public class KeyExportTests
         foreach (var unexportable in new[] { agentKey, external, certified })
         {
             await Assert.That(() => unexportable.ToPkcs8PrivateKey()).Throws<NotSupportedException>();
-            await Assert.That(() => unexportable.ToPkcs8PrivateKey(NewPassphrase())).Throws<NotSupportedException>();
+            await Assert.That(() => unexportable.ToPkcs8PrivateKey(TestSecrets.New())).Throws<NotSupportedException>();
             await Assert.That(() => unexportable.ToPuttyPrivateKey()).Throws<NotSupportedException>();
-            await Assert.That(() => unexportable.ToPuttyPrivateKey(NewPassphrase())).Throws<NotSupportedException>();
+            await Assert.That(() => unexportable.ToPuttyPrivateKey(TestSecrets.New())).Throws<NotSupportedException>();
         }
     }
 
@@ -301,7 +298,7 @@ public class KeyExportTests
         {
             var path = Path.Combine(directory.FullName, "id_key");
             using var key = Generate(SshKeyType.EcdsaNistp256, 0, "saved@example");
-            var passphrase = NewPassphrase();
+            var passphrase = TestSecrets.New();
 
             await key.SaveAsync(path, format, passphrase);
 
@@ -328,7 +325,7 @@ public class KeyExportTests
         {
             var path = Path.Combine(directory.FullName, "id_ed25519");
             using var key = Generate(SshKeyType.Ed25519, 0);
-            var passphrase = NewPassphrase();
+            var passphrase = TestSecrets.New();
 
             await key.SaveAsync(path, passphrase, kdfRounds: 20);
 
@@ -359,13 +356,13 @@ public class KeyExportTests
             var path = Path.Combine(directory.FullName, "id_key");
             using var key = Generate(SshKeyType.Ed25519, 0);
 
-            await Assert.That(async () => await key.SaveAsync(path, "p", kdfRounds: 0)).Throws<ArgumentOutOfRangeException>();
-            await Assert.That(async () => await key.SaveAsync(path, "p", kdfRounds: (1 << 16) + 1)).Throws<ArgumentOutOfRangeException>();
+            await Assert.That(async () => await key.SaveAsync(path, TestSecrets.New(), kdfRounds: 0)).Throws<ArgumentOutOfRangeException>();
+            await Assert.That(async () => await key.SaveAsync(path, TestSecrets.New(), kdfRounds: (1 << 16) + 1)).Throws<ArgumentOutOfRangeException>();
             await Assert.That(async () => await key.SaveAsync(path, (SshPrivateKeyFormat)99)).Throws<ArgumentOutOfRangeException>();
             await Assert.That(async () => await key.SaveAsync(" ", SshPrivateKeyFormat.Pkcs8)).Throws<ArgumentException>();
 
             // A format that cannot hold the key fails before any file is made.
-            await Assert.That(async () => await key.SaveAsync(path, SshPrivateKeyFormat.Pkcs8, NewPassphrase())).Throws<NotSupportedException>();
+            await Assert.That(async () => await key.SaveAsync(path, SshPrivateKeyFormat.Pkcs8, TestSecrets.New())).Throws<NotSupportedException>();
             await Assert.That(Directory.GetFiles(directory.FullName)).IsEmpty();
         }
         finally

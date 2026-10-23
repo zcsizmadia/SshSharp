@@ -11,7 +11,7 @@ public class KeyboardInteractiveTests
 {
     private static CancellationToken Timeout() => new CancellationTokenSource(TimeSpan.FromSeconds(60)).Token;
 
-    private static readonly Round PasswordRound = new("", "", [("Password: ", false)], ["secret"]);
+    private static readonly Round PasswordRound = new("", "", [("Password: ", false)], [TestSecrets.Password]);
 
     private static readonly Round CodeRound = new("Two-factor", "Enter the code from your app.", [("Code: ", true)], ["123456"]);
 
@@ -59,7 +59,7 @@ public class KeyboardInteractiveTests
     {
         await using var server = new FakeSessionServer { AdvertisedMethods = ["keyboard-interactive"], KeyboardInteractiveRounds = [PasswordRound, CodeRound] };
         var seen = new List<SshKeyboardInteractiveRequest>();
-        await using var client = await ConnectAsync(server, Answers(seen, ["secret"], ["123456"]));
+        await using var client = await ConnectAsync(server, Answers(seen, [TestSecrets.Password], ["123456"]));
 
         await Assert.That(client.IsConnected).IsTrue();
         await Assert.That(seen.Count).IsEqualTo(2);
@@ -76,7 +76,7 @@ public class KeyboardInteractiveTests
         var notice = new Round("", "Your password expires in 3 days.", [], []);
         await using var server = new FakeSessionServer { AdvertisedMethods = ["keyboard-interactive"], KeyboardInteractiveRounds = [notice, PasswordRound] };
         var seen = new List<SshKeyboardInteractiveRequest>();
-        await using var client = await ConnectAsync(server, Answers(seen, [], ["secret"]));
+        await using var client = await ConnectAsync(server, Answers(seen, [], [TestSecrets.Password]));
         await Assert.That(seen[0].Prompts.Count).IsEqualTo(0);
         await Assert.That(server.KeyboardInteractiveAnswers[0].Length).IsEqualTo(0);
     }
@@ -85,7 +85,7 @@ public class KeyboardInteractiveTests
     public async Task WrongAnswers_FailWithTheMethodsTheServerAccepts()
     {
         await using var server = new FakeSessionServer { AdvertisedMethods = ["keyboard-interactive"], KeyboardInteractiveRounds = [PasswordRound] };
-        var error = await Assert.ThrowsAsync<SshAuthenticationException>(() => ConnectAsync(server, Answers([], ["wrong"])));
+        var error = await Assert.ThrowsAsync<SshAuthenticationException>(() => ConnectAsync(server, Answers([], [TestSecrets.New()])));
         await Assert.That(error!.AllowedMethods).IsEquivalentTo(new[] { "keyboard-interactive" });
     }
 
@@ -94,7 +94,7 @@ public class KeyboardInteractiveTests
     {
         // sshd with PasswordAuthentication no and KbdInteractiveAuthentication yes (PAM) asks for the password this way.
         await using var server = new FakeSessionServer { AdvertisedMethods = ["keyboard-interactive"], KeyboardInteractiveRounds = [PasswordRound] };
-        await using var client = await ConnectAsync(server, password: "secret");
+        await using var client = await ConnectAsync(server, password: TestSecrets.Password);
         await Assert.That(Attempts(server)).IsEquivalentTo(new[] { "none", "keyboard-interactive" });
     }
 
@@ -102,7 +102,7 @@ public class KeyboardInteractiveTests
     public async Task APasswordAlone_UsesThePasswordMethod_WhenTheServerOffersIt()
     {
         await using var server = new FakeSessionServer { AdvertisedMethods = ["keyboard-interactive", "password"], KeyboardInteractiveRounds = [PasswordRound] };
-        await using var client = await ConnectAsync(server, password: "secret");
+        await using var client = await ConnectAsync(server, password: TestSecrets.Password);
         await Assert.That(Attempts(server)).IsEquivalentTo(new[] { "none", "password" });
     }
 
@@ -111,7 +111,7 @@ public class KeyboardInteractiveTests
     {
         await using (var server = new FakeSessionServer { AdvertisedMethods = ["keyboard-interactive"], KeyboardInteractiveRounds = [CodeRound] })
         {
-            await Assert.ThrowsAsync<SshAuthenticationException>(() => ConnectAsync(server, password: "secret"));
+            await Assert.ThrowsAsync<SshAuthenticationException>(() => ConnectAsync(server, password: TestSecrets.Password));
             await Assert.That(server.KeyboardInteractiveAnswers).IsEmpty();
         }
 
@@ -119,7 +119,7 @@ public class KeyboardInteractiveTests
         var hiddenCode = CodeRound with { Prompts = [("Code: ", false)] };
         await using (var server = new FakeSessionServer { AdvertisedMethods = ["keyboard-interactive"], KeyboardInteractiveRounds = [PasswordRound, hiddenCode] })
         {
-            await Assert.ThrowsAsync<SshAuthenticationException>(() => ConnectAsync(server, password: "secret"));
+            await Assert.ThrowsAsync<SshAuthenticationException>(() => ConnectAsync(server, password: TestSecrets.Password));
             await Assert.That(server.KeyboardInteractiveAnswers.Count).IsEqualTo(1);
         }
     }
@@ -129,7 +129,7 @@ public class KeyboardInteractiveTests
     {
         await using var server = new FakeSessionServer { AdvertisedMethods = ["keyboard-interactive", "password"], KeyboardInteractiveRounds = [PasswordRound] };
         var seen = new List<SshKeyboardInteractiveRequest>();
-        await using var client = await ConnectAsync(server, Answers(seen), password: "secret");
+        await using var client = await ConnectAsync(server, Answers(seen), password: TestSecrets.Password);
         await Assert.That(seen.Count).IsEqualTo(1);
         await Assert.That(Attempts(server)).IsEquivalentTo(new[] { "none", "keyboard-interactive", "password" });
     }
@@ -154,7 +154,7 @@ public class KeyboardInteractiveTests
         var error = await Assert.ThrowsAsync<SshException>(() => ConnectAsync(server, (_, _) =>
         {
             rounds++;
-            return ValueTask.FromResult<IReadOnlyList<string>?>(["secret"]);
+            return ValueTask.FromResult<IReadOnlyList<string>?>([TestSecrets.Password]);
         }));
         await Assert.That(error!.Reason).IsEqualTo(SshFailureReason.AuthenticationFailed);
         await Assert.That(rounds).IsEqualTo(SshUserAuth.MaxRounds);
@@ -194,7 +194,7 @@ public class KeyboardInteractiveTests
         // AuthenticationMethods password,publickey: the key comes first in the client's order, but the server takes it only after the password.
         using var key = SshPrivateKey.Parse(TestKeys.OpenSshEd25519(out var blob));
         await using var server = new FakeSessionServer { AuthorizedKeys = [blob], AuthenticationChain = ["password", "publickey"] };
-        await using var client = await ConnectAsync(server, password: "secret", keys: [key]);
+        await using var client = await ConnectAsync(server, password: TestSecrets.Password, keys: [key]);
         await Assert.That(Attempts(server)).IsEquivalentTo(new[] { "none", "password", "publickey", "publickey-signed:ssh-ed25519" });
     }
 
@@ -203,7 +203,7 @@ public class KeyboardInteractiveTests
     {
         await using var server = new FakeSessionServer { AuthenticationBanner = "Authorized use only.\n" };
         var banners = new List<string>();
-        await using var client = await ConnectAsync(server, password: "secret", banner: (text, _) =>
+        await using var client = await ConnectAsync(server, password: TestSecrets.Password, banner: (text, _) =>
         {
             banners.Add(text);
             return ValueTask.CompletedTask;
@@ -212,7 +212,7 @@ public class KeyboardInteractiveTests
 
         // Without a callback it is skipped.
         await using var quiet = new FakeSessionServer { AuthenticationBanner = "Authorized use only.\n" };
-        await using var other = await ConnectAsync(quiet, password: "secret");
+        await using var other = await ConnectAsync(quiet, password: TestSecrets.Password);
         await Assert.That(other.IsConnected).IsTrue();
     }
 

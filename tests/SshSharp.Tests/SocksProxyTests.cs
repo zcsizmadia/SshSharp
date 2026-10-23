@@ -18,7 +18,7 @@ public class SocksProxyTests
         var client = await SshClient.ConnectAsync(server.ClientStream, new SshClientOptions
         {
             UserName = "tester",
-            Password = "secret",
+            Password = TestSecrets.Password,
             HostKeyVerifier = SshHostKeyVerifier.FromDelegate((_, _) => ValueTask.FromResult(true)),
         }, leaveOpen: true, Timeout());
         var proxy = await client.ForwardDynamicPortAsync(new IPEndPoint(IPAddress.Loopback, 0), Timeout());

@@ -383,7 +383,7 @@ public sealed class AgentTests : IDisposable
         {
             Config = SshConfig.Parse(config),
             ResolveOptions = new SshConfigResolveOptions { LocalUser = "local", HomeDirectory = _dir },
-            Password = "secret",
+            Password = TestSecrets.Password,
             TcpConnector = (_, _, _, _) =>
             {
                 _ = server.StartAsync();

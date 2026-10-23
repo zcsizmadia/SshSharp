@@ -50,13 +50,14 @@ public class KeyGenerationTests
     public async Task AnEncryptedKey_NeedsItsPassphrase(SshKeyType type, string keyType, int bits)
     {
         using var key = SshPrivateKey.Generate(type, rsaBits: bits == 0 ? 3072 : bits);
-        var text = key.ToOpenSshPrivateKey("correct horse", kdfRounds: 4);
+        var passphrase = TestSecrets.New();
+        var text = key.ToOpenSshPrivateKey(passphrase, kdfRounds: 4);
 
-        using var parsed = SshPrivateKey.Parse(text, "correct horse");
+        using var parsed = SshPrivateKey.Parse(text, passphrase);
         await Assert.That(parsed.PublicKey.ToArray()).IsEquivalentTo(key.PublicKey.ToArray());
         await Assert.That(parsed.KeyType).IsEqualTo(keyType);
         AssertSigns(parsed);
-        await Assert.That(() => SshPrivateKey.Parse(text, "wrong")).Throws<FormatException>();
+        await Assert.That(() => SshPrivateKey.Parse(text, TestSecrets.New())).Throws<FormatException>();
         await Assert.That(() => SshPrivateKey.Parse(text)).Throws<FormatException>();
     }
 
@@ -64,7 +65,7 @@ public class KeyGenerationTests
     public async Task TheFile_IsLaidOutAsSshKeygenWritesIt()
     {
         using var key = SshPrivateKey.Generate(SshKeyType.Ed25519);
-        var text = key.ToOpenSshPrivateKey("pass", kdfRounds: 24);
+        var text = key.ToOpenSshPrivateKey(TestSecrets.New(), kdfRounds: 24);
         var lines = text.Split('\n');
 
         await Assert.That(lines[0]).IsEqualTo("-----BEGIN OPENSSH PRIVATE KEY-----");
@@ -105,7 +106,8 @@ public class KeyGenerationTests
         using var second = SshPrivateKey.Generate(SshKeyType.Ed25519);
 
         await Assert.That(first.Fingerprint).IsNotEqualTo(second.Fingerprint);
-        await Assert.That(first.ToOpenSshPrivateKey("p", 1)).IsNotEqualTo(first.ToOpenSshPrivateKey("p", 1));
+        var passphrase = TestSecrets.New();
+        await Assert.That(first.ToOpenSshPrivateKey(passphrase, 1)).IsNotEqualTo(first.ToOpenSshPrivateKey(passphrase, 1));
     }
 
     [Test]
@@ -147,8 +149,8 @@ public class KeyGenerationTests
         await Assert.That(() => SshPrivateKey.Generate(SshKeyType.Rsa, rsaBits: 3071)).Throws<ArgumentOutOfRangeException>();
         await Assert.That(() => SshPrivateKey.Generate((SshKeyType)99)).Throws<ArgumentOutOfRangeException>();
         using var key = SshPrivateKey.Generate(SshKeyType.Ed25519);
-        await Assert.That(() => key.ToOpenSshPrivateKey("p", 0)).Throws<ArgumentOutOfRangeException>();
-        await Assert.That(() => key.ToOpenSshPrivateKey("p", (1 << 16) + 1)).Throws<ArgumentOutOfRangeException>();
+        await Assert.That(() => key.ToOpenSshPrivateKey(TestSecrets.New(), 0)).Throws<ArgumentOutOfRangeException>();
+        await Assert.That(() => key.ToOpenSshPrivateKey(TestSecrets.New(), (1 << 16) + 1)).Throws<ArgumentOutOfRangeException>();
     }
 
     [Test]
@@ -160,9 +162,10 @@ public class KeyGenerationTests
             var path = Path.Combine(directory.FullName, "id_ed25519");
             using var key = SshPrivateKey.Generate(SshKeyType.Ed25519, "saved@example");
 
-            await key.SaveAsync(path, "secret");
+            var passphrase = TestSecrets.New();
+            await key.SaveAsync(path, passphrase);
 
-            using var loaded = await SshPrivateKey.LoadAsync(path, "secret");
+            using var loaded = await SshPrivateKey.LoadAsync(path, passphrase);
             await Assert.That(loaded.Fingerprint).IsEqualTo(key.Fingerprint);
             await Assert.That(await File.ReadAllTextAsync(path + ".pub")).IsEqualTo(key.ToAuthorizedKeysLine() + "\n");
 
@@ -227,11 +230,12 @@ public class KeyGenerationTests
         {
             var path = Path.Combine(directory.FullName, "id_key");
             using var key = SshPrivateKey.Generate(type, "interop@example", bits == 0 ? 3072 : bits);
-            await key.SaveAsync(path, "interop passphrase");
+            var passphrase = TestSecrets.New();
+            await key.SaveAsync(path, passphrase);
 
             // -y prints the public key derived from the private key file, after decrypting it.
             var start = new ProcessStartInfo(sshKeygen) { RedirectStandardOutput = true, RedirectStandardError = true };
-            foreach (var argument in new[] { "-y", "-P", "interop passphrase", "-f", path })
+            foreach (var argument in new[] { "-y", "-P", passphrase, "-f", path })
             {
                 start.ArgumentList.Add(argument);
             }

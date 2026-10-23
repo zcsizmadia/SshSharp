@@ -258,7 +258,7 @@ public class ParserRobustnessTests
     {
         // Traditional encrypted PEM (headers and body as text), with the right passphrase, so an unmutated seed decrypts and the
         // mutations reach every step after the headers.
-        var passphrase = Convert.ToHexString(RandomNumberGenerator.GetBytes(12));
+        var passphrase = TestSecrets.New();
         using var ecdsa = ECDsa.Create(ECCurve.NamedCurves.nistP256);
         using var rsa = RSA.Create(2048);
         byte[][] pemSeeds =
@@ -307,15 +307,16 @@ public class ParserRobustnessTests
     [Test]
     public async Task PuttyKeyParsing_OnlyEverFailsWithAFormatError()
     {
+        var passphrase = TestSecrets.New();
         byte[][] seeds =
         [
             Encoding.Latin1.GetBytes(Keys.TestKeys.Ppk(2, "ssh-ed25519", out _)),
             Encoding.Latin1.GetBytes(Keys.TestKeys.Ppk(3, "ecdsa-sha2-nistp256", out _)),
-            Encoding.Latin1.GetBytes(Keys.TestKeys.Ppk(3, "ssh-ed25519", out _, passphrase: "pw")),
+            Encoding.Latin1.GetBytes(Keys.TestKeys.Ppk(3, "ssh-ed25519", out _, passphrase: passphrase)),
         ];
         var failures = Run(seeds, input =>
         {
-            using var key = SshPrivateKey.Parse(Encoding.Latin1.GetString(input), "pw");
+            using var key = SshPrivateKey.Parse(Encoding.Latin1.GetString(input), passphrase);
         }, FormatErrors, iterations: 1500);
         await Assert.That(failures).IsEmpty();
     }

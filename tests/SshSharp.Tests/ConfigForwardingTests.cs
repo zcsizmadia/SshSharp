@@ -68,7 +68,7 @@ public sealed class ConfigForwardingTests : IDisposable
         {
             Config = SshConfig.Parse(config),
             ResolveOptions = new SshConfigResolveOptions { LocalUser = "local", HomeDirectory = _dir },
-            Password = "secret",
+            Password = TestSecrets.Password,
             UseAgent = false,
             StartForwardings = start,
             TcpConnector = (_, _, _, _) =>
@@ -174,7 +174,7 @@ public sealed class ConfigForwardingTests : IDisposable
         {
             Config = SshConfig.Parse(config),
             ResolveOptions = new SshConfigResolveOptions { LocalUser = "local", HomeDirectory = _dir },
-            Password = "secret",
+            Password = TestSecrets.Password,
             UseAgent = false,
             StartForwardings = true,
             TcpConnector = (_, _, _, _) =>

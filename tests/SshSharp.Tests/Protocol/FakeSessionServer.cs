@@ -140,7 +140,7 @@ internal sealed class FakeSessionServer : IAsyncDisposable
 
     public FakeSshServer Raw => _server;
 
-    public string Password { get; init; } = "secret";
+    public string Password { get; init; } = TestSecrets.Password;
 
     public string UserName { get; init; } = "tester";
 

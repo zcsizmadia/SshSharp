@@ -1,4 +1,3 @@
-using System.Security.Cryptography;
 using SshSharp.Config;
 using SshSharp.Tests.Protocol;
 
@@ -8,8 +7,6 @@ namespace SshSharp.Tests.Config;
 public class PasswordPromptConfigTests
 {
     private static CancellationToken Timeout() => new CancellationTokenSource(TimeSpan.FromSeconds(60)).Token;
-
-    private static string NewPassword() => Convert.ToHexString(RandomNumberGenerator.GetBytes(12));
 
     private static readonly SshConfigResolveOptions Resolve = new() { LocalUser = "local", HomeDirectory = Path.GetTempPath(), LocalHostName = "box" };
 
@@ -36,7 +33,7 @@ public class PasswordPromptConfigTests
     [Test]
     public async Task TheProvider_IsAskedUpToTheConfiguredNumberOfTimes_WithTheHostName()
     {
-        await using var server = new FakeSessionServer { Password = NewPassword() };
+        await using var server = new FakeSessionServer { Password = TestSecrets.New() };
         var seen = new List<SshPasswordPrompt>();
         var error = await Assert.ThrowsAsync<SshAuthenticationException>(async () => await SshClient.ConnectAsync("t", new SshConfigConnectOptions
         {
@@ -46,7 +43,7 @@ public class PasswordPromptConfigTests
             PasswordProvider = (prompt, _) =>
             {
                 seen.Add(prompt);
-                return ValueTask.FromResult<string?>(NewPassword());
+                return ValueTask.FromResult<string?>(TestSecrets.New());
             },
             TcpConnector = Network(("target.example.com", server)),
         }, Timeout()));
@@ -63,7 +60,7 @@ public class PasswordPromptConfigTests
     [Arguments(" PasswordAuthentication no\n KbdInteractiveAuthentication no\n")]
     public async Task TheProvider_IsNotAsked_InBatchMode_OrWithPasswordsOff(string line)
     {
-        await using var server = new FakeSessionServer { Password = NewPassword() };
+        await using var server = new FakeSessionServer { Password = TestSecrets.New() };
         var asked = 0;
         await Assert.ThrowsAsync<SshAuthenticationException>(async () => await SshClient.ConnectAsync("t", new SshConfigConnectOptions
         {
@@ -85,7 +82,7 @@ public class PasswordPromptConfigTests
     public async Task AJumpHost_IsNeverAskedForThroughTheProvider()
     {
         // A jump host that takes passwords only: the provider is the destination's, so the chain fails at the hop without asking.
-        await using var jump = new FakeSessionServer { Password = NewPassword(), AdvertisedMethods = ["password"] };
+        await using var jump = new FakeSessionServer { Password = TestSecrets.New(), AdvertisedMethods = ["password"] };
         var asked = 0;
         var error = await Assert.ThrowsAsync<SshAuthenticationException>(async () => await SshClient.ConnectAsync("t", new SshConfigConnectOptions
         {
@@ -107,8 +104,8 @@ public class PasswordPromptConfigTests
     [Test]
     public async Task AnExpiredPassword_IsChangedThroughTheConfigPath()
     {
-        var replacement = NewPassword();
-        await using var server = new FakeSessionServer { Password = NewPassword(), PasswordExpired = true };
+        var replacement = TestSecrets.New();
+        await using var server = new FakeSessionServer { Password = TestSecrets.New(), PasswordExpired = true };
         await using var client = await SshClient.ConnectAsync("t", new SshConfigConnectOptions
         {
             UseAgent = false,

@@ -274,13 +274,18 @@ public sealed class SocksAuthenticationTests
     [Test]
     public async Task TheComparison_DependsOnTheValuesOnly()
     {
-        var expected = new SocksCredentials(new NetworkCredential("user", "pass"), "credentials");
-        await Assert.That(expected.Matches("user"u8, "pass"u8)).IsTrue();
-        await Assert.That(expected.Matches("user"u8, "pass "u8)).IsFalse();
-        await Assert.That(expected.Matches("user"u8, "pas"u8)).IsFalse();
-        await Assert.That(expected.Matches("User"u8, "pass"u8)).IsFalse();
-        await Assert.That(expected.Matches("pass"u8, "user"u8)).IsFalse();
+        var password = TestSecrets.New();
+        var bytes = Encoding.UTF8.GetBytes(password);
+        var expected = new SocksCredentials(new NetworkCredential("user", password), "credentials");
+        await Assert.That(expected.Matches("user"u8, bytes)).IsTrue();
+        await Assert.That(expected.Matches("user"u8, [.. bytes, (byte)' '])).IsFalse();
+        await Assert.That(expected.Matches("user"u8, bytes.AsSpan(..^1))).IsFalse();
+        await Assert.That(expected.Matches("User"u8, bytes)).IsFalse();
+        await Assert.That(expected.Matches(bytes, "user"u8)).IsFalse();
         await Assert.That(expected.Matches(""u8, ""u8)).IsFalse();
-        await Assert.That(new SocksCredentials(new NetworkCredential("ü", "ß"), "credentials").Matches("ü"u8, "ß"u8)).IsTrue();
+
+        // Compared as UTF-8.
+        var nonAscii = "ß" + password;
+        await Assert.That(new SocksCredentials(new NetworkCredential("ü", nonAscii), "credentials").Matches("ü"u8, Encoding.UTF8.GetBytes(nonAscii))).IsTrue();
     }
 }

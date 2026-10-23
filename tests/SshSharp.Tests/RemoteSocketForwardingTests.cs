@@ -21,7 +21,7 @@ public sealed class RemoteSocketForwardingTests : IDisposable
         return await SshClient.ConnectAsync(server.ClientStream, new SshClientOptions
         {
             UserName = "tester",
-            Password = "secret",
+            Password = TestSecrets.Password,
             HostKeyVerifier = SshHostKeyVerifier.FromDelegate((_, _) => ValueTask.FromResult(true)),
         }, leaveOpen: true, Timeout());
     }
@@ -247,7 +247,7 @@ public sealed class RemoteSocketForwardingTests : IDisposable
             {
                 Config = SshConfig.Parse($"Host *\n User tester\n StrictHostKeyChecking no\n UserKnownHostsFile none\n RemoteForward /run/app.sock 127.0.0.1:{service.Port}\n RemoteForward /run/agent.sock {dir}/agent.sock\n"),
                 ResolveOptions = new SshConfigResolveOptions { LocalUser = "local", HomeDirectory = _dir },
-                Password = "secret",
+                Password = TestSecrets.Password,
                 UseAgent = false,
                 StartForwardings = true,
                 TcpConnector = (_, _, _, _) =>

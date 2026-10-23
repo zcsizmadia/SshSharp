@@ -37,7 +37,7 @@ public class ObscureKeystrokeTimingTests
         return await SshClient.ConnectAsync(server.ClientStream, new SshClientOptions
         {
             UserName = "tester",
-            Password = "secret",
+            Password = TestSecrets.Password,
             HostKeyVerifier = SshHostKeyVerifier.FromDelegate((_, _) => ValueTask.FromResult(true)),
             ObscureKeystrokeTiming = interval,
             TimeProvider = time,

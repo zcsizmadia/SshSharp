@@ -61,8 +61,9 @@ public class KeyWriterBufferTests
         await Assert.That(OpenSshKeyWriter.EstimatePrivateSectionSize(key)).IsGreaterThanOrEqualTo(section.WrittenCount);
 
         // RSA's private fields grow with the modulus no faster than the public blob does (n, d ~ modulus; p, q, iqmp ~ half).
-        var text = key.ToOpenSshPrivateKey("passphrase", kdfRounds: 1);
-        using var reloaded = SshPrivateKey.Parse(text, "passphrase");
+        var passphrase = TestSecrets.New();
+        var text = key.ToOpenSshPrivateKey(passphrase, kdfRounds: 1);
+        using var reloaded = SshPrivateKey.Parse(text, passphrase);
         await Assert.That(reloaded.PublicKey.ToArray().SequenceEqual(key.PublicKey.ToArray())).IsTrue();
     }
 }

@@ -100,11 +100,12 @@ public sealed class AgentKeyManagementTests : IDisposable
         await Assert.That(async () => await agent.RemoveKeyAsync(first, Timeout())).Throws<SshException>();
 
         // Locked, the agent lists nothing and takes no keys; the wrong passphrase does not unlock it.
-        await agent.LockAsync("lock-phrase", Timeout());
+        var lockPassphrase = TestSecrets.New();
+        await agent.LockAsync(lockPassphrase, Timeout());
         await Assert.That(await agent.GetKeysAsync(Timeout())).IsEmpty();
         await Assert.That(async () => await agent.AddKeyAsync(first, cancellationToken: Timeout())).Throws<SshException>();
-        await Assert.That(async () => await agent.UnlockAsync("wrong", Timeout())).Throws<SshException>();
-        await agent.UnlockAsync("lock-phrase", Timeout());
+        await Assert.That(async () => await agent.UnlockAsync(TestSecrets.New(), Timeout())).Throws<SshException>();
+        await agent.UnlockAsync(lockPassphrase, Timeout());
         await Assert.That((await agent.GetKeysAsync(Timeout())).Count).IsEqualTo(1);
 
         await agent.RemoveAllKeysAsync(Timeout());

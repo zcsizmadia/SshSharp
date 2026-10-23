@@ -1,20 +1,19 @@
-using System.Security.Cryptography;
 using System.Text;
+using SshSharp.Keys;
 using static SshSharp.Tests.Integration.KeyExportInteropTests;
 
 namespace SshSharp.Tests.Integration;
 
 /// <summary>
 /// Encrypted key files made by the real tools and read by SshSharp: traditional encrypted PEM (<c>Proc-Type: 4,ENCRYPTED</c>) from
-/// <c>ssh-keygen -m PEM</c> and OpenSSL, and OpenSSH keys that <c>ssh-keygen -Z chacha20-poly1305@openssh.com</c> encrypted. The keys and
-/// passphrases are made per run, so none is written down. Each test is skipped when its tool is not on the PATH.
+/// <c>ssh-keygen -m PEM</c> and OpenSSL, and OpenSSH keys that <c>ssh-keygen -Z</c> encrypted with each AES cipher and with
+/// <c>chacha20-poly1305@openssh.com</c>. The keys and passphrases are made per run, so none is written down. Each test is skipped
+/// when its tool is not on the PATH.
 /// </summary>
 [Category("LocalTools")] // ssh-keygen and openssl only, no server: it runs with the unit tests
 public class EncryptedKeyInteropTests
 {
     private const string ChaCha = "chacha20-poly1305@openssh.com";
-
-    private static string NewPassphrase() => Convert.ToHexString(RandomNumberGenerator.GetBytes(12));
 
     [Test]
     [Arguments("rsa", 2048, "ssh-rsa")]
@@ -30,7 +29,7 @@ public class EncryptedKeyInteropTests
         }
 
         using var directory = new TempDirectory();
-        var passphrase = NewPassphrase();
+        var passphrase = TestSecrets.New();
         var path = directory.NewPath("pem");
         var (exit, _, error) = await RunAsync(sshKeygen, "-q", "-t", type, "-b", bits.ToString(System.Globalization.CultureInfo.InvariantCulture),
             "-m", "PEM", "-N", passphrase, "-C", "pem@example", "-f", path);
@@ -44,7 +43,7 @@ public class EncryptedKeyInteropTests
             await Assert.That(key.PublicKey.ToArray()).IsEquivalentTo(await PublicBlobAsync(path));
         }
 
-        await Assert.That(() => SshPrivateKey.Parse(text, NewPassphrase())).Throws<FormatException>().WithMessageContaining("passphrase is wrong");
+        await Assert.That(() => SshPrivateKey.Parse(text, TestSecrets.New())).Throws<FormatException>().WithMessageContaining("passphrase is wrong");
     }
 
     [Test]
@@ -60,7 +59,7 @@ public class EncryptedKeyInteropTests
         }
 
         using var directory = new TempDirectory();
-        var passphrase = NewPassphrase();
+        var passphrase = TestSecrets.New();
         var path = directory.NewPath("chacha");
         string[] arguments = bits == 0
             ? ["-q", "-t", type, "-Z", ChaCha, "-N", passphrase, "-C", "chacha@example", "-f", path]
@@ -78,7 +77,7 @@ public class EncryptedKeyInteropTests
             await Assert.That(key.PublicKey.ToArray()).IsEquivalentTo(await PublicBlobAsync(path));
         }
 
-        await Assert.That(() => SshPrivateKey.Parse(text, NewPassphrase())).Throws<FormatException>().WithMessageContaining("passphrase is wrong");
+        await Assert.That(() => SshPrivateKey.Parse(text, TestSecrets.New())).Throws<FormatException>().WithMessageContaining("passphrase is wrong");
 
         // A changed tag (the file's last 16 bytes) or encrypted section fails authentication.
         foreach (var offset in new[] { 1, 16, 17, 32 })
@@ -88,6 +87,45 @@ public class EncryptedKeyInteropTests
             var rewrapped = "-----BEGIN OPENSSH PRIVATE KEY-----\n" + Convert.ToBase64String(tampered) + "\n-----END OPENSSH PRIVATE KEY-----\n";
             await Assert.That(() => SshPrivateKey.Parse(rewrapped, passphrase)).Throws<FormatException>().WithMessageContaining("passphrase is wrong");
         }
+    }
+
+    [Test]
+    [Arguments("aes128-ctr")]
+    [Arguments("aes192-ctr")]
+    [Arguments("aes256-ctr")]
+    [Arguments("aes128-cbc")]
+    [Arguments("aes192-cbc")]
+    [Arguments("aes256-cbc")]
+    [Arguments("aes128-gcm@openssh.com")]
+    [Arguments("aes256-gcm@openssh.com")]
+    public async Task SshKeygen_EachAesCipher_Reads(string cipher)
+    {
+        // The unit tests (Keys/SshPrivateKeyTests.cs) build these files themselves; here ssh-keygen encrypts them, so the decryption
+        // is checked against another implementation's encryption.
+        if (Tool("ssh-keygen") is not { } sshKeygen)
+        {
+            Skip.Test("ssh-keygen is not installed.");
+            return;
+        }
+
+        using var directory = new TempDirectory();
+        var passphrase = TestSecrets.New();
+        var path = directory.NewPath("key");
+        var (exit, _, error) = await RunAsync(sshKeygen, "-q", "-t", "ed25519", "-Z", cipher, "-N", passphrase, "-C", "aes@example", "-f", path);
+        await Assert.That(exit).IsEqualTo(0).Because(error);
+
+        var text = await File.ReadAllTextAsync(path);
+        await Assert.That(Body(text).AsSpan().IndexOf(Encoding.ASCII.GetBytes(cipher))).IsGreaterThan(0);
+        using (var key = SshPrivateKey.Parse(text, passphrase))
+        {
+            await Assert.That(key.KeyType).IsEqualTo("ssh-ed25519");
+            await Assert.That(key.Comment).IsEqualTo("aes@example");
+            await Assert.That(key.PublicKey.ToArray()).IsEquivalentTo(await PublicBlobAsync(path));
+            var signature = key.Sign("ssh-ed25519", "data"u8.ToArray());
+            await Assert.That(VerifyingKey.Parse(key.PublicKey.Span).VerifySignature("ssh-ed25519", signature, "data"u8)).IsTrue();
+        }
+
+        await Assert.That(() => SshPrivateKey.Parse(text, TestSecrets.New())).Throws<FormatException>().WithMessageContaining("passphrase");
     }
 
     [Test]
@@ -117,7 +155,7 @@ public class EncryptedKeyInteropTests
             await Assert.That(key.PublicKey.ToArray()).IsEquivalentTo(expected.PublicKey.ToArray());
         }
 
-        await Assert.That(() => SshPrivateKey.Parse(text, NewPassphrase())).Throws<FormatException>().WithMessageContaining("passphrase is wrong");
+        await Assert.That(() => SshPrivateKey.Parse(text, TestSecrets.New())).Throws<FormatException>().WithMessageContaining("passphrase is wrong");
     }
 
     [Test]
@@ -171,7 +209,7 @@ public class EncryptedKeyInteropTests
         var (exit, _, error) = await RunAsync(openssl, "genpkey", "-algorithm", algorithm, "-pkeyopt", option, "-out", plain);
         await Assert.That(exit).IsEqualTo(0).Because(error);
 
-        var passphrase = NewPassphrase();
+        var passphrase = TestSecrets.New();
         var passphraseFile = directory.NewPath("phrase");
         await File.WriteAllTextAsync(passphraseFile, passphrase);
         var encrypted = directory.NewPath("encrypted");

@@ -98,7 +98,7 @@ public sealed class GssapiTests : IDisposable
                 _ => new FakeGssapiServer(),
             },
         };
-        await using var client = await ConnectAsync(server, gss, password: "secret");
+        await using var client = await ConnectAsync(server, gss, password: TestSecrets.Password);
 
         await Assert.That(client.IsConnected).IsTrue();
         await Assert.That(server.AuthAttempts).Contains("gssapi-with-mic");
@@ -124,7 +124,7 @@ public sealed class GssapiTests : IDisposable
     {
         // Off by default, as in ssh.
         await using (var server = new FakeSessionServer { AdvertisedMethods = ["gssapi-with-mic", "password"], Gssapi = new FakeGssapiServer() })
-        await using (var client = await ConnectAsync(server, gss: null, password: "secret"))
+        await using (var client = await ConnectAsync(server, gss: null, password: TestSecrets.Password))
         {
             await Assert.That(server.AuthAttempts).DoesNotContain("gssapi-with-mic");
         }
@@ -132,7 +132,7 @@ public sealed class GssapiTests : IDisposable
         // Over a plain stream there is no host name to name the service after, unless TargetHost gives one.
         var gss = new FakeGssapi();
         await using (var server = new FakeSessionServer { AdvertisedMethods = ["gssapi-with-mic", "password"], Gssapi = new FakeGssapiServer() })
-        await using (var client = await ConnectAsync(server, gss, password: "secret", targetHost: null))
+        await using (var client = await ConnectAsync(server, gss, password: TestSecrets.Password, targetHost: null))
         {
             await Assert.That(server.AuthAttempts).DoesNotContain("gssapi-with-mic");
             await Assert.That(gss.Host).IsNull();
@@ -178,7 +178,7 @@ public sealed class GssapiTests : IDisposable
 
         var gss = new FakeGssapi();
         await using var server = new FakeSessionServer { AdvertisedMethods = ["gssapi-with-mic", "password"], Gssapi = new FakeGssapiServer() };
-        await using var client = await ConnectAsync(server, gss, password: "secret");
+        await using var client = await ConnectAsync(server, gss, password: TestSecrets.Password);
         await Assert.That(server.AuthAttempts).DoesNotContain("gssapi-with-mic");
         await Assert.That(gss.Host).IsNull();
     }
@@ -199,7 +199,7 @@ public sealed class GssapiTests : IDisposable
             {
                 Config = SshConfig.Parse(config),
                 ResolveOptions = new SshConfigResolveOptions { LocalUser = "local", HomeDirectory = _dir },
-                Password = "secret",
+                Password = TestSecrets.Password,
                 UseAgent = false,
                 GssapiContextFactory = gss.Factory,
                 TcpConnector = (_, _, _, _) =>

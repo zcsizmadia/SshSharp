@@ -89,12 +89,14 @@ public class ProxyTests
             return true;
         });
 
-        var sshProxy = SshProxy.Http("127.0.0.1", proxy.Port, new NetworkCredential("alice", "s3cret:x"));
+        // Basic authentication allows a colon in the password, after the one that ends the user name.
+        var password = TestSecrets.New() + ":x";
+        var sshProxy = SshProxy.Http("127.0.0.1", proxy.Port, new NetworkCredential("alice", password));
         await using var stream = await sshProxy.ConnectAsync("ssh.internal", 2222, Timeout());
 
         await Assert.That(request).IsEqualTo(
             "CONNECT ssh.internal:2222 HTTP/1.1\r\nHost: ssh.internal:2222\r\nProxy-Authorization: Basic " +
-            Convert.ToBase64String("alice:s3cret:x"u8.ToArray()) + "\r\n\r\n");
+            Convert.ToBase64String(Encoding.ASCII.GetBytes("alice:" + password)) + "\r\n\r\n");
         await Assert.That(Encoding.ASCII.GetString(await ReadAsync(stream, 20))).IsEqualTo("SSH-2.0-Behind_1.0\r\n");
     }
 
@@ -138,6 +140,7 @@ public class ProxyTests
     [Test]
     public async Task Socks5_WithCredentials_SendsTheNameForTheProxyToResolve()
     {
+        var password = TestSecrets.New();
         byte[]? login = null, connect = null;
         await using var proxy = new FakeProxy(async stream =>
         {
@@ -146,8 +149,8 @@ public class ProxyTests
             var header = await ReadAsync(stream, 2);
             var user = await ReadAsync(stream, header[1]);
             var passwordLength = await ReadAsync(stream, 1);
-            var password = await ReadAsync(stream, passwordLength[0]);
-            login = [.. header, .. user, .. passwordLength, .. password];
+            var sent = await ReadAsync(stream, passwordLength[0]);
+            login = [.. header, .. user, .. passwordLength, .. sent];
             await stream.WriteAsync(new byte[] { 1, 0 });
             connect = await ReadAsync(stream, 4 + 1 + "ssh.internal".Length + 2);
 
@@ -156,9 +159,9 @@ public class ProxyTests
             return true;
         });
 
-        await using var stream = await SshProxy.Socks5("127.0.0.1", proxy.Port, new NetworkCredential("bob", "pw")).ConnectAsync("ssh.internal", 22, Timeout());
+        await using var stream = await SshProxy.Socks5("127.0.0.1", proxy.Port, new NetworkCredential("bob", password)).ConnectAsync("ssh.internal", 22, Timeout());
 
-        await Assert.That(login).IsEquivalentTo((byte[])[1, 3, .. "bob"u8, 2, .. "pw"u8]);
+        await Assert.That(login).IsEquivalentTo((byte[])[1, 3, .. "bob"u8, (byte)password.Length, .. Encoding.ASCII.GetBytes(password)]);
         await Assert.That(connect).IsEquivalentTo((byte[])[5, 1, 0, 3, 12, .. "ssh.internal"u8, 0, 22]);
         await Assert.That(Encoding.ASCII.GetString(await ReadAsync(stream, 11))).IsEqualTo("SSH-2.0-x\r\n");
     }
@@ -208,16 +211,17 @@ public class ProxyTests
     [Test]
     public async Task Socks5_WrongCredentials_AreReported()
     {
+        var password = TestSecrets.New();
         await using var proxy = new FakeProxy(async stream =>
         {
             await ReadAsync(stream, 4);
             await stream.WriteAsync(new byte[] { 5, 2 });
-            await ReadAsync(stream, 1 + 1 + 1 + 1 + 1);
+            await ReadAsync(stream, 1 + 1 + 1 + 1 + password.Length);
             await stream.WriteAsync(new byte[] { 1, 1 });
             return false;
         });
 
-        var ex = await Assert.That(async () => await SshProxy.Socks5("127.0.0.1", proxy.Port, new NetworkCredential("u", "p")).ConnectAsync("h", 22, Timeout())).Throws<SshException>();
+        var ex = await Assert.That(async () => await SshProxy.Socks5("127.0.0.1", proxy.Port, new NetworkCredential("u", password)).ConnectAsync("h", 22, Timeout())).Throws<SshException>();
 
         await Assert.That(ex!.Message).Contains("refused the user name or password");
     }
@@ -225,16 +229,17 @@ public class ProxyTests
     [Test]
     public async Task Socks5_AnAuthenticationReplyWithTheWrongVersion_IsRefused()
     {
+        var password = TestSecrets.New();
         await using var proxy = new FakeProxy(async stream =>
         {
             await ReadAsync(stream, 4);
             await stream.WriteAsync(new byte[] { 5, 2 });
-            await ReadAsync(stream, 1 + 1 + 1 + 1 + 1);
+            await ReadAsync(stream, 1 + 1 + 1 + 1 + password.Length);
             await stream.WriteAsync(new byte[] { 5, 0 }); // "success", but not an RFC 1929 reply (version 1)
             return false;
         });
 
-        var ex = await Assert.That(async () => await SshProxy.Socks5("127.0.0.1", proxy.Port, new NetworkCredential("u", "p")).ConnectAsync("h", 22, Timeout())).Throws<SshException>();
+        var ex = await Assert.That(async () => await SshProxy.Socks5("127.0.0.1", proxy.Port, new NetworkCredential("u", password)).ConnectAsync("h", 22, Timeout())).Throws<SshException>();
 
         await Assert.That(ex!.Message).Contains("wrong version");
     }
@@ -350,7 +355,7 @@ public class ProxyTests
         await using var client = await SshClient.ConnectAsync("ssh.behind.proxy", 22, new SshClientOptions
         {
             UserName = "tester",
-            Password = "secret",
+            Password = TestSecrets.Password,
             HostKeyVerifier = SshHostKeyVerifier.FromDelegate((_, _) => ValueTask.FromResult(true)),
             Proxy = SshProxy.FromUri(new Uri($"http://127.0.0.1:{proxy.Port}")),
         }, Timeout());
@@ -427,7 +432,7 @@ public class ProxyTests
         await using var client = await SshClient.ConnectAsync(server.ClientStream, new SshClientOptions
         {
             UserName = "tester",
-            Password = "secret",
+            Password = TestSecrets.Password,
             HostKeyVerifier = SshHostKeyVerifier.FromDelegate((_, _) => ValueTask.FromResult(true)),
         }, leaveOpen: true, Timeout());
 
