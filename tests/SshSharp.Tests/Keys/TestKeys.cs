@@ -15,7 +15,7 @@ namespace SshSharp.Tests.Keys;
 internal static class TestKeys
 {
     public static string OpenSshEd25519(out byte[] publicBlob, string comment = "test@example", int? checkOverride = null, byte[]? padding = null,
-        string? passphrase = null, string cipher = "aes256-ctr")
+        string? passphrase = null, string cipher = "aes256-ctr", int rounds = 16)
     {
         var seed = RandomNumberGenerator.GetBytes(32);
         var pub = new byte[32];
@@ -26,7 +26,7 @@ internal static class TestKeys
             w.WriteString("ssh-ed25519");
             w.WriteString(pub);
             w.WriteString([.. seed, .. pub]);
-        }, comment, checkOverride, padding, passphrase, cipher);
+        }, comment, checkOverride, padding, passphrase, cipher, rounds);
     }
 
     /// <summary>
@@ -312,7 +312,7 @@ internal static class TestKeys
     }
 
     private static string OpenSsh(byte[] publicBlob, Action<SshWriter> writeKey, string comment, int? checkOverride = null, byte[]? padding = null,
-        string? passphrase = null, string cipher = "aes256-ctr")
+        string? passphrase = null, string cipher = "aes256-ctr", int rounds = 16)
     {
         var check = (uint)RandomNumberGenerator.GetInt32(int.MaxValue);
         var section = Blob(w =>
@@ -327,8 +327,8 @@ internal static class TestKeys
         var pad = padding ?? Enumerable.Range(1, (blockSize - (section.Length % blockSize)) % blockSize).Select(i => (byte)i).ToArray();
         byte[] privateSection = [.. section, .. pad];
 
-        // Encrypted like ssh-keygen: bcrypt_pbkdf(passphrase, salt, 16 rounds) gives key || IV for the cipher, with the key and IV
-        // lengths of OpenSSH's cipher.c.
+        // Encrypted like ssh-keygen: bcrypt_pbkdf(passphrase, salt, rounds; 16 by default, as there) gives key || IV for the cipher,
+        // with the key and IV lengths of OpenSSH's cipher.c.
         var salt = RandomNumberGenerator.GetBytes(16);
         byte[] tag = [];
         if (passphrase is not null)
@@ -342,7 +342,7 @@ internal static class TestKeys
                 _ => throw new ArgumentException($"No such key file cipher: {cipher}.", nameof(cipher)),
             };
             var keyAndIv = new byte[keyLength + (chacha ? 0 : gcm ? 12 : 16)];
-            BcryptPbkdf.DeriveKey(Encoding.UTF8.GetBytes(passphrase), salt, 16, keyAndIv);
+            BcryptPbkdf.DeriveKey(Encoding.UTF8.GetBytes(passphrase), salt, rounds, keyAndIv);
             if (chacha)
             {
                 // As sshkey.c encrypts: chachapoly_crypt with sequence number 0 and no additional data. The Poly1305 key is ChaCha20
@@ -389,7 +389,7 @@ internal static class TestKeys
             }
             else
             {
-                w.WriteString(Blob(o => { o.WriteString(salt); o.WriteUInt32(16); }));
+                w.WriteString(Blob(o => { o.WriteString(salt); o.WriteUInt32((uint)rounds); }));
             }
 
             w.WriteUInt32(1);

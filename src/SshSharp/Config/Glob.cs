@@ -80,6 +80,7 @@ internal static class Glob
     /// </summary>
     public static IReadOnlyList<string> ExpandFiles(string pattern)
     {
+        // Stryker disable once String : GetPathRoot returns null only for a null path
         var root = Path.GetPathRoot(pattern) ?? string.Empty;
         var segments = pattern[root.Length..].Split(['/', '\\'], StringSplitOptions.RemoveEmptyEntries);
         List<string> current = [root];
@@ -101,6 +102,8 @@ internal static class Glob
                     continue;
                 }
 
+                // Stryker disable once Block,Statement : every directory listed was just seen to exist, except the root, which exists unless it
+                // names a missing drive
                 if (!Directory.Exists(dir))
                 {
                     continue;

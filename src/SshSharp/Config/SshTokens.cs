@@ -38,6 +38,7 @@ internal sealed record SshTokenContext(
 
     private string Expand(string value, bool variables)
     {
+        // Stryker disable once String : a value without tokens comes through the loop below unchanged too
         if (!value.Contains('%', StringComparison.Ordinal) && !(variables && value.Contains("${", StringComparison.Ordinal)))
         {
             return value;
@@ -49,17 +50,22 @@ internal sealed record SshTokenContext(
             if (variables && value[i] == '$' && i + 1 < value.Length && value[i + 1] == '{')
             {
                 var close = value.IndexOf('}', i + 2);
+
+                // Stryker disable once Equality : close is at least i + 2
                 if (close < 0)
                 {
+                    // Stryker disable once String : the message is for people
                     throw new FormatException($"Unterminated '${{' in '{value}'.");
                 }
 
                 var name = value[(i + 2)..close];
                 if (name.Length == 0)
                 {
+                    // Stryker disable once String : the message is for people
                     throw new FormatException($"An empty '${{}}' in '{value}'.");
                 }
 
+                // Stryker disable once String : the message is for people
                 sb.Append(GetEnvironmentVariable(name) ?? throw new FormatException($"Environment variable '{name}' is not set."));
                 i = close;
                 continue;
@@ -73,6 +79,7 @@ internal sealed record SshTokenContext(
 
             if (++i >= value.Length)
             {
+                // Stryker disable once String : the message is for people
                 throw new FormatException($"Trailing '%' in '{value}'.");
             }
 
@@ -93,6 +100,8 @@ internal sealed record SshTokenContext(
                 'i' => LocalUserId(),
                 'T' => "NONE", // no tun device is ever opened
                 var other when Extra is not null && Extra.TryGetValue(other, out var extra) => extra,
+
+                // Stryker disable once String : the message is for people
                 _ => throw new FormatException($"Unknown token '%{value[i]}' in '{value}'."),
             });
         }
@@ -124,12 +133,16 @@ internal sealed record SshTokenContext(
             if (path[i] == '$' && i + 1 < path.Length && path[i + 1] == '{')
             {
                 var close = path.IndexOf('}', i + 2);
+
+                // Stryker disable once Equality : close is at least i + 2
                 if (close < 0)
                 {
+                    // Stryker disable once String : the message is for people
                     throw new FormatException($"Unterminated '${{' in '{value}'.");
                 }
 
                 var name = path[(i + 2)..close];
+                // Stryker disable once String : the message is for people
                 sb.Append(GetEnvironmentVariable(name) ?? throw new FormatException($"Environment variable '{name}' is not set."));
                 i = close;
             }
@@ -156,6 +169,7 @@ internal sealed record SshTokenContext(
         return Convert.ToHexString(SHA1.HashData(data)).ToLowerInvariant();
     }
 
+    // Stryker disable once String : the message is for people
     private static string LocalUserId() => OperatingSystem.IsWindows()
         ? throw new FormatException("The %i token (local user id) is not available on Windows.")
         : NativeMethods.GetUid().ToString(System.Globalization.CultureInfo.InvariantCulture);
