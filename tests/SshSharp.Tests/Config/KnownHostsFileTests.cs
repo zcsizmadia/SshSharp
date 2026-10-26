@@ -372,7 +372,8 @@ public class KnownHostsFileTests
     /// <summary>
     /// Replacing the file is retried while it fails, as it does on Windows while another process has the file open. A target that is
     /// in the way for a moment is replaced once it is free. One that stays in the way fails once the retries run out, with no temporary
-    /// file left behind. A directory at the path stands in for the open file, because it makes the replace fail on every platform.
+    /// file left behind. On Windows the target is held open without sharing, the case the retries are for. Elsewhere an open file does
+    /// not stop the replace, so a directory at the path stands in for it.
     /// </summary>
     [Test]
     [Arguments(false)]
@@ -387,20 +388,55 @@ public class KnownHostsFileTests
             file.Add("example.com", 22, "ssh-ed25519", KeyA);
             Task Save() => async ? file.SaveAsync(path) : Task.Run(() => file.Save(path));
 
-            // The retries wait in real time (25 ms, then 50 ms and so on, 700 ms in all), so the directory goes after 150 ms: after the
-            // first retries and well before the last.
-            Directory.CreateDirectory(path);
+            // The retries wait in real time (25 ms, then 50 ms and so on, 700 ms in all). The target is freed once the temporary file
+            // is written and a moment has passed, so the first replace has failed and the retries still have most of their time left. A
+            // deleted directory is not used on Windows: it stays in the way for as long as anything (an indexer, an antivirus) has it open.
+            FileStream? held = null;
+            if (OperatingSystem.IsWindows())
+            {
+                File.WriteAllText(path, "");
+                held = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.None);
+            }
+            else
+            {
+                Directory.CreateDirectory(path);
+            }
+
             var saving = Save();
-            await Task.Delay(150);
-            Directory.Delete(path);
+            while (Directory.GetFiles(dir).Length < (held is null ? 1 : 2) && !saving.IsCompleted)
+            {
+                await Task.Delay(5);
+            }
+
+            await Task.Delay(50);
+            if (held is null)
+            {
+                Directory.Delete(path);
+            }
+            else
+            {
+                held.Dispose();
+            }
+
             await saving;
             await Assert.That(KnownHostsFile.Load(path).Check("example.com", 22, "ssh-ed25519", KeyA)).IsEqualTo(KnownHostsCheckResult.Match);
 
-            File.Delete(path);
-            Directory.CreateDirectory(path);
-            var failure = await Assert.ThrowsAsync<Exception>(Save);
-            await Assert.That(failure is IOException or UnauthorizedAccessException).IsTrue();
-            await Assert.That(Directory.GetFiles(dir)).IsEmpty();
+            if (OperatingSystem.IsWindows())
+            {
+                held = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.None);
+            }
+            else
+            {
+                File.Delete(path);
+                Directory.CreateDirectory(path);
+            }
+
+            using (held)
+            {
+                var failure = await Assert.ThrowsAsync<Exception>(Save);
+                await Assert.That(failure is IOException or UnauthorizedAccessException).IsTrue();
+                await Assert.That(Directory.GetFiles(dir)).IsEquivalentTo(held is null ? Array.Empty<string>() : [path]);
+            }
         }
         finally
         {
