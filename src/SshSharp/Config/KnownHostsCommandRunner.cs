@@ -128,7 +128,8 @@ internal static class KnownHostsCommandRunner
         }
     }
 
-    private static async Task<string> ReadBoundedAsync(Stream stream, CancellationToken cancellationToken)
+    /// <summary>Reads <paramref name="stream"/> to its end as UTF-8, failing once it has more than <see cref="MaxOutput"/> bytes.</summary>
+    internal static async Task<string> ReadBoundedAsync(Stream stream, CancellationToken cancellationToken)
     {
         using var buffer = new MemoryStream();
         var chunk = new byte[8192];
@@ -137,6 +138,7 @@ internal static class KnownHostsCommandRunner
         {
             if (buffer.Length + read > MaxOutput)
             {
+                // Stryker disable once String : the message is for people
                 throw new SshException(SshFailureReason.ConnectFailed, $"KnownHostsCommand wrote more than {MaxOutput} bytes.");
             }
 
@@ -193,6 +195,7 @@ internal static class KnownHostsCommandRunner
 
         if (quote != '\0')
         {
+            // Stryker disable once String : the message is for people
             throw new FormatException("A quote in KnownHostsCommand is not closed.");
         }
 
