@@ -167,12 +167,50 @@ public class SshConfigMatchTests
         await Assert.That(() => SshExecMatcher.RunShellAsync(command, cts.Token)).Throws<OperationCanceledException>();
     }
 
+    /// <summary>
+    /// Runs <see cref="SshExecMatcher.RunShellAsync"/> on the thread pool and gives up after 30 seconds, so that a run that never ends
+    /// (even one blocked before its first await) fails the test with the step it was on, rather than hanging the test run.
+    /// </summary>
+    private static async Task<bool> RunShellWithinAsync(string step, string command, CancellationToken cancellationToken)
+    {
+        try
+        {
+            // The token goes to the command alone: it is what must answer the cancellation.
+            return await Task.Run(() => SshExecMatcher.RunShellAsync(command, cancellationToken))
+                .WaitAsync(TimeSpan.FromSeconds(30), CancellationToken.None);
+        }
+        catch (TimeoutException ex)
+        {
+            throw new TimeoutException($"{step} did not finish within 30 s.", ex);
+        }
+    }
+
     [Test]
     public async Task RunShell_ReportsExitStatus()
     {
         await Assert.That(await SshExecMatcher.RunShellAsync("exit 0")).IsTrue();
         await Assert.That(await SshExecMatcher.RunShellAsync("exit 1")).IsFalse();
         await Assert.That(() => SshExecMatcher.RunShellAsync("")).Throws<ArgumentException>();
+    }
+
+    [Test]
+    public async Task RunShell_GivesTheCommandNoInput_AndReadsAwayItsOutput()
+    {
+        // sort reads its input to the end, and 1 MiB is far more than a pipe holds: either would wait out the deadline below if the
+        // input were left open or the output unread.
+        var path = Path.Combine(Path.GetTempPath(), "sshsharp-exec-" + Guid.NewGuid().ToString("N"));
+        await File.WriteAllTextAsync(path, new string('x', 1024 * 1024));
+        try
+        {
+            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+            await Assert.That(await RunShellWithinAsync("sort", "sort", deadline.Token)).IsTrue();
+            var print = OperatingSystem.IsWindows() ? $"type \"{path}\"" : $"cat '{path}'";
+            await Assert.That(await RunShellWithinAsync("Printing 1 MiB", print, deadline.Token)).IsTrue();
+        }
+        finally
+        {
+            File.Delete(path);
+        }
     }
 
     [Test]

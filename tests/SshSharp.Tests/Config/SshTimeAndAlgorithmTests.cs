@@ -14,6 +14,7 @@ public class SshTimeAndAlgorithmTests
     [Arguments("1d", 86400)]
     [Arguments("2w", 1209600)]
     [Arguments("1m30s", 90)]
+    [Arguments("2147483647", int.MaxValue)] // the most OpenSSH's convtime takes
     public async Task Time_Parses(string text, int seconds)
     {
         await Assert.That(SshTime.TryParse(text, out var t)).IsTrue();

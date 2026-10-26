@@ -19,6 +19,8 @@ public static class SshExecMatcher
     public static async Task<bool> RunShellAsync(string command, CancellationToken cancellationToken = default)
     {
         using var process = Start(command);
+
+        // Stryker disable once Block,Boolean : without shell execute, Process.Start returns a process or throws
         if (process is null)
         {
             return false;
@@ -46,6 +48,8 @@ public static class SshExecMatcher
         var info = new ProcessStartInfo(windows ? "cmd.exe" : "/bin/sh")
         {
             UseShellExecute = false,
+
+            // Stryker disable once Boolean : a console window is not something a test can see
             CreateNoWindow = true,
             RedirectStandardInput = true,
 
@@ -66,12 +70,16 @@ public static class SshExecMatcher
         }
 
         var process = Process.Start(info);
+
+        // Stryker disable once Block : as above, Process.Start does not return null here
         if (process is null)
         {
             return null;
         }
 
         process.StandardInput.Close();
+
+        // Stryker disable once Assignment : the output is read and dropped with or without a handler
         process.OutputDataReceived += static (_, _) => { };
         process.BeginOutputReadLine();
         return process;
