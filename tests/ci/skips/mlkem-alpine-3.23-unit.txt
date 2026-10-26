@@ -1,1 +1,3 @@
 # Every ML-KEM unit test runs here (OpenSSL 3.5): nothing may skip.
+# This job runs on .NET 10's runtime image, so the case for .NET 11's platform X25519 cannot run (WycheproofTests is here for ML-KEM).
+WycheproofTests.X25519_AgreesOrRefusesAsWycheproofExpects(True)
