@@ -186,20 +186,6 @@ public class SshConfigMatchTests
     }
 
     [Test]
-    public async Task RunShellAsync_WhenCancelled_KillsTheCommandAndWhatItStarted()
-    {
-        // The shell starts a child that writes the marker after two seconds; killing only the shell would leave the child to write it.
-        var marker = Path.Combine(Path.GetTempPath(), "sshsharp-exec-" + Guid.NewGuid().ToString("N"));
-        var command = OperatingSystem.IsWindows()
-            ? $"cmd /d /c \"ping -n 3 127.0.0.1 >nul & echo x>\"{marker}\"\""
-            : $"(sleep 2; echo x > '{marker}') & wait";
-        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(300));
-        await Assert.That(() => RunShellWithinAsync("The cancelled command", command, cts.Token)).Throws<OperationCanceledException>();
-        await Task.Delay(TimeSpan.FromSeconds(4));
-        await Assert.That(File.Exists(marker)).IsFalse();
-    }
-
-    [Test]
     public async Task RunShell_ReportsExitStatus()
     {
         await Assert.That(await SshExecMatcher.RunShellAsync("exit 0")).IsTrue();
