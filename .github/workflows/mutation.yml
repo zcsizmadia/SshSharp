@@ -126,6 +126,8 @@ jobs:
       - name: Stryker
         working-directory: tests/SshSharp.Tests
         # MTP is Stryker's runner for Microsoft.Testing.Platform, which TUnit is built on (a preview runner in Stryker.NET 5).
+        # stryker-config.json, found in this directory, leaves ConfigureAwait's argument unmutated: library code has no synchronization
+        # context to return to, so true and false behave the same and every such mutant would survive.
         env:
           FULL: ${{ github.event_name == 'workflow_dispatch' && inputs.full }}
           # Only this scope's tests are compiled (tests/SshSharp.Tests/SshSharp.Tests.csproj), so a mutant runs the tests that can

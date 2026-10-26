@@ -79,6 +79,7 @@ public sealed class KnownHostsFile
             return new KnownHostsFile();
         }
 
+        // Stryker disable once Boolean : a handle opened for asynchronous I/O reads the same bytes synchronously
         using var stream = OpenShared(path, useAsync: false);
         using var reader = new StreamReader(stream);
         return Parse(reader.ReadToEnd());
@@ -170,6 +171,7 @@ public sealed class KnownHostsFile
         string? comment = null, KnownHostsMarker marker = KnownHostsMarker.None)
     {
         var entry = KnownHostsEntry.ForHost(host, port, keyType, publicKey.ToArray(), hash, comment, marker);
+        // Stryker disable once Boolean : IsInvalid counts only for a line without an entry
         _lines.Add(new Line(entry.ToLine(), entry, false));
         return entry;
     }
@@ -198,6 +200,7 @@ public sealed class KnownHostsFile
             {
                 count++;
                 _lines.RemoveAt(i);
+                // Stryker disable once Statement : a hashed entry's one pattern is never the plain name, so the code below would continue too
                 continue;
             }
 
@@ -216,6 +219,7 @@ public sealed class KnownHostsFile
             else
             {
                 var updated = entry.WithHostPatterns(string.Join(',', remaining));
+                // Stryker disable once Boolean : IsInvalid counts only for a line without an entry
                 _lines[i] = new Line(updated.ToLine(), updated, false);
             }
         }
@@ -370,6 +374,7 @@ public sealed class KnownHostsFile
 
     private static bool EndsWithoutNewline(string path)
     {
+        // Stryker disable once Bitwise : only Windows enforces sharing modes, and the tests cannot hold a file open from another process there
         using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
         if (stream.Length == 0)
         {
@@ -424,18 +429,23 @@ public sealed class KnownHostsFile
                 "@revoked" => KnownHostsMarker.Revoked,
                 _ => (KnownHostsMarker)(-1),
             };
+            // Stryker disable once Equality : the known markers are positive, so <= 0 finds only the unknown one too
             if (marker < 0)
             {
                 return new Line(raw, null, true);
             }
 
+            // At most three fields were read, so with the marker removed the key is never among them.
             fields.RemoveAt(0);
-            if (fields.Count < 3 && comment is not null)
+            if (comment is not null)
             {
-                // The comment was split off before the marker shifted the fields.
+                // The comment was split off before the marker shifted the fields. It was trimmed, so it does not start with a separator
+                // and end is never 0.
                 var rest = comment.AsSpan();
                 var end = rest.IndexOfAny(' ', '\t');
+                // Stryker disable once Equality : end is never 0 (above)
                 fields.Add(end < 0 ? rest.ToString() : rest[..end].ToString());
+                // Stryker disable once Equality : end is never 0 (above)
                 comment = end < 0 ? null : rest[end..].TrimStart(" \t").ToString();
                 if (string.IsNullOrEmpty(comment))
                 {

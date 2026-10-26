@@ -209,7 +209,7 @@ list:
 - the job summary counts the skips by reason.
 
 The lists hold only what a job cannot run: .NET 8 without ML-KEM or `gssapi-with-mic`, a Linux without ML-KEM in its OpenSSL,
-Windows without FIFOs, servers without an algorithm, an extension or a key setup, and tools too old for a check: `ssh-keygen` reads
+Windows without FIFOs or Unix file modes, servers without an algorithm, an extension or a key setup, and tools too old for a check: `ssh-keygen` reads
 Ed25519 PKCS#8 keys only from OpenSSH 9.8p1 on (9.6p1 has the code, but its build never turned it on), so
 `KeyExportInteropTests.SshKeygen_ReadsPkcs8(Ed25519, ...)` skips with Ubuntu 24.04's OpenSSH 9.6p1 and OpenSSH for Windows 9.5,
 and runs on macOS, where CI installs Homebrew's OpenSSH. A new skip is not added to a list until it is understood. A skip can hide a
