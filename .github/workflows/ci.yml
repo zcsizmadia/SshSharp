@@ -64,24 +64,10 @@ jobs:
           sudo ifconfig lo0 alias 127.0.0.2 up
           ifconfig lo0 | grep -F 'inet 127.0.0.2'
       - name: Test net8.0
-        timeout-minutes: 14 # DIAGNOSTIC (temporary)
-        shell: bash
+        timeout-minutes: 12 # DIAGNOSTIC (temporary)
         env:
           SSHSHARP_DIAG: ${{ runner.temp }}/diag
-        run: |
-          dotnet test --project tests/SshSharp.Tests -c Release -f net8.0 --no-build --treenode-filter "${{ env.UNIT_TESTS }}" --report-trx --report-trx-filename unit-net8.0.trx --results-directory TestResults &
-          pid=$!
-          for i in $(seq 1 60); do sleep 10; kill -0 "$pid" 2>/dev/null || break; done
-          if kill -0 "$pid" 2>/dev/null; then
-            echo "::warning::the tests still run after 10 minutes; sampling"
-            ps -axo pid,ppid,stat,etime,command > "$RUNNER_TEMP/diag-ps.txt" || true
-            if [ "$RUNNER_OS" = macOS ]; then
-              for p in $(pgrep -f SshSharp.Tests); do sample "$p" 5 -file "$RUNNER_TEMP/diag-sample-$p.txt" || true; done
-            fi
-            pkill -f SshSharp.Tests || true
-            kill "$pid" || true
-          fi
-          wait "$pid"
+        run: dotnet test --project tests/SshSharp.Tests -c Release -f net8.0 --no-build --treenode-filter "${{ env.UNIT_TESTS }}" --report-trx --report-trx-filename unit-net8.0.trx --results-directory TestResults
       - name: Diagnostic output (temporary)
         if: always()
         shell: bash
