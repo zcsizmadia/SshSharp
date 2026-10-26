@@ -35,7 +35,7 @@ public sealed class SftpTests : IDisposable
             rig.Client = await SshClient.ConnectAsync(rig.Ssh.ClientStream, new SshClientOptions
             {
                 UserName = "tester",
-                Password = "secret",
+                Password = TestSecrets.Password,
                 HostKeyVerifier = SshHostKeyVerifier.FromDelegate((_, _) => ValueTask.FromResult(true)),
             }, leaveOpen: true, Timeout());
             rig.Sftp = await rig.Client.OpenSftpAsync(Timeout());
@@ -94,7 +94,7 @@ public sealed class SftpTests : IDisposable
         await using var client = await SshClient.ConnectAsync(ssh.ClientStream, new SshClientOptions
         {
             UserName = "tester",
-            Password = "secret",
+            Password = TestSecrets.Password,
             HostKeyVerifier = SshHostKeyVerifier.FromDelegate((_, _) => ValueTask.FromResult(true)),
         }, leaveOpen: true, Timeout());
 

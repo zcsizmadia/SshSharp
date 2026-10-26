@@ -229,7 +229,10 @@ whose modification time equals it to the second (SFTP version 3 carries whole se
 size or time the server does not send counts as a change. It is a quick check, not a content check: a file rewritten with the same
 size and its time set back is taken as unchanged. The times match only when the earlier transfer copied them, so use it with
 `Preserve`. On a file system with coarser times (FAT's 2 seconds), `TimeTolerance` lets them differ by that much. A download
-compares the listing with the local files at no extra cost; an upload lists each remote directory that existed already, once. The summary counts `Excluded` (the filter's) and `Unchanged` entries apart from `Skipped`. Neither option
+compares the listing with the local files at no extra cost; an upload lists each remote directory that existed already, once.
+ProFTPD's `mod_sftp` answers OK to creating a directory that is there already, so against it (recognised by its identification,
+`mod_sftp`) an upload lists every remote directory it goes into. The summary counts `Excluded` (the filter's) and `Unchanged`
+entries apart from `Skipped`. Neither option
 deletes anything at the destination. See [Choose what a directory transfer copies](how-to/transfer-files-sftp.md#choose-what-a-directory-transfer-copies)
 and [Skip files that have not changed](how-to/transfer-files-sftp.md#skip-files-that-have-not-changed).
 
@@ -336,7 +339,10 @@ Some servers hash a file where it is, so a transfer can be checked without readi
 - **Feature detection.** Without an announced extension, or when the server lists its algorithms and none of those asked for is
   among them, `GetFileHashAsync` throws `NotSupportedException` before anything is sent. A server that cannot hash with any of them
   answers `SftpException` (`OperationUnsupported`). A reply with an algorithm that was not asked for, or a hash of the wrong length,
-  is a protocol error.
+  is a protocol error. ProFTPD's reply, which leaves out the extension's name before the algorithm, is read as well.
+- **Ranges on ProFTPD.** ProFTPD's `mod_sftp` (1.3.9) reads a range in chunks of four file system blocks (16 KiB on most file
+  systems) and, when `length` is not a multiple of that, hashes on to the end of the file, so the hash does not match. Hash the
+  whole file, or a range whose length is a multiple of 64 KiB.
 
 ### Raw extended requests
 

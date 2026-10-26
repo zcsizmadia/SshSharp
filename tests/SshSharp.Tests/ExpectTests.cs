@@ -223,14 +223,15 @@ public class ExpectTests
     {
         // Wait for the prompt, send, then read what came back line by line: nothing is lost between the two kinds of read.
         var input = new MemoryStream();
+        var password = TestSecrets.New();
         var expect = new SshExpect(new ScriptedStream(new[] { "Password: ", "\r\nWelcome\r\n$ " }.Select(Encoding.UTF8.GetBytes)), input);
 
         await expect.ExpectAsync("Password: ", Timeout());
-        await expect.SendLineAsync("secret", Timeout());
+        await expect.SendLineAsync(password, Timeout());
         await Assert.That(await expect.ReadLineAsync(Timeout())).IsEqualTo(string.Empty); // the rest of the prompt's line
         await Assert.That(await expect.ReadLineAsync(Timeout())).IsEqualTo("Welcome");
         await Assert.That((await expect.ExpectAsync("$ ", Timeout())).Before).IsEqualTo(string.Empty);
-        await Assert.That(Encoding.UTF8.GetString(input.ToArray())).IsEqualTo("secret\n");
+        await Assert.That(Encoding.UTF8.GetString(input.ToArray())).IsEqualTo(password + "\n");
     }
 
     [Test]

@@ -54,7 +54,7 @@ public sealed class ConfigConnectOverridesTests : IDisposable
             UseAgent = false,
             Config = SshConfig.Parse("Host box\n ConnectionAttempts 3\n" + Trusting),
             ResolveOptions = Resolve,
-            Password = "secret",
+            Password = TestSecrets.Password,
             TcpConnector = FailingThen(1, Refused, server, calls),
         }, Timeout());
 
@@ -113,7 +113,7 @@ public sealed class ConfigConnectOverridesTests : IDisposable
             UseAgent = false,
             Config = SshConfig.Parse("Host box\n" + Trusting),
             ResolveOptions = Resolve,
-            Password = "secret",
+            Password = TestSecrets.Password,
             ConnectionAttempts = 2, // the override, with nothing in the configuration
             TcpConnector = FailingThen(1, () => new SshException(SshFailureReason.ConnectFailed, "No.", new SocketException((int)error)), server, calls),
         }, Timeout());
@@ -131,7 +131,7 @@ public sealed class ConfigConnectOverridesTests : IDisposable
             UseAgent = false,
             Config = SshConfig.Parse("Host box\n ConnectionAttempts 3\n User tester\n StrictHostKeyChecking yes\n UserKnownHostsFile none\n GlobalKnownHostsFile none\n"),
             ResolveOptions = Resolve,
-            Password = "secret",
+            Password = TestSecrets.Password,
             TcpConnector = FailingThen(0, Refused, server, calls),
         }, Timeout()));
         await Assert.That(calls.Count).IsEqualTo(1);
@@ -316,7 +316,7 @@ public sealed class ConfigConnectOverridesTests : IDisposable
             UseAgent = false,
             Config = SshConfig.Parse("Host box\n" + KeepAlive + Trusting),
             ResolveOptions = Resolve,
-            Password = "secret",
+            Password = TestSecrets.Password,
             TcpConnector = FailingThen(0, Refused, server, []),
         }, Timeout()))
         {
@@ -330,7 +330,7 @@ public sealed class ConfigConnectOverridesTests : IDisposable
             UseAgent = false,
             Config = SshConfig.Parse("Host box\n" + KeepAlive + Trusting),
             ResolveOptions = Resolve,
-            Password = "secret",
+            Password = TestSecrets.Password,
             KeepAliveInterval = TimeSpan.FromSeconds(10),
             KeepAliveCountMax = 7,
             TcpConnector = FailingThen(0, Refused, server, []),
@@ -349,7 +349,7 @@ public sealed class ConfigConnectOverridesTests : IDisposable
                 UseAgent = false,
                 Config = SshConfig.Parse("Host box\n" + KeepAlive + Trusting),
                 ResolveOptions = Resolve,
-                Password = "secret",
+                Password = TestSecrets.Password,
                 KeepAliveInterval = off,
                 TcpConnector = FailingThen(0, Refused, server, []),
             }, Timeout());

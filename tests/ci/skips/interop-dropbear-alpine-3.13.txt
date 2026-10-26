@@ -40,6 +40,5 @@ TransportInteropTests.HandshakeAndEncryptedRoundTrip(diffie-hellman-group16-sha5
 TransportInteropTests.HandshakeAndEncryptedRoundTrip(diffie-hellman-group18-sha512, chacha20-poly1305@openssh·com, ssh-ed25519)
 TransportInteropTests.HandshakeAndEncryptedRoundTrip(sntrup761x25519-sha512, chacha20-poly1305@openssh·com, ssh-ed25519)
 TransportInteropTests.HandshakeAndEncryptedRoundTrip(sntrup761x25519-sha512@openssh·com, chacha20-poly1305@openssh·com, ssh-ed25519)
-TransportInteropTests.ManyKeyExchanges_PerHostKey_AllVerify
 TransportInteropTests.PlainHmacSha2_HandshakeAndEncryptedRoundTrip(aes128-ctr, hmac-sha2-512)
 UpdateHostKeysInteropTests.OpenSshProvesItsOtherHostKeys_AndTheyAreRecorded

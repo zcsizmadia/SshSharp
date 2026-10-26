@@ -26,7 +26,7 @@ public sealed class UpdateHostKeysTests : IDisposable
         var options = new SshClientOptions
         {
             UserName = "tester",
-            Password = "secret",
+            Password = TestSecrets.Password,
             HostKeyAlias = Host,
             HostKeyVerifier = new KnownHostsVerifier([KnownHosts]) { Policy = StrictHostKeyChecking.Yes, UpdateHostKeys = update },
         };
@@ -140,7 +140,7 @@ public sealed class UpdateHostKeysTests : IDisposable
         await using var client = await SshClient.ConnectAsync(server.ClientStream, new SshClientOptions
         {
             UserName = "tester",
-            Password = "secret",
+            Password = TestSecrets.Password,
             HostKeyAlias = Host,
             HostKeyVerifier = new KnownHostsVerifier([KnownHosts]) { Policy = StrictHostKeyChecking.No, UpdateHostKeys = true },
             Logger = skipped,
@@ -201,7 +201,7 @@ public sealed class UpdateHostKeysTests : IDisposable
         return await SshClient.ConnectAsync(server.ClientStream, new SshClientOptions
         {
             UserName = "tester",
-            Password = "secret",
+            Password = TestSecrets.Password,
             HostKeyAlias = Host,
             HostKeyVerifier = new KnownHostsVerifier([KnownHosts]) { Policy = StrictHostKeyChecking.Yes, UpdateHostKeys = true, ConfirmHostKeyUpdate = confirm },
         }, leaveOpen: true, Timeout());

@@ -58,6 +58,7 @@ public class TransportInteropTests
     /// the key exchange runs; each failure is reported with the signature's own description.
     /// </summary>
     [Test]
+    [Category("Handshakes")] // opt-in with SSHSHARP_TEST_HANDSHAKES; CI leaves it out
     public async Task ManyKeyExchanges_PerHostKey_AllVerify()
     {
         if (!RealServer.IsAvailable || !int.TryParse(Environment.GetEnvironmentVariable("SSHSHARP_TEST_HANDSHAKES"), out var count) || count <= 0)

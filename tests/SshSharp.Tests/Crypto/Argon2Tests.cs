@@ -58,11 +58,12 @@ public class Argon2Tests
     public async Task LongOutputs_UseTheChainedHash_AndInvalidParametersAreRefused()
     {
         // 80 bytes (what PuTTY derives: key, IV and MAC key) exercises H' beyond 64 bytes.
+        var passphrase = Encoding.UTF8.GetBytes(TestSecrets.New());
         var output = new byte[80];
-        Argon2.Hash(Argon2Type.Argon2id, Encoding.UTF8.GetBytes("passphrase"), new byte[16], memoryKiB: 64, passes: 1, parallelism: 1, output);
+        Argon2.Hash(Argon2Type.Argon2id, passphrase, new byte[16], memoryKiB: 64, passes: 1, parallelism: 1, output);
         await Assert.That(output.Any(b => b != 0)).IsTrue();
         var again = new byte[80];
-        Argon2.Hash(Argon2Type.Argon2id, Encoding.UTF8.GetBytes("passphrase"), new byte[16], memoryKiB: 64, passes: 1, parallelism: 1, again);
+        Argon2.Hash(Argon2Type.Argon2id, passphrase, new byte[16], memoryKiB: 64, passes: 1, parallelism: 1, again);
         await Assert.That(again).IsEquivalentTo(output);
 
         await Assert.That(() => Argon2.Hash(Argon2Type.Argon2id, [], new byte[16], 4, 1, 1, new byte[32])).Throws<ArgumentException>();

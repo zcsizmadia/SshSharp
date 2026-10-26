@@ -200,7 +200,7 @@ public sealed class SshTelemetryTests : IDisposable
 
         // UploadFileAsync is one span, not one with an UploadAsync span inside.
         await Assert.That(uploads).IsEquivalentTo(new object?[] { (long)data.Length, 1000L });
-        await AssertNoneRecordedAsync(spans, "secret", _dir, "telemetry-user");
+        await AssertNoneRecordedAsync(spans, TestSecrets.Password, _dir, "telemetry-user");
 
         // Others transfer in parallel: at least these bytes, each counted once per direction.
         double Sum(string direction) => measurements.Of("sshsharp.sftp.bytes").Where(m => Measurements.Has(m.Tags, "ssh.sftp.direction", direction)).Sum(m => m.Value);
@@ -312,7 +312,7 @@ public sealed class SshTelemetryTests : IDisposable
 
         // A single-file transfer has no file or directory counts: they are the directory spans' tags, as for SFTP.
         await Assert.That(spans.Any(a => a.GetTagItem("ssh.scp.files") is not null || a.GetTagItem("ssh.scp.directories") is not null)).IsFalse();
-        await AssertNoneRecordedAsync(spans, "secret", "/srv", _dir, "telemetry-user");
+        await AssertNoneRecordedAsync(spans, TestSecrets.Password, "/srv", _dir, "telemetry-user");
 
         // Others transfer in parallel: at least these bytes, each counted once per direction.
         double Sum(string direction) => measurements.Of("sshsharp.scp.bytes").Where(m => Measurements.Has(m.Tags, "ssh.scp.direction", direction)).Sum(m => m.Value);

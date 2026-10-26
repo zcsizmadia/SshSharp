@@ -137,7 +137,7 @@ public sealed class ConfigGapsTests : IDisposable
         {
             Config = SshConfig.Parse(config),
             ResolveOptions = Options(),
-            Password = "secret",
+            Password = TestSecrets.Password,
             UseAgent = false,
             AllowKnownHostsCommand = allow,
             HostKeyVerifier = verifier,

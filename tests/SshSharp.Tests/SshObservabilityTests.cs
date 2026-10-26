@@ -40,10 +40,10 @@ public class SshObservabilityTests
 
     private static CancellationToken Timeout() => new CancellationTokenSource(TimeSpan.FromSeconds(60)).Token;
 
-    private static SshClientOptions Options(ILogger? logger = null, string? password = "secret", long rekeyBytes = 1L << 30, bool fips = false) => new()
+    private static SshClientOptions Options(ILogger? logger = null, string? password = null, long rekeyBytes = 1L << 30, bool fips = false) => new()
     {
         UserName = "tester",
-        Password = password,
+        Password = password ?? TestSecrets.Password,
         HostKeyVerifier = SshHostKeyVerifier.FromDelegate((_, _) => ValueTask.FromResult(true)),
         Logger = logger,
         RekeyAfterBytes = rekeyBytes,
@@ -117,10 +117,12 @@ public class SshObservabilityTests
     [Test]
     public async Task LogsTheLifecycle_ButNeverASecret()
     {
-        const string command = "deploy --token=top-secret-xyz";
+        var password = TestSecrets.New();
+        var token = TestSecrets.New();
+        var command = "deploy --token=" + token;
         var logger = new TestLogger();
-        await using var server = new FakeSessionServer { Password = "hunter2" };
-        await using (var client = await ConnectAsync(server, Options(logger, password: "hunter2")))
+        await using var server = new FakeSessionServer { Password = password };
+        await using (var client = await ConnectAsync(server, Options(logger, password: password)))
         {
             var result = await client.RunCommandAsync(command, Timeout());
             await Assert.That(result.ExitStatus).IsEqualTo(0);
@@ -140,8 +142,8 @@ public class SshObservabilityTests
         await Assert.That(all).Contains("Disconnecting");
 
         // The point of the exercise: nothing sensitive in any message, at any level.
-        await Assert.That(all).DoesNotContain("hunter2");
-        await Assert.That(all).DoesNotContain("top-secret");
+        await Assert.That(all).DoesNotContain(password);
+        await Assert.That(all).DoesNotContain(token);
         await Assert.That(all).DoesNotContain("deploy");
         // Listed, not just counted, so a failure says which warning appeared.
         await Assert.That(logger.Entries.Where(e => e.Level >= LogLevel.Warning).Select(e => $"{e.Level}: {e.Message}").ToList()).IsEmpty();
@@ -171,19 +173,21 @@ public class SshObservabilityTests
     public async Task LogsFailuresWithoutTheCredentials()
     {
         var wrong = new TestLogger();
-        await using var server = new FakeSessionServer { Password = "correct-horse" };
+        var password = TestSecrets.New();
+        var wrongPassword = TestSecrets.New();
+        await using var server = new FakeSessionServer { Password = password };
         _ = server.StartAsync();
-        await Assert.That(async () => await SshClient.ConnectAsync(server.ClientStream, Options(wrong, password: "wrong-battery"), true, Timeout())).Throws<SshException>();
+        await Assert.That(async () => await SshClient.ConnectAsync(server.ClientStream, Options(wrong, password: wrongPassword), true, Timeout())).Throws<SshException>();
         var text = string.Join("\n", wrong.Entries.Select(e => $"{e.Level}: {e.Message}"));
         await Assert.That(text).Contains("Warning: Authentication failed; the server accepts: password");
         await Assert.That(text).DoesNotContain("tester");
-        await Assert.That(text).DoesNotContain("wrong-battery");
-        await Assert.That(text).DoesNotContain("correct-horse");
+        await Assert.That(text).DoesNotContain(wrongPassword);
+        await Assert.That(text).DoesNotContain(password);
 
         var rejected = new TestLogger();
         await using var second = new FakeSessionServer();
         _ = second.StartAsync();
-        var options = new SshClientOptions { UserName = "tester", Password = "x", Logger = rejected, HostKeyVerifier = SshHostKeyVerifier.FromDelegate((_, _) => ValueTask.FromResult(false)) };
+        var options = new SshClientOptions { UserName = "tester", Password = TestSecrets.Password, Logger = rejected, HostKeyVerifier = SshHostKeyVerifier.FromDelegate((_, _) => ValueTask.FromResult(false)) };
         await Assert.That(async () => await SshClient.ConnectAsync(second.ClientStream, options, true, Timeout())).Throws<SshException>();
         await Assert.That(rejected.Entries.Any(e => e.Level == LogLevel.Warning && e.Message.Contains("was not accepted") && e.Message.Contains("SHA256:"))).IsTrue();
     }
@@ -293,9 +297,9 @@ public class SshObservabilityTests
     {
         SshSpans.Listen();
         using var root = new Activity("test-root-2").Start();
-        await using var server = new FakeSessionServer { Password = "right" };
+        await using var server = new FakeSessionServer();
         _ = server.StartAsync();
-        await Assert.That(async () => await SshClient.ConnectAsync(server.ClientStream, Options(password: "wrong"), true, Timeout())).Throws<SshException>();
+        await Assert.That(async () => await SshClient.ConnectAsync(server.ClientStream, Options(password: TestSecrets.New()), true, Timeout())).Throws<SshException>();
 
         var connect = SshSpans.InTrace(root.TraceId).Single(a => a.OperationName == "SshSharp.Connect");
         await Assert.That(connect.Status).IsEqualTo(ActivityStatusCode.Error);
@@ -342,10 +346,10 @@ public class SshObservabilityTests
         listener.SetMeasurementEventCallback<long>((instrument, _, tags, _) => { lock (lockObject) { seen.Add((instrument.Name, tags.ToArray())); } });
         listener.Start();
 
-        await using (var server = new FakeSessionServer { Password = "right" })
+        await using (var server = new FakeSessionServer())
         {
             _ = server.StartAsync();
-            await Assert.That(async () => await SshClient.ConnectAsync(server.ClientStream, Options(password: "wrong"), true, Timeout())).Throws<SshException>();
+            await Assert.That(async () => await SshClient.ConnectAsync(server.ClientStream, Options(password: TestSecrets.New()), true, Timeout())).Throws<SshException>();
         }
 
         await using (var server = new FakeSessionServer { RefuseExec = true })

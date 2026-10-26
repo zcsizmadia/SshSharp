@@ -72,14 +72,18 @@ internal static class SftpExtensionReplies
 
     /// <summary>
     /// The reply to <c>check-file-name</c> or <c>check-file-handle</c> with a block size of 0 (one hash for the whole range):
-    /// <c>string "check-file" || string algorithm || byte[] hash</c>, the hash being the rest of the packet. The algorithm must be one of
+    /// <c>string "check-file" || string algorithm || byte[] hash</c>, the hash being the rest of the packet; or, as ProFTPD's mod_sftp
+    /// sends it, without the leading name: <c>string algorithm || byte[] hash</c>. The algorithm must be one of
     /// <paramref name="requested"/>, and a hash of an algorithm with a known digest length must have that length.
     /// </summary>
     public static (string Algorithm, byte[] Hash) ParseCheckFile(ref SshReader reader, IReadOnlyList<string> requested)
     {
+        // A reply that does not start with the extension's name is read as ProFTPD's form, which starts with the algorithm. The checks
+        // below still apply: anything else names an algorithm that was not asked for.
+        var start = reader;
         if (!reader.ReadString().SequenceEqual("check-file"u8))
         {
-            throw new SshProtocolException("The check-file reply does not start with \"check-file\".");
+            reader = start;
         }
 
         var used = reader.ReadUtf8String();

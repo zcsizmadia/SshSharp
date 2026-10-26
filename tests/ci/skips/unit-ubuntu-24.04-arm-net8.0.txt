@@ -9,6 +9,7 @@ GssapiTests.WhenKerberosFails_TheNextMethodIsTried(mic-rejected)
 GssapiTests.WhenKerberosFails_TheNextMethodIsTried(no-ticket)
 GssapiTests.WhenKerberosFails_TheNextMethodIsTried(refused)
 GssapiTests.WhenKerberosFails_TheNextMethodIsTried(ticket-fails-later)
+# A limit of the tool: ssh-keygen reads Ed25519 PKCS#8 only from OpenSSH 9.8p1 (docs/testing.md, "Expected skips").
 KeyExportInteropTests.SshKeygen_ReadsPkcs8(Ed25519, ssh-ed25519)
 MlKemKexTests.AMalformedNistHybridReply_IsRefused(mlkem1024nistp384-sha384, off-curve)
 MlKemKexTests.AMalformedNistHybridReply_IsRefused(mlkem1024nistp384-sha384, short)

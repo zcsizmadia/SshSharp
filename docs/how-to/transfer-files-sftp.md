@@ -515,6 +515,8 @@ be checked without reading the file back. Compare it with a hash of the local co
 - **SHA-2 by default.** Without `algorithms`, only `sha256`, `sha512`, `sha384` and `sha224` are accepted. Name `md5`, `sha1` or
   `crc32` only for a server that offers nothing better: they catch accidental damage, not a deliberate change. `Algorithm` on the
   result says which one the server used; hash the local copy with the same one.
+- **Ranges on ProFTPD** come back wrong unless `length` is a multiple of 64 KiB: its `mod_sftp` hashes on to the end of the file
+  otherwise. Hash the whole file there.
 
 ## Call a vendor extension
 

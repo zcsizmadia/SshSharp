@@ -62,7 +62,7 @@ public class MlKemKexTests
         await using var client = await SshClient.ConnectAsync(server.ClientStream, new SshClientOptions
         {
             UserName = "tester",
-            Password = "secret",
+            Password = TestSecrets.Password,
             HostKeyVerifier = SshHostKeyVerifier.FromDelegate((_, _) => ValueTask.FromResult(true)),
             AlgorithmPreferences = new AlgorithmPreferences { Kex = [kex] },
             RekeyAfterBytes = 64 * 1024,
@@ -145,7 +145,7 @@ public class MlKemKexTests
         await using var client = await SshClient.ConnectAsync(server.ClientStream, new SshClientOptions
         {
             UserName = "tester",
-            Password = "secret",
+            Password = TestSecrets.Password,
             HostKeyVerifier = SshHostKeyVerifier.FromDelegate((_, _) => ValueTask.FromResult(true)),
             RekeyAfterBytes = 64 * 1024, // several key re-exchanges over the hybrid during the command
         }, leaveOpen: true, Timeout());

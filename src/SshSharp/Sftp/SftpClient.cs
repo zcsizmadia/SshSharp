@@ -28,11 +28,12 @@ public sealed partial class SftpClient : IAsyncDisposable
 
     private readonly SftpChannel _channel;
 
-    private SftpClient(SftpChannel channel, SftpLimits limits, bool symlinkInDraftOrder)
+    private SftpClient(SftpChannel channel, SftpLimits limits, bool symlinkInDraftOrder, bool mkdirAnswersOkWhenThere)
     {
         _channel = channel;
         Limits = limits;
         _symlinkInDraftOrder = symlinkInDraftOrder;
+        _mkdirAnswersOkWhenThere = mkdirAnswersOkWhenThere;
     }
 
     // SSH_FXP_SYMLINK's argument order: the draft's (link, then target) for servers that follow it, otherwise OpenSSH's reversed one.
@@ -48,6 +49,17 @@ public sealed partial class SftpClient : IAsyncDisposable
     internal static bool TakesSymlinkInDraftOrder(string? serverSoftware) =>
         serverSoftware is not null
         && (serverSoftware.StartsWith("AsyncSSH_", StringComparison.Ordinal) || serverSoftware.StartsWith("Erlang/", StringComparison.Ordinal));
+
+    // Whether MKDIR of a directory that is there already succeeds, so its success does not show that the directory is new and empty.
+    private readonly bool _mkdirAnswersOkWhenThere;
+
+    /// <summary>
+    /// Whether the server answers OK to MKDIR of a directory that is there already, rather than an error: ProFTPD's mod_sftp does (it
+    /// ignores EEXIST), so a directory upload cannot take that answer to mean the directory is new and has nothing to compare with.
+    /// </summary>
+    /// <param name="serverSoftware">The software part of the server's identification (<c>mod_sftp</c>, <c>mod_sftp/1.2.0</c>), as the transport parsed it.</param>
+    internal static bool AnswersMkdirOkWhenThere(string? serverSoftware) =>
+        serverSoftware is not null && serverSoftware.StartsWith("mod_sftp", StringComparison.Ordinal);
 
     /// <summary>
     /// Whether the session is still usable: false once its channel or the connection under it ended or failed (the server closed it, a
@@ -160,7 +172,7 @@ public sealed partial class SftpClient : IAsyncDisposable
                 }
             }
 
-            return new SftpClient(channel, limits, TakesSymlinkInDraftOrder(serverSoftware));
+            return new SftpClient(channel, limits, TakesSymlinkInDraftOrder(serverSoftware), AnswersMkdirOkWhenThere(serverSoftware));
         }
         catch
         {
@@ -1917,7 +1929,8 @@ public sealed class SftpTransferOptions
     /// <para>
     /// A download compares with the local files, at no extra cost: the remote sizes and times come from the listings. An upload lists
     /// each remote directory that already existed once, when its first file is reached (a directory the transfer creates holds nothing
-    /// to compare with), and compares with the listing.
+    /// to compare with), and compares with the listing. Against ProFTPD's mod_sftp, which answers OK to creating a directory that is
+    /// there already, it lists every remote directory it goes into.
     /// </para>
     /// </remarks>
     public bool SkipUnchanged { get; init; }

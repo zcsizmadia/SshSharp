@@ -14,7 +14,7 @@ public class SessionTests
         var options = new SshClientOptions
         {
             UserName = "tester",
-            Password = "secret",
+            Password = TestSecrets.Password,
             HostKeyVerifier = SshHostKeyVerifier.FromDelegate((_, _) => ValueTask.FromResult(true)),
         };
         return await SshClient.ConnectAsync(server.ClientStream, options, leaveOpen: true, Timeout());

@@ -10,7 +10,7 @@ public class SshConnectionTests
     private static SshClientOptions Options() => new()
     {
         UserName = "tester",
-        Password = "secret",
+        Password = TestSecrets.Password,
         HostKeyVerifier = SshHostKeyVerifier.FromDelegate((_, _) => ValueTask.FromResult(true)),
     };
 

@@ -21,7 +21,7 @@ public class RemoteDynamicForwardingTests
         return await SshClient.ConnectAsync(server.ClientStream, new SshClientOptions
         {
             UserName = "tester",
-            Password = "secret",
+            Password = TestSecrets.Password,
             HostKeyVerifier = SshHostKeyVerifier.FromDelegate((_, _) => ValueTask.FromResult(true)),
         }, leaveOpen: true, Timeout());
     }
@@ -256,7 +256,7 @@ public class RemoteDynamicForwardingTests
                 {
                     Config = SshConfig.Parse("Host *\n User tester\n StrictHostKeyChecking no\n UserKnownHostsFile none\n RemoteForward 1080\n RemoteForward 0 127.0.0.1:3000\n"),
                     ResolveOptions = new SshConfigResolveOptions { LocalUser = "local", HomeDirectory = dir.FullName },
-                    Password = "secret",
+                    Password = TestSecrets.Password,
                     UseAgent = false,
                     StartForwardings = true,
                     TcpConnector = (_, _, _, _) =>

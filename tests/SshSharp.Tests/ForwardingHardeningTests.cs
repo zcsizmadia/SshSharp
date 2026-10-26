@@ -22,7 +22,7 @@ public class ForwardingHardeningTests
         return await SshClient.ConnectAsync(server.ClientStream, new SshClientOptions
         {
             UserName = "tester",
-            Password = "secret",
+            Password = TestSecrets.Password,
             HostKeyVerifier = SshHostKeyVerifier.FromDelegate((_, _) => ValueTask.FromResult(true)),
             MaxForwardedConnections = maxForwarded,
             Logger = logger,
@@ -276,7 +276,7 @@ public class ForwardingHardeningTests
                     Config = SshConfig.Parse("Host *\n User tester\n StrictHostKeyChecking no\n UserKnownHostsFile none\n"
                         + " RemoteForward 8080 internal-db.example:5432\n RemoteForward /run/secret-app.sock 127.0.0.1:3000\n LocalForward unsupported\n"),
                     ResolveOptions = new SshConfigResolveOptions { LocalUser = "local", HomeDirectory = dir.FullName },
-                    Password = "secret",
+                    Password = TestSecrets.Password,
                     UseAgent = false,
                     StartForwardings = true,
                     Logger = logger,

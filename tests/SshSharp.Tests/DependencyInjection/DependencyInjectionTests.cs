@@ -26,7 +26,7 @@ public sealed class DependencyInjectionTests : IDisposable
         o.Host = "127.0.0.1";
         o.Port = server.Port;
         o.UserName = "tester";
-        o.Password = "secret";
+        o.Password = TestSecrets.Password;
         o.KnownHostsFiles = [KnownHosts];
         o.AcceptNewHostKeys = acceptNew;
         o.ReconnectDelay = TimeSpan.FromSeconds(10);
@@ -87,7 +87,7 @@ public sealed class DependencyInjectionTests : IDisposable
             ["Ssh:Box:Host"] = "127.0.0.1",
             ["Ssh:Box:Port"] = server.Port.ToString(System.Globalization.CultureInfo.InvariantCulture),
             ["Ssh:Box:UserName"] = "tester",
-            ["Ssh:Box:Password"] = "secret",
+            ["Ssh:Box:Password"] = TestSecrets.Password,
             ["Ssh:Box:KnownHostsFiles:0"] = KnownHosts,
             ["Ssh:Box:AcceptNewHostKeys"] = "true",
             ["Ssh:Box:ConnectTimeout"] = "00:00:20",

@@ -22,9 +22,9 @@ env:
   ITERATIONS: ${{ inputs.iterations }}
   UNIT_FILTER: ${{ inputs.unit-filter }}
   # As in CI (ci.yml): the unit jobs leave out the tests that need a real server and the opt-in measurements; the interop jobs run the
-  # tests that need a server, except the ssh-audit one.
+  # tests that need a server, except the ssh-audit one and the opt-in key-exchange volume test.
   UNIT_TESTS: /*/*/*/*[(Category!=Integration)&(Category!=Measure)]
-  INTEROP_TESTS: /*/*/*/*[(Category=Integration)&(Category!=SshAudit)&(Category!=Measure)]
+  INTEROP_TESTS: /*/*/*/*[(Category=Integration)&(Category!=SshAudit)&(Category!=Measure)&(Category!=Handshakes)]
 
 concurrency:
   group: stress-${{ github.ref }}
@@ -47,7 +47,8 @@ jobs:
         with:
           build: true
           build-args: -p:SshSharpInstrument=true
-      # As in CI: PuTTY's command-line puttygen for the .ppk interop tests, except on Windows, where puttygen.exe is a window only.
+      # As in CI: PuTTY's command-line puttygen for the .ppk interop tests, except on Windows, where puttygen.exe is a window only; on
+      # macOS also Homebrew's OpenSSH, whose ssh-keygen reads Ed25519 PKCS#8 keys.
       - name: puttygen
         if: runner.os != 'Windows'
         shell: bash
@@ -57,10 +58,18 @@ jobs:
             sudo apt-get update -qq > /dev/null
             sudo apt-get install -y -qq putty-tools > /dev/null
           else
-            HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_CLEANUP=1 brew install --quiet putty
+            HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_CLEANUP=1 brew install --quiet putty openssh
+            command -v ssh-keygen
+            ssh -V
           fi
           command -v puttygen
           puttygen --version
+      # As in CI: macOS configures only 127.0.0.1 on lo0, and BindAddressTests bind to 127.0.0.2.
+      - name: Loopback alias 127.0.0.2
+        if: runner.os == 'macOS'
+        run: |
+          sudo ifconfig lo0 alias 127.0.0.2 up
+          ifconfig lo0 | grep -F 'inet 127.0.0.2'
       - name: Loop
         shell: bash
         run: tests/stress/loop.sh "$ITERATIONS" "$RUNNER_TEMP/stress" net8.0,net10.0,net11.0 "${UNIT_FILTER:-$UNIT_TESTS}"

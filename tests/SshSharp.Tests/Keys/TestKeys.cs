@@ -327,13 +327,21 @@ internal static class TestKeys
         var pad = padding ?? Enumerable.Range(1, (blockSize - (section.Length % blockSize)) % blockSize).Select(i => (byte)i).ToArray();
         byte[] privateSection = [.. section, .. pad];
 
-        // Encrypted like ssh-keygen: bcrypt_pbkdf(passphrase, salt, 16 rounds) gives key || IV for the cipher.
+        // Encrypted like ssh-keygen: bcrypt_pbkdf(passphrase, salt, 16 rounds) gives key || IV for the cipher, with the key and IV
+        // lengths of OpenSSH's cipher.c.
         var salt = RandomNumberGenerator.GetBytes(16);
         byte[] tag = [];
         if (passphrase is not null)
         {
-            var gcm = cipher == "aes256-gcm@openssh.com";
-            var keyAndIv = new byte[chacha ? 64 : 32 + (gcm ? 12 : 16)];
+            var gcm = cipher.EndsWith("-gcm@openssh.com", StringComparison.Ordinal);
+            var keyLength = chacha ? 64 : cipher switch
+            {
+                "aes128-ctr" or "aes128-cbc" or "aes128-gcm@openssh.com" => 16,
+                "aes192-ctr" or "aes192-cbc" => 24,
+                "aes256-ctr" or "aes256-cbc" or "aes256-gcm@openssh.com" => 32,
+                _ => throw new ArgumentException($"No such key file cipher: {cipher}.", nameof(cipher)),
+            };
+            var keyAndIv = new byte[keyLength + (chacha ? 0 : gcm ? 12 : 16)];
             BcryptPbkdf.DeriveKey(Encoding.UTF8.GetBytes(passphrase), salt, 16, keyAndIv);
             if (chacha)
             {
@@ -353,13 +361,19 @@ internal static class TestKeys
             {
                 tag = new byte[16];
                 var sealedSection = new byte[privateSection.Length];
-                using var aesGcm = new AesGcm(keyAndIv.AsSpan(0, 32), 16);
-                aesGcm.Encrypt(keyAndIv.AsSpan(32), privateSection, sealedSection, tag);
+                using var aesGcm = new AesGcm(keyAndIv.AsSpan(0, keyLength), 16);
+                aesGcm.Encrypt(keyAndIv.AsSpan(keyLength), privateSection, sealedSection, tag);
                 privateSection = sealedSection;
+            }
+            else if (cipher.EndsWith("-cbc", StringComparison.Ordinal))
+            {
+                using var aes = Aes.Create();
+                aes.Key = keyAndIv[..keyLength];
+                privateSection = aes.EncryptCbc(privateSection, keyAndIv.AsSpan(keyLength), PaddingMode.None);
             }
             else
             {
-                using var ctr = new AesCtr(keyAndIv.AsSpan(0, 32), keyAndIv.AsSpan(32));
+                using var ctr = new AesCtr(keyAndIv.AsSpan(0, keyLength), keyAndIv.AsSpan(keyLength));
                 ctr.Transform(privateSection);
             }
         }

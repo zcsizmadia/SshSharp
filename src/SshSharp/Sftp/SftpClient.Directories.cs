@@ -648,13 +648,16 @@ public sealed partial class SftpClient
         }
     }
 
-    /// <summary>Creates the remote directory, or accepts one that is there already; true when it was created (so it is empty).</summary>
+    /// <summary>
+    /// Creates the remote directory, or accepts one that is there already; true when it was created (so it is empty), which a server
+    /// that answers OK either way (<see cref="AnswersMkdirOkWhenThere"/>) cannot tell.
+    /// </summary>
     private async Task<bool> EnsureRemoteDirectoryAsync(string path, CancellationToken cancellationToken)
     {
         try
         {
             await CreateDirectoryAsync(path, cancellationToken: cancellationToken).ConfigureAwait(false);
-            return true;
+            return !_mkdirAnswersOkWhenThere;
         }
         catch (SftpException)
         {
