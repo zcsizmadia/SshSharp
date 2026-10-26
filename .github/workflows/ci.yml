@@ -64,14 +64,7 @@ jobs:
           sudo ifconfig lo0 alias 127.0.0.2 up
           ifconfig lo0 | grep -F 'inet 127.0.0.2'
       - name: Test net8.0
-        timeout-minutes: 12 # DIAGNOSTIC (temporary)
-        env:
-          SSHSHARP_DIAG: ${{ runner.temp }}/diag
         run: dotnet test --project tests/SshSharp.Tests -c Release -f net8.0 --no-build --treenode-filter "${{ env.UNIT_TESTS }}" --report-trx --report-trx-filename unit-net8.0.trx --results-directory TestResults
-      - name: Diagnostic output (temporary)
-        if: always()
-        shell: bash
-        run: cat "$RUNNER_TEMP"/diag* || true
       - name: Test net10.0 with coverage
         run: dotnet test --project tests/SshSharp.Tests -c Release -f net10.0 --no-build --treenode-filter "${{ env.UNIT_TESTS }}" --report-trx --report-trx-filename unit-net10.0.trx --coverage --coverage-output-format cobertura --coverage-output coverage.cobertura.xml --results-directory TestResults
       # Every skip must be one this job is known to need (tests/ci/skips/unit-<os>-<framework>.txt): an unexpected one fails the job.

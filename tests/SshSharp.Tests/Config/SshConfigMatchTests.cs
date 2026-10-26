@@ -173,55 +173,15 @@ public class SshConfigMatchTests
     /// </summary>
     private static async Task<bool> RunShellWithinAsync(string step, string command, CancellationToken cancellationToken)
     {
-        // DIAGNOSTIC (temporary): progress markers and a native-thread watchdog that samples the process on macOS.
-        var diag = Environment.GetEnvironmentVariable("SSHSHARP_DIAG");
-        void Mark(string text)
-        {
-            if (diag is not null)
-            {
-                File.AppendAllText(diag + ".txt", $"{DateTime.UtcNow:HH:mm:ss.fff} [{Environment.CurrentManagedThreadId}] {step}: {text}\n");
-            }
-        }
-
-        using var done = new ManualResetEventSlim();
-        if (diag is not null)
-        {
-            new Thread(() =>
-            {
-                if (!done.Wait(20_000))
-                {
-                    Mark("not done after 20 s; sampling");
-                    using var sample = System.Diagnostics.Process.Start("/usr/bin/sample",
-                        [Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture), "5", "-file", diag + "-sample.txt"]);
-                    sample.WaitForExit();
-                    Mark("sampled");
-                }
-            }) { IsBackground = true }.Start();
-        }
-
         try
         {
-            Mark("calling");
-            var task = SshExecMatcher.RunShellAsync(command, cancellationToken);
-            Mark("returned a task");
-
             // The token goes to the command alone: it is what must answer the cancellation.
-            var result = await task.WaitAsync(TimeSpan.FromSeconds(30), CancellationToken.None);
-            Mark("completed");
-            return result;
+            return await SshExecMatcher.RunShellAsync(command, cancellationToken)
+                .WaitAsync(TimeSpan.FromSeconds(30), CancellationToken.None);
         }
         catch (TimeoutException ex)
         {
             throw new TimeoutException($"{step} did not finish within 30 s.", ex);
-        }
-        catch (Exception ex)
-        {
-            Mark("threw " + ex.GetType().Name);
-            throw;
-        }
-        finally
-        {
-            done.Set();
         }
     }
 
