@@ -258,7 +258,9 @@ public sealed class ConfigConnectTests : IDisposable
     {
         var passphrase = TestSecrets.New();
         File.WriteAllText(Path.Combine(_dir, "plain"), TestKeys.OpenSshEd25519(out var plainBlob));
-        File.WriteAllText(Path.Combine(_dir, "locked"), TestKeys.OpenSshEd25519(out var lockedBlob, passphrase: passphrase));
+        // One bcrypt round, not ssh-keygen's 16: the passphrase path is the same, and mutation testing (whose instrumentation slows
+        // bcrypt_pbkdf down many times) would otherwise give up on this test and count it against every mutant.
+        File.WriteAllText(Path.Combine(_dir, "locked"), TestKeys.OpenSshEd25519(out var lockedBlob, passphrase: passphrase, rounds: 1));
 
         await using (var server = new FakeSessionServer { AdvertisedMethods = ["publickey"], AuthorizedKeys = [plainBlob] })
         {
