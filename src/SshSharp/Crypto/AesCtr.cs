@@ -23,12 +23,14 @@ internal sealed class AesCtr : IDisposable
     {
         if (initialCounter.Length != BlockSize)
         {
+            // Stryker disable once String : the message text is not behaviour; the tests check the exception
             throw new ArgumentException("The initial counter block must be 16 bytes.", nameof(initialCounter));
         }
 
         // The setter keeps its own copy; wipe ours.
         var keyCopy = key.ToArray();
         _aes.Key = keyCopy;
+        // Stryker disable once Statement : wiping the copy is hygiene that the API cannot observe
         CryptographicOperations.ZeroMemory(keyCopy);
         _aes.Mode = CipherMode.ECB;
         _aes.Padding = PaddingMode.None;
@@ -65,6 +67,7 @@ internal sealed class AesCtr : IDisposable
     {
         if (destination.Length > BlockSize)
         {
+            // Stryker disable once String : the message text is not behaviour; the tests check the exception
             throw new ArgumentException("At most one block of keystream can be peeked.", nameof(destination));
         }
 
@@ -72,6 +75,7 @@ internal sealed class AesCtr : IDisposable
         _keystream.AsSpan(0, destination.Length).CopyTo(destination);
     }
 
+    // Stryker disable once Block,Statement : releasing the platform objects and wiping the buffers is hygiene that the API cannot observe
     public void Dispose()
     {
         _encryptor.Dispose();
