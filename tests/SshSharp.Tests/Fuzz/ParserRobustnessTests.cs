@@ -5,6 +5,7 @@ using SshSharp.Config;
 using SshSharp.Crypto;
 using SshSharp.Keys;
 using SshSharp.Protocol;
+using static SshSharp.Tests.Fuzz.FuzzHarness;
 
 namespace SshSharp.Tests.Fuzz;
 
@@ -16,8 +17,6 @@ namespace SshSharp.Tests.Fuzz;
 /// </summary>
 public class ParserRobustnessTests
 {
-    private const int Iterations = 3000;
-
     [Test]
     public async Task PacketDecoding_OnlyEverFailsWithAProtocolError()
     {
@@ -254,37 +253,6 @@ public class ParserRobustnessTests
     }
 
     [Test]
-    public async Task EncryptedKeyParsing_OnlyEverFailsWithAFormatError()
-    {
-        // Traditional encrypted PEM (headers and body as text), with the right passphrase, so an unmutated seed decrypts and the
-        // mutations reach every step after the headers.
-        var passphrase = TestSecrets.New();
-        using var ecdsa = ECDsa.Create(ECCurve.NamedCurves.nistP256);
-        using var rsa = RSA.Create(2048);
-        byte[][] pemSeeds =
-        [
-            Encoding.Latin1.GetBytes(Keys.TestKeys.LegacyEncryptedPem("EC PRIVATE KEY", ecdsa.ExportECPrivateKey(), passphrase)),
-            Encoding.Latin1.GetBytes(Keys.TestKeys.LegacyEncryptedPem("RSA PRIVATE KEY", rsa.ExportRSAPrivateKey(), passphrase, "AES-256-CBC")),
-        ];
-        var failures = Run(pemSeeds, input =>
-        {
-            using var key = SshPrivateKey.Parse(Encoding.Latin1.GetString(input), passphrase);
-        }, FormatErrors, iterations: 1000);
-
-        // A chacha20-poly1305 OpenSSH key: only what follows the bcrypt options is mutated, so no mutant asks for millions of rounds.
-        var pem = Keys.TestKeys.OpenSshEd25519(out _, passphrase: passphrase, cipher: "chacha20-poly1305@openssh.com");
-        var body = Convert.FromBase64String(string.Concat(pem.Split('\n').Where(l => l.Length > 0 && !l.StartsWith("-----", StringComparison.Ordinal))));
-        var prefixLength = "openssh-key-v1\0"u8.Length + 4 + "chacha20-poly1305@openssh.com".Length + 4 + "bcrypt".Length + 4 + 4 + 16 + 4;
-        var prefix = body[..prefixLength];
-        failures.AddRange(Run([body[prefixLength..]], input =>
-        {
-            var text = "-----BEGIN OPENSSH PRIVATE KEY-----\n" + Convert.ToBase64String([.. prefix, .. input]) + "\n-----END OPENSSH PRIVATE KEY-----\n";
-            using var key = SshPrivateKey.Parse(text, passphrase);
-        }, FormatErrors, iterations: 50));
-        await Assert.That(failures).IsEmpty();
-    }
-
-    [Test]
     public async Task CertificateParsingAndChecking_OnlyEverFailWithAProtocolError()
     {
         // Host certificates come from the server: parsing and every check must reject garbage cleanly.
@@ -389,102 +357,6 @@ public class ParserRobustnessTests
         var seen = new HashSet<string>();
         Run([[1, 2, 3, 4, 5, 6, 7, 8]], input => seen.Add(Convert.ToHexString(input)), allowed: null, iterations: 100);
         await Assert.That(seen.Count).IsGreaterThan(50);
-    }
-
-    // ---- harness ----
-
-    private static readonly Func<Exception, bool> ProtocolErrors = ex => ex is SshProtocolException;
-
-    private static readonly Func<Exception, bool> FormatErrors = ex => ex is FormatException;
-
-    /// <summary>
-    /// Runs mutations of the seeds through <paramref name="parse"/> and returns a description of each unexpected exception.
-    /// <paramref name="allowed"/> says which exceptions are a clean rejection (null: none, the parser must never throw).
-    /// </summary>
-    private static List<string> Run(byte[][] seeds, Action<byte[]> parse, Func<Exception, bool>? allowed, int iterations = Iterations)
-    {
-        var random = new Random(20261013);
-        var failures = new List<string>();
-        foreach (var seed in seeds)
-        {
-            Check(seed);
-        }
-
-        for (var i = 0; i < iterations; i++)
-        {
-            Check(Mutate(seeds[random.Next(seeds.Length)], random));
-        }
-
-        return failures;
-
-        void Check(byte[] input)
-        {
-            try
-            {
-                parse(input);
-            }
-            catch (Exception ex) when (allowed?.Invoke(ex) == true)
-            {
-                // A clean rejection.
-            }
-            catch (Exception ex) when (failures.Count < 5)
-            {
-                failures.Add($"{ex.GetType().Name}: {ex.Message} (input {Convert.ToHexString(input.AsSpan(0, Math.Min(input.Length, 48)))})");
-            }
-            catch (Exception)
-            {
-                // Enough examples collected.
-            }
-        }
-    }
-
-    private static readonly byte[] Interesting = [0x00, 0x01, 0x7f, 0x80, 0xff, (byte)'%', (byte)'\n', (byte)'"', (byte)' ', (byte)','];
-
-    private static byte[] Mutate(byte[] seed, Random random)
-    {
-        var data = new List<byte>(seed);
-        var operations = random.Next(1, 5);
-        for (var op = 0; op < operations; op++)
-        {
-            var at = data.Count == 0 ? 0 : random.Next(data.Count);
-            switch (random.Next(7))
-            {
-                case 0 when data.Count > 0:
-                    data[at] ^= (byte)(1 << random.Next(8));
-                    break;
-                case 1 when data.Count > 0:
-                    data[at] = Interesting[random.Next(Interesting.Length)];
-                    break;
-                case 2 when data.Count > 0:
-                    data.RemoveRange(at, Math.Min(data.Count - at, random.Next(1, 16)));
-                    break;
-                case 3:
-                    data.InsertRange(at, Enumerable.Range(0, random.Next(1, 8)).Select(_ => (byte)random.Next(256)));
-                    break;
-                case 4 when data.Count > 4:
-                    // Length fields are where parsers break: overwrite four bytes with a big-endian edge value.
-                    var value = random.Next(4) switch { 0 => 0u, 1 => uint.MaxValue, 2 => 0x7fffffffu, _ => (uint)random.Next() };
-                    at = Math.Min(at, data.Count - 4);
-                    data[at] = (byte)(value >> 24);
-                    data[at + 1] = (byte)(value >> 16);
-                    data[at + 2] = (byte)(value >> 8);
-                    data[at + 3] = (byte)value;
-                    break;
-                case 5 when data.Count > 0:
-                    data.RemoveRange(at, data.Count - at); // truncate
-                    break;
-                default:
-                    if (data.Count > 0)
-                    {
-                        var length = Math.Min(data.Count - at, random.Next(1, 32));
-                        data.InsertRange(at, data.GetRange(at, length)); // duplicate a chunk
-                    }
-
-                    break;
-            }
-        }
-
-        return [.. data];
     }
 
     private static void Decode(byte[] input, PacketProtector protector)

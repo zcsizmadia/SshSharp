@@ -402,11 +402,12 @@ public sealed class SshTelemetryTests : IDisposable
     {
         using var socket = new Socket(endPoint.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
         await socket.ConnectAsync(endPoint, Timeout());
-        await socket.SendAsync("ping"u8.ToArray(), SocketFlags.None, Timeout());
-        socket.Shutdown(SocketShutdown.Send);
         var buffer = new byte[64];
         try
         {
+            // The reset of a refused connection can arrive before the shutdown as well as during the read.
+            await socket.SendAsync("ping"u8.ToArray(), SocketFlags.None, Timeout());
+            socket.Shutdown(SocketShutdown.Send);
             while (await socket.ReceiveAsync(buffer, SocketFlags.None, Timeout()) > 0)
             {
             }

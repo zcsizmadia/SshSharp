@@ -120,7 +120,10 @@ always finish. A sweep cuts the connection at 13 points from the first byte to w
   packets, the server's identification line, `KEXINIT`, public keys and signatures, certificates, private keys (text and binary),
   `known_hosts`, `ssh_config`, KRLs, SFTP replies and compressed packets (`zlib@openssh.com`). Each parser is also mutation-fuzzed briefly in every unit test run.
 - **Mutation testing** (Stryker.NET, weekly and on demand) over the cryptography, the packet codec, compression and the configuration
-  parsers. A surviving mutant is a code change no test notices. The score is reported, not enforced.
+  parsers. A surviving mutant is a code change no test notices. The score is reported, not enforced. Each scope compiles only the
+  tests that can reach its files, and slow tests stay out of the scopes they cannot help. When a test runs too long during coverage
+  capture, Stryker runs it against every mutant, so the mutants that the fast tests miss time out instead of surviving, and a timeout
+  counts as detected. The encrypted private key fuzz test is in a file of its own for this reason.
 
 ## Stress testing and intermittent failures
 
@@ -207,7 +210,7 @@ list:
 - the job summary counts the skips by reason.
 
 The lists hold only what a job cannot run: .NET 8 without ML-KEM or `gssapi-with-mic`, a Linux without ML-KEM in its OpenSSL,
-Windows without FIFOs, servers without an algorithm, an extension or a key setup, and tools too old for a check: `ssh-keygen` reads
+Windows without FIFOs or Unix file modes, servers without an algorithm, an extension or a key setup, and tools too old for a check: `ssh-keygen` reads
 Ed25519 PKCS#8 keys only from OpenSSH 9.8p1 on (9.6p1 has the code, but its build never turned it on), so
 `KeyExportInteropTests.SshKeygen_ReadsPkcs8(Ed25519, ...)` skips with Ubuntu 24.04's OpenSSH 9.6p1 and OpenSSH for Windows 9.5,
 and runs on macOS, where CI installs Homebrew's OpenSSH. A new skip is not added to a list until it is understood. A skip can hide a

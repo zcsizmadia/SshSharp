@@ -359,5 +359,140 @@ public class KnownHostsFileTests
         await Assert.That(() => file.Save("")).Throws<ArgumentException>();
         await Assert.That(async () => await KnownHostsFile.LoadAsync("")).Throws<ArgumentException>();
         await Assert.That(async () => await file.SaveAsync("")).Throws<ArgumentException>();
+
+        // White space is refused before the disk is touched: on Linux it would be a file named by the spaces.
+        const string blank = "   ";
+        await Assert.That(() => file.Save(blank)).Throws<ArgumentException>();
+        await Assert.That(async () => await file.SaveAsync(blank)).Throws<ArgumentException>();
+        await Assert.That(async () => await KnownHostsFile.AppendAsync(blank, "example.com", 22, "ssh-ed25519", KeyA)).Throws<ArgumentException>();
+        using var hostKey = SshPrivateKey.Generate(SshKeyType.Ed25519);
+        await Assert.That(async () => await KnownHostsFile.AppendAsync(blank, "example.com", 22, hostKey.GetPublicKey())).Throws<ArgumentException>();
+    }
+
+    /// <summary>
+    /// Replacing the file is retried while it fails, as it does on Windows while another process has the file open. A target that is
+    /// in the way for a moment is replaced once it is free. One that stays in the way fails once the retries run out, with no temporary
+    /// file left behind. On Windows the target is held open without sharing, the case the retries are for. Elsewhere an open file does
+    /// not stop the replace, so a directory at the path stands in for it.
+    /// </summary>
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
+    public async Task Save_RetriesTheReplace_WhileTheTargetIsInTheWay(bool async)
+    {
+        var dir = Directory.CreateTempSubdirectory("kh").FullName;
+        var path = Path.Combine(dir, "known_hosts");
+        try
+        {
+            var file = new KnownHostsFile();
+            file.Add("example.com", 22, "ssh-ed25519", KeyA);
+            Task Save() => async ? file.SaveAsync(path) : Task.Run(() => file.Save(path));
+
+            // The retries wait in real time (25 ms, then 50 ms and so on, 700 ms in all). The target is freed once the temporary file
+            // is written and a moment has passed, so the first replace has failed and the retries still have most of their time left. A
+            // deleted directory is not used on Windows: it stays in the way for as long as anything (an indexer, an antivirus) has it open.
+            FileStream? held = null;
+            if (OperatingSystem.IsWindows())
+            {
+                File.WriteAllText(path, "");
+                held = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.None);
+            }
+            else
+            {
+                Directory.CreateDirectory(path);
+            }
+
+            var saving = Save();
+            while (Directory.GetFiles(dir).Length < (held is null ? 1 : 2) && !saving.IsCompleted)
+            {
+                await Task.Delay(5);
+            }
+
+            await Task.Delay(50);
+            if (held is null)
+            {
+                Directory.Delete(path);
+            }
+            else
+            {
+                held.Dispose();
+            }
+
+            await saving;
+            await Assert.That(KnownHostsFile.Load(path).Check("example.com", 22, "ssh-ed25519", KeyA)).IsEqualTo(KnownHostsCheckResult.Match);
+
+            if (OperatingSystem.IsWindows())
+            {
+                held = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.None);
+            }
+            else
+            {
+                File.Delete(path);
+                Directory.CreateDirectory(path);
+            }
+
+            using (held)
+            {
+                var failure = await Assert.ThrowsAsync<Exception>(Save);
+                await Assert.That(failure is IOException or UnauthorizedAccessException).IsTrue();
+                await Assert.That(Directory.GetFiles(dir)).IsEquivalentTo(held is null ? Array.Empty<string>() : [path]);
+            }
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    /// <summary>The rewritten file keeps the permissions of the one it replaces: a known_hosts file of mode 0600 stays 0600.</summary>
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
+    public async Task Save_KeepsTheModeOfTheFileItReplaces(bool async)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            Skip.Test("Windows has no Unix file modes.");
+            return;
+        }
+
+        var dir = Directory.CreateTempSubdirectory("kh").FullName;
+        var path = Path.Combine(dir, "known_hosts");
+        try
+        {
+            await File.WriteAllTextAsync(path, "");
+            File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+            var file = new KnownHostsFile();
+            file.Add("example.com", 22, "ssh-ed25519", KeyA);
+            if (async)
+            {
+                await file.SaveAsync(path);
+            }
+            else
+            {
+                file.Save(path);
+            }
+
+            await Assert.That(File.GetUnixFileMode(path)).IsEqualTo(UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    /// <summary>
+    /// The comment of a line with a marker is split off after the marker, but keeps what follows the separators, as on a line
+    /// without one: a vertical tab is not a separator.
+    /// </summary>
+    [Test]
+    public async Task AMarkerLinesComment_IsKeptAsOnALineWithoutAMarker()
+    {
+        var file = KnownHostsFile.Parse(
+            $"example.com ssh-ed25519 {KeyAText} \vplain\n" +
+            $"@revoked example.com ssh-ed25519 {KeyAText} \vrevoked\n" +
+            $"@cert-authority *.example.com ssh-ed25519 {KeyAText}\n");
+        await Assert.That(file.Entries.Select(e => e.Comment)).IsEquivalentTo(new string?[] { "\vplain", "\vrevoked", null });
+        await Assert.That(file.InvalidLineCount).IsEqualTo(0);
     }
 }
