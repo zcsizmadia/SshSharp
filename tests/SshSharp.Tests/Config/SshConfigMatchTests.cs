@@ -168,11 +168,45 @@ public class SshConfigMatchTests
     }
 
     [Test]
+    public async Task RunShellAsync_WhenCancelled_KillsTheCommandAndWhatItStarted()
+    {
+        // The shell starts a child that writes the marker after two seconds; killing only the shell would leave the child to write it.
+        var marker = Path.Combine(Path.GetTempPath(), "sshsharp-exec-" + Guid.NewGuid().ToString("N"));
+        var command = OperatingSystem.IsWindows()
+            ? $"cmd /d /c \"ping -n 3 127.0.0.1 >nul & echo x>\"{marker}\"\""
+            : $"(sleep 2; echo x > '{marker}') & wait";
+        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(300));
+        await Assert.That(() => SshExecMatcher.RunShellAsync(command, cts.Token)).Throws<OperationCanceledException>();
+        await Task.Delay(TimeSpan.FromSeconds(4));
+        await Assert.That(File.Exists(marker)).IsFalse();
+    }
+
+    [Test]
     public async Task RunShell_ReportsExitStatus()
     {
         await Assert.That(await SshExecMatcher.RunShellAsync("exit 0")).IsTrue();
         await Assert.That(await SshExecMatcher.RunShellAsync("exit 1")).IsFalse();
         await Assert.That(() => SshExecMatcher.RunShellAsync("")).Throws<ArgumentException>();
+    }
+
+    [Test]
+    public async Task RunShell_GivesTheCommandNoInput_AndReadsAwayItsOutput()
+    {
+        // sort reads its input to the end, and 1 MiB is far more than a pipe holds: either would wait out the deadline below if the
+        // input were left open or the output unread.
+        var path = Path.Combine(Path.GetTempPath(), "sshsharp-exec-" + Guid.NewGuid().ToString("N"));
+        await File.WriteAllTextAsync(path, new string('x', 1024 * 1024));
+        try
+        {
+            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+            await Assert.That(await SshExecMatcher.RunShellAsync("sort", deadline.Token)).IsTrue();
+            var print = OperatingSystem.IsWindows() ? $"type \"{path}\"" : $"cat '{path}'";
+            await Assert.That(await SshExecMatcher.RunShellAsync(print, deadline.Token)).IsTrue();
+        }
+        finally
+        {
+            File.Delete(path);
+        }
     }
 
     [Test]

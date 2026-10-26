@@ -35,6 +35,7 @@ public sealed class KnownHostsEntry
     {
         if (field.Any(char.IsWhiteSpace) || field.Any(char.IsControl))
         {
+            // Stryker disable once String : the message is for people
             throw new ArgumentException("A known_hosts field must not contain white space or control characters.", parameterName);
         }
     }
@@ -49,6 +50,7 @@ public sealed class KnownHostsEntry
         RequireField(field, parameterName);
         if (StartsAsMarkerOrComment(field))
         {
+            // Stryker disable once String : the message is for people
             throw new ArgumentException("A known_hosts host field must not start with '@' or '#'.", parameterName);
         }
     }
@@ -63,6 +65,7 @@ public sealed class KnownHostsEntry
     {
         if (comment is not null && comment.Any(c => char.IsControl(c) && c != '\t'))
         {
+            // Stryker disable once String : the message is for people
             throw new ArgumentException("A known_hosts comment must not contain control characters other than a tab.", nameof(comment));
         }
     }
@@ -184,6 +187,7 @@ public sealed class KnownHostsEntry
     public SshPublicKey GetPublicKey()
     {
         var key = SshPublicKey.Read(PublicKey.Span, Comment);
+        // Stryker disable once String : the message is for people
         return key.KeyType == KeyType ? key : throw new FormatException("The entry's key type does not match its key.");
     }
 
@@ -213,6 +217,7 @@ public sealed class KnownHostsEntry
         }
         else if (salt.Length != salt20.Length)
         {
+            // Stryker disable once String : the message is for people
             throw new ArgumentException("The salt must be 20 bytes.", nameof(salt));
         }
         else

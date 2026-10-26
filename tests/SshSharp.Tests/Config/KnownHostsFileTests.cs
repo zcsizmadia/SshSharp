@@ -131,6 +131,8 @@ public class KnownHostsFileTests
         await Assert.That(() => new KnownHostsEntry("a.example.com", (SshPublicKey)null!)).Throws<ArgumentNullException>();
         await Assert.That(() => KnownHostsEntry.ForHost("a.example.com", 22, null!)).Throws<ArgumentNullException>();
         await Assert.That(() => KnownHostsEntry.ForHost("a b", 22, key)).Throws<ArgumentException>();
+        await Assert.That(() => KnownHostsEntry.ForHost("a b", 22, key, hash: true)).Throws<ArgumentException>(); // refused before hashing hides it
+        await Assert.That(() => KnownHostsEntry.ForHost(null!, 22, key)).Throws<ArgumentNullException>().WithParameterName("host");
         await Assert.That(() => KnownHostsEntry.ForHost("a.example.com\n", 22, key)).Throws<ArgumentException>();
         await Assert.That(() => KnownHostsEntry.ForHost(" ", 22, key)).Throws<ArgumentException>();
         await Assert.That(() => KnownHostsEntry.ForHost("a.example.com", 0, key)).Throws<ArgumentOutOfRangeException>();
@@ -292,6 +294,27 @@ public class KnownHostsFileTests
         await Assert.That(file.Remove("192.0.2.1")).IsEqualTo(1);
         await Assert.That(file.Remove("a.example.com", 2222)).IsEqualTo(1);
         await Assert.That(file.Entries.Count).IsEqualTo(0);
+    }
+
+    [Test]
+    public async Task Remove_FromASharedLine_KeepsACommentThatWouldNotBeAccepted()
+    {
+        // A file being read may carry characters Add refuses; removing one host from the line must not make the rest of it fail.
+        var file = KnownHostsFile.Parse($"a.example.com,b.example.com ssh-ed25519 {KeyAText} odd\u0001comment\n");
+        await Assert.That(file.Remove("a.example.com")).IsEqualTo(1);
+        await Assert.That(file.ToString()).IsEqualTo($"b.example.com ssh-ed25519 {KeyAText} odd\u0001comment\n");
+    }
+
+    [Test]
+    public async Task HashHost_WithASalt_IsTheHmacOfTheHostAsStored()
+    {
+        var salt = Enumerable.Range(1, 20).Select(i => (byte)i).ToArray();
+#pragma warning disable CA5350 // the hashed known_hosts format is HMAC-SHA1
+        var hash = System.Security.Cryptography.HMACSHA1.HashData(salt, "[srv.example.com]:2200"u8);
+#pragma warning restore CA5350
+        await Assert.That(KnownHostsEntry.HashHost("Srv.Example.com", 2200, salt))
+            .IsEqualTo($"|1|{Convert.ToBase64String(salt)}|{Convert.ToBase64String(hash)}");
+        await Assert.That(() => KnownHostsEntry.HashHost("srv.example.com", 22, new byte[19])).Throws<ArgumentException>();
     }
 
     [Test]
