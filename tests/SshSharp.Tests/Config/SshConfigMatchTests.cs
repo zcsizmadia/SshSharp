@@ -167,6 +167,24 @@ public class SshConfigMatchTests
         await Assert.That(() => SshExecMatcher.RunShellAsync(command, cts.Token)).Throws<OperationCanceledException>();
     }
 
+    /// <summary>
+    /// Runs <see cref="SshExecMatcher.RunShellAsync"/> on the thread pool and gives up after 30 seconds, so that a run that never ends
+    /// (even one blocked before its first await) fails the test with the step it was on, rather than hanging the test run.
+    /// </summary>
+    private static async Task<bool> RunShellWithinAsync(string step, string command, CancellationToken cancellationToken)
+    {
+        try
+        {
+            // The token goes to the command alone: it is what must answer the cancellation.
+            return await Task.Run(() => SshExecMatcher.RunShellAsync(command, cancellationToken))
+                .WaitAsync(TimeSpan.FromSeconds(30), CancellationToken.None);
+        }
+        catch (TimeoutException ex)
+        {
+            throw new TimeoutException($"{step} did not finish within 30 s.", ex);
+        }
+    }
+
     [Test]
     public async Task RunShellAsync_WhenCancelled_KillsTheCommandAndWhatItStarted()
     {
@@ -176,7 +194,7 @@ public class SshConfigMatchTests
             ? $"cmd /d /c \"ping -n 3 127.0.0.1 >nul & echo x>\"{marker}\"\""
             : $"(sleep 2; echo x > '{marker}') & wait";
         using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(300));
-        await Assert.That(() => SshExecMatcher.RunShellAsync(command, cts.Token)).Throws<OperationCanceledException>();
+        await Assert.That(() => RunShellWithinAsync("The cancelled command", command, cts.Token)).Throws<OperationCanceledException>();
         await Task.Delay(TimeSpan.FromSeconds(4));
         await Assert.That(File.Exists(marker)).IsFalse();
     }
@@ -199,9 +217,9 @@ public class SshConfigMatchTests
         try
         {
             using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(20));
-            await Assert.That(await SshExecMatcher.RunShellAsync("sort", deadline.Token)).IsTrue();
+            await Assert.That(await RunShellWithinAsync("sort", "sort", deadline.Token)).IsTrue();
             var print = OperatingSystem.IsWindows() ? $"type \"{path}\"" : $"cat '{path}'";
-            await Assert.That(await SshExecMatcher.RunShellAsync(print, deadline.Token)).IsTrue();
+            await Assert.That(await RunShellWithinAsync("Printing 1 MiB", print, deadline.Token)).IsTrue();
         }
         finally
         {
