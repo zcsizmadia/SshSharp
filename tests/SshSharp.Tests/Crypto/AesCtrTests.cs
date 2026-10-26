@@ -88,6 +88,43 @@ public class AesCtrTests
         await Assert.That(Hex(split)).IsEqualTo(Hex(whole));
     }
 
+    /// <summary>
+    /// Transform works in batches of 64 blocks (1,024 bytes). Lengths past one batch, ending on a batch, in a block or on a block,
+    /// match the reference, and the counter after a partly filled last batch has advanced by exactly the blocks used, so the next call
+    /// continues the keystream.
+    /// </summary>
+    [Test]
+    [Arguments(1024)]
+    [Arguments(1025)]
+    [Arguments(1040)]
+    [Arguments(2047)]
+    [Arguments(2048)]
+    [Arguments(3000)]
+    public async Task SeveralBatches_MatchTheReference_AndTheNextCallContinues(int length)
+    {
+        var rng = new Random(length);
+        var key = new byte[16];
+        rng.NextBytes(key);
+        var counter = new byte[16];
+        rng.NextBytes(counter);
+        var data = new byte[length + 64];
+        rng.NextBytes(data);
+
+        // The first call ends on a whole block, so the keystream continues into the second.
+        var first = (length + 15) / 16 * 16;
+        var actual = (byte[])data.Clone();
+        using var ctr = new AesCtr(key, counter);
+        ctr.Transform(actual.AsSpan(0, first));
+        ctr.Transform(actual.AsSpan(first));
+        await Assert.That(Hex(actual)).IsEqualTo(Hex(ReferenceCtr(key, counter, data)));
+
+        // One call of the length itself, which ends in a block when it is not a multiple of 16.
+        var once = data[..length];
+        using var single = new AesCtr(key, counter);
+        single.Transform(once);
+        await Assert.That(Hex(once)).IsEqualTo(Hex(ReferenceCtr(key, counter, data[..length])));
+    }
+
     [Test]
     public async Task CounterCarriesAcrossAllBytes()
     {

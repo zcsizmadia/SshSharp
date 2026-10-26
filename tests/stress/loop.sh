@@ -27,7 +27,8 @@ for i in $(seq 1 "$iterations"); do
   # Strip colours (perl: macOS sed knows neither -i without a suffix nor \x1b), then keep the names of the tests that failed: "failed <name> (<duration>)",
   # where a parameterised name may contain spaces and parentheses of its own.
   perl -pi -e 's/\e\[[0-9;]*m//g' "$log"
-  failures=$(grep -E '^failed ' "$log" | sed -E 's/^failed (.*) \([^()]*\)$/\1/' || true)
+  # -a: a log with one byte that is not valid UTF-8 is "binary" to grep, which then prints "Binary file matches" instead of the lines.
+  failures=$(grep -aE '^failed ' "$log" | sed -E 's/^failed (.*) \([^()]*\)$/\1/' || true)
   if [ "$status" -ne 0 ] || [ -n "$failures" ]; then
     failed_runs=$(( failed_runs + 1 ))
     echo "iteration $i ($fw, ${took}s): FAILED (exit $status) ${failures//$'\n'/, }"
@@ -38,14 +39,14 @@ for i in $(seq 1 "$iterations"); do
     fi
   else
     # The counts too: a run that skipped everything also "passes".
-    counts=$(grep -E '^\s*(succeeded|skipped):' "$log" | tr -s ' ' | tr '\n' ' ')
+    counts=$(grep -aE '^\s*(succeeded|skipped):' "$log" | tr -s ' ' | tr '\n' ' ')
     echo "iteration $i ($fw, ${took}s): passed ($counts)"
     rm -f "$log"
   fi
 done
 
 reports=0
-[ -s "$SSHSHARP_INSTRUMENT_LOG" ] && reports=$(grep -c 'SshSharp instrumentation' "$SSHSHARP_INSTRUMENT_LOG")
+[ -s "$SSHSHARP_INSTRUMENT_LOG" ] && reports=$(grep -ac 'SshSharp instrumentation' "$SSHSHARP_INSTRUMENT_LOG")
 {
   echo "### $iterations iterations ($frameworks): $failed_runs failed, $reports instrumentation reports"
   if [ -s "$out/failed-tests.txt" ]; then
