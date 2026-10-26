@@ -247,6 +247,12 @@ public sealed class KnownHostsVerifierTests : IDisposable
         var nested = Path.Combine(_dir, "x", "y", "known_hosts");
         await KnownHostsFile.AppendAsync(nested, "a.example", 22, key.KeyType, key.PublicKey);
         await Assert.That(File.ReadAllText(nested)).IsEqualTo(Line("a.example", key));
+
+        // An empty file has no last line to end, so the entry is its first line.
+        var empty = Path.Combine(_dir, "empty_known_hosts");
+        File.WriteAllText(empty, "");
+        await KnownHostsFile.AppendAsync(empty, "a.example", 22, key.KeyType, key.PublicKey);
+        await Assert.That(File.ReadAllText(empty)).IsEqualTo(Line("a.example", key));
     }
 
     [Test]
