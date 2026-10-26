@@ -119,7 +119,10 @@ always finish. A sweep cuts the connection at 13 points from the first byte to w
   packets, the server's identification line, `KEXINIT`, public keys and signatures, certificates, private keys (text and binary),
   `known_hosts`, `ssh_config`, KRLs, SFTP replies and compressed packets (`zlib@openssh.com`). Each parser is also mutation-fuzzed briefly in every unit test run.
 - **Mutation testing** (Stryker.NET, weekly and on demand) over the cryptography, the packet codec, compression and the configuration
-  parsers. A surviving mutant is a code change no test notices. The score is reported, not enforced.
+  parsers. A surviving mutant is a code change no test notices. The score is reported, not enforced. Each scope compiles only the
+  tests that can reach its files, and slow tests stay out of the scopes they cannot help. When a test runs too long during coverage
+  capture, Stryker runs it against every mutant, so the mutants that the fast tests miss time out instead of surviving, and a timeout
+  counts as detected. The encrypted private key fuzz test is in a file of its own for this reason.
 
 ## Stress testing and intermittent failures
 
