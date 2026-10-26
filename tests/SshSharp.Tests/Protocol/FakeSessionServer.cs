@@ -1166,9 +1166,12 @@ internal sealed class FakeSessionServer : IAsyncDisposable
             case SshMessage.ChannelEof:
             {
                 var channel = Find(reader.ReadUInt32());
-                channel.Input.Writer.TryComplete();
+
+                // Recorded before the input completes: a script that reads to the end may finish, and the client's call return,
+                // before this loop runs again, and a test then checks EofReceived.
                 Interlocked.Increment(ref channel.EofCount);
                 channel.EofReceived = true;
+                channel.Input.Writer.TryComplete();
                 if (channel.Tunnel is { } tunnel)
                 {
                     (tunnel as DuplexStream)?.CloseWrite(); // relay the half-close, as sshd does with shutdown(SHUT_WR)
