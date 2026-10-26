@@ -176,7 +176,7 @@ public class SshConfigMatchTests
         try
         {
             // The token goes to the command alone: it is what must answer the cancellation.
-            return await SshExecMatcher.RunShellAsync(command, cancellationToken)
+            return await Task.Run(() => SshExecMatcher.RunShellAsync(command, cancellationToken))
                 .WaitAsync(TimeSpan.FromSeconds(30), CancellationToken.None);
         }
         catch (TimeoutException ex)
