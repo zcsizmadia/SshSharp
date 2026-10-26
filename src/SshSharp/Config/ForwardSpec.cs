@@ -43,6 +43,8 @@ internal static class ForwardSpec
         if (text[0] == '[')
         {
             var close = text.IndexOf(']', StringComparison.Ordinal);
+
+            // Stryker disable once Equality : text[0] is '[', so ']' is never at 0
             if (close < 0 || close + 1 >= text.Length || text[close + 1] != ':')
             {
                 return null;
@@ -78,9 +80,9 @@ internal static class ForwardSpec
         if (text[0] == '[')
         {
             var close = text.IndexOf(']', StringComparison.Ordinal);
-            if (close < 1 || close + 1 >= text.Length || text[close + 1] != ':')
+            if (close < 2 || close + 1 >= text.Length || text[close + 1] != ':')
             {
-                return null;
+                return null; // no port, or no host in the brackets
             }
 
             host = text[1..close];
@@ -175,6 +177,8 @@ internal static class ForwardSpec
 
         var permittedAddress = SshRemotePortForwarder.ParseAddressLiteral(permitted);
         var requestedAddress = SshRemotePortForwarder.ParseAddressLiteral(requested);
+
+        // Stryker disable once Logical : when only one is an address, the texts differ (equal texts parse alike), so comparing them is false too
         if (permittedAddress is not null || requestedAddress is not null)
         {
             return permittedAddress is not null && permittedAddress.Equals(requestedAddress);
