@@ -57,7 +57,7 @@ jobs:
           # traditional encrypted PEM decryptor (EVP_BytesToKey with AES-CBC).
           - scope: key-readers
             mutate: -m "**/Keys/PrivateKeyParser.cs" -m "**/Keys/OpenSshKeyDecryptor.cs" -m "**/Keys/LegacyPemKeyDecryptor.cs"
-            tests: Keys/*Tests.cs;Fuzz/ParserRobustnessTests.cs
+            tests: Keys/*Tests.cs;Fuzz/ParserRobustnessTests.cs;Fuzz/EncryptedKeyRobustnessTests.cs
           - scope: ecdh-dh
             mutate: -m "**/Crypto/NistCurve.cs" -m "**/Crypto/ModpGroup.cs" -m "**/Crypto/DhGroupValidator.cs" -m "**/Protocol/ClientKeyExchange.cs" -m "**/Protocol/DhGroupExchangeKeyExchange.cs"
             tests: Crypto/NistCurveTests.cs;Crypto/ModpGroupTests.cs;Crypto/DhGroupValidatorTests.cs;Crypto/WycheproofTests.cs;Protocol/ClientKeyExchangeTests.cs;Protocol/DhGroupExchangeTests.cs;Protocol/MlKemKexTests.cs;Protocol/SntrupKexTests.cs;Keys/ExternalKeyTests.cs;Agent/AgentTests.cs
