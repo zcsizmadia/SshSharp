@@ -86,5 +86,8 @@ internal sealed class FakeGssapiServer
     /// <summary>A banner (SSH_MSG_USERAUTH_BANNER) sent in the middle of the exchange, with each token, which RFC 4252 allows.</summary>
     public string? Banner { get; init; }
 
+    /// <summary>Answers the client's first token with another SSH_MSG_USERAUTH_GSSAPI_RESPONSE instead of a token.</summary>
+    public bool AnswerWithResponse { get; init; }
+
     public bool RejectMic { get; init; }
 }
