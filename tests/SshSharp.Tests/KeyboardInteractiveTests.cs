@@ -6,7 +6,7 @@ using Round = SshSharp.Tests.Protocol.FakeSessionServer.KeyboardRound;
 
 namespace SshSharp.Tests;
 
-/// <summary>Keyboard-interactive authentication (RFC 4256), the banner, and the order methods are tried in.</summary>
+/// <summary>Keyboard-interactive authentication (RFC 4256), the banner, the ssh-userauth service request, and the order methods are tried in.</summary>
 public class KeyboardInteractiveTests
 {
     private static CancellationToken Timeout() => new CancellationTokenSource(TimeSpan.FromSeconds(60)).Token;
@@ -225,6 +225,15 @@ public class KeyboardInteractiveTests
         await using var quiet = new FakeSessionServer { AuthenticationBanner = "Authorized use only.\n" };
         await using var other = await ConnectAsync(quiet, password: TestSecrets.Password);
         await Assert.That(other.IsConnected).IsTrue();
+    }
+
+    [Test]
+    public async Task AServerThatAcceptsAnotherService_IsAProtocolError()
+    {
+        await using var server = new FakeSessionServer { AcceptedService = "ssh-connection" };
+        var error = await Assert.ThrowsAsync<SshException>(() => ConnectAsync(server, password: TestSecrets.Password));
+        await Assert.That(error!.Reason).IsEqualTo(SshFailureReason.ProtocolError);
+        await Assert.That(server.AuthAttempts).IsEmpty();
     }
 
     [Test]
