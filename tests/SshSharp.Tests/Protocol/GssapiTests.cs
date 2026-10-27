@@ -12,7 +12,8 @@ public sealed class GssapiTests : IDisposable
 
     private static CancellationToken Timeout() => new CancellationTokenSource(TimeSpan.FromSeconds(60)).Token;
 
-    private static async Task<SshClient> ConnectAsync(FakeSessionServer server, FakeGssapi? gss, string? password = null, string? targetHost = "kdc-test.example")
+    private static async Task<SshClient> ConnectAsync(FakeSessionServer server, FakeGssapi? gss, string? password = null, string? targetHost = "kdc-test.example",
+        Func<string, CancellationToken, ValueTask>? banner = null)
     {
         _ = server.StartAsync();
         return await SshClient.ConnectAsync(server.ClientStream, new SshClientOptions
@@ -21,6 +22,7 @@ public sealed class GssapiTests : IDisposable
             Password = password,
             HostKeyVerifier = SshHostKeyVerifier.FromDelegate((_, _) => ValueTask.FromResult(true)),
             Gssapi = gss is null ? null : new SshGssapiOptions { TargetHost = targetHost, DelegateCredentials = true, ContextFactory = gss.Factory },
+            AuthenticationBanner = banner,
         }, leaveOpen: true, Timeout());
     }
 
@@ -62,6 +64,35 @@ public sealed class GssapiTests : IDisposable
         await using var server = new FakeSessionServer { AdvertisedMethods = ["gssapi-with-mic"], Gssapi = new FakeGssapiServer { SendStatusMessage = true } };
         await using var client = await ConnectAsync(server, new FakeGssapi());
         await Assert.That(client.IsConnected).IsTrue();
+    }
+
+    [Test]
+    public async Task ABannerDuringTheExchange_IsShown_AndAStatusMessageIsNot()
+    {
+        if (!SshGssapiOptions.IsSupported)
+        {
+            Skip.Test("gssapi-with-mic needs .NET 10.");
+            return;
+        }
+
+        var shown = new List<string>();
+        await using (var server = new FakeSessionServer
+        {
+            AdvertisedMethods = ["gssapi-with-mic"],
+            Gssapi = new FakeGssapiServer { Banner = "Authorized use only.", SendStatusMessage = true },
+        })
+        {
+            await using var client = await ConnectAsync(server, new FakeGssapi(), banner: (text, _) => { shown.Add(text); return ValueTask.CompletedTask; });
+            // One banner with each of the client's tokens, and nothing for the status messages.
+            await Assert.That(shown).IsEquivalentTo(Enumerable.Repeat("Authorized use only.", server.GssapiTokensReceived.Count));
+        }
+
+        // Without a handler the banner is read and dropped.
+        await using (var server = new FakeSessionServer { AdvertisedMethods = ["gssapi-with-mic"], Gssapi = new FakeGssapiServer { Banner = "Authorized use only." } })
+        {
+            await using var client = await ConnectAsync(server, new FakeGssapi());
+            await Assert.That(client.IsConnected).IsTrue();
+        }
     }
 
     [Test]

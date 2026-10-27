@@ -71,6 +71,17 @@ public class KeyboardInteractiveTests
     }
 
     [Test]
+    public async Task ANullAnswer_IsSentAsAnEmptyOne()
+    {
+        // A handler that ignores the nullability of its answers must not break the message: a null answer is an empty one.
+        var blank = new Round("", "", [("Optional note: ", true)], [""]);
+        await using var server = new FakeSessionServer { AdvertisedMethods = ["keyboard-interactive"], KeyboardInteractiveRounds = [blank] };
+        await using var client = await ConnectAsync(server, (_, _) => ValueTask.FromResult<IReadOnlyList<string>?>([null!]));
+        await Assert.That(client.IsConnected).IsTrue();
+        await Assert.That(server.KeyboardInteractiveAnswers.Single()).IsEquivalentTo(new[] { "" });
+    }
+
+    [Test]
     public async Task ARoundWithoutQuestions_IsAnsweredWithNothing()
     {
         var notice = new Round("", "Your password expires in 3 days.", [], []);
