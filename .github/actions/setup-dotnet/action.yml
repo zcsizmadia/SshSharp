@@ -21,11 +21,15 @@ runs:
   steps:
     # Actions are pinned by commit SHA (the tag in the comment is for humans and Dependabot).
     # On windows-11-arm, the PowerShell that runs install-dotnet.ps1 now and then crashes ("Internal CLR error. (0x80131506)", exit
-    # code 0xC0000005) before our code runs (actions/setup-dotnet#793), so a failed install there gets one more try. Everywhere else a
-    # failure fails the job at once. Remove the retry when the issue is fixed.
+    # code 0xC0000005) before our code runs (actions/setup-dotnet#793, actions/runner-images#15107). The runner-images maintainers saw
+    # 11 crashes in 12,000 pwsh launches, and none with a 64 MiB gen0 budget (DOTNET_GCgen0size, in hex), so the install steps set it;
+    # only these steps, so the rest of the job keeps the default GC settings. A failed install there still gets one more try. Everywhere
+    # else a failure fails the job at once. Remove both once a PowerShell 7.6 release with PowerShell/PowerShell#28186 is on the image.
     - id: install
       uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
       continue-on-error: ${{ runner.os == 'Windows' && runner.arch == 'ARM64' }}
+      env:
+        DOTNET_GCgen0size: '4000000'
       with:
         global-json-file: global.json
         dotnet-version: ${{ inputs.dotnet-8 == 'true' && '8.0.x' || '' }}
@@ -33,6 +37,8 @@ runs:
         cache-dependency-path: '**/Directory.Packages.props'
     - if: steps.install.outcome == 'failure'
       uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+      env:
+        DOTNET_GCgen0size: '4000000'
       with:
         global-json-file: global.json
         dotnet-version: ${{ inputs.dotnet-8 == 'true' && '8.0.x' || '' }}
