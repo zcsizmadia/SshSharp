@@ -21,7 +21,7 @@ Console.WriteLine(result.StandardOutputText);
 
 ## Features
 
-- **Platform:** pure managed C#, no native dependencies; .NET 8 and .NET 10 on Windows, Linux and macOS; trimming and Native AOT.
+- **Platform:** pure managed C#, no native dependencies; .NET 8, .NET 10 and .NET 11 on Windows, Linux and macOS; trimming and Native AOT.
   Async all the way, with a `CancellationToken` on every network operation.
 - **Connecting:** `ssh_config` aliases (`Host`, `Match`, `Include`), ProxyJump chains (from `ssh_config` or in code),
   ProxyCommand, HTTP and SOCKS proxies or your own transport, typed options for algorithms and timeouts, keep-alive.
@@ -53,7 +53,7 @@ Every feature, with its API and the page that shows how:
 
 | | SshSharp | SSH.NET 2026.0 |
 |---|---|---|
-| Target frameworks | .NET 8, .NET 10 | .NET Framework 4.6.2+, .NET Standard 2.0, .NET 8+ |
+| Target frameworks | .NET 8, .NET 10, .NET 11 | .NET Framework 4.6.2+, .NET Standard 2.0, .NET 8+ |
 | API | Async-only network API; `CancellationToken` on every network operation | Mostly synchronous; async connect, commands and SFTP |
 | Faster on the same server with the same algorithms: 8 parallel commands in half the time, SFTP stream writes 3x faster, downloads and streaming 20-40% faster | ✅ ([benchmarks](https://github.com/zcsizmadia/SshSharp/blob/main/docs/benchmarks.md#a-second-machine-windows-and-wsl)) | ❌ |
 | Fewer allocations: 3-7x less memory allocated per transfer (SCP, SFTP, command output), no large-object-heap garbage per SFTP request | ✅ ([benchmarks](https://github.com/zcsizmadia/SshSharp/blob/main/docs/benchmarks.md#a-second-machine-windows-and-wsl)) | ❌ |
@@ -83,8 +83,8 @@ Every feature, with its API and the page that shows how:
 | Key generation (Ed25519, ECDSA, RSA) and export (OpenSSH, PKCS#8, PuTTY `.ppk`) | ✅ | ❌ |
 | Signing and verifying files and git commits (`ssh-keygen -Y`, SSHSIG, allowed-signers files) | ✅ | ❌ |
 | Post-quantum key exchange `sntrup761x25519-sha512` (OpenSSH 8.5+, also as `@openssh.com`) | ✅ (managed: every platform, .NET 8 too) | ✅ |
-| Post-quantum key exchange `mlkem768x25519-sha256` (OpenSSH 9.9+) | ✅ (.NET 10 with platform ML-KEM) | ✅ |
-| FIPS-compatible post-quantum key exchange (`mlkem768nistp256-sha256`, `mlkem1024nistp384-sha384`) | ✅ (.NET 10 with platform ML-KEM) | ❌ |
+| Post-quantum key exchange `mlkem768x25519-sha256` (OpenSSH 9.9+) | ✅ (.NET 10+ with platform ML-KEM) | ✅ |
+| FIPS-compatible post-quantum key exchange (`mlkem768nistp256-sha256`, `mlkem1024nistp384-sha384`) | ✅ (.NET 10+ with platform ML-KEM) | ❌ |
 | Strict key exchange (Terrapin fix) | ✅ | ✅ |
 | Legacy algorithms (CBC, 3DES, SHA-1, `ssh-rsa`, DH group 1, pre-authentication `zlib`) | — (by design) | ✅ (plain `zlib` only when you add it to `CompressionAlgorithms`) |
 | Commands, shells with a terminal, `expect`-style scripting | ✅ | ✅ |
@@ -134,7 +134,7 @@ Checked on 2026-10-19 against Tmds.Ssh 0.26.0 ([NuGet](https://www.nuget.org/pac
 | | SshSharp | Tmds.Ssh 0.26.0 |
 |---|---|---|
 | Version | 1.x (stable public API) | 0.x (pre-1.0) |
-| Target frameworks | .NET 8, .NET 10 | .NET 8, 9, 10 and 11 |
+| Target frameworks | .NET 8, .NET 10, .NET 11 | .NET 8, 9, 10 and 11 |
 | Cryptography | The platform's (BCL), plus managed code where the platform has none | The platform's (BCL) and BouncyCastle (a package dependency) |
 | Async API with `CancellationToken` | ✅ | ✅ |
 | Native AOT | ✅ (an AOT-compiled binary connects to a real server in CI) | `IsAotCompatible` is set in the project |
@@ -257,7 +257,7 @@ latest release.
 
 ## Testing
 
-Every pull request runs about 1,300 unit tests on Linux, Windows and macOS (x64 and Arm64), each on .NET 8 and .NET 10, and the
+Every pull request runs about 1,300 unit tests on Linux, Windows and macOS (x64 and Arm64), each on .NET 8, .NET 10 and .NET 11, and the
 interop tests against real servers: OpenSSH old and new on Linux and Windows, Dropbear, AsyncSSH, Apache MINA SSHD, Erlang/OTP,
 and SFTP-only servers. The cryptography is checked against reference vectors and about 6,400 Project Wycheproof edge cases. A
 fault-injection proxy cuts, stalls and slows connections at any point, the parsers are fuzzed nightly, and stress runs loop the

@@ -47,6 +47,8 @@ jobs:
         run: dotnet test --project tests/SshSharp.Tests -c Release -f net8.0 --no-build --treenode-filter "$UNIT_TESTS"
       - name: Test net10.0
         run: dotnet test --project tests/SshSharp.Tests -c Release -f net10.0 --no-build --treenode-filter "$UNIT_TESTS"
+      - name: Test net11.0
+        run: dotnet test --project tests/SshSharp.Tests -c Release -f net11.0 --no-build --treenode-filter "$UNIT_TESTS"
       - name: Pack
         run: |
           set -euo pipefail

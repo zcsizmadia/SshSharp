@@ -35,7 +35,7 @@ public static class SshExecMatcher
         }
         catch (OperationCanceledException)
         {
-            process.Kill(entireProcessTree: true);
+            ChildProcess.Stop(process);
             cancellationToken.ThrowIfCancellationRequested();
             return false; // the 30 seconds ran out
         }
@@ -68,6 +68,8 @@ public static class SshExecMatcher
             info.ArgumentList.Add("-c");
             info.ArgumentList.Add(command);
         }
+
+        ChildProcess.InheritStandardStreamsOnly(info);
 
         var process = Process.Start(info);
 
