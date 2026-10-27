@@ -55,6 +55,21 @@ signatures (SSHSIG), typed exceptions, keep-alive, `ping@openssh.com` (`PingAsyn
 
 Out: server-side SSH, `ControlMaster` multiplexing, GSSAPI key exchange (`gssapi-keyex`), X11 forwarding (to be added if users ask).
 
+Planned and requested work is tracked in GitHub issues. Features that wait for a user to ask carry the `on request` label. The ideas
+below have no issue: none is planned, and each would need a reason first.
+
+- A managed ML-KEM fallback for .NET 8, or for platforms without ML-KEM: new managed crypto, so high risk.
+- X11 forwarding: untrusted by default, with a fake cookie in place of the real one as `ssh -X` does, and a threat-model section,
+  because a forwarded display can be read and typed into.
+- UMAC MACs: another managed primitive (the BCL has no UMAC) for algorithms that every server pairs with HMAC-SHA2.
+- A `ControlMaster` client for an existing `ControlPath`.
+- `SshSharp.Compat`: an SSH.NET-shaped package with synchronous wrappers.
+- In CI: Terrapin-Scanner in client mode (it overlaps the ssh-audit job), and more interop servers (Paramiko, wolfSSH, Bitvise).
+
+Decided against: SSH3 (its drafts expired), Ed448 and curve448, `tun` forwarding, a server side, SSHFP, SFTP versions 4 to 6, and
+plain `zlib` compression before authentication (the delayed `zlib@openssh.com` ships). Shipping the in-memory test server as a
+`SshSharp.Testing` package is not planned either.
+
 ## Packages
 
 | Package | Contents |
