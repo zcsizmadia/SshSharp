@@ -8,6 +8,11 @@ updates:
       # TUnit and the testing platform move together; one PR instead of several.
       testing:
         patterns: ["TUnit*", "Microsoft.Testing.*"]
+      # dotnet/runtime's packages ship together on the .NET servicing days (each release only the ones that changed): one PR for them.
+      # Microsoft.Extensions.TimeProvider.Testing comes from dotnet/extensions, on its own versions and schedule.
+      dotnet-runtime:
+        patterns: ["Microsoft.Extensions.*", "System.IO.Pipelines"]
+        exclude-patterns: ["Microsoft.Extensions.TimeProvider.Testing"]
   - package-ecosystem: github-actions
     # The workflows, and the composite action they share.
     directories: ["/", "/.github/actions/*"]
