@@ -84,6 +84,7 @@ internal static partial class ChaCha20
     {
         if (key.Length != KeySize || nonce8.Length != 8 || output.Length < input.Length)
         {
+            // Stryker disable once String : the message is for people
             throw new ArgumentException("ChaCha20 needs a 32-byte key, an 8-byte nonce and enough output space.");
         }
 
@@ -96,12 +97,14 @@ internal static partial class ChaCha20
         Span<byte> block = stackalloc byte[BlockSize];
         for (var offset = done; offset < input.Length; offset += BlockSize)
         {
+            // Stryker disable once Bitwise : on an unsigned value, >>> is the same shift as >>
             Block(key, (uint)counter, (uint)(counter >> 32), n0, n1, block);
             counter++;
             var count = Math.Min(BlockSize, input.Length - offset);
             XorHelper.Xor(input.Slice(offset, count), block, output[offset..]);
         }
 
+        // Stryker disable once Statement : wiping the keystream from the stack is hygiene that the API cannot observe
         block.Clear();
     }
 

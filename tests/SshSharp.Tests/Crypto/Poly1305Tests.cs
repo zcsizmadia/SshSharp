@@ -226,6 +226,21 @@ public class Poly1305Tests
     }
 
     [Test]
+    public async Task TheFinalReductionWith26BitLimbs_CarriesOutOfH0AfterTheFold()
+    {
+        // The rare path of the 26-bit code's final reduction: h1 >= 2^26 with h2, h3 and h4 at their tops carries all the way up, the
+        // fold adds 5 to an h0 at least 2^26 - 5, and h0 carries into h1 once more. With r = 2^26 - 1 (r1 to r4 zero), the block loop
+        // computes (h + m) * r exactly, so a search over two blocks found messages that leave it there (no random input gets close).
+        byte[] r = [0xff, 0xff, 0xff, 0x03, .. new byte[12]];
+        var m1 = ToBytes(BigInteger.Parse("0ffff057fffc16ffff05ffffc18ffff04", System.Globalization.NumberStyles.HexNumber, null));
+        var m2 = ToBytes(0x3eb);
+        foreach (var s in new[] { new byte[16], Enumerable.Repeat((byte)0xff, 16).ToArray(), RandomBytes(new Random(307), 16) })
+        {
+            await AssertMatchesBothReferences([.. r, .. s], [.. m1, .. m2], $"s {Hex(s)}");
+        }
+    }
+
+    [Test]
     public async Task SCarriesOutOf2To128()
     {
         // h + s above 2^128 must wrap: s = 2^128 - 1 with h = 1, 2 and p - 1 (whose low 128 bits are all ones but the last two).
