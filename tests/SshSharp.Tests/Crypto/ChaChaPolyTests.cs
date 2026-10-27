@@ -310,22 +310,33 @@ public class ChaChaPolyTests
         await Assert.That(() => cipher.TryDecryptWithoutLength(0, new byte[8], new byte[15], new byte[8])).Throws<ArgumentException>();
         await Assert.That(() => cipher.TryDecryptWithoutLength(0, new byte[8], new byte[16], new byte[7])).Throws<ArgumentException>();
         await Assert.That(() => cipher.TryDecryptWithoutLength(0, new byte[8], new byte[16], new byte[9])).Throws<ArgumentException>();
+
+        // Exactly ArgumentException, for sizes that would otherwise go through: an output longer than the packet, a tag that is too long.
+        await Assert.That(() => cipher.Encrypt(0, 1, new byte[1], new byte[6], new byte[16])).ThrowsExactly<ArgumentException>();
+        await Assert.That(() => cipher.Encrypt(0, 1, new byte[1], new byte[5], new byte[17])).ThrowsExactly<ArgumentException>();
+
+        // A packet of just the length, with an empty body, is the smallest one there is.
+        var output = new byte[4];
+        var tag = new byte[16];
+        cipher.Encrypt(7, 0, [], output, tag);
+        await Assert.That(cipher.TryDecrypt(7, output, tag, [])).IsTrue();
     }
 
     [Test]
     public async Task OpenSsh_DisposeZeroesKeys()
     {
+        // Both halves of the key are wiped: the disposed cipher encrypts as one made from 64 zero bytes would.
         var cipher = NewCipher(out _);
         cipher.Dispose();
         var packet = new byte[8];
         var tag = new byte[16];
         var body = new byte[4];
         cipher.Encrypt(1, 4, body, packet, tag);
-        // With zeroed keys the construction no longer matches a cipher built from the original key.
-        using var original = NewCipher(out _);
+        using var zero = new ChaCha20Poly1305OpenSsh(new byte[64]);
         var packet2 = new byte[8];
         var tag2 = new byte[16];
-        original.Encrypt(1, 4, body, packet2, tag2);
-        await Assert.That(Hex(tag)).IsNotEqualTo(Hex(tag2));
+        zero.Encrypt(1, 4, body, packet2, tag2);
+        await Assert.That(Hex(packet)).IsEqualTo(Hex(packet2));
+        await Assert.That(Hex(tag)).IsEqualTo(Hex(tag2));
     }
 }

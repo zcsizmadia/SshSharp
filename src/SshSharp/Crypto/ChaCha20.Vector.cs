@@ -63,6 +63,7 @@ internal static partial class ChaCha20
     internal static int XorParallel(ReadOnlySpan<byte> key, uint n0, uint n1, ref ulong counter, ReadOnlySpan<byte> input, Span<byte> output, int parallelBlocks)
     {
         var done = 0;
+        // Stryker disable once Block : without the 8-block path the 4-block path does the same blocks, with the same output; only the speed differs
         if (parallelBlocks == 8)
         {
             done = Xor8Blocks(key, n0, n1, ref counter, input, output);
@@ -104,6 +105,7 @@ internal static partial class ChaCha20
             // all ones (-1) in that lane, so subtracting it adds the carry. At 2^64 both words wrap, as the scalar counter does.
             var low = Vector128.Create((uint)counter);
             var ctrLow = low + Vector128.Create(0u, 1, 2, 3);
+            // Stryker disable once Bitwise : on an unsigned value, >>> is the same shift as >>
             var ctrHigh = Vector128.Create((uint)(counter >> 32)) - Vector128.LessThan(ctrLow, low);
 
             Vector128<uint> x0 = c0, x1 = c1, x2 = c2, x3 = c3;
@@ -159,6 +161,7 @@ internal static partial class ChaCha20
             // As in Xor4Blocks, with 8 lanes.
             var low = Vector256.Create((uint)counter);
             var ctrLow = low + Vector256.Create(0u, 1, 2, 3, 4, 5, 6, 7);
+            // Stryker disable once Bitwise : on an unsigned value, >>> is the same shift as >>
             var ctrHigh = Vector256.Create((uint)(counter >> 32)) - Vector256.LessThan(ctrLow, low);
 
             Vector256<uint> x0 = c0, x1 = c1, x2 = c2, x3 = c3;

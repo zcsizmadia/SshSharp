@@ -234,22 +234,35 @@ difference; over 16,383 bytes it takes about 64 ticks with the 64-bit limbs and 
 A differential test runs both limb sizes on every machine against each other and against the definition computed with `BigInteger`:
 random keys and messages of every length up to 1,100 bytes and longer ones, the largest clamped r with all-ones messages, accumulators
 that end just below, at and above p and 2^130 (where the final subtraction and the carry above 2^130 decide the result), an s that
-carries out of 2^128, and the RFC 8439 vectors (section 2.5.2 and appendix A.3).
+carries out of 2^128, two blocks that drive the 26-bit code's final reduction into its rarest carry (below), and the RFC 8439
+vectors (section 2.5.2 and appendix A.3).
 
-Mutation testing (the `chacha20-poly1305` scope, Stryker.NET 5) kills 126 mutants of the 64-bit code and 174 of the 26-bit code.
-What survives:
+Mutation testing (the `chacha20-poly1305` scope, Stryker.NET 5) kills 126 mutants of the 64-bit code and 175 of the 26-bit code,
+and every mutant of ChaCha20, its vector code and the `chacha20-poly1305@openssh.com` construction that is not equivalent. What
+survives, or is annotated as equivalent:
 
 - `>>` turned into `>>>`: on an unsigned value both are the same shift, so these mutants are equivalent. Where the shift is the only
   bitwise operator of its statement, the statement carries a `// Stryker disable once Bitwise` comment. Where the statement also
   has `&`, `|` or `<<` (6 statements in the 64-bit code, 11 in the 26-bit code), it does not, because the comment would also hide
   those operators' mutants, which the tests kill.
 - The call of the 26-bit code from `ComputeTag` runs only in a 32-bit process, so a 64-bit test run cannot cover it; the tests call
-  `ComputeTag26` directly instead. Negating `Environment.Is64BitProcess` is equivalent (both branches give the same tag), and so is
-  removing the clearing of the last block's stack buffer (it starts zeroed and only the last block uses it); both are annotated.
+  `ComputeTag26` directly instead. Removing the call is annotated; removing its `else` block stays as the scope's one uncovered
+  mutant, because annotating the `if` would also hide the removal of the 64-bit branch, which the tests kill. Negating
+  `Environment.Is64BitProcess` is equivalent (both branches give the same tag), and so is removing the clearing of the last block's
+  stack buffer (it starts zeroed and only the last block uses it); both are annotated.
 - The additions of the second carry pass of the final reduction (`h2 += cc`, `h0 += cc * 5`, `h1 += cc`) add a carry that is
   always 0 within the block loop's limb bounds (above), so changing them is equivalent; they are annotated with that bound.
-- In the 26-bit code, the last carry of its final reduction (`h1 += cc`) survives, as it did before this change; that code is
-  unchanged.
+- In the 26-bit code, the last carry of its final reduction (`h1 += cc`, after the fold adds 5 to h0) is not equivalent, but no
+  random input reaches it. It carries only when h1 is at least 2^26, h2, h3 and h4 are at their tops, and h0 is at least
+  2^26 - 5. With r = 2^26 - 1 (r1 to r4 zero), the block loop computes (h + m) * r exactly, which made the state reachable with two
+  blocks found by a search. `TheFinalReductionWith26BitLimbs_CarriesOutOfH0AfterTheFold` uses them, and it is the only test that
+  fails when the addition becomes a subtraction.
+- ChaCha20 and the `chacha20-poly1305@openssh.com` construction: wiping the keystream, the one-time Poly1305 key and the block they
+  come from off the stack is hygiene that the API cannot observe, and clearing the nonce's stack buffer again changes nothing
+  (locals are initialized); these are annotated. So is the 8-block vector path: without it, the 4-block path does the same blocks
+  with the same output, only slower. `>>` turned into `>>>` on the 64-bit block counter is equivalent, as above. What the API can
+  observe is tested: that `Dispose` wipes both halves of the key (the disposed cipher encrypts as an all-zero key does), each
+  size check, and the smallest packet (a length with an empty body).
 
 ## Private keys written to files
 

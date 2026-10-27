@@ -34,6 +34,7 @@ internal static partial class Poly1305
         }
         else
         {
+            // Stryker disable once Statement : runs only in a 32-bit process, which a 64-bit test run cannot be; the tests call ComputeTag26 directly
             ComputeTag26(key, message, tag);
         }
     }
