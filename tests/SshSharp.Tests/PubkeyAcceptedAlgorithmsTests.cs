@@ -198,6 +198,7 @@ public sealed class PubkeyAcceptedAlgorithmsTests : IDisposable
             ["rsa-sha2-256", "rsa-sha2-512"])).IsEqualTo("rsa-sha2-512");
         await Assert.That(SshUserAuth.ChooseSignatureAlgorithm(rsa, new Dictionary<string, string>(), ["rsa-sha2-256"])).IsEqualTo("rsa-sha2-256");
         await Assert.That(SshUserAuth.ChooseSignatureAlgorithm(rsa, BothRsa, ["ssh-ed25519"])).IsNull();
+        await Assert.That(SshUserAuth.ChooseSignatureAlgorithm(rsa, new Dictionary<string, string>(), ["ssh-ed25519"])).IsNull(); // and without server-sig-algs
     }
 
     [Test]

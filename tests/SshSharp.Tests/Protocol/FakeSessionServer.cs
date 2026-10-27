@@ -684,6 +684,11 @@ internal sealed class FakeSessionServer : IAsyncDisposable
                     GssapiTokensReceived.Add(token);
                 }
 
+                if (gss.Banner is { } gssBanner)
+                {
+                    await _server.SendAsync(Build(w => { w.WriteByte(SshMessage.UserAuthBanner); w.WriteString(gssBanner); w.WriteString(""); }));
+                }
+
                 if (gss.SendStatusMessage)
                 {
                     // SSH_MSG_USERAUTH_GSSAPI_ERROR: the server's GSS-API status, informational.

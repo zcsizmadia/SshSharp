@@ -83,5 +83,8 @@ internal sealed class FakeGssapiServer
 
     public bool SendStatusMessage { get; init; }
 
+    /// <summary>A banner (SSH_MSG_USERAUTH_BANNER) sent in the middle of the exchange, with each token, which RFC 4252 allows.</summary>
+    public string? Banner { get; init; }
+
     public bool RejectMic { get; init; }
 }

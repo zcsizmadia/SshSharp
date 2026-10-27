@@ -88,7 +88,7 @@ jobs:
             tests: Protocol/PacketCompressionTests.cs;Protocol/SshTransportCompressionTests.cs;CompressionTests.cs;Fuzz/ParserRobustnessTests.cs
           - scope: userauth
             mutate: -m "**/Protocol/SshUserAuth.cs"
-            tests: KeyboardInteractiveTests.cs;PasswordAuthenticationTests.cs;PublicKeyAuthTests.cs;Agent/AgentServerTests.cs;Protocol/GssapiTests.cs
+            tests: KeyboardInteractiveTests.cs;PasswordAuthenticationTests.cs;PublicKeyAuthTests.cs;PubkeyAcceptedAlgorithmsTests.cs;Agent/AgentServerTests.cs;Protocol/GssapiTests.cs
           - scope: identification
             mutate: -m "**/Protocol/SshIdentification.cs"
             tests: Protocol/SshIdentificationTests.cs;ConnectionOptionsTests.cs
