@@ -115,7 +115,7 @@ Every feature, with its API and the page that shows how:
 | Fuzzing | ✅ (coverage-guided, nightly; every parser in each test run) | ❌ |
 | Fault-injection tests against real servers (cuts at any byte, either way; silent or one-way stalled networks; latency, tiny segments, low bandwidth; sessions killed on the server) | ✅ | Partial (sessions killed on the server) |
 | Mutation testing | ✅ (Stryker.NET, weekly) | ❌ |
-| Maturity | New (1.0 in October 2026); managed crypto awaiting an outside review | More than a decade of production use |
+| Maturity | New (1.0 in October 2026); managed crypto reviewed internally, not independently audited | More than a decade of production use |
 
 **Use SSH.NET instead** when you need .NET Framework or .NET Standard, servers that only speak legacy algorithms,
 or a long track record. Moving from SSH.NET? See the

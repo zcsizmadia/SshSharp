@@ -134,7 +134,7 @@ docs/                      # guides, design notes, the API reference site (DocFX
 
 - **Managed X25519/Ed25519** is the riskiest code: it signs with users' long-term keys. The managed sntrup761 handles the
   post-quantum half of a key exchange. Both are checked against official vectors, reviewed for constant time with a
-  dudect-style timing test (`docs/crypto-review.md`), and await an outside review. The BCL is used wherever it
+  dudect-style timing test (`docs/crypto-review.md`), but not independently audited. The BCL is used wherever it
   provides the primitive on both target frameworks.
 - **`ssh_config` runs commands** (`Match exec`, `ProxyCommand`). Caller inputs are validated, `Match exec` is opt-in, and
   the threat model (`docs/threat-model.md`) records what is trusted.
