@@ -51,8 +51,17 @@ await client.UploadFileAsync("secrets.env", "/etc/app/secrets.env", options, can
 A failed transfer (a missing file, permission denied, a server without `scp`) throws an `SshException` with
 `SshFailureReason.TransferFailed` and the server's own message.
 
-Remote paths are passed to the server's shell as one single-quoted word, so spaces and special characters are safe with a POSIX shell (`sh`, `bash`); a Windows server whose default shell is `cmd.exe` or PowerShell does not read single quotes that way. When
-downloading, every name the server sends must be a single path component (no `/`, `\`, `:`, `.`, `..` or control characters),
+SCP runs `scp` on the server through the server's shell, and the remote path is part of that command. SshSharp passes it as one
+single-quoted word, so spaces and special characters are safe with a POSIX shell (`sh`, `bash`).
+
+> [!WARNING]
+> Windows OpenSSH servers run commands through `cmd.exe` by default, or PowerShell when configured so, and neither reads that
+> quoting as a POSIX shell does. `cmd.exe` does not treat single quotes as quotes at all, so a path with `&` in it runs what follows
+> as a command. PowerShell does, but escapes a quote inside them differently, so a path with a `'` in it can end the quoted word
+> and run a command. Either runs as the logged-in user. Pass only remote paths you control to SCP on such a server. For a path that
+> comes from user input or another untrusted source, use [SFTP](sftp.md), which sends paths as data and runs no shell.
+
+When downloading, every name the server sends must be a single path component (no `/`, `\`, `:`, `.`, `..` or control characters),
 and a single-file download accepts exactly one file: a hostile server cannot write outside the target or slip in extra files
 (CVE-2019-6111). Permission bits from the server are applied without set-id or sticky bits, and only with `Preserve`.
 
