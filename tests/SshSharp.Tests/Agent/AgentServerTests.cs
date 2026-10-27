@@ -366,7 +366,20 @@ public class AgentServerTests
         () => TestKeys.Blob(w => { w.WriteByte(27); w.WriteString("unknown@example.com"); }),
         () => TestKeys.Blob(w => { w.WriteByte(27); w.WriteString("session-bind@openssh.com"); }),
         () => TestKeys.Blob(w => { w.WriteByte(27); w.WriteString("session-bind@openssh.com"); w.WriteString("k"); w.WriteString("s"); w.WriteString("g"); }),
+        () => SessionBindWithHostKey(TestKeys.Blob(w => { w.WriteString("ecdsa-sha2-nistp256"); w.WriteString("nistp256"); w.WriteString([4, .. new byte[64]]); })), // off the curve
+        () => SessionBindWithHostKey(TestKeys.Blob(w => { w.WriteString("ssh-unknown@example.com"); w.WriteString("x"); })),
     ];
+
+    /// <summary>A well-formed session-bind@openssh.com request around a host key that cannot be read.</summary>
+    private static byte[] SessionBindWithHostKey(byte[] hostKey) => TestKeys.Blob(w =>
+    {
+        w.WriteByte(27);
+        w.WriteString("session-bind@openssh.com");
+        w.WriteString(hostKey);
+        w.WriteString("session"u8);
+        w.WriteString(TestKeys.Blob(s => { s.WriteString("ecdsa-sha2-nistp256"); s.WriteString("sig"u8); }));
+        w.WriteBoolean(false);
+    });
 
     [Test]
     [MethodDataSource(nameof(MalformedRequests))]
