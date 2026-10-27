@@ -100,6 +100,7 @@ public sealed class SftpGlobTests
     [Arguments("[a\\-c]", "b", false)]
     [Arguments("[a-\\c]", "b", true)] // an escaped range end
     [Arguments("[\\", "[\\", true)]
+    [Arguments("[a-", "[a-", true)] // a set that ends on a dash never closes
     public async Task Malformed_AndEscapes(string pattern, string name, bool expected) =>
         await Assert.That(SftpGlob.Parse(pattern).IsMatch(name)).IsEqualTo(expected);
 
