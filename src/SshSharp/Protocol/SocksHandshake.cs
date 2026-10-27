@@ -32,17 +32,21 @@ internal sealed class SocksCredentials
     /// <exception cref="ArgumentException">The user name or password is empty or longer than 255 bytes in UTF-8.</exception>
     public SocksCredentials(NetworkCredential credentials, string parameterName)
     {
+        // Stryker disable once String : NetworkCredential gives an empty string, never null, so these fallbacks are never used
         var userName = Encoding.UTF8.GetBytes(credentials.UserName ?? string.Empty);
+        // Stryker disable once String : as above
         var password = Encoding.UTF8.GetBytes(credentials.Password ?? string.Empty);
         try
         {
             if (userName.Length is 0 or > MaxLength || password.Length is 0 or > MaxLength)
             {
+                // Stryker disable once String : the message is for people
                 throw new ArgumentException("A SOCKS 5 user name and password are each 1 to 255 bytes in UTF-8 (RFC 1929).", parameterName);
             }
 
             Digests(userName, password, _expected);
         }
+        // Stryker disable once Block,Statement : wiping the buffer is hygiene no test can see; nothing reads it afterwards
         finally
         {
             CryptographicOperations.ZeroMemory(password);
@@ -111,6 +115,7 @@ internal static class SocksHandshake
                 await SendAsync(stream, [0, 0x5B, 0, 0, 0, 0, 0, 0], cancellationToken).ConfigureAwait(false);
             }
 
+            // Stryker disable once String : the message is for people
             throw new SocksAuthenticationException("SOCKS 4 has no password authentication");
         }
 
@@ -164,6 +169,7 @@ internal static class SocksHandshake
             await SendAsync(stream, [Socks5, 0xFF], cancellationToken).ConfigureAwait(false); // no acceptable method
             if (credentials is not null)
             {
+                // Stryker disable once String : the message is for people
                 throw new SocksAuthenticationException("the client did not offer username/password authentication");
             }
 
@@ -180,6 +186,7 @@ internal static class SocksHandshake
         var header = await ReadExactlyAsync(stream, 4, cancellationToken).ConfigureAwait(false);
         if (header[0] != Socks5)
         {
+            // Stryker disable once String : the message is for people
             throw new IOException("The SOCKS 5 request has the wrong version.");
         }
 
@@ -220,6 +227,7 @@ internal static class SocksHandshake
     {
         if (await ReadByteAsync(stream, cancellationToken).ConfigureAwait(false) != UserNamePasswordVersion)
         {
+            // Stryker disable once String : the message is for people
             throw new IOException("The SOCKS 5 username/password request has the wrong version.");
         }
 
@@ -230,6 +238,7 @@ internal static class SocksHandshake
         {
             matches = credentials.Matches(userName, password);
         }
+        // Stryker disable once Block,Statement : wiping the buffer is hygiene no test can see; nothing reads it afterwards
         finally
         {
             CryptographicOperations.ZeroMemory(password);
@@ -238,6 +247,7 @@ internal static class SocksHandshake
         await SendAsync(stream, [UserNamePasswordVersion, matches ? (byte)0 : (byte)1], cancellationToken).ConfigureAwait(false);
         if (!matches)
         {
+            // Stryker disable once String : the message is for people
             throw new SocksAuthenticationException("wrong user name or password");
         }
     }
@@ -266,6 +276,7 @@ internal static class SocksHandshake
             var received = await stream.ReadAsync(buffer.AsMemory(read), cancellationToken).ConfigureAwait(false);
             if (received == 0)
             {
+                // Stryker disable once String : the message is for people
                 throw new IOException("The SOCKS client closed the connection during the handshake.");
             }
 
@@ -283,6 +294,7 @@ internal static class SocksHandshake
         {
             if (text.Length == MaxName)
             {
+                // Stryker disable once String : the message is for people
                 throw new IOException("A SOCKS 4 field is longer than 255 bytes.");
             }
 
