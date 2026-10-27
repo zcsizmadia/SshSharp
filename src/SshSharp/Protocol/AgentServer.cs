@@ -350,6 +350,7 @@ internal sealed class AgentServer
 
             return (SshPublicKey.FromBlob(blob, comment), null);
         }
+        // Stryker disable once Block : without the block, the method returns null, as the block does
         catch (Exception ex) when (ex is SshProtocolException or FormatException)
         {
             return null;
@@ -365,6 +366,7 @@ internal sealed class AgentServer
                 ? SshCertificate.FromBlob(blob).Key
                 : VerifyingKey.Parse(blob);
         }
+        // Stryker disable once Block,Equality : reading a key throws SshProtocolException, which HandleAsync answers with failure as well
         catch (Exception ex) when (ex is SshProtocolException or FormatException)
         {
             return null;
@@ -381,6 +383,7 @@ internal sealed class AgentServer
         var flags = reader.ReadUInt32();
         if (!reader.IsEmpty)
         {
+            // Stryker disable once String : the message is for people
             throw new SshProtocolException("Data after the signing request.");
         }
 
@@ -419,6 +422,7 @@ internal sealed class AgentServer
                 sshsig.ReadString(); // the message's hash
                 return sshsig.IsEmpty && name.Length > 0 ? new SignedData(SshSignaturePurpose.FileSignature, Namespace: name) : null;
             }
+            // Stryker disable once Block : without the block, the method returns null, as the block does
             catch (SshProtocolException)
             {
                 return null;
@@ -580,6 +584,7 @@ internal sealed class RelayedAgent(Stream stream) : AgentBackend
         var count = reader.ReadUInt32();
         if (count > SshAgent.MaxKeys)
         {
+            // Stryker disable once String : the message is for people
             throw new SshProtocolException($"The agent listed {count} keys.");
         }
 
@@ -621,6 +626,7 @@ internal static class AgentChannelServer
                     if (count + data.Length > buffer.Length)
                     {
                         // Bounded: at most one message (checked against the limit below) and one channel packet are ever held.
+                        // Stryker disable once Arithmetic : the buffer holds the data either way; only how far it grows ahead changes
                         Array.Resize(ref buffer, Math.Max(buffer.Length * 2, count + data.Length));
                     }
 
