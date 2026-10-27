@@ -380,7 +380,11 @@ connection, but not read or change it: each host's key is verified end to end, b
   in a dot or space are refused too.
 - A single-file download refuses a second file or a directory.
 - File modes from the server apply only with `Preserve`, and only the permission bits, never set-id or sticky.
-- Remote paths are passed to the server's shell quoted as one word.
+- Remote paths, for downloads and uploads, are passed to the server's shell as one single-quoted word. That is safe with a POSIX
+  shell. On a Windows OpenSSH server the command runs through `cmd.exe`, which does not treat single quotes as quotes, or
+  PowerShell, which escapes a quote inside them differently. There, a path the application does not control can run a command as
+  the logged-in user: the issue behind CVE-2020-15778 and SSH.NET's GHSA-mggc-4xg6-vcxf. Applications pass such paths to SFTP,
+  which runs no shell.
 - Total size, file count and directory depth are not limited: a server can fill the target's disk.
 
 ### Secrets in memory and logs
