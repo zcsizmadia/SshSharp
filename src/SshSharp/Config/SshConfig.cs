@@ -139,10 +139,15 @@ public sealed class SshConfig
     {
         var home = homeDirectory ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         var userDirectory = Path.Join(home, ".ssh");
+
+        // Stryker disable once Conditional,String : the system-wide directory is not one a test may write to
         var systemDirectory = OperatingSystem.IsWindows()
             ? Path.Join(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "ssh")
             : "/etc/ssh";
-        return Combine(Load(Path.Join(userDirectory, "config"), userDirectory), Load(Path.Join(systemDirectory, "ssh_config"), systemDirectory));
+
+        // Stryker disable once String : the system-wide file is not one a test may write
+        var systemConfig = Path.Join(systemDirectory, "ssh_config");
+        return Combine(Load(Path.Join(userDirectory, "config"), userDirectory), Load(systemConfig, systemDirectory));
     }
 
     /// <summary>Combines several configs; earlier ones take precedence (first obtained value wins).</summary>
@@ -167,6 +172,7 @@ public sealed class SshConfig
         }
         catch (SshConfigCallbackNeeded)
         {
+            // Stryker disable once String : the message is for people
             throw new NotSupportedException(
                 "This ssh_config needs Match exec or host canonicalization, whose callbacks are asynchronous: use ResolveAsync.");
         }
@@ -225,11 +231,13 @@ public sealed class SshConfig
         RequireSafe(host, nameof(host), "host name");
         if (host.Any(char.IsWhiteSpace))
         {
+            // Stryker disable once String : the message is for people
             throw new ArgumentException("The host name contains white space.", nameof(host));
         }
 
         if (options.User is { } explicitUser)
         {
+            // Stryker disable once String : the message is for people
             RequireSafe(explicitUser, nameof(options), "user name");
         }
 
@@ -266,6 +274,7 @@ public sealed class SshConfig
         var globalKnownHosts = KnownHostsFiles(values, "globalknownhostsfile", DefaultGlobalKnownHosts());
 
         // The resolver keeps only whichever of ProxyJump and ProxyCommand came first, as OpenSSH does.
+        // Stryker disable once Equality : the resolver stores a directive only with its arguments
         var proxyCommand = values.TryGetValue("proxycommand", out var pc) && pc.Count > 0 && !pc[0].Equals("none", StringComparison.OrdinalIgnoreCase)
             ? ctx.ExpandTokens(pc[0]) : null;
         var ipQos = ParseIPQoS(All("ipqos"));
@@ -305,6 +314,7 @@ public sealed class SshConfig
             ServerAliveInterval = Time(First("serveraliveinterval")) is { } sai && sai > TimeSpan.Zero ? sai : null,
             ServerAliveCountMax = int.TryParse(First("serveralivecountmax"), NumberStyles.None, CultureInfo.InvariantCulture, out var count) ? count : 3,
             ConnectTimeout = Time(First("connecttimeout")),
+            // Stryker disable once Equality : 1 attempt and the default of 1 are the same
             ConnectionAttempts = int.TryParse(First("connectionattempts"), NumberStyles.None, CultureInfo.InvariantCulture, out var attempts) && attempts >= 1 ? attempts : 1,
             AddressFamily = ParseFamily(First("addressfamily")),
             BindAddress = First("bindaddress") is { Length: > 0 } bindAddress ? bindAddress : null,
@@ -350,6 +360,7 @@ public sealed class SshConfig
     {
         if (value.StartsWith('-') || value.AsSpan().IndexOfAny(UnsafeCharacters) >= 0 || value.Any(char.IsControl))
         {
+            // Stryker disable once String : the message is for people
             throw new ArgumentException($"The {what} contains characters that are not allowed (shell metacharacters, control characters, or a leading '-').", parameterName);
         }
     }
@@ -363,6 +374,7 @@ public sealed class SshConfig
 
     private static string[] DefaultGlobalKnownHosts()
     {
+        // Stryker disable once Conditional,String : the system-wide directory is not one a test may write to
         var dir = OperatingSystem.IsWindows()
             ? Path.Join(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "ssh")
             : "/etc/ssh";
@@ -371,14 +383,13 @@ public sealed class SshConfig
 
     private static string ExpandAgent(string value, SshTokenContext ctx)
     {
-        if (value.Equals("none", StringComparison.OrdinalIgnoreCase) || value.Equals("SSH_AUTH_SOCK", StringComparison.Ordinal))
-        {
-            return value;
-        }
+        // none and SSH_AUTH_SOCK need no case of their own: with no token, ~ or ${ in them, they come through the expansion below as
+        // they are.
 
         // "$NAME" names an environment variable that holds the socket path.
         if (value.Length > 1 && value[0] == '$' && value[1] != '{')
         {
+            // Stryker disable once String : the message is for people
             return ctx.GetEnvironmentVariable(value[1..]) ?? throw new FormatException($"Environment variable '{value[1..]}' is not set.");
         }
 
@@ -554,7 +565,8 @@ public sealed class SshConfig
 
         var mode = parts[0].ToLowerInvariant();
         TimeSpan? lifetime = null;
-        if (parts.Length == 2 || mode is not ("yes" or "no" or "ask" or "confirm"))
+        // A lone word other than yes or confirm is a time (meaning yes), or else malformed: ask and no give null below either way.
+        if (parts.Length == 2 || mode is not ("yes" or "confirm"))
         {
             if (!SshTime.TryParse(parts[^1], out var time) || time <= TimeSpan.Zero)
             {
