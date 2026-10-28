@@ -288,18 +288,21 @@ internal static class TcpConnector
         }
         finally
         {
-            // The attempts still running lost (or the race ended without a winner): they are cancelled, their sockets closed, and awaited,
-            // so that none outlives the race.
+            // The attempts still running lost (or the race ended without a winner): they are cancelled, which ends their connects, and
+            // awaited before their sockets are closed, so that none outlives the race.
             await race.CancelAsync().ConfigureAwait(false);
             foreach (var (task, (socket, _)) in running)
             {
-                socket.Dispose();
-                try
+                using (socket)
                 {
-                    await task.ConfigureAwait(false);
-                }
-                catch (Exception ex) when (ex is SocketException or OperationCanceledException or ObjectDisposedException)
-                {
+                    try
+                    {
+                        await task.ConfigureAwait(false);
+                    }
+                    catch (Exception ex) when (ex is SocketException or OperationCanceledException or ObjectDisposedException)
+                    {
+                        // A loser's end: cancelled, or failed meanwhile. Either way it lost, and what the race reports is decided already.
+                    }
                 }
             }
         }
