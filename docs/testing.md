@@ -128,6 +128,20 @@ always finish. A sweep cuts the connection at 13 points from the first byte to w
   mutant that cannot change what any caller sees (wiping a buffer, a message, an allocation size) is annotated in the code with the
   reason, as `// Stryker disable once <mutator> : <reason>`.
 
+  **Timeouts overstate the scores.** With the runner for Microsoft.Testing.Platform (a preview in Stryker.NET 5), every mutation
+  check that Stryker compiles into the code reads the active mutant from a memory-mapped file instead of a field. Hot code runs
+  about a hundred times slower, while the time limit comes from a run without that overhead. The managed cryptography's tests
+  then time out whatever the mutant does, and Stryker counts each as detected. In the full run of October 2026:
+
+  | Scope | Score | Killed mutants alone |
+  |---|---|---|
+  | sntrup761 | 100% | 8.6% |
+  | public-key, bcrypt-pbkdf, key-readers, userauth | 97–100% | 39–47% |
+  | key-writers, identification, ecdh-dh | 100% | 62–64% |
+
+  The job summary prints both. The true score lies between them: some timeouts are real loops, and some mutants would survive.
+  Raising the time limit would push the slowest scopes past the job's 340 minutes, so these scopes wait for a fix in Stryker.
+
 ## Stress testing and intermittent failures
 
 A stress workflow runs the unit tests on every platform, and the interop tests against every server, in a loop (100 iterations
