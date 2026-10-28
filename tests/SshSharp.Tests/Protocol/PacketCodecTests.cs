@@ -856,6 +856,43 @@ public class PacketCodecTests
     }
 
     [Test]
+    public async Task PaddingRandom_AnExactFit_UsesUpTheBlock_AndABlockSizedRequestComesFromAFreshBlock()
+    {
+        var refills = new List<byte[]>();
+        var padding = CountingPadding(8, refills);
+        var taken = new byte[4];
+        padding.Fill(taken);
+        padding.Fill(taken); // exactly what is left: no refill
+        await Assert.That(refills.Count).IsEqualTo(1);
+        await Assert.That(Convert.ToHexString(taken)).IsEqualTo(Convert.ToHexString(refills[0].AsSpan(4, 4)));
+
+        // As large as the block, with half of one left: a fresh block, used up whole, so the next request starts another.
+        padding.Fill(taken);
+        var whole = new byte[8];
+        padding.Fill(whole);
+        await Assert.That(refills.Count).IsEqualTo(3);
+        await Assert.That(Convert.ToHexString(whole)).IsEqualTo(Convert.ToHexString(refills[2]));
+        padding.Fill(taken);
+        await Assert.That(refills.Count).IsEqualTo(4);
+    }
+
+    [Test]
+    public async Task WithoutAPaddingSource_ThePaddingIsRandom()
+    {
+        // Padding is at least 4 bytes, so a packet whose padding is all zeros has odds of 2^-32 at most; eight in a row, 2^-256.
+        var anyNonZero = false;
+        for (uint sequence = 0; sequence < 8; sequence++)
+        {
+            var wire = new ArrayBufferWriter<byte>();
+            PacketCodec.Encode(wire, [], new byte[3], PacketProtector.None, sequence, padding: null);
+            var paddingLength = wire.WrittenSpan[4];
+            anyNonZero |= wire.WrittenSpan.Slice(5 + 3, paddingLength).ContainsAnyExcept((byte)0);
+        }
+
+        await Assert.That(anyNonZero).IsTrue();
+    }
+
+    [Test]
     public async Task PaddingRandom_ByDefault_DrawsFromTheSystemRandomNumberGenerator()
     {
         var padding = new PaddingRandom();
