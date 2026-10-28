@@ -167,6 +167,35 @@ public class SshConfigMatchTests
         await Assert.That(() => SshExecMatcher.RunShellAsync(command, cts.Token)).Throws<OperationCanceledException>();
     }
 
+    [Test]
+    public async Task RunShellAsync_ThatRunsOutOfTime_DoesNotMatch()
+    {
+        var command = OperatingSystem.IsWindows() ? "ping -n 30 127.0.0.1 >nul" : "sleep 30";
+        await Assert.That(await SshExecMatcher.RunShellWithinAsync(command, TimeSpan.FromMilliseconds(200), CancellationToken.None)).IsFalse();
+    }
+
+    [Test]
+    public async Task RunShellAsync_Cancelled_KillsTheCommand_AndWhatItStarted()
+    {
+        // The command would write the marker a second later: from the shell itself on Windows, and from a background child elsewhere,
+        // which only killing the whole process tree stops.
+        var marker = Path.Combine(Path.GetTempPath(), "sshsharp-exec-" + Guid.NewGuid().ToString("N"));
+        var command = OperatingSystem.IsWindows()
+            ? $"ping -n 2 127.0.0.1 >nul & echo x > \"{marker}\""
+            : $"(sleep 1; echo x > '{marker}') & wait";
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(200));
+            await Assert.That(() => SshExecMatcher.RunShellAsync(command, cts.Token)).Throws<OperationCanceledException>();
+            await Task.Delay(TimeSpan.FromSeconds(2));
+            await Assert.That(File.Exists(marker)).IsFalse();
+        }
+        finally
+        {
+            File.Delete(marker);
+        }
+    }
+
     /// <summary>
     /// Runs <see cref="SshExecMatcher.RunShellAsync"/> on the thread pool and gives up after 30 seconds, so that a run that never ends
     /// (even one blocked before its first await) fails the test with the step it was on, rather than hanging the test run.

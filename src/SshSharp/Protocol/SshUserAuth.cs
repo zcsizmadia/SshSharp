@@ -167,6 +167,7 @@ internal sealed class SshUserAuth(SshTransport transport, string userName, Func<
     {
         var outcome = await RequestCoreAsync("keyboard-interactive", w =>
         {
+            // Stryker disable once String : the language tag is deprecated (RFC 4256 section 3.1), and servers ignore it
             w.WriteString(""); // language tag (deprecated)
             w.WriteString(""); // submethods: let the server choose
         }, Reply.InfoRequest, cancellationToken).ConfigureAwait(false);
@@ -206,6 +207,7 @@ internal sealed class SshUserAuth(SshTransport transport, string userName, Func<
             }
             finally
             {
+                // Stryker disable once Statement : wiping the responses is hygiene that the API cannot observe
                 CryptographicOperations.ZeroMemory(message); // the responses are usually secrets, whether the send worked or not
             }
             outcome = await ReceiveReplyAsync(Reply.InfoRequest, cancellationToken).ConfigureAwait(false);
@@ -495,6 +497,7 @@ internal sealed class SshUserAuth(SshTransport transport, string userName, Func<
                     case SshMessage.UserAuthPasswordChangeRequest when reply == Reply.PasswordChange:
                         var prompt = reader.ReadUtf8String();
                         var language = reader.ReadUtf8String();
+                        // Stryker disable once Boolean : with a change request the caller reads only the request; the other fields are unset
                         result = new Received(new AuthOutcome(false, [], false, ChangeRequest: new PasswordChangeRequested(prompt, language)), null);
                         break;
                     default:

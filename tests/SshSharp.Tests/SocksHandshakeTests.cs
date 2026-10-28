@@ -46,6 +46,23 @@ public sealed class SocksHandshakeTests
     }
 
     [Test]
+    public async Task AHostName_IsOneTo255PrintableCharacters_WithoutSpaces()
+    {
+        foreach (var name in new[] { new string('a', 255), "files~1.example.com" })
+        {
+            var (request, _) = await HandshakeAsync(Socks4(1, 80, [0, 0, 0, 1], name));
+            await Assert.That(request).IsEqualTo(new SocksRequest(name, 80, 4));
+        }
+
+        foreach (var name in new[] { string.Empty, "db example.com" })
+        {
+            var (request, reply) = await HandshakeAsync(Socks4(1, 80, [0, 0, 0, 1], name));
+            await Assert.That(request).IsNull();
+            await Assert.That(reply).IsEquivalentTo(Socks4Refused);
+        }
+    }
+
+    [Test]
     [Arguments(2, 80)] // BIND
     [Arguments(1, 0)] // port 0
     public async Task Socks4_WhatThisProxyDoesNotDo_IsRefusedInTheReply(int command, int port)
