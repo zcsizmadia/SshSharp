@@ -1,5 +1,7 @@
+using System.Buffers;
 using System.Diagnostics;
 using System.Text;
+using SshSharp.Protocol;
 
 namespace SshSharp.Tests.Keys;
 
@@ -159,6 +161,50 @@ public class SshSignatureTests
     }
 
     [Test]
+    public async Task ASignatureThatCannotBeChecked_DoesNotVerify()
+    {
+        using var key = Generate(SshKeyType.Ed25519, 0);
+
+        static string Armored(byte[] publicKey, byte[] signature)
+        {
+            var buffer = new ArrayBufferWriter<byte>();
+            var w = new SshWriter(buffer);
+            w.WriteBytes("SSHSIG"u8);
+            w.WriteUInt32(1);
+            w.WriteString(publicKey);
+            w.WriteString("git");
+            w.WriteString(string.Empty);
+            w.WriteString("sha512");
+            w.WriteString(signature);
+            return $"-----BEGIN SSH SIGNATURE-----\n{Convert.ToBase64String(buffer.WrittenSpan)}\n-----END SSH SIGNATURE-----\n";
+        }
+
+        var unknownKeyBuffer = new ArrayBufferWriter<byte>();
+        new SshWriter(unknownKeyBuffer).WriteString("unknown-key@example.com");
+
+        // A key type SshSharp cannot verify with, and a signature field too short to name its algorithm.
+        await Assert.That(SshSignature.Parse(Armored(unknownKeyBuffer.WrittenSpan.ToArray(), [0, 0, 0, 1, 0x41])).Verify(Message, "git")).IsFalse();
+        await Assert.That(SshSignature.Parse(Armored(key.PublicKey.ToArray(), [0, 0])).Verify(Message, "git")).IsFalse();
+    }
+
+    [Test]
+    public async Task TheText_HasNoEmptyLine_WhenTheBase64FillsItsLastLine()
+    {
+        // The namespace's length moves the base64's; somewhere in this range it is a whole number of 70-character lines.
+        using var key = Generate(SshKeyType.Ed25519, 0);
+        var filled = 0;
+        for (var length = 1; length <= 140; length++)
+        {
+            var text = (await SshSignature.SignAsync(key, Message, new string('n', length))).ToString();
+            var base64 = text.Split('\n')[1..^2];
+            filled += string.Concat(base64).Length % 70 == 0 ? 1 : 0;
+            await Assert.That(text).DoesNotContain("\n\n");
+        }
+
+        await Assert.That(filled).IsGreaterThan(0);
+    }
+
+    [Test]
     public async Task ASignatureByAnotherKey_DoesNotVerifyAsThisKey()
     {
         using var signer = Generate(SshKeyType.Ed25519, 0);
@@ -225,6 +271,87 @@ public class SshSignatureTests
         await Assert.That(signers.Verify(signature, "dev@example.com", Message, "git", new DateTimeOffset(2025, 6, 1, 0, 0, 0, TimeSpan.Zero))).IsFalse();
         await Assert.That(signers.Verify(signature, "dev@example.com", Message, "git", new DateTimeOffset(2027, 1, 1, 0, 0, 0, TimeSpan.Zero))).IsFalse();
         await Assert.That(signers.FindPrincipals(signature, new DateTimeOffset(2027, 1, 1, 0, 0, 0, TimeSpan.Zero))).IsEmpty();
+
+        // Over a stream, the same times apply.
+        await Assert.That(await signers.VerifyAsync(signature, "dev@example.com", new MemoryStream(Message), "git", inside)).IsTrue();
+        await Assert.That(await signers.VerifyAsync(signature, "dev@example.com", new MemoryStream(Message), "git", new DateTimeOffset(2027, 1, 1, 0, 0, 0, TimeSpan.Zero)))
+            .IsFalse();
+    }
+
+    [Test]
+    public async Task AllowedSigners_TimesWithHoursAndMinutes_AndInvalidDates()
+    {
+        using var key = Generate(SshKeyType.Ed25519, 0);
+        var signature = await SshSignature.SignAsync(key, Message, "git");
+        var signers = SshAllowedSigners.Parse($"dev@example.com valid-before=\"202606011230Z\" {KeyText(key)}");
+        await Assert.That(signers.Verify(signature, "dev@example.com", Message, "git", new DateTimeOffset(2026, 6, 1, 12, 30, 0, TimeSpan.Zero))).IsTrue();
+        await Assert.That(signers.Verify(signature, "dev@example.com", Message, "git", new DateTimeOffset(2026, 6, 1, 12, 30, 1, TimeSpan.Zero))).IsFalse();
+
+        await Assert.That(() => SshAllowedSigners.Parse($"dev@example.com valid-after=\"20261332\" {KeyText(key)}"))
+            .ThrowsExactly<FormatException>().WithMessageContaining("is not a valid date");
+        await Assert.That(() => SshAllowedSigners.Parse($"dev@example.com valid-after=\"2026010\" {KeyText(key)}"))
+            .ThrowsExactly<FormatException>().WithMessageContaining("is not YYYYMMDD[HHMM[SS]][Z]");
+    }
+
+    [Test]
+    public async Task AllowedSigners_Namespaces_AreCaseSensitive()
+    {
+        using var key = Generate(SshKeyType.Ed25519, 0);
+        var signature = await SshSignature.SignAsync(key, Message, "GIT");
+        var signers = SshAllowedSigners.Parse($"dev@example.com namespaces=\"git\" {KeyText(key)}");
+        await Assert.That(signature.Verify(Message, "GIT")).IsTrue();
+        await Assert.That(signers.Verify(signature, "dev@example.com", Message, "GIT")).IsFalse();
+    }
+
+    [Test]
+    public async Task AllowedSigners_Quotes_AreRemovedOnlyFromAQuotedValue_AndEmptyOptionsAreSkipped()
+    {
+        using var key = Generate(SshKeyType.Ed25519, 0);
+        var signature = await SshSignature.SignAsync(key, Message, "git");
+
+        await Assert.That(SshAllowedSigners.Parse($"dev\"\" {KeyText(key)}").FindPrincipals(signature)).IsEquivalentTo(["dev\"\""]);
+        await Assert.That(() => SshAllowedSigners.Parse($"\"\" {KeyText(key)}")).ThrowsExactly<FormatException>().WithMessageContaining("missing principals");
+        await Assert.That(SshAllowedSigners.Parse($"dev@example.com namespaces=\"git\",,valid-after=\"20200101\", {KeyText(key)}").Count).IsEqualTo(1);
+        await Assert.That(() => SshAllowedSigners.Parse($"\"dev@example.com {KeyText(key)}"))
+            .ThrowsExactly<FormatException>().WithMessageContaining("an unterminated quote");
+    }
+
+    [Test]
+    public async Task NullArguments_AreRejected()
+    {
+        using var key = Generate(SshKeyType.Ed25519, 0);
+        var signature = await SshSignature.SignAsync(key, Message, "git");
+        var signers = SshAllowedSigners.Parse($"dev@example.com {KeyText(key)}");
+        var stream = new MemoryStream(Message);
+
+        // A null stream is the guard's to reject: hashing it would throw too, but for its own parameter ("source").
+        static async Task NullMessage(Func<Task> act)
+        {
+            var error = await Assert.That(act).ThrowsExactly<ArgumentNullException>();
+            await Assert.That(error!.ParamName).IsEqualTo("message");
+        }
+
+        await Assert.That(() => SshAllowedSigners.Parse(null!)).ThrowsExactly<ArgumentNullException>();
+        await Assert.That(async () => await SshAllowedSigners.LoadAsync(null!)).ThrowsExactly<ArgumentNullException>();
+        await Assert.That(async () => await SshAllowedSigners.LoadAsync("   ")).ThrowsExactly<ArgumentException>();
+        await Assert.That(() => signers.Verify(null!, "dev@example.com", Message, "git")).ThrowsExactly<ArgumentNullException>();
+        await Assert.That(() => signers.Verify(signature, null!, Message, "git")).ThrowsExactly<ArgumentNullException>();
+        await Assert.That(() => signers.Verify(signature, "dev@example.com", Message, null!)).ThrowsExactly<ArgumentNullException>();
+        await Assert.That(async () => await signers.VerifyAsync(null!, "dev@example.com", stream, "git")).ThrowsExactly<ArgumentNullException>();
+        await Assert.That(async () => await signers.VerifyAsync(signature, null!, stream, "git")).ThrowsExactly<ArgumentNullException>();
+        await NullMessage(() => signers.VerifyAsync(signature, "dev@example.com", null!, "git"));
+        await Assert.That(async () => await signers.VerifyAsync(signature, "dev@example.com", stream, null!)).ThrowsExactly<ArgumentNullException>();
+        await Assert.That(() => signers.FindPrincipals(null!)).ThrowsExactly<ArgumentNullException>();
+
+        await Assert.That(async () => await SshSignature.SignAsync(null!, Message, "git")).ThrowsExactly<ArgumentNullException>();
+        await Assert.That(async () => await SshSignature.SignAsync(null!, stream, "git")).ThrowsExactly<ArgumentNullException>();
+        await NullMessage(() => SshSignature.SignAsync(key, (Stream)null!, "git"));
+        await Assert.That(async () => await SshSignature.SignAsync(key, stream, "git", "md5")).ThrowsExactly<ArgumentException>();
+        await Assert.That(async () => await SshSignature.SignAsync(key, stream, "")).ThrowsExactly<ArgumentException>();
+        await Assert.That(() => signature.Verify(Message, null!)).ThrowsExactly<ArgumentNullException>();
+        await NullMessage(() => signature.VerifyAsync(null!, "git"));
+        await Assert.That(async () => await signature.VerifyAsync(stream, null!)).ThrowsExactly<ArgumentNullException>();
+        await NullMessage(() => signature.VerifyAsync(null!, "git", key.GetPublicKey()));
     }
 
     [Test]
@@ -235,9 +362,9 @@ public class SshSignatureTests
         using var key = Generate(SshKeyType.EcdsaNistp256, 0);
         var signers = SshAllowedSigners.Parse($"*@example.com cert-authority {KeyText(authority)}\n");
 
-        async Task<SshSignature> SignWith(SshPrivateKey ca, SshCertificateType type, DateTimeOffset? validBefore = null)
+        async Task<SshSignature> SignWith(SshPrivateKey ca, SshCertificateType type, DateTimeOffset? validBefore = null, DateTimeOffset? validAfter = null)
         {
-            var blob = TestKeys.Certificate(ca, key.PublicKey.ToArray(), type, ["dev@example.com", "ops@other.org"], validBefore: validBefore);
+            var blob = TestKeys.Certificate(ca, key.PublicKey.ToArray(), type, ["dev@example.com", "ops@other.org"], validAfter, validBefore);
             using var certified = type == SshCertificateType.User
                 ? key.WithCertificate(SshCertificate.Parse(TestKeys.CertificateLine(blob)))
                 : null;
@@ -271,6 +398,18 @@ public class SshSignatureTests
         var expired = await SignWith(authority, SshCertificateType.User, DateTimeOffset.UtcNow.AddDays(-1));
         await Assert.That(signers.Verify(expired, "dev@example.com", Message, "git")).IsFalse();
         await Assert.That(signers.Verify(await SignWith(authority, SshCertificateType.Host), "dev@example.com", Message, "git")).IsFalse();
+
+        // The certificate is valid from its first second up to, not including, its last.
+        var from = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        var until = new DateTimeOffset(2027, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        var dated = await SignWith(authority, SshCertificateType.User, until, from);
+        await Assert.That(signers.Verify(dated, "dev@example.com", Message, "git", from)).IsTrue();
+        await Assert.That(signers.Verify(dated, "dev@example.com", Message, "git", until.AddSeconds(-1))).IsTrue();
+        await Assert.That(signers.Verify(dated, "dev@example.com", Message, "git", until)).IsFalse();
+        await Assert.That(signers.Verify(dated, "dev@example.com", Message, "git", from.AddSeconds(-1))).IsFalse();
+
+        // The line's principal patterns are case-sensitive against the certificate's principals too.
+        await Assert.That(SshAllowedSigners.Parse($"Dev@example.com cert-authority {KeyText(authority)}\n").FindPrincipals(signature)).IsEmpty();
 
         // Without cert-authority, the CA's key on the line does not vouch for its certificates.
         var plainLine = SshAllowedSigners.Parse($"*@example.com {KeyText(authority)}");
