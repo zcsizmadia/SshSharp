@@ -846,7 +846,8 @@ internal sealed class FakeSessionServer : IAsyncDisposable
 
                     if (HoldForwardReplies is { } hold && name == "streamlocal-forward@openssh.com")
                     {
-                        await hold.Task;
+                        // Disposing the server ends the wait: a test that fails before it releases the hold must not hang in DisposeAsync.
+                        await hold.Task.WaitAsync(_cts.Token);
                     }
 
                     if (wantReply)
@@ -880,7 +881,8 @@ internal sealed class FakeSessionServer : IAsyncDisposable
 
                     if (HoldForwardReplies is { } hold && name == "tcpip-forward")
                     {
-                        await hold.Task;
+                        // Disposing the server ends the wait: a test that fails before it releases the hold must not hang in DisposeAsync.
+                        await hold.Task.WaitAsync(_cts.Token);
                     }
 
                     if (wantReply)
