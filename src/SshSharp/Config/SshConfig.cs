@@ -396,7 +396,7 @@ public sealed class SshConfig
         return ctx.ExpandPath(ctx.ExpandTokens(value));
     }
 
-    private static int? ParsePort(string? value) =>
+    internal static int? ParsePort(string? value) =>
         int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var p) && p is >= 1 and <= 65535 ? p : null;
 
     private static bool IsNo(string value) => value.ToLowerInvariant() is "no" or "false" or "off";

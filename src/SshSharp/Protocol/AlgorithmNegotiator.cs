@@ -229,6 +229,7 @@ internal sealed class AlgorithmPreferences
         };
     }
 
+    // Stryker disable once Boolean : every kind has its arm, so the last one is never taken
     private static bool IsImplemented(string name, AlgorithmKind kind) => kind switch
     {
         AlgorithmKind.Cipher => SshAlgorithms.IsKnownCipher(name),
@@ -281,6 +282,7 @@ internal static class AlgorithmNegotiator
         var extInfo = server.KexAlgorithms.Contains(SshAlgorithms.ExtInfoServer);
 
         // If the server's first-packet guess used a different kex or host key than the negotiated ones, that packet must be discarded.
+        // Stryker disable once Linq : the kex was picked from the server's list, so it has a real one and First finds it too
         var guessedWrong = server.FirstKexPacketFollows
             && (server.KexAlgorithms.FirstOrDefault(IsRealKex) != kex || server.ServerHostKeyAlgorithms[0] != hostKey);
 

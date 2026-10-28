@@ -78,6 +78,11 @@ public class SshConfigMatchTests
         await Assert.That(Resolve("Tag blue\nMatch tagged blue\n Port 71\n", "a").Port).IsEqualTo(71);
         await Assert.That(Resolve("Match tagged red\n Port 72\n", "a", new SshConfigResolveOptions { Tag = "red", LocalUser = "l", HomeDirectory = "/h" }).Port).IsEqualTo(72);
         await Assert.That(Resolve("Match tagged red\n Port 72\n", "a").Port).IsEqualTo(22);
+
+        // The caller's tag wins over the file's.
+        var red = new SshConfigResolveOptions { Tag = "red", LocalUser = "l", HomeDirectory = "/h" };
+        await Assert.That(Resolve("Tag blue\nMatch tagged red\n Port 73\n", "a", red).Port).IsEqualTo(73);
+        await Assert.That(Resolve("Tag blue\nMatch tagged blue\n Port 74\n", "a", red).Port).IsEqualTo(22);
     }
 
     [Test]
@@ -124,6 +129,45 @@ public class SshConfigMatchTests
         };
         await Assert.That(Resolve(config, "a", options).Port).IsEqualTo(51);
         await Assert.That(commands.Single()).IsEqualTo("check a local");
+    }
+
+    [Test]
+    public async Task Exec_ExpandsTheHostKeyAliasAndProxyJumpSetSoFar()
+    {
+        var commands = new List<string>();
+        var options = new SshConfigResolveOptions
+        {
+            LocalUser = "l",
+            HomeDirectory = "/h",
+            ExecMatcher = (command, _) => { commands.Add(command); return ValueTask.FromResult(false); },
+        };
+
+        Resolve("HostKeyAlias alias1\nProxyJump jump.example.com\nMatch exec \"c %k %j\"\n Port 5\n", "a", options);
+        Resolve("Match exec \"d %k %j\"\n Port 5\n", "a", options); // %k is the host without an alias, %j empty without a jump
+        Resolve("ProxyJump none\nMatch exec \"e %j\"\n Port 5\n", "a", options);
+        await Assert.That(string.Join("|", commands)).IsEqualTo("c alias1 jump.example.com|d a |e ");
+    }
+
+    [Test]
+    [Arguments("Port 2200\n", null, "2200")]
+    [Arguments("Port 1\n", null, "1")]
+    [Arguments("Port 65535\n", null, "65535")]
+    [Arguments("Port 0\n", null, "22")]
+    [Arguments("Port 65536\n", null, "22")]
+    [Arguments("Port 2200\n", 2222, "2222")]
+    public async Task Exec_ExpandsThePortSoFar_TheCallersFirst_AndOnlyAValidOne(string config, int? port, string expected)
+    {
+        var commands = new List<string>();
+        var options = new SshConfigResolveOptions
+        {
+            LocalUser = "l",
+            HomeDirectory = "/h",
+            Port = port,
+            ExecMatcher = (command, _) => { commands.Add(command); return ValueTask.FromResult(false); },
+        };
+
+        Resolve(config + "Match exec \"p %p\"\n User u\n", "a", options);
+        await Assert.That(commands.Single()).IsEqualTo("p " + expected);
     }
 
     [Test]
@@ -269,6 +313,13 @@ public class SshConfigMatchTests
     }
 
     [Test]
+    public async Task SecondPass_KeepsAPercentSignInTheName_AsItIs()
+    {
+        // The name is expanded once, in the first pass; the second does not expand it again.
+        await Assert.That(Resolve("Match final\n Port 2\n", "a%h").HostName).IsEqualTo("a%h");
+    }
+
+    [Test]
     public async Task SecondPass_KeepsTheHostNameOfTheFirst()
     {
         // ssh sets HostName to the name it settled on before reading again, so a HostName met only in the second pass is ignored.
@@ -353,13 +404,24 @@ public class SshConfigMatchTests
         var notFound = Canonicalizing((_, _) => null);
         await Assert.That(Resolve("CanonicalizeHostname yes\n", "web", notFound).HostName).IsEqualTo("web");
         await Assert.That(Resolve("CanonicalizeHostname yes\nCanonicalizeFallbackLocal yes\n", "web", notFound).HostName).IsEqualTo("web");
+        var off = await Assert.That(() => Resolve("CanonicalizeHostname yes\nCanonicalizeFallbackLocal false\n", "web", notFound)).Throws<InvalidOperationException>();
+        await Assert.That(off!.Message).Contains("CanonicalizeFallbackLocal is off");
         await Assert.That(() => Resolve("CanonicalizeHostname yes\nCanonicalizeFallbackLocal no\n", "web", notFound)).Throws<InvalidOperationException>();
     }
 
     [Test]
     public async Task Match_SyntaxErrors()
     {
-        await Assert.That(() => Resolve("Match host\n Port 1\n", "a")).Throws<FormatException>();
-        await Assert.That(() => Resolve("Match bogus\n Port 1\n", "a")).Throws<FormatException>();
+        var noHost = await Assert.That(() => Resolve("Match host\n Port 1\n", "a")).ThrowsExactly<FormatException>();
+        await Assert.That(noHost!.Message).Contains("Match criterion 'host' needs an argument");
+        var bogus = await Assert.That(() => Resolve("Match bogus\n Port 1\n", "a")).ThrowsExactly<FormatException>();
+        await Assert.That(bogus!.Message).Contains("Unsupported Match criterion 'bogus'");
+
+        // A session criterion needs its argument whether or not the caller described the session.
+        var shell = new SshConfigResolveOptions { LocalUser = "l", HomeDirectory = "/h", SessionType = "shell" };
+        var described = await Assert.That(() => Resolve("Match sessiontype\n Port 1\n", "a", shell)).ThrowsExactly<FormatException>();
+        await Assert.That(described!.Message).Contains("Match criterion 'sessiontype' needs an argument");
+        var undescribed = await Assert.That(() => Resolve("Match command\n Port 1\n", "a")).ThrowsExactly<FormatException>();
+        await Assert.That(undescribed!.Message).Contains("Match criterion 'command' needs an argument");
     }
 }

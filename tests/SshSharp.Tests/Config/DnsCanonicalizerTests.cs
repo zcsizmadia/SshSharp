@@ -342,4 +342,33 @@ public sealed class DnsCanonicalizerTests
         await Assert.That(await SshDnsLookup.CanonicalNameAsync("localhost", SshAddressFamily.Inet, timeout.Token)).IsNotNull();
         await Assert.That(await SshDnsLookup.CanonicalNameAsync(new string('a', 300), SshAddressFamily.Any, timeout.Token)).IsNull(); // too long to ask
     }
+
+    [Test]
+    public async Task ANameWithAColon_IsNotLookedUp()
+    {
+        // Not an address .NET parses, but a colon still means an address with a scope or a typo, as ssh sees it.
+        var dns = new FakeDns(("a:b.example.com.", "a:b.example.com"));
+        var host = await ResolveAsync(Canonicalize, "a:b", dns);
+        await Assert.That(dns.Lookups.Count).IsEqualTo(0);
+        await Assert.That(host.HostName).IsEqualTo("a:b");
+    }
+
+    [Test]
+    public async Task AnEmptyCanonicalName_KeepsTheName_WhateverTheRules()
+    {
+        var dns = new FakeDns(("web.example.com.", "."));
+        var host = await ResolveAsync(Canonicalize + "CanonicalizePermittedCNAMEs *:*\n", "web", dns);
+        await Assert.That(host.HostName).IsEqualTo("web.example.com");
+    }
+
+    [Test]
+    public async Task TheSystemResolversAnswer_GivesItsHostName_OrTheNameWhenItHasNone_AndNothingWithoutAddresses()
+    {
+        System.Net.IPAddress[] addresses = [System.Net.IPAddress.Parse("192.0.2.10")];
+        await Assert.That(SshDnsLookup.CanonicalName("web.", new System.Net.IPHostEntry { HostName = "web.example.com.", AddressList = addresses }))
+            .IsEqualTo("web.example.com");
+        await Assert.That(SshDnsLookup.CanonicalName("web.example.com.", new System.Net.IPHostEntry { HostName = string.Empty, AddressList = addresses }))
+            .IsEqualTo("web.example.com");
+        await Assert.That(SshDnsLookup.CanonicalName("web.", new System.Net.IPHostEntry { HostName = "web.example.com", AddressList = [] })).IsNull();
+    }
 }

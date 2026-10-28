@@ -9,7 +9,8 @@ namespace SshSharp.Tests.Protocol;
 public class KexNegotiationTests
 {
     private static KexInitMessage Server(
-        string[]? kex = null, string[]? hostKeys = null, string[]? ciphers = null, string[]? macs = null, bool firstFollows = false) => new()
+        string[]? kex = null, string[]? hostKeys = null, string[]? ciphers = null, string[]? macs = null, bool firstFollows = false,
+        string[]? macsServerToClient = null) => new()
     {
         Cookie = new byte[16],
         KexAlgorithms = kex ?? [SshAlgorithms.Curve25519Sha256, SshAlgorithms.EcdhNistp256, SshAlgorithms.ExtInfoServer, SshAlgorithms.StrictKexServer],
@@ -17,7 +18,7 @@ public class KexNegotiationTests
         EncryptionClientToServer = ciphers ?? ["aes256-ctr", "chacha20-poly1305@openssh.com"],
         EncryptionServerToClient = ciphers ?? ["aes256-ctr", "chacha20-poly1305@openssh.com"],
         MacClientToServer = macs ?? ["hmac-sha2-256-etm@openssh.com"],
-        MacServerToClient = macs ?? ["hmac-sha2-256-etm@openssh.com"],
+        MacServerToClient = macsServerToClient ?? macs ?? ["hmac-sha2-256-etm@openssh.com"],
         CompressionClientToServer = ["none", "zlib@openssh.com"],
         CompressionServerToClient = ["none", "zlib@openssh.com"],
         FirstKexPacketFollows = firstFollows,
@@ -135,6 +136,13 @@ public class KexNegotiationTests
         {
             await Assert.That(() => AlgorithmNegotiator.Negotiate(KexInitMessage.ForClient(new AlgorithmPreferences()), server)).Throws<SshException>();
         }
+
+        // Each direction's MAC is named on its own.
+        var macs = KexInitMessage.ForClient(new AlgorithmPreferences { Ciphers = ["aes256-ctr"] });
+        var toServer = Assert.Throws<SshException>(() => AlgorithmNegotiator.Negotiate(macs, Server(macs: ["hmac-md5"])));
+        await Assert.That(toServer.Message).Contains("No matching MAC (client to server) algorithm");
+        var toClient = Assert.Throws<SshException>(() => AlgorithmNegotiator.Negotiate(macs, Server(macsServerToClient: ["hmac-md5"])));
+        await Assert.That(toClient.Message).Contains("No matching MAC (server to client) algorithm");
     }
 
     [Test]
