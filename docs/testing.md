@@ -141,7 +141,9 @@ always finish. A sweep cuts the connection at 13 points from the first byte to w
   | key-writers, identification, ecdh-dh | 100% | 62–64% |
 
   The job summary prints both. The true score lies between them: some timeouts are real loops, and some mutants would survive.
-  Raising the time limit would push the slowest scopes past the job's 340 minutes, so these scopes wait for a fix in Stryker.
+  Raising the time limit would push the slowest scopes past the job's 340 minutes, so these scopes wait for a fix in Stryker
+  ([stryker-net#3915](https://github.com/stryker-mutator/stryker-net/issues/3915) for the mapped read,
+  [stryker-net#3904](https://github.com/stryker-mutator/stryker-net/issues/3904) for how timeouts are judged).
 
 ## Stress testing and intermittent failures
 
