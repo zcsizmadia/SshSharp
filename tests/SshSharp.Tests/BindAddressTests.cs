@@ -36,7 +36,7 @@ public sealed class BindAddressTests : IDisposable
     }
 
     /// <summary>A loopback listener that relays its one connection to a fake SSH server, and records where the connection came from.</summary>
-    private sealed class Bridge : IAsyncDisposable
+    internal sealed class Bridge : IAsyncDisposable
     {
         private readonly Socket _listener = new(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
         private readonly Task _serve;

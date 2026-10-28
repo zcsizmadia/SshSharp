@@ -49,7 +49,8 @@ A token gives the same bound without the option, with an exception of your choos
 
 - **One limit for all of the server's addresses.** A host name with several addresses (IPv6 and IPv4) is tried address by address
   within the same `ConnectTimeout`, so an address that does not answer can use it up before the next is tried. Where the IPv6 route
-  is known to be broken, set `AddressFamily = SshAddressFamily.Inet` (see [Connecting](../connecting.md#ipv4-or-ipv6-only)).
+  is known to be broken, set `AddressFamily = SshAddressFamily.Inet` (see [Connecting](../connecting.md#ipv4-or-ipv6-only)), or race
+  the addresses with `StaggeredConnectDelay` (see [Race the server's addresses](../connecting.md#race-the-servers-addresses)).
 - **The DI package** maps its endpoint's `ConnectTimeout` onto this option and reports it as a `TimeoutException`; see
   [ASP.NET Core and dependency injection](aspnetcore-and-di.md).
 

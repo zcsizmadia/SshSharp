@@ -1,3 +1,6 @@
+using System.Net;
+using SshSharp.Config;
+using SshSharp.Protocol;
 using SshSharp.Sftp;
 
 namespace SshSharp.Tests.Integration;
@@ -139,9 +142,33 @@ public class ConnectionOptionsInteropTests
         await Assert.That(client.ConnectedAt).IsGreaterThanOrEqualTo(before);
         await Assert.That(client.RemoteEndPoint).IsNotNull();
         await Assert.That(client.LocalEndPoint).IsNotNull();
-        await Assert.That(((System.Net.IPEndPoint)client.RemoteEndPoint!).Port).IsEqualTo(RealServer.Endpoint!.Value.Port);
+        await Assert.That(((IPEndPoint)client.RemoteEndPoint!).Port).IsEqualTo(RealServer.Endpoint!.Value.Port);
         await Assert.That(client.BytesSent).IsGreaterThan(0);
         await Assert.That(client.BytesReceived).IsGreaterThan(0);
         await Assert.That(client.SessionId.Length).IsGreaterThanOrEqualTo(32);
+    }
+
+    [Test]
+    public async Task AStaggeredConnect_ReachesTheServer_PastAnAddressThatDoesNotAnswer()
+    {
+        if (!RealServer.HasAccount)
+        {
+            Skip.Test("No real server account configured.");
+        }
+
+        // The server's name resolves, here, to 192.0.2.1 first: a documentation address (RFC 5737) that nothing answers, whose attempt,
+        // tried alone, would last until the system gave up on it (minutes on Linux). Raced 250 ms apart, the server's own address wins.
+        var (host, port) = RealServer.Endpoint!.Value;
+        var addresses = IPAddress.TryParse(host, out var literal) ? [literal] : await Dns.GetHostAddressesAsync(host, Timeout());
+        var started = System.Diagnostics.Stopwatch.StartNew();
+        var stream = await TcpConnector.ConnectAsync("server.example.com", port, local: null, SshAddressFamily.Any, "the server",
+            configure: null, (_, _) => Task.FromResult<IPAddress[]>([IPAddress.Parse("192.0.2.1"), .. addresses]),
+            _ => true, TimeSpan.FromMilliseconds(250), TimeProvider.System, (socket, address, p, ct) => socket.ConnectAsync(address, p, ct), Timeout());
+        var elapsed = started.Elapsed;
+
+        await using var client = await SshClient.ConnectAsync(stream, (await RealServer.OptionsAsync())!, cancellationToken: Timeout());
+        await client.PingAsync(Timeout());
+        await Assert.That(((IPEndPoint)client.RemoteEndPoint!).Port).IsEqualTo(port);
+        await Assert.That(elapsed).IsLessThan(TimeSpan.FromSeconds(10));
     }
 }

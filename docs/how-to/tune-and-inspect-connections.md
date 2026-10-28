@@ -33,7 +33,9 @@ address it carries and gets an IPv4 socket, and a family the system has turned o
 address, or a name with one address, that is once per attempt. When a name has several addresses and the first cannot be reached,
 the callback runs again for the socket of each further address tried, and each retry that `ConnectionAttempts` makes starts with
 new sockets too, so set
-the same options every time. Anything the callback throws ends the connection attempt and is thrown from `ConnectAsync` unchanged,
+the same options every time. With `StaggeredConnectDelay`, a further address is tried while the first may still be connecting, so
+several sockets can be open at once; the callback still runs for one socket at a time, and the sockets that lose the race are
+closed (see [Race the server's addresses](../connecting.md#race-the-servers-addresses)). Anything the callback throws ends the connection attempt and is thrown from `ConnectAsync` unchanged,
 not wrapped as a failure to connect.
 
 It applies only to the TCP connection that `SshClient.ConnectAsync(host, port, options)` opens itself:

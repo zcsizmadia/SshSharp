@@ -10,7 +10,9 @@ namespace SshSharp.Protocol;
 /// Opens the TCP connection to a server or proxy: from any local address, or from given ones (<c>BindAddress</c>, <c>BindInterface</c>,
 /// <see cref="SshClientOptions.LocalEndPoint"/>). The name is resolved here and its addresses tried in order, each with a new socket. A
 /// socket bound to an IPv4 address reaches only IPv4 destinations and an IPv6 one only IPv6, so with a bind the destination's addresses
-/// are filtered to the families the local addresses have.
+/// are filtered to the families the local addresses have. With a stagger (<see cref="SshClientOptions.StaggeredConnectDelay"/>) the
+/// addresses are raced instead, as RFC 8305 describes: the families interleaved, a new attempt started each time the delay passes or an
+/// attempt fails, and the first connection made wins.
 /// </summary>
 internal static class TcpConnector
 {
@@ -38,6 +40,24 @@ internal static class TcpConnector
     public static Task<NetworkStream> ConnectAsync(string host, int port, IReadOnlyList<IPEndPoint>? local, SshAddressFamily family, string what,
         Action<Socket>? configure, CancellationToken cancellationToken) =>
         ConnectAsync(host, port, local, family, what, configure, Dns.GetHostAddressesAsync, cancellationToken);
+
+    /// <summary>
+    /// Connects like <see cref="ConnectAsync(string, int, IReadOnlyList{IPEndPoint}?, SshAddressFamily, string, Action{Socket}?, CancellationToken)"/>,
+    /// racing the addresses <paramref name="stagger"/> apart when there is one.
+    /// </summary>
+    /// <param name="host">The host name or address.</param>
+    /// <param name="port">The port.</param>
+    /// <param name="local">Local endpoints to connect from, or null for any.</param>
+    /// <param name="family">The <c>AddressFamily</c> restriction.</param>
+    /// <param name="what">"the server" or "the proxy", for the error message.</param>
+    /// <param name="configure">Sets the caller's socket options.</param>
+    /// <param name="stagger">How long an attempt has before the next starts, or null to try the addresses one after another.</param>
+    /// <param name="timeProvider">The clock that times the stagger.</param>
+    /// <param name="cancellationToken">Cancels resolving and connecting.</param>
+    public static Task<NetworkStream> ConnectAsync(string host, int port, IReadOnlyList<IPEndPoint>? local, SshAddressFamily family, string what,
+        Action<Socket>? configure, TimeSpan? stagger, TimeProvider timeProvider, CancellationToken cancellationToken) =>
+        ConnectAsync(host, port, local, family, what, configure, Dns.GetHostAddressesAsync, OSSupports, stagger, timeProvider, ConnectOneAsync,
+            cancellationToken);
 
     /// <summary>
     /// Connects as above, resolving names with <paramref name="resolve"/> (tests give a name the addresses they need).
@@ -73,9 +93,30 @@ internal static class TcpConnector
     /// <param name="resolve">Resolves a host name to its addresses.</param>
     /// <param name="supports">Whether the system can create sockets of an address family.</param>
     /// <param name="cancellationToken">Cancels resolving and connecting.</param>
+    internal static Task<NetworkStream> ConnectAsync(string host, int port, IReadOnlyList<IPEndPoint>? local, SshAddressFamily family, string what,
+        Action<Socket>? configure, Func<string, CancellationToken, Task<IPAddress[]>> resolve, Func<AddressFamily, bool> supports,
+        CancellationToken cancellationToken) =>
+        ConnectAsync(host, port, local, family, what, configure, resolve, supports, stagger: null, TimeProvider.System, ConnectOneAsync, cancellationToken);
+
+    /// <summary>
+    /// Connects as above, racing the addresses <paramref name="stagger"/> apart when there is one, and connecting each socket with
+    /// <paramref name="connect"/> (tests stand in for addresses that do not answer).
+    /// </summary>
+    /// <param name="host">The host name or address.</param>
+    /// <param name="port">The port.</param>
+    /// <param name="local">Local endpoints to connect from, or null for any.</param>
+    /// <param name="family">The <c>AddressFamily</c> restriction.</param>
+    /// <param name="what">"the server" or "the proxy", for the error message.</param>
+    /// <param name="configure">Sets the caller's socket options.</param>
+    /// <param name="resolve">Resolves a host name to its addresses.</param>
+    /// <param name="supports">Whether the system can create sockets of an address family.</param>
+    /// <param name="stagger">How long an attempt has before the next starts, or null to try the addresses one after another.</param>
+    /// <param name="timeProvider">The clock that times the stagger.</param>
+    /// <param name="connect">Connects a socket to an address and port.</param>
+    /// <param name="cancellationToken">Cancels resolving and connecting.</param>
     internal static async Task<NetworkStream> ConnectAsync(string host, int port, IReadOnlyList<IPEndPoint>? local, SshAddressFamily family, string what,
         Action<Socket>? configure, Func<string, CancellationToken, Task<IPAddress[]>> resolve, Func<AddressFamily, bool> supports,
-        CancellationToken cancellationToken)
+        TimeSpan? stagger, TimeProvider timeProvider, Func<Socket, IPAddress, int, CancellationToken, ValueTask> connect, CancellationToken cancellationToken)
     {
         // An address of the other family has nothing to try (the socket would refuse it with a NotSupportedException).
         if (family != SshAddressFamily.Any && IPAddress.TryParse(host, out var address)
@@ -135,6 +176,11 @@ internal static class TcpConnector
                 $"None of the addresses of {what} is of an address family this system supports.");
         }
 
+        if (stagger is { } delay && candidates.Count > 1)
+        {
+            return await RaceAsync(Interleave(candidates), port, what, configure, delay, timeProvider, connect, cancellationToken).ConfigureAwait(false);
+        }
+
         SocketException? last = null;
         foreach (var (destination, from) in candidates)
         {
@@ -153,7 +199,7 @@ internal static class TcpConnector
                 configuring = true;
                 configure?.Invoke(socket);
                 configuring = false;
-                await socket.ConnectAsync(destination, port, cancellationToken).ConfigureAwait(false);
+                await connect(socket, destination, port, cancellationToken).ConfigureAwait(false);
 
                 // A cancellation racing the connect's completion can close the socket and still let ConnectAsync return (seen on .NET 8
                 // under load); the stream would then fail on first use. The caller asked to cancel: say so.
@@ -163,16 +209,7 @@ internal static class TcpConnector
             catch (SocketException ex) when (!configuring)
             {
                 socket?.Dispose();
-                if (from is not null && ex.SocketErrorCode is SocketError.AddressNotAvailable or SocketError.AddressAlreadyInUse)
-                {
-                    throw new SshException(SshFailureReason.ConnectFailed, $"Could not bind to the local address: {ex.SocketErrorCode}.", ex);
-                }
-
-                // A connect's error says more than a family the system turned out not to have, whichever of them came last.
-                if (last is null || ex.SocketErrorCode != SocketError.AddressFamilyNotSupported)
-                {
-                    last = ex;
-                }
+                last = Failed(ex, from, last);
             }
             catch
             {
@@ -181,8 +218,180 @@ internal static class TcpConnector
             }
         }
 
-        throw new SshException(SshFailureReason.ConnectFailed, $"Could not connect to {what}: {last!.SocketErrorCode}.", last);
+        throw NoneConnected(what, last!);
     }
+
+    /// <summary>
+    /// Races the connection attempts, as RFC 8305 section 5 describes: each starts when the one before has failed or has had
+    /// <paramref name="stagger"/> to connect, whichever comes first, and the first to connect wins; the others are closed.
+    /// </summary>
+    /// <remarks>
+    /// The sockets are created and configured here, one after another, so <paramref name="configure"/> is never called on two at once;
+    /// what it throws ends the race and is thrown as it is. A failure to bind the local address ends it too, since every attempt from
+    /// that address would fail alike.
+    /// </remarks>
+    private static async Task<NetworkStream> RaceAsync(List<(IPAddress Destination, IPEndPoint? Local)> candidates, int port, string what,
+        Action<Socket>? configure, TimeSpan stagger, TimeProvider timeProvider, Func<Socket, IPAddress, int, CancellationToken, ValueTask> connect,
+        CancellationToken cancellationToken)
+    {
+        using var race = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var running = new Dictionary<Task, (Socket Socket, IPEndPoint? Local)>();
+        SocketException? last = null;
+        var next = 0;
+        try
+        {
+            while (true)
+            {
+                if (next < candidates.Count)
+                {
+                    var (destination, from) = candidates[next++];
+                    var (socket, error) = Open(destination, from, configure);
+                    if (socket is null)
+                    {
+                        // The system could not create or bind this one: the next is due at once.
+                        last = Failed(error!, from, last);
+                        continue;
+                    }
+
+                    running.Add(AttemptAsync(connect, socket, destination, port, race.Token), (socket, from));
+                }
+
+                if (running.Count == 0)
+                {
+                    break;
+                }
+
+                // Until an attempt ends, or, while addresses are left, until the stagger passes and the next is due.
+                using var wait = CancellationTokenSource.CreateLinkedTokenSource(race.Token);
+                var due = next < candidates.Count ? Task.Delay(stagger, timeProvider, wait.Token) : null;
+                var ended = await Task.WhenAny(due is null ? running.Keys : running.Keys.Append(due)).ConfigureAwait(false);
+                await wait.CancelAsync().ConfigureAwait(false);
+                cancellationToken.ThrowIfCancellationRequested();
+                if (ended == due)
+                {
+                    continue;
+                }
+
+                var (attempt, local) = running[ended];
+                running.Remove(ended);
+                try
+                {
+                    await ended.ConfigureAwait(false);
+                    return new NetworkStream(attempt, ownsSocket: true);
+                }
+                catch (SocketException ex)
+                {
+                    attempt.Dispose();
+                    last = Failed(ex, local, last);
+                }
+            }
+        }
+        finally
+        {
+            // The attempts still running lost (or the race ended without a winner): they are cancelled, their sockets closed, and awaited,
+            // so that none outlives the race.
+            await race.CancelAsync().ConfigureAwait(false);
+            foreach (var (task, (socket, _)) in running)
+            {
+                socket.Dispose();
+                try
+                {
+                    await task.ConfigureAwait(false);
+                }
+                catch (Exception ex) when (ex is SocketException or OperationCanceledException or ObjectDisposedException)
+                {
+                }
+            }
+        }
+
+        throw NoneConnected(what, last!);
+    }
+
+    /// <summary>
+    /// A new socket for <paramref name="destination"/>, bound to <paramref name="from"/> and configured; or, when the system could not
+    /// create or bind it, the error. What <paramref name="configure"/> throws is thrown as it is.
+    /// </summary>
+    private static (Socket? Socket, SocketException? Error) Open(IPAddress destination, IPEndPoint? from, Action<Socket>? configure)
+    {
+        Socket? socket = null;
+        try
+        {
+            socket = new Socket(destination.AddressFamily, SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
+            if (from is not null)
+            {
+                socket.Bind(from);
+            }
+        }
+        catch (SocketException ex)
+        {
+            socket?.Dispose();
+            return (null, ex);
+        }
+
+        try
+        {
+            configure?.Invoke(socket);
+            return (socket, null);
+        }
+        catch
+        {
+            socket.Dispose();
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// The error to report once an attempt failed with <paramref name="ex"/>, given <paramref name="last"/>, the one so far: a connect's
+    /// error says more than a family the system turned out not to have, whichever of them came last.
+    /// </summary>
+    /// <exception cref="SshException">The local address could not be bound, which no other address of the server would change.</exception>
+    private static SocketException Failed(SocketException ex, IPEndPoint? from, SocketException? last)
+    {
+        if (from is not null && ex.SocketErrorCode is SocketError.AddressNotAvailable or SocketError.AddressAlreadyInUse)
+        {
+            throw new SshException(SshFailureReason.ConnectFailed, $"Could not bind to the local address: {ex.SocketErrorCode}.", ex);
+        }
+
+        return last is null || ex.SocketErrorCode != SocketError.AddressFamilyNotSupported ? ex : last;
+    }
+
+    private static SshException NoneConnected(string what, SocketException last) =>
+        new(SshFailureReason.ConnectFailed, $"Could not connect to {what}: {last.SocketErrorCode}.", last);
+
+    /// <summary>
+    /// The addresses in RFC 8305's order (section 4): the resolver's, with the families taking turns, starting with the family of the
+    /// address it put first, so that a family that does not work costs one stagger at a time rather than one per address.
+    /// </summary>
+    internal static List<(IPAddress Destination, IPEndPoint? Local)> Interleave(List<(IPAddress Destination, IPEndPoint? Local)> candidates)
+    {
+        var first = candidates[0].Destination.AddressFamily;
+        var preferred = new Queue<(IPAddress, IPEndPoint?)>(candidates.Where(c => c.Destination.AddressFamily == first));
+        var other = new Queue<(IPAddress, IPEndPoint?)>(candidates.Where(c => c.Destination.AddressFamily != first));
+        var ordered = new List<(IPAddress Destination, IPEndPoint? Local)>(candidates.Count);
+        while (preferred.Count > 0 || other.Count > 0)
+        {
+            if (preferred.TryDequeue(out var a))
+            {
+                ordered.Add(a);
+            }
+
+            if (other.TryDequeue(out var b))
+            {
+                ordered.Add(b);
+            }
+        }
+
+        return ordered;
+    }
+
+    /// <summary>One attempt of the race, as a task even when <paramref name="connect"/> throws before it returns one.</summary>
+    private static async Task AttemptAsync(Func<Socket, IPAddress, int, CancellationToken, ValueTask> connect, Socket socket, IPAddress address, int port,
+        CancellationToken cancellationToken) =>
+        await connect(socket, address, port, cancellationToken).ConfigureAwait(false);
+
+    /// <summary>Connects <paramref name="socket"/> as the system does.</summary>
+    private static ValueTask ConnectOneAsync(Socket socket, IPAddress address, int port, CancellationToken cancellationToken) =>
+        socket.ConnectAsync(address, port, cancellationToken);
 
     /// <summary>The address, or the IPv4 address an IPv4-mapped IPv6 address carries.</summary>
     private static IPAddress Unmapped(IPAddress address) => address.IsIPv4MappedToIPv6 ? address.MapToIPv4() : address;
