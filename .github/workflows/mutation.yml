@@ -109,8 +109,8 @@ jobs:
             mutate: -m "**/Protocol/SocksHandshake.cs"
             tests: SocksHandshakeTests.cs;SocksProxyTests.cs;SocksAuthenticationTests.cs;RemoteDynamicForwardingTests.cs
           - scope: config-known-hosts
-            mutate: -m "**/Config/KnownHosts*.cs" -m "**/Config/ForwardSpec.cs" -m "**/Config/SshExecMatcher.cs" -m "**/Config/SshTime.cs"
-            tests: Config/*Tests.cs;KnownHostsVerifierTests.cs;ConfigForwardingTests.cs;Fuzz/ParserRobustnessTests.cs;Keys/SshPublicKeyTests.cs
+            mutate: -m "**/Config/KnownHosts*.cs" -m "**/Config/ForwardSpec.cs" -m "**/Config/SshExecMatcher.cs" -m "**/Config/SshTime.cs" -m "**/ProcessTree.cs"
+            tests: Config/*Tests.cs;KnownHostsVerifierTests.cs;ConfigForwardingTests.cs;Fuzz/ParserRobustnessTests.cs;Keys/SshPublicKeyTests.cs;ProcessTreeTests.cs
           # The replies to the SFTP file hash extensions (check-file, md5-hash) and raw extended requests, and check-file announcements.
           - scope: sftp-extension-replies
             mutate: -m "**/Sftp/SftpExtensionReplies.cs"

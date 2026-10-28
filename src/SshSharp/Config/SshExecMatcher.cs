@@ -38,7 +38,7 @@ public static class SshExecMatcher
         }
         catch (OperationCanceledException)
         {
-            process.Kill(entireProcessTree: true);
+            ProcessTree.Kill(process);
             cancellationToken.ThrowIfCancellationRequested();
             return false; // the time limit ran out
         }

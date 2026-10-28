@@ -117,7 +117,7 @@ internal static class KnownHostsCommandRunner
                 {
                     try
                     {
-                        process.Kill(entireProcessTree: true);
+                        ProcessTree.Kill(process);
                     }
                     catch (InvalidOperationException)
                     {

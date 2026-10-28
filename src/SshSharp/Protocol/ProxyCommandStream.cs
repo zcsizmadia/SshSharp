@@ -92,7 +92,7 @@ internal sealed class ProxyCommandStream : Stream
             {
                 if (!_process.HasExited)
                 {
-                    _process.Kill(entireProcessTree: true);
+                    ProcessTree.Kill(_process);
                 }
             }
             catch (InvalidOperationException)
