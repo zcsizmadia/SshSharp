@@ -22,17 +22,25 @@ internal static class SshDnsLookup
                 SshAddressFamily.Inet6 => await Dns.GetHostEntryAsync(name, AddressFamily.InterNetworkV6, cancellationToken).ConfigureAwait(false),
                 _ => await Dns.GetHostEntryAsync(name, cancellationToken).ConfigureAwait(false),
             };
-            if (entry.AddressList.Length == 0)
-            {
-                return null;
-            }
-
-            return string.IsNullOrEmpty(entry.HostName) ? name.TrimEnd('.') : entry.HostName.TrimEnd('.');
+            return CanonicalName(name, entry);
         }
+
+        // Stryker disable once Block : without the block, the method returns null, as the block does
         catch (Exception ex) when (ex is SocketException or ArgumentException)
         {
             // Not found, no data, a name the resolver will not take (too long, bad characters): not a canonical name.
             return null;
         }
+    }
+
+    /// <summary>The canonical name in the resolver's answer for <paramref name="name"/>: null without addresses, else its host name or the name.</summary>
+    internal static string? CanonicalName(string name, IPHostEntry entry)
+    {
+        if (entry.AddressList.Length == 0)
+        {
+            return null;
+        }
+
+        return string.IsNullOrEmpty(entry.HostName) ? name.TrimEnd('.') : entry.HostName.TrimEnd('.');
     }
 }
