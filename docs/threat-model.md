@@ -438,6 +438,11 @@ connection, but not read or change it: each host's key is verified end to end, b
   an absolute path), so
   token values cannot inject commands; the run is limited to 30 seconds and 1 MiB of output. On Windows a batch file (`.bat`,
   `.cmd`) is refused, because Windows runs it through `cmd.exe`, which would reparse the arguments.
+- When the library stops one of these commands (`Match exec` cancelled or past its 30 seconds, `KnownHostsCommand` past its limit,
+  a `ProxyCommand` when its connection closes), it kills the command and every process it started. These processes run in the
+  application's own process group. Each gets `SIGKILL` alone, never `SIGSTOP` first: .NET's own tree kill stops each process
+  before killing it, and a background child left stopped when its shell died made macOS send `SIGHUP` to that group, which
+  terminates the application (#432). A process started while the tree is being killed can escape it.
 - `Match localnetwork` reads the local interface addresses. As ssh_config(5) warns, a network address is not a trustworthy
   criterion: anyone who controls the network can choose which block applies.
 - Host name canonicalization (`CanonicalizeHostname`) with the built-in DNS canonicalizer (`UseDnsCanonicalizer`, off by default)

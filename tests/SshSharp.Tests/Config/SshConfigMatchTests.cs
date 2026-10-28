@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using SshSharp.Config;
 
 namespace SshSharp.Tests.Config;
@@ -216,6 +217,36 @@ public class SshConfigMatchTests
     {
         var command = OperatingSystem.IsWindows() ? "ping -n 30 127.0.0.1 >nul" : "sleep 30";
         await Assert.That(await SshExecMatcher.RunShellWithinAsync(command, TimeSpan.FromMilliseconds(200), CancellationToken.None)).IsFalse();
+    }
+
+    [Test]
+    public async Task RunShellAsync_Cancelled_KillsTheCommand_AndWhatItStarted_WithoutAHangup()
+    {
+        // The command would write the marker a second later: from the shell itself on Windows, and from a background child elsewhere,
+        // which only killing the whole process tree stops. Killing it must not hang up this process's own group, as .NET's tree kill
+        // did on macOS by stopping the child first (#432).
+        var marker = Path.Combine(Path.GetTempPath(), "sshsharp-exec-" + Guid.NewGuid().ToString("N"));
+        var command = OperatingSystem.IsWindows()
+            ? $"ping -n 2 127.0.0.1 >nul & echo x > \"{marker}\""
+            : $"(sleep 1; echo x > '{marker}') & wait";
+        var hangups = 0;
+        using var hangup = OperatingSystem.IsWindows() ? null : PosixSignalRegistration.Create(PosixSignal.SIGHUP, context =>
+        {
+            Interlocked.Increment(ref hangups);
+            context.Cancel = true;
+        });
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(200));
+            await Assert.That(() => SshExecMatcher.RunShellAsync(command, cts.Token)).Throws<OperationCanceledException>();
+            await Task.Delay(TimeSpan.FromSeconds(2));
+            await Assert.That(File.Exists(marker)).IsFalse();
+            await Assert.That(hangups).IsEqualTo(0);
+        }
+        finally
+        {
+            File.Delete(marker);
+        }
     }
 
     /// <summary>
