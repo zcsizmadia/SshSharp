@@ -132,33 +132,21 @@ internal static class ProcessTree
     /// <summary>The live processes, other than this one, whose environment holds <paramref name="tag"/>.</summary>
     internal static List<int> Tagged(byte[] tag)
     {
-        var found = new List<int>();
         if (OperatingSystem.IsLinux())
         {
-            foreach (var directory in Directory.EnumerateDirectories("/proc"))
-            {
-                if (int.TryParse(Path.GetFileName(directory), NumberStyles.None, CultureInfo.InvariantCulture, out var pid) &&
-                    pid != Environment.ProcessId && Carries(LinuxEnvironment(directory), tag))
-                {
-                    found.Add(pid);
-                }
-            }
-
-            return found;
+            return Directory.EnumerateDirectories("/proc")
+                .Select(directory => (Directory: directory, Pid: ParsePid(directory)))
+                .Where(process => process.Pid > 0 && process.Pid != Environment.ProcessId &&
+                    Carries(LinuxEnvironment(process.Directory), tag))
+                .Select(process => process.Pid)
+                .ToList();
         }
 
         // Stryker disable all : macOS only, where the mutation workflow does not run (the macOS test job runs it)
         var buffer = new byte[MacArgumentsLimit()];
-        foreach (var pid in MacPids().Where(pid => pid != Environment.ProcessId))
-        {
-            if (Carries(MacArguments(pid, buffer), tag))
-            {
-                found.Add(pid);
-            }
-        }
+        return MacPids().Where(pid => pid != Environment.ProcessId && Carries(MacArguments(pid, buffer), tag)).ToList();
 
         // Stryker restore all
-        return found;
     }
 
     /// <summary>
@@ -257,6 +245,10 @@ internal static class ProcessTree
 
         return children;
     }
+
+    // A /proc entry's pid, or 0 for an entry that is not a process.
+    private static int ParsePid(string directory) =>
+        int.TryParse(Path.GetFileName(directory), NumberStyles.None, CultureInfo.InvariantCulture, out var pid) ? pid : 0;
 
     /// <summary>A process's environment from <c>/proc/[pid]/environ</c>: empty for a zombie, and for another user's process.</summary>
     private static byte[] LinuxEnvironment(string directory)
