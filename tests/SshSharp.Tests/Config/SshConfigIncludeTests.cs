@@ -209,4 +209,14 @@ public sealed class SshConfigIncludeTests : IDisposable
         await Assert.That(Glob.ExpandFiles(Path.GetPathRoot(_dir)!).Count).IsEqualTo(0);
         await Assert.That(Glob.ExpandFiles(Path.Combine(_dir, "nope", "*.x")).Count).IsEqualTo(0);
     }
+
+    [Test]
+    public async Task ExpandFiles_ListsEachMatchOnce_ThroughDirectoriesWithoutWildcards()
+    {
+        var sub = Directory.CreateDirectory(Path.Combine(_dir, "conf.d")).FullName;
+        File.WriteAllText(Path.Combine(sub, "a.conf"), string.Empty);
+        File.WriteAllText(Path.Combine(sub, "b.conf"), string.Empty);
+        var files = Glob.ExpandFiles(Path.Combine(_dir, "conf.d", "*.conf"));
+        await Assert.That(string.Join("|", files.Select(Path.GetFileName))).IsEqualTo("a.conf|b.conf");
+    }
 }

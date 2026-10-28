@@ -211,6 +211,13 @@ public class SshConfigMatchTests
         await Assert.That(() => SshExecMatcher.RunShellAsync(command, cts.Token)).Throws<OperationCanceledException>();
     }
 
+    [Test]
+    public async Task RunShellAsync_ThatRunsOutOfTime_DoesNotMatch()
+    {
+        var command = OperatingSystem.IsWindows() ? "ping -n 30 127.0.0.1 >nul" : "sleep 30";
+        await Assert.That(await SshExecMatcher.RunShellWithinAsync(command, TimeSpan.FromMilliseconds(200), CancellationToken.None)).IsFalse();
+    }
+
     /// <summary>
     /// Runs <see cref="SshExecMatcher.RunShellAsync"/> on the thread pool and gives up after 30 seconds, so that a run that never ends
     /// (even one blocked before its first await) fails the test with the step it was on, rather than hanging the test run.

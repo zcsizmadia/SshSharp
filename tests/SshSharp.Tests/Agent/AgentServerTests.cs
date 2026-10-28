@@ -457,6 +457,24 @@ public class AgentServerTests
     }
 
     [Test]
+    public async Task TheLongestSessionId_StillBinds_AndStillMakesALoginRequest()
+    {
+        using var hostKey = SshPrivateKey.Generate(SshKeyType.Ed25519);
+        using var key = SshPrivateKey.Generate(SshKeyType.Ed25519);
+        var longest = RandomNumberGenerator.GetBytes(AgentServer.MaxSessionIdLength);
+        await Assert.That(await HandleAsync(Server(), Bind(hostKey, longest, forwarding: true))).IsEquivalentTo(new byte[] { 6 });
+
+        var seen = new List<SshAgentRequest>();
+        var server = Server((request, _) =>
+        {
+            seen.Add(request);
+            return ValueTask.FromResult(true);
+        }, key);
+        await HandleAsync(server, Sign(key.PublicKey.Span, Login(key, "ssh-ed25519", sessionId: longest)));
+        await Assert.That(seen.Single().Purpose).IsEqualTo(SshSignaturePurpose.Authentication);
+    }
+
+    [Test]
     public async Task SessionBind_KeepsAtMostSixteenSessions()
     {
         using var hostKey = SshPrivateKey.Generate(SshKeyType.Ed25519);

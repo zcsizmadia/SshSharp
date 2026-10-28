@@ -122,7 +122,11 @@ always finish. A sweep cuts the connection at 13 points from the first byte to w
   parsers. A surviving mutant is a code change no test notices. The score is reported, not enforced. Each scope compiles only the
   tests that can reach its files, and slow tests stay out of the scopes they cannot help. When a test runs too long during coverage
   capture, Stryker runs it against every mutant, so the mutants that the fast tests miss time out instead of surviving, and a timeout
-  counts as detected. The encrypted private key fuzz test is in a file of its own for this reason.
+  counts as detected. The encrypted private key fuzz test is in a file of its own for this reason. The weekly run mutates only what
+  changed in the last eight days, so its scores cover those files alone; a run started by hand mutates everything. The workflow runs
+  on Linux, so code for Windows only is not scored there: its mutants are annotated, and the Windows test job exercises that code. A
+  mutant that cannot change what any caller sees (wiping a buffer, a message, an allocation size) is annotated in the code with the
+  reason, as `// Stryker disable once <mutator> : <reason>`.
 
 ## Stress testing and intermittent failures
 

@@ -217,6 +217,7 @@ public sealed class SshConfig
             }
         }
 
+        // Stryker disable once String : the message is for people
         throw new InvalidOperationException("Resolving the ssh_config needed too many Match exec or canonicalization answers.");
     }
 

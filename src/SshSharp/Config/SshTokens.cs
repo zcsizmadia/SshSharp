@@ -169,7 +169,8 @@ internal sealed record SshTokenContext(
         return Convert.ToHexString(SHA1.HashData(data)).ToLowerInvariant();
     }
 
-    // Stryker disable once String : the message is for people
+    // Stryker disable once Conditional,String : the message is for people; on Linux, where the mutation workflow runs, the condition is
+    // false either way (the Windows test job sees the throw)
     private static string LocalUserId() => OperatingSystem.IsWindows()
         ? throw new FormatException("The %i token (local user id) is not available on Windows.")
         : NativeMethods.GetUid().ToString(System.Globalization.CultureInfo.InvariantCulture);

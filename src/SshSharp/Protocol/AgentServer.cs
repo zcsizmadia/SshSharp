@@ -438,6 +438,7 @@ internal sealed class AgentServer
         {
             return SshCertificate.IsCertificateAlgorithm(new SshReader(data).ReadUtf8String()) ? new SignedData(SshSignaturePurpose.Certificate) : null;
         }
+        // Stryker disable once Block : without the block, the method returns null, as the block does
         catch (SshProtocolException)
         {
             return null;
@@ -468,6 +469,7 @@ internal sealed class AgentServer
             var hostKey = method == Hostbound ? reader.ReadString().ToArray() : null;
             return reader.IsEmpty ? new SignedData(SshSignaturePurpose.Authentication, UserName: user, SessionId: sessionId, HostKey: hostKey) : null;
         }
+        // Stryker disable once Block : without the block, the method returns null, as the block does
         catch (SshProtocolException)
         {
             return null;
