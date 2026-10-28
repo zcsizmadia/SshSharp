@@ -19,10 +19,11 @@ public sealed class SshJumpHost
     /// <param name="options">The hop's user, credentials, <see cref="SshClientOptions.HostKeyVerifier"/> and other settings. Its
     /// <see cref="SshClientOptions.ConnectTimeout"/> bounds this hop's connection; the destination's bounds the whole chain. The network
     /// settings are the destination's: <see cref="SshClientOptions.Proxy"/>, <see cref="SshClientOptions.LocalEndPoint"/>,
-    /// <see cref="SshClientOptions.AddressFamily"/>, <see cref="SshClientOptions.ConfigureSocket"/> and
-    /// <see cref="SshClientOptions.ConnectionAttempts"/> of the destination's options apply to the first network connection, the first
-    /// hop's, so the hop's must not be set (its <see cref="SshClientOptions.AddressFamily"/>, <see cref="SshClientOptions.ConfigureSocket"/>
-    /// and <see cref="SshClientOptions.ConnectionAttempts"/> are not used). A hop has no jump hosts of its own: list every hop, in
+    /// <see cref="SshClientOptions.AddressFamily"/>, <see cref="SshClientOptions.ConfigureSocket"/>,
+    /// <see cref="SshClientOptions.ConnectionAttempts"/> and <see cref="SshClientOptions.StaggeredConnectDelay"/> of the destination's options
+    /// apply to the first network connection, the first hop's, so the hop's must not be set (its <see cref="SshClientOptions.AddressFamily"/>,
+    /// <see cref="SshClientOptions.ConfigureSocket"/>, <see cref="SshClientOptions.ConnectionAttempts"/> and
+    /// <see cref="SshClientOptions.StaggeredConnectDelay"/> are not used). A hop has no jump hosts of its own: list every hop, in
     /// order, in the destination's <see cref="SshClientOptions.JumpHosts"/>.</param>
     /// <exception cref="ArgumentException"><paramref name="host"/> is empty, or <paramref name="options"/> set
     /// <see cref="SshClientOptions.JumpHosts"/>, <see cref="SshClientOptions.Proxy"/> or <see cref="SshClientOptions.LocalEndPoint"/>.</exception>

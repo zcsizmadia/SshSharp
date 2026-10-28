@@ -444,7 +444,8 @@ public sealed class SshClientOptions
     /// to the first, reaches each next one through the one before, and the server through the last. Each hop logs in and verifies its
     /// host key with its own <see cref="SshJumpHost.Options"/>; these options (credentials, <see cref="HostKeyVerifier"/>) are the
     /// destination's alone and never offered to a hop. <see cref="Proxy"/>, <see cref="LocalEndPoint"/>, <see cref="AddressFamily"/>,
-    /// <see cref="ConfigureSocket"/> and <see cref="ConnectionAttempts"/> apply to the first network connection, which is the first hop's
+    /// <see cref="ConfigureSocket"/>, <see cref="ConnectionAttempts"/> and <see cref="StaggeredConnectDelay"/> apply to the first network
+    /// connection, which is the first hop's
     /// (a hop's own are not used). <see cref="ConnectTimeout"/> bounds the whole chain. Disposing the
     /// client closes every hop. Empty (the default) connects directly. Used by
     /// <see cref="SshClient.ConnectAsync(string, int, SshClientOptions, CancellationToken)"/>; ignored when connecting over a stream you opened.
@@ -531,6 +532,41 @@ public sealed class SshClientOptions
     private readonly int _connectionAttempts = 1;
 
     /// <summary>
+    /// Races the server's addresses instead of trying them one after another, as RFC 8305 ("Happy Eyeballs") describes: when its name
+    /// has several addresses, the next is tried once the one before has had this long to connect or has failed, whichever comes first,
+    /// IPv6 and IPv4 addresses taking turns, and the first connection made is used. A server whose first address does not answer (a
+    /// broken IPv6 route, say) is then reached after this delay, not after the system's connect timeout, which can be minutes. RFC 8305
+    /// recommends 250 milliseconds. Null (the default) tries the addresses in order, each until it fails, as ssh does.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// It applies where <see cref="ConfigureSocket"/> does: the TCP connection to the server, or to the first of the
+    /// <see cref="JumpHosts"/>. Not the connection to a <see cref="Proxy"/>, nor a host given as an IP address or a name with one address,
+    /// which have nothing to race. The name is resolved once, by the system's resolver, whose order (RFC 6724) decides which family
+    /// goes first.
+    /// </para>
+    /// <para>
+    /// Several sockets may then be connecting at once. <see cref="ConfigureSocket"/> is still called once for each, before it connects,
+    /// one at a time, never on two at once; the sockets that lose the race are closed. A server may log the connections that lost
+    /// as connections closed before the handshake. Each retry that <see cref="ConnectionAttempts"/> makes races the addresses again.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="ArgumentOutOfRangeException">The value is less than 10 milliseconds or more than 2 seconds, the bounds RFC 8305 sets.</exception>
+    public TimeSpan? StaggeredConnectDelay
+    {
+        get => _staggeredConnectDelay;
+        init => _staggeredConnectDelay = CheckStagger(value);
+    }
+
+    private readonly TimeSpan? _staggeredConnectDelay;
+
+    /// <summary>Checks a <see cref="StaggeredConnectDelay"/>: null, or 10 milliseconds to 2 seconds (RFC 8305 section 5).</summary>
+    internal static TimeSpan? CheckStagger(TimeSpan? value) =>
+        value is { } delay && (delay < TimeSpan.FromMilliseconds(10) || delay > TimeSpan.FromSeconds(2))
+            ? throw new ArgumentOutOfRangeException(nameof(value), delay, "The staggered connect delay must be from 10 milliseconds to 2 seconds, or null.")
+            : value;
+
+    /// <summary>
     /// Sets socket options on the TCP connection to the server: TCP keep-alive, buffer sizes, the type of service (DSCP), and so on. It is
     /// called with the new socket before it connects (after it is bound to <see cref="LocalEndPoint"/>, if set), so options that must be
     /// set before the handshake, such as the receive buffer size that TCP window scaling depends on, take effect. Null (the default)
@@ -547,7 +583,8 @@ public sealed class SshClientOptions
     /// <para>
     /// It is called once for each socket SshSharp creates, and each address of the server that is tried gets a socket of its own: once
     /// per attempt for an IP address or a name with one address, and again for each further address tried when a name has several and
-    /// the first cannot be reached. Each retry that <see cref="ConnectionAttempts"/> makes creates new sockets too. The socket's family is the address's (IPv4 or IPv6, not dual-mode). It runs on the connecting thread and should
+    /// the first cannot be reached (or, with <see cref="StaggeredConnectDelay"/>, has not connected in time: several sockets may then be
+    /// connecting at once, and those that lose are closed). Each retry that <see cref="ConnectionAttempts"/> makes creates new sockets too. The socket's family is the address's (IPv4 or IPv6, not dual-mode). It runs on the connecting thread and should
     /// only set options.
     /// An exception it throws ends the attempt and is thrown from <c>ConnectAsync</c> as it is.
     /// </para>

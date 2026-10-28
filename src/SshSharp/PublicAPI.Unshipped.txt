@@ -11,3 +11,7 @@ SshSharp.Sftp.SftpTransferOptions.TimeTolerance.get -> System.TimeSpan
 SshSharp.Sftp.SftpTransferOptions.TimeTolerance.init -> void
 SshSharp.Sftp.SftpTransferSummary.UnreadableDirectories.get -> System.Collections.Generic.IReadOnlyList<string!>!
 SshSharp.Sftp.SftpTransferSummary.UnreadableDirectories.init -> void
+SshSharp.SshClientOptions.StaggeredConnectDelay.get -> System.TimeSpan?
+SshSharp.SshClientOptions.StaggeredConnectDelay.init -> void
+SshSharp.SshConfigConnectOptions.StaggeredConnectDelay.get -> System.TimeSpan?
+SshSharp.SshConfigConnectOptions.StaggeredConnectDelay.init -> void
