@@ -87,6 +87,7 @@ internal static class PacketCodec
         var packetLength = 1 + payloadLength + paddingLength;
         if (packetLength > MaxPacketLength)
         {
+            // Stryker disable once String : the message is for people
             throw new ArgumentException($"Payload of {payloadLength} bytes exceeds the maximum packet size.", nameof(body));
         }
 
@@ -160,6 +161,7 @@ internal static class PacketCodec
         var used = (int)total;
         var packetSize = 4 + (int)length;
         var buffer = ArrayPool<byte>.Shared.Rent(used);
+        // Stryker disable once Statement : Instrumentation calls are compiled only into instrumented builds
         Instrumentation.Rented(buffer, nameof(TryDecode));
         try
         {
@@ -173,6 +175,7 @@ internal static class PacketCodec
             var padding = buffer[4];
             if (padding < MinPadding || padding > length - 1)
             {
+                // Stryker disable once String : the message is for people
                 throw new SshProtocolException($"Invalid padding length {padding} in a packet of {length} bytes.");
             }
 
@@ -197,12 +200,14 @@ internal static class PacketCodec
     internal static void ZeroAndReturn(byte[] buffer, int used, string owner)
     {
         CryptographicOperations.ZeroMemory(buffer.AsSpan(0, used));
+        // Stryker disable once Statement : Instrumentation calls are compiled only into instrumented builds
         Instrumentation.Returning(buffer, owner);
         ArrayPool<byte>.Shared.Return(buffer);
     }
 
     private static void Validate(uint length, PacketProtector protector)
     {
+        // Stryker disable once Equality : a length of 5 is never aligned (blocks are at least 8 bytes), so it is refused either way
         if (length < 1 + MinPadding || length > MaxPacketLength)
         {
             throw new SshProtocolException($"Invalid packet length {length}.");
@@ -271,6 +276,7 @@ internal sealed class PaddingRandom
     /// <summary>Wipes the bytes not yet used (the transport is being disposed).</summary>
     public void Clear()
     {
+        // Stryker disable once Statement : wiping the unused bytes is hygiene that the API cannot observe
         CryptographicOperations.ZeroMemory(_buffer);
         _position = _buffer.Length;
     }
