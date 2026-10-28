@@ -320,6 +320,112 @@ public sealed class RevokedHostKeysTests : IDisposable
     }
 
     [Test]
+    public async Task AMalformedKrl_IsRefused_SayingWhatIsWrong()
+    {
+        var key = FakeHostKey.Ed25519();
+        var authority = _authority.PublicKey.ToArray();
+        var tooLarge = new byte[(1024 * 1024) + 1]; // one byte over the bitmap bound
+        tooLarge[0] = 0x01;
+        (byte[] Krl, string Message)[] cases =
+        [
+            (new Krl().Build(version: 2), "KRL format version 2 is not supported."),
+            (new Krl().Signature(authority, new byte[64]).Section(2, w => w.WriteString(key.Blob)).Build(), "The KRL has a section after its signature."),
+            (new Krl().Section(3, w => w.WriteString(new byte[19])).Build(), "A KRL fingerprint has the wrong length."),
+            (new Krl().Section(5, w => w.WriteString(new byte[20])).Build(), "A KRL fingerprint has the wrong length."),
+            (new Krl().Section(2, w => w.WriteUInt32(100)).Build(), "A KRL field runs past the end of its section."),
+            (new Krl().Build()[..20], "The KRL is truncated."),
+            (new Krl().Certificates([0, 0]).Build(), "The KRL is truncated."), // an authority that is not a key blob
+            (new Krl().Certificates(authority, (0x20, w => w.WriteUInt64(0))).Build(), "A KRL revokes serial 0 or has an empty serial range."),
+            (new Krl().Certificates(authority, (0x21, w => { w.WriteUInt64(1); w.WriteUInt64(2); w.WriteByte(0); })).Build(), "Trailing data in a KRL serial range."),
+            (new Krl().Certificates(authority, (0x22, w => { w.WriteUInt64(1); w.WriteMpint(new byte[] { 0x01 }); w.WriteByte(0); })).Build(),
+                "Trailing data in a KRL serial bitmap."),
+            (new Krl().Certificates(authority, (0x22, w => { w.WriteUInt64(1); w.WriteString(new byte[] { 0x80 }); })).Build(), "A KRL bitmap is negative."),
+            (new Krl().Certificates(authority, (0x22, w => { w.WriteUInt64(1); w.WriteMpint(tooLarge); })).Build(), "A KRL serial bitmap is too large."),
+            (new Krl().Certificates(authority, (0x22, w => { w.WriteUInt64(0); w.WriteMpint(new byte[] { 0x03 }); })).Build(),
+                "A KRL revokes serial 0 or has an empty serial range."),
+            (new Krl().Certificates(authority, (0x22, w => { w.WriteUInt64(ulong.MaxValue); w.WriteMpint(new byte[] { 0x02 }); })).Build(), "A KRL serial bitmap overflows."),
+            (new Krl().Certificates(authority, (0x40, _ => { })).Build(), "KRL certificate section type 64 is not supported."),
+            (new Krl().Certificates(authority, (0x39, w => { w.WriteString("future"); w.WriteBoolean(true); w.WriteString(ReadOnlySpan<byte>.Empty); })).Build(),
+                "The KRL has a critical extension 'future' that is not supported."),
+            (new Krl().Section(255, w => { w.WriteString("future"); w.WriteBoolean(false); w.WriteString(ReadOnlySpan<byte>.Empty); w.WriteByte(0); }).Build(),
+                "Trailing data in a KRL extension."),
+            (new Krl().Section(255, w => { w.WriteString(new byte[] { 0xff, 0xfe }); w.WriteBoolean(false); w.WriteString(ReadOnlySpan<byte>.Empty); }).Build(),
+                "A KRL name is not valid UTF-8."),
+        ];
+
+        foreach (var (krl, message) in cases)
+        {
+            var error = await Assert.That(() => RevokedKeyList.Parse(krl)).ThrowsExactly<FormatException>();
+            await Assert.That(error!.Message).IsEqualTo(message);
+        }
+    }
+
+    [Test]
+    public async Task ABitmap_RevokesExactlyItsBits_UpToTheLastSerial()
+    {
+        var key = FakeHostKey.Ed25519();
+        var authority = _authority.PublicKey.ToArray();
+        var list = RevokedKeyList.Parse(new Krl()
+            .Certificates(authority,
+                (0x22, w => { w.WriteUInt64(0); w.WriteMpint(new byte[] { 0x02 }); }),             // offset 0 is fine without bit 0: serial 1
+                (0x22, w => { w.WriteUInt64(ulong.MaxValue); w.WriteMpint(new byte[] { 0x01 }); }), // the very last serial
+                (0x22, w => { w.WriteUInt64(1000); w.WriteMpint(new byte[] { 0x80, 0x01 }); }))     // a positive mpint with its leading zero
+            .Build());
+
+        bool Revoked(ulong serial) => list.IsRevoked(key.Blob, Certificate(key, serial));
+        foreach (var serial in new ulong[] { 1, ulong.MaxValue, 1000, 1015 })
+        {
+            await Assert.That(Revoked(serial)).IsTrue().Because($"serial {serial}");
+        }
+
+        // Just past the end of a bitmap is not in it (nor read past its bytes).
+        foreach (var serial in new ulong[] { 2, ulong.MaxValue - 1, 1016, 1001 })
+        {
+            await Assert.That(Revoked(serial)).IsFalse().Because($"serial {serial}");
+        }
+    }
+
+    [Test]
+    public async Task TheCache_DropsTheFileUsedLongestAgo_OnlyWhenFullAndTheFileIsNew()
+    {
+        var list = RevokedKeyList.Parse([]);
+        var cache = new System.Collections.Concurrent.ConcurrentDictionary<string, (byte[] Hash, RevokedKeyList List, long LastUsed)>();
+        for (var i = 0; i < RevokedKeyList.MaxCachedFiles - 1; i++)
+        {
+            cache[$"file{i}"] = ([], list, 100 + i);
+        }
+
+        cache["oldest"] = ([], list, 50);
+        RevokedKeyList.MakeRoom(cache, "file3"); // full, but a file already cached: nothing goes
+        await Assert.That(cache.Count).IsEqualTo(RevokedKeyList.MaxCachedFiles);
+
+        RevokedKeyList.MakeRoom(cache, "new");
+        await Assert.That(cache.Count).IsEqualTo(RevokedKeyList.MaxCachedFiles - 1);
+        await Assert.That(cache.ContainsKey("oldest")).IsFalse();
+
+        RevokedKeyList.MakeRoom(cache, "another"); // room left: nothing goes
+        await Assert.That(cache.Count).IsEqualTo(RevokedKeyList.MaxCachedFiles - 1);
+    }
+
+    [Test]
+    public async Task AFileOfTheLargestSize_IsRead_AndALargerOneRefused()
+    {
+        var path = Path.Combine(_dir, "large");
+        var spaces = new byte[RevokedKeyList.MaxFileSize];
+        Array.Fill(spaces, (byte)' ');
+        await File.WriteAllBytesAsync(path, spaces);
+        await Assert.That((await RevokedKeyList.LoadAsync(path, CancellationToken.None)).IsRevoked(FakeHostKey.Ed25519().Blob, null)).IsFalse();
+
+        await using (var file = File.OpenWrite(path))
+        {
+            file.SetLength(RevokedKeyList.MaxFileSize + 1L);
+        }
+
+        var error = await Assert.That(async () => await RevokedKeyList.LoadAsync(path, CancellationToken.None)).ThrowsExactly<IOException>();
+        await Assert.That(error!.Message).IsEqualTo(RevokedKeyList.TooLargeMessage);
+    }
+
+    [Test]
     public async Task SshConfig_RevokedHostKeys_IsExpanded_AndRefusesTheConnection()
     {
         var key = FakeHostKey.Ed25519();
