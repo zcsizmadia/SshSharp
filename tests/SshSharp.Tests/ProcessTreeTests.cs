@@ -33,10 +33,19 @@ public class ProcessTreeTests
 
             ProcessTree.Kill(process);
             await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
-            foreach (var pid in tree)
+
+            // SIGKILL is delivered at once, but each process finishes exiting a moment later, and the shell (killed last) can be gone
+            // first: a loaded runner showed one still running (1 in 60 stress iterations). A process the kill missed is a sleep of 30 s,
+            // still running at the deadline.
+            var gone = DateTime.UtcNow.AddSeconds(10);
+            var running = tree.Where(IsRunning).ToList();
+            while (running.Count > 0 && DateTime.UtcNow < gone)
             {
-                await Assert.That(IsRunning(pid)).IsFalse();
+                await Task.Delay(20);
+                running = running.Where(IsRunning).ToList();
             }
+
+            await Assert.That(string.Join("; ", running.Select(Describe))).IsEqualTo(string.Empty);
         }
         finally
         {
@@ -44,6 +53,18 @@ public class ProcessTreeTests
             {
                 process.Kill(entireProcessTree: true);
             }
+        }
+    }
+
+    private static string Describe(int pid)
+    {
+        try
+        {
+            return OperatingSystem.IsLinux() ? File.ReadAllText($"/proc/{pid}/stat").Trim() : $"{pid} still running";
+        }
+        catch (IOException)
+        {
+            return $"{pid} (exited)";
         }
     }
 
