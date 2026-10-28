@@ -117,6 +117,38 @@ public sealed class CertificateTests : IDisposable
         await Assert.That(Make(before: now.AddMinutes(-1)).CheckForHost(Host, now)).Contains("valid only");
         await Assert.That(Make(after: now.AddMinutes(5)).CheckForHost(Host, now)).Contains("valid only");
         await Assert.That(Make(options: [("force-command", "/bin/true")]).CheckForHost(Host, now)).Contains("critical options");
+        await Assert.That(Make(options: [("force-command", "/bin/true"), ("source-address", "192.0.2.0/24")]).CheckForHost(Host, now))
+            .Contains("(force-command, source-address)");
+    }
+
+    [Test]
+    public async Task ALineThatIsNotACertificate_OrDoesNotMatchItsBlob_SaysWhich()
+    {
+        var key = FakeHostKey.Ed25519();
+        var blob = TestKeys.Certificate(_authority, key.Blob, SshCertificateType.Host, [Host]);
+
+        await Assert.That(() => SshCertificate.Parse(null!)).ThrowsExactly<ArgumentNullException>();
+        foreach (var line in new[] { "ssh-ed25519-cert-v01@openssh.com", $"ssh-ed25519 {Convert.ToBase64String(blob)}" })
+        {
+            await Assert.That(() => SshCertificate.Parse(line)).ThrowsExactly<FormatException>().WithMessageContaining("Not an OpenSSH certificate line");
+        }
+
+        await Assert.That(() => SshCertificate.Parse($"ecdsa-sha2-nistp256-cert-v01@openssh.com {Convert.ToBase64String(blob)}"))
+            .ThrowsExactly<FormatException>().WithMessageContaining("The certificate's type does not match the line's type field.");
+        await Assert.That(() => SshCertificate.FromBlob([.. blob, 0])).ThrowsExactly<SshProtocolException>().WithMessageContaining("Trailing data");
+    }
+
+    [Test]
+    public async Task TheCertifiedKeyIsRead_OnlyFromATypeSshSharpAccepts()
+    {
+        foreach (var type in new[] { "ssh-ed25519", "ecdsa-sha2-nistp256", "ecdsa-sha2-nistp384", "ecdsa-sha2-nistp521", "ssh-rsa", "sk-ssh-ed25519", "sk-ecdsa-sha2-nistp256" })
+        {
+            await Assert.That(SshCertificate.IsAcceptedCertificateKeyType(type + "-cert-v01@openssh.com")).IsTrue().Because(type);
+        }
+
+        await Assert.That(SshCertificate.IsAcceptedCertificateKeyType("ssh-dss-cert-v01@openssh.com")).IsFalse();
+        var dss = TestKeys.Blob(w => w.WriteString("ssh-dss-cert-v01@openssh.com"));
+        await Assert.That(() => SshCertificate.ReadCertifiedKey(dss)).ThrowsExactly<SshProtocolException>().WithMessageContaining("not of a type SshSharp accepts");
     }
 
     // ---- host certificates in a connection ----
