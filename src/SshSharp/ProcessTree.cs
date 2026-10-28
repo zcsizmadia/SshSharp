@@ -17,11 +17,10 @@ namespace SshSharp;
 /// </remarks>
 internal static class ProcessTree
 {
-    private const int SigKill = 9;
-
     // The rounds stop when one finds nothing new; the limit is for a tree that keeps starting processes as fast as they are killed.
     private const int MaxRounds = 16;
 
+    /// <summary>Kills <paramref name="process"/> and its descendants, sending each SIGKILL alone on Unix.</summary>
     /// <exception cref="InvalidOperationException">No process is associated with <paramref name="process"/>.</exception>
     public static void Kill(Process process)
     {
@@ -37,26 +36,35 @@ internal static class ProcessTree
         var killed = new HashSet<int>();
         for (var round = 0; round < MaxRounds; round++)
         {
-            var descendants = Descendants(process.Id);
-            var found = false;
-
             // Breadth first lists parents before their children, so a process is killed before it can start more.
-            foreach (var pid in descendants)
-            {
-                if (killed.Add(pid))
-                {
-                    found = true;
-                    _ = NativeMethods.Kill(pid, SigKill); // it may have exited meanwhile
-                }
-            }
-
-            if (!found)
+            var fresh = Descendants(process.Id).Where(pid => !killed.Contains(pid)).ToList();
+            if (fresh.Count == 0)
             {
                 break;
+            }
+
+            foreach (var pid in fresh)
+            {
+                killed.Add(pid);
+                KillOne(pid);
             }
         }
 
         process.Kill();
+    }
+
+    // Process.Kill sends SIGKILL alone on Unix; only the whole-tree overload stops processes first.
+    private static void KillOne(int pid)
+    {
+        try
+        {
+            using var process = Process.GetProcessById(pid);
+            process.Kill();
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            // It exited meanwhile.
+        }
     }
 
     /// <summary>The descendants of <paramref name="root"/>, breadth first.</summary>
@@ -70,13 +78,10 @@ internal static class ProcessTree
         {
             var parent = queue.Dequeue();
             IReadOnlyList<int> direct = children is null ? MacChildren(parent) : children.GetValueOrDefault(parent) ?? [];
-            foreach (var child in direct)
+            foreach (var child in direct.Where(child => child != root && !found.Contains(child)))
             {
-                if (child != root && !found.Contains(child))
-                {
-                    found.Add(child);
-                    queue.Enqueue(child);
-                }
+                found.Add(child);
+                queue.Enqueue(child);
             }
         }
 
@@ -97,7 +102,7 @@ internal static class ProcessTree
             string stat;
             try
             {
-                stat = File.ReadAllText(Path.Combine(directory, "stat"));
+                stat = File.ReadAllText(directory + "/stat");
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
@@ -144,10 +149,6 @@ internal static class ProcessTree
 
     private static class NativeMethods
     {
-        [DllImport("libc", EntryPoint = "kill")]
-        [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
-        public static extern int Kill(int pid, int signal);
-
         // Returns the number of pids written (libproc divides proc_listpids's byte count by sizeof(int)).
         [DllImport("libproc", EntryPoint = "proc_listchildpids")]
         [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
