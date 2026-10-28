@@ -380,6 +380,15 @@ public sealed class SshCertificateBuilderTests
     }
 
     [Test]
+    public async Task AnRsaAuthority_SignsWithSha512_ThoughItListsSha256First()
+    {
+        using var authority = SshPrivateKey.FromSigner(new Sha256FirstSigner(Keys[SshKeyType.Rsa]));
+        var certificate = await User().SignAsync(authority, Timeout());
+        await Assert.That(certificate.VerifySignature()).IsTrue();
+        await Assert.That(SignatureAlgorithm(certificate)).IsEqualTo("rsa-sha2-512");
+    }
+
+    [Test]
     public async Task AnAgentKey_CanBeTheAuthority_ButNotOneThatSignsWithSha1()
     {
         await using var agent = new FakeAgent();
@@ -541,6 +550,20 @@ public sealed class SshCertificateBuilderTests
                 throw new UnauthorizedAccessException("This key signs for logging in only.");
             }
 
+            var blob = await key.SignAsync(request, null, cancellationToken);
+            var reader = new SshReader(blob);
+            reader.ReadString();
+            return reader.ReadString().ToArray();
+        }
+    }
+
+    /// <summary>An RSA signer that prefers rsa-sha2-256, as a key service might list its algorithms.</summary>
+    private sealed class Sha256FirstSigner(SshPrivateKey key) : SshKeySigner(key.PublicKey)
+    {
+        public override IReadOnlyList<string> SignatureAlgorithms => [SshAlgorithms.RsaSha2_256, SshAlgorithms.RsaSha2_512];
+
+        public override async ValueTask<byte[]> SignAsync(SshSignRequest request, CancellationToken cancellationToken)
+        {
             var blob = await key.SignAsync(request, null, cancellationToken);
             var reader = new SshReader(blob);
             reader.ReadString();

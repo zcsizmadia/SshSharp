@@ -93,18 +93,21 @@ internal static class SftpExtensionReplies
             if (string.Equals(name, used, StringComparison.OrdinalIgnoreCase))
             {
                 algorithm = name;
+                // Stryker disable once Statement : the first match and the last are the same name unless the caller asks for an algorithm twice
                 break;
             }
         }
 
         if (algorithm is null)
         {
+            // Stryker disable once String : the message is for people
             throw new SshProtocolException("The check-file reply names an algorithm that was not asked for.");
         }
 
         var hash = reader.Remaining;
         if (hash.IsEmpty || (HashLength(algorithm) is { } length && hash.Length != length))
         {
+            // Stryker disable once String : the message is for people
             throw new SshProtocolException($"The check-file reply has a {algorithm} hash of {hash.Length} bytes.");
         }
 
@@ -119,12 +122,14 @@ internal static class SftpExtensionReplies
     {
         if (!reader.ReadString().SequenceEqual("md5-hash"u8))
         {
+            // Stryker disable once String : the message is for people
             throw new SshProtocolException("The md5-hash reply does not start with \"md5-hash\".");
         }
 
         var hash = reader.ReadString();
         if (hash.Length != 16)
         {
+            // Stryker disable once String : the message is for people
             throw new SshProtocolException($"The md5-hash reply has a hash of {hash.Length} bytes.");
         }
 
