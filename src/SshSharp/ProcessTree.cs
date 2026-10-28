@@ -1,6 +1,9 @@
 using System.Diagnostics;
 using System.Globalization;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace SshSharp;
 
@@ -9,16 +12,60 @@ namespace SshSharp;
 /// without stopping any of them first.
 /// </summary>
 /// <remarks>
+/// <para>
 /// On Unix, <see cref="Process.Kill(bool)"/> with the whole tree sends each process SIGSTOP before SIGKILL. A shell runs in the
 /// application's own process group, and so do its background children. When the shell dies while such a child is stopped, the kernel
 /// can send SIGHUP and SIGCONT to that group (macOS does), and SIGHUP terminates the application (#432). Here each process gets SIGKILL
-/// alone, so none is ever stopped. The command itself is killed last: until then, each round also finds what it started meanwhile. A
-/// process started meanwhile by one of its descendants can escape; .NET's SIGSTOP was there to prevent that.
+/// alone, so none is ever stopped. The command itself is killed last: until then, each round also finds what it started meanwhile.
+/// </para>
+/// <para>
+/// What a process forks as it is killed is not in the tree: the fork completes (macOS does not abort it for the pending SIGKILL), and
+/// the child is reparented to init, still in the application's group. A shell's background subshell escaped that way when its fork
+/// met the cancellation (1 in 70 stress iterations on macOS, 72 in 400 with the cancellation timed to meet it). So each command started
+/// by <see cref="Start"/> carries an environment variable with a random value of its own, which everything it starts inherits, and the
+/// kill ends with a sweep: while any process carrying that value is alive, it gets SIGKILL too. A process that is gone has finished
+/// any fork it was in, so once none is left, nothing that inherited the value is. A process that drops the variable from its
+/// environment and leaves the tree is not found.
+/// </para>
 /// </remarks>
 internal static class ProcessTree
 {
+    /// <summary>The environment variable that marks the processes of one command started by <see cref="Start"/>.</summary>
+    internal const string TagVariable = "SSHSHARP_PROCESS_TREE";
+
     // The rounds stop when one finds nothing new; the limit is for a tree that keeps starting processes as fast as they are killed.
     private const int MaxRounds = 16;
+
+    private const int CtlKern = 1;
+    private const int KernArgMax = 8;
+    private const int KernProcArgs2 = 49;
+
+    // A killed process is gone within milliseconds; the limit is for one that cannot be killed (stuck in the kernel).
+    private static readonly TimeSpan SweepLimit = TimeSpan.FromSeconds(2);
+
+    private static readonly ConditionalWeakTable<Process, byte[]> Tags = new();
+
+    /// <summary>
+    /// Starts a command with <see cref="Process.Start(ProcessStartInfo)"/>, marking it and what it starts for <see cref="Kill"/>.
+    /// </summary>
+    public static Process? Start(ProcessStartInfo info)
+    {
+        // Stryker disable once all : Windows only, where the mutation workflow does not run
+        if (!(OperatingSystem.IsLinux() || OperatingSystem.IsMacOS()))
+        {
+            return Process.Start(info);
+        }
+
+        var value = Convert.ToHexString(RandomNumberGenerator.GetBytes(16));
+        info.Environment[TagVariable] = value;
+        var process = Process.Start(info);
+        if (process is not null)
+        {
+            Tags.Add(process, Tag(value));
+        }
+
+        return process;
+    }
 
     /// <summary>Kills <paramref name="process"/> and its descendants, sending each SIGKILL alone on Unix.</summary>
     /// <exception cref="InvalidOperationException">No process is associated with <paramref name="process"/>.</exception>
@@ -51,6 +98,92 @@ internal static class ProcessTree
         }
 
         process.Kill();
+        if (Tags.TryGetValue(process, out var tag))
+        {
+            Sweep(tag);
+        }
+    }
+
+    /// <summary>The bytes <see cref="Tagged"/> looks for: the variable, its value and the NUL that ends them.</summary>
+    internal static byte[] Tag(string value) => Encoding.ASCII.GetBytes(TagVariable + "=" + value + "\0");
+
+    /// <summary>Kills every live process whose environment holds <paramref name="tag"/>, until none is left.</summary>
+    internal static void Sweep(byte[] tag)
+    {
+        var limit = Stopwatch.StartNew();
+        while (true)
+        {
+            var tagged = Tagged(tag);
+            if (tagged.Count == 0 || limit.Elapsed > SweepLimit)
+            {
+                return;
+            }
+
+            foreach (var pid in tagged)
+            {
+                KillOne(pid);
+            }
+
+            // SIGKILL is sent at once, but each process finishes exiting a moment later; until then it still reads as alive.
+            Thread.Sleep(1);
+        }
+    }
+
+    /// <summary>The live processes, other than this one, whose environment holds <paramref name="tag"/>.</summary>
+    internal static List<int> Tagged(byte[] tag)
+    {
+        var found = new List<int>();
+        if (OperatingSystem.IsLinux())
+        {
+            foreach (var directory in Directory.EnumerateDirectories("/proc"))
+            {
+                if (int.TryParse(Path.GetFileName(directory), NumberStyles.None, CultureInfo.InvariantCulture, out var pid) &&
+                    pid != Environment.ProcessId && Carries(LinuxEnvironment(directory), tag))
+                {
+                    found.Add(pid);
+                }
+            }
+
+            return found;
+        }
+
+        // Stryker disable all : macOS only, where the mutation workflow does not run (the macOS test job runs it)
+        var buffer = new byte[MacArgumentsLimit()];
+        foreach (var pid in MacPids().Where(pid => pid != Environment.ProcessId))
+        {
+            if (Carries(MacArguments(pid, buffer), tag))
+            {
+                found.Add(pid);
+            }
+        }
+
+        // Stryker restore all
+        return found;
+    }
+
+    /// <summary>
+    /// Whether <paramref name="block"/>, NUL-separated strings, holds <paramref name="tag"/> (<c>NAME=value</c> and its NUL) as one of
+    /// them, not as the end of a longer one.
+    /// </summary>
+    internal static bool Carries(ReadOnlySpan<byte> block, ReadOnlySpan<byte> tag)
+    {
+        var offset = 0;
+        while (true)
+        {
+            var at = block[offset..].IndexOf(tag);
+            if (at < 0)
+            {
+                return false;
+            }
+
+            at += offset;
+            if (at == 0 || block[at - 1] == 0)
+            {
+                return true;
+            }
+
+            offset = at + 1;
+        }
     }
 
     // Process.Kill sends SIGKILL alone on Unix; only the whole-tree overload stops processes first.
@@ -125,7 +258,20 @@ internal static class ProcessTree
         return children;
     }
 
-    // Stryker disable once all : macOS only, where the mutation workflow does not run (the macOS test job runs it)
+    /// <summary>A process's environment from <c>/proc/[pid]/environ</c>: empty for a zombie, and for another user's process.</summary>
+    private static byte[] LinuxEnvironment(string directory)
+    {
+        try
+        {
+            return File.ReadAllBytes(directory + "/environ");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return []; // it exited, or is not ours to read
+        }
+    }
+
+    // Stryker disable all : macOS only, where the mutation workflow does not run (the macOS test job runs it)
     private static int[] MacChildren(int parent)
     {
         var buffer = new int[64];
@@ -147,11 +293,63 @@ internal static class ProcessTree
         }
     }
 
+    private static int[] MacPids()
+    {
+        var buffer = new int[1024];
+        while (true)
+        {
+            var count = NativeMethods.ListAllPids(buffer, buffer.Length * sizeof(int));
+            if (count <= 0)
+            {
+                return [];
+            }
+
+            // A full buffer may have cut the list short.
+            if (count < buffer.Length)
+            {
+                return buffer[..count];
+            }
+
+            buffer = new int[buffer.Length * 2];
+        }
+    }
+
+    // The most a process's arguments and environment take (sysctl kern.argmax).
+    private static int MacArgumentsLimit()
+    {
+        var value = new byte[sizeof(int)];
+        var length = (nuint)value.Length;
+        return NativeMethods.Sysctl([CtlKern, KernArgMax], 2, value, ref length, IntPtr.Zero, 0) == 0
+            ? BitConverter.ToInt32(value)
+            : 1 << 20;
+    }
+
+    // A process's argument count, executable path, arguments and environment, as NUL-separated strings (sysctl kern.procargs2). It
+    // fails for a zombie, and for another user's process, so neither is found.
+    private static ReadOnlySpan<byte> MacArguments(int pid, byte[] buffer)
+    {
+        var length = (nuint)buffer.Length;
+        return NativeMethods.Sysctl([CtlKern, KernProcArgs2, pid], 3, buffer, ref length, IntPtr.Zero, 0) == 0
+            ? buffer.AsSpan(0, (int)length)
+            : [];
+    }
+
+    // Stryker restore all
     private static class NativeMethods
     {
         // Returns the number of pids written (libproc divides proc_listpids's byte count by sizeof(int)).
         [DllImport("libproc", EntryPoint = "proc_listchildpids")]
         [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
         public static extern int ListChildPids(int ppid, [Out] int[] buffer, int bufferSize);
+
+        // Returns the number of pids written, as proc_listchildpids does.
+        [DllImport("libproc", EntryPoint = "proc_listallpids")]
+        [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
+        public static extern int ListAllPids([Out] int[] buffer, int bufferSize);
+
+        [DllImport("libc", EntryPoint = "sysctl")]
+        [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
+        public static extern int Sysctl(
+            [In] int[] name, uint nameLength, [Out] byte[] value, ref nuint valueLength, IntPtr newValue, nuint newValueLength);
     }
 }

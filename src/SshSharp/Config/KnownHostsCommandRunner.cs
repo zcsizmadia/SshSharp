@@ -82,7 +82,7 @@ internal static class KnownHostsCommandRunner
         Process process;
         try
         {
-            process = Process.Start(start) ?? throw new InvalidOperationException("The process did not start.");
+            process = ProcessTree.Start(start) ?? throw new InvalidOperationException("The process did not start.");
         }
         catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
         {

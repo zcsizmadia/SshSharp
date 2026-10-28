@@ -77,7 +77,7 @@ public static class SshExecMatcher
             info.ArgumentList.Add(command);
         }
 
-        var process = Process.Start(info);
+        var process = ProcessTree.Start(info);
 
         // Stryker disable once Block : as above, Process.Start does not return null here
         if (process is null)
