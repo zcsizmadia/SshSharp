@@ -150,9 +150,9 @@ jobs:
           {
             echo "### Mutation testing: ${{ matrix.scope }}"
             grep -E "^(Killed|Survived|Timeout|Errors):|final mutation score" "$RUNNER_TEMP/stryker.log" | sed 's/^.*INF\] //' | sed 's/^/    /'
-            # Stryker counts a timeout as detected. Many timeouts here are not loops: under the MTP runner every mutation check reads
-            # the active mutant from a memory-mapped file, which slows hot code (the crypto) past the time limit whatever the mutant
-            # does (docs/testing.md). The score from killed mutants alone is the lower bound.
+            # Stryker counts a timeout as detected. Many timeouts here are not loops: the mutation checks slow hot code (the crypto) far
+            # past a time limit measured without them, whatever the mutant does (docs/testing.md). The score from killed mutants alone
+            # is the lower bound.
             report="$RUNNER_TEMP/stryker/reports/mutation-report.json"
             if [ -f "$report" ]; then
               jq -r '[.files[].mutants[].status]

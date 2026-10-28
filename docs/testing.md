@@ -128,10 +128,11 @@ always finish. A sweep cuts the connection at 13 points from the first byte to w
   mutant that cannot change what any caller sees (wiping a buffer, a message, an allocation size) is annotated in the code with the
   reason, as `// Stryker disable once <mutator> : <reason>`.
 
-  **Timeouts overstate the scores.** With the runner for Microsoft.Testing.Platform (a preview in Stryker.NET 5), every mutation
-  check that Stryker compiles into the code reads the active mutant from a memory-mapped file instead of a field. Hot code runs
-  about a hundred times slower, while the time limit comes from a run without that overhead. The managed cryptography's tests
-  then time out whatever the mutant does, and Stryker counts each as detected. In the full run of October 2026:
+  **Timeouts overstate the scores.** Stryker compiles a check into every mutated expression, and in hot code those checks cost far
+  more than the code they guard: a tight arithmetic loop ran about 50 times slower. With the runner for Microsoft.Testing.Platform (a
+  preview in Stryker.NET 5), each check also reads the active mutant from a memory-mapped file, which made it about 225 times
+  slower. The time limit comes from a run without the checks. The managed cryptography's tests then time out whatever the mutant
+  does, and Stryker counts each as detected. In the full run of October 2026:
 
   | Scope | Score | Killed mutants alone |
   |---|---|---|
