@@ -442,7 +442,10 @@ connection, but not read or change it: each host's key is verified end to end, b
   a `ProxyCommand` when its connection closes), it kills the command and every process it started. These processes run in the
   application's own process group. Each gets `SIGKILL` alone, never `SIGSTOP` first: .NET's own tree kill stops each process
   before killing it, and a background child left stopped when its shell died made macOS send `SIGHUP` to that group, which
-  terminates the application (#432). A process started while the tree is being killed can escape it.
+  terminates the application (#432). A process forked as its parent is killed is no longer in the tree (macOS completes the
+  fork), so each command also runs with `SSHSHARP_PROCESS_TREE` set to a random value of its own, which everything it starts
+  inherits: after the tree, every live process carrying that value is killed too, until none is left. Only processes of the
+  application's own user are found. A process that drops the variable from its environment and leaves the tree can escape.
 - `Match localnetwork` reads the local interface addresses. As ssh_config(5) warns, a network address is not a trustworthy
   criterion: anyone who controls the network can choose which block applies.
 - Host name canonicalization (`CanonicalizeHostname`) with the built-in DNS canonicalizer (`UseDnsCanonicalizer`, off by default)
