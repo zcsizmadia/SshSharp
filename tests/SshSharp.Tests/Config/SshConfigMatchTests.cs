@@ -238,15 +238,43 @@ public class SshConfigMatchTests
         try
         {
             using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(200));
+            var before = ProcessTree.RecentKills;
             await Assert.That(() => SshExecMatcher.RunShellAsync(command, cts.Token)).Throws<OperationCanceledException>();
+
+            // For a failure: what of the command still ran right after the kill, and (in the stress workflow's instrumented build) how
+            // the kill went. A subshell outlived the kill of its own child on macOS once in 70 stress iterations, after #438.
+            var survivors = OperatingSystem.IsWindows() ? "" : await RunningAsync(marker);
+            var kills = ProcessTree.RecentKills;
+            kills = kills.StartsWith(before, StringComparison.Ordinal) ? kills[before.Length..] : kills;
+
             await Task.Delay(TimeSpan.FromSeconds(2));
-            await Assert.That(File.Exists(marker)).IsFalse();
+            await Assert.That(File.Exists(marker)).IsFalse().Because($"running after the kill:\n{survivors}\nthe kill:\n{kills}");
             await Assert.That(hangups).IsEqualTo(0);
         }
         finally
         {
             File.Delete(marker);
         }
+    }
+
+    // The processes whose command line names the marker (the shell and its subshell), and every sleep, from ps.
+    private static async Task<string> RunningAsync(string marker)
+    {
+        var info = new System.Diagnostics.ProcessStartInfo("/bin/ps", "-A -o pid,ppid,pgid,stat,command") { RedirectStandardOutput = true };
+        string table;
+        try
+        {
+            using var ps = System.Diagnostics.Process.Start(info)!;
+            table = await ps.StandardOutput.ReadToEndAsync();
+            await ps.WaitForExitAsync();
+        }
+        catch (System.ComponentModel.Win32Exception ex)
+        {
+            return "(no ps: " + ex.Message + ")"; // only a failure's report needs it
+        }
+
+        return string.Join("\n", table.Split('\n').Where(line => line.Contains(marker, StringComparison.Ordinal) ||
+            line.Contains(" sleep ", StringComparison.Ordinal)));
     }
 
     /// <summary>
