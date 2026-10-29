@@ -37,6 +37,11 @@ internal static class ProcessTree
     // The rounds stop when one finds nothing new; the limit is for a tree that keeps starting processes as fast as they are killed.
     private const int MaxRounds = 16;
 
+    // The same on Linux and macOS.
+    private const int SigKill = 9;
+    private const int Eperm = 1;
+    private const int Esrch = 3;
+
     private const int CtlKern = 1;
     private const int KernArgMax = 8;
     private const int KernProcArgs2 = 49;
@@ -51,7 +56,7 @@ internal static class ProcessTree
     private static readonly ConcurrentQueue<string> KillTrace = new();
     private const int MaxKillTrace = 400;
 
-    /// <summary>The newest steps of the kills in this process, in the instrumented build only (empty otherwise), for a test to report.</summary>
+    /// <summary>The newest steps of the kills in this process (the instrumented build only; empty otherwise), for a test.</summary>
     internal static string RecentKills => string.Join(Environment.NewLine, KillTrace);
 
     /// <summary>
@@ -105,7 +110,8 @@ internal static class ProcessTree
             foreach (var pid in fresh)
             {
                 killed.Add(pid);
-                Trace(root, $"{pid}: {KillOne(pid)}");
+                var result = KillOne(pid);
+                Trace(root, $"{pid}: {result}"); // not inside the call: it compiles away outside the stress build, arguments and all
             }
         }
 
@@ -135,7 +141,8 @@ internal static class ProcessTree
 
             foreach (var pid in tagged)
             {
-                Trace(root, $"{pid}: {KillOne(pid)}");
+                var result = KillOne(pid);
+                Trace(root, $"{pid}: {result}"); // not inside the call: it compiles away outside the stress build, arguments and all
             }
 
             // SIGKILL is sent at once, but each process finishes exiting a moment later; until then it still reads as alive.
@@ -188,21 +195,17 @@ internal static class ProcessTree
         }
     }
 
-    // Process.Kill sends SIGKILL alone on Unix; only the whole-tree overload stops processes first. Returns what happened, for the trace.
-    private static string KillOne(int pid)
-    {
-        try
+    // SIGKILL alone, with kill(2) itself: Process.Kill returns without a word when the process is not found (ESRCH), and sends nothing
+    // when its cached state says that pid has exited, so it cannot tell which happened. Returns what did, for the trace. ESRCH: it
+    // exited meanwhile; EPERM: another user's process.
+    // Stryker disable once all : what it returns only feeds the stress build's trace; the kill itself is what the tests check
+    private static string KillOne(int pid) =>
+        NativeMethods.Kill(pid, SigKill) == 0 ? "killed" : Marshal.GetLastPInvokeError() switch
         {
-            using var process = Process.GetProcessById(pid);
-            process.Kill();
-            return "killed";
-        }
-        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception)
-        {
-            // It exited meanwhile.
-            return "not killed: " + ex.GetType().Name;
-        }
-    }
+            Esrch => "not killed: ESRCH",
+            Eperm => "not killed: EPERM",
+            var errno => $"not killed: errno {errno}",
+        };
 
     [Conditional("SSHSHARP_INSTRUMENT")]
     private static void Trace(int root, string step)
@@ -364,6 +367,10 @@ internal static class ProcessTree
         [DllImport("libproc", EntryPoint = "proc_listallpids")]
         [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
         public static extern int ListAllPids([Out] int[] buffer, int bufferSize);
+
+        [DllImport("libc", EntryPoint = "kill", SetLastError = true)]
+        [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
+        public static extern int Kill(int pid, int signal);
 
         [DllImport("libc", EntryPoint = "sysctl")]
         [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
