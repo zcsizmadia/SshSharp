@@ -184,6 +184,21 @@ public sealed class LocalSocketForwardingTests : IDisposable
             {
                 read = 0; // reset rather than closed: either way the connection ended
             }
+            catch (OperationCanceledException)
+            {
+                // Seen once on windows-latest in 70 stress iterations, not reproduced since: say how far the connection got. No request
+                // at the server means it was never accepted or its open never arrived; a request and no active connection means the
+                // socket was closed and the close never reached this end; an active connection means the open is still waiting.
+                int requests;
+                lock (server.DirectStreamLocalRequests)
+                {
+                    requests = server.DirectStreamLocalRequests.Count;
+                }
+
+                throw new InvalidOperationException(
+                    $"The refused connection was not closed within 60 s: requests at the server {requests}, " +
+                    $"active connections {forwarder.ActiveConnections}, client connected {client.IsConnected}.");
+            }
 
             await Assert.That(read).IsEqualTo(0);
         }
