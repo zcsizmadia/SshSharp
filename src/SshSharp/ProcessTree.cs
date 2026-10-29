@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Globalization;
 using System.Runtime.CompilerServices;
@@ -45,6 +46,14 @@ internal static class ProcessTree
 
     private static readonly ConditionalWeakTable<Process, byte[]> Tags = new();
 
+    // The instrumented build's own record of each kill, apart from Instrumentation's shared trace: the forwarding relays fill that one
+    // during a test run, which would push these out before the test that needs them reads them.
+    private static readonly ConcurrentQueue<string> KillTrace = new();
+    private const int MaxKillTrace = 400;
+
+    /// <summary>The newest steps of the kills in this process, in the instrumented build only (empty otherwise), for a test to report.</summary>
+    internal static string RecentKills => string.Join(Environment.NewLine, KillTrace);
+
     /// <summary>
     /// Starts a command with <see cref="Process.Start(ProcessStartInfo)"/>, marking it and what it starts for <see cref="Kill"/>.
     /// </summary>
@@ -80,11 +89,14 @@ internal static class ProcessTree
             return;
         }
 
+        var root = process.Id;
         var killed = new HashSet<int>();
         for (var round = 0; round < MaxRounds; round++)
         {
             // Breadth first lists parents before their children, so a process is killed before it can start more.
-            var fresh = Descendants(process.Id).Where(pid => !killed.Contains(pid)).ToList();
+            var tree = Descendants(root);
+            Trace(root, $"round {round}: [{string.Join(",", tree)}]");
+            var fresh = tree.Where(pid => !killed.Contains(pid)).ToList();
             if (fresh.Count == 0)
             {
                 break;
@@ -93,14 +105,15 @@ internal static class ProcessTree
             foreach (var pid in fresh)
             {
                 killed.Add(pid);
-                KillOne(pid);
+                Trace(root, $"{pid}: {KillOne(pid)}");
             }
         }
 
         process.Kill();
+        Trace(root, "root killed");
         if (Tags.TryGetValue(process, out var tag))
         {
-            Sweep(tag);
+            Sweep(tag, root);
         }
     }
 
@@ -108,12 +121,13 @@ internal static class ProcessTree
     internal static byte[] Tag(string value) => Encoding.ASCII.GetBytes(TagVariable + "=" + value + "\0");
 
     /// <summary>Kills every live process whose environment holds <paramref name="tag"/>, until none is left.</summary>
-    internal static void Sweep(byte[] tag)
+    internal static void Sweep(byte[] tag, int root = 0)
     {
         var limit = Stopwatch.StartNew();
         while (true)
         {
             var tagged = Tagged(tag);
+            Trace(root, $"sweep: [{string.Join(",", tagged)}]");
             if (tagged.Count == 0 || limit.Elapsed > SweepLimit)
             {
                 return;
@@ -121,7 +135,7 @@ internal static class ProcessTree
 
             foreach (var pid in tagged)
             {
-                KillOne(pid);
+                Trace(root, $"{pid}: {KillOne(pid)}");
             }
 
             // SIGKILL is sent at once, but each process finishes exiting a moment later; until then it still reads as alive.
@@ -174,17 +188,29 @@ internal static class ProcessTree
         }
     }
 
-    // Process.Kill sends SIGKILL alone on Unix; only the whole-tree overload stops processes first.
-    private static void KillOne(int pid)
+    // Process.Kill sends SIGKILL alone on Unix; only the whole-tree overload stops processes first. Returns what happened, for the trace.
+    private static string KillOne(int pid)
     {
         try
         {
             using var process = Process.GetProcessById(pid);
             process.Kill();
+            return "killed";
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception)
         {
             // It exited meanwhile.
+            return "not killed: " + ex.GetType().Name;
+        }
+    }
+
+    [Conditional("SSHSHARP_INSTRUMENT")]
+    private static void Trace(int root, string step)
+    {
+        KillTrace.Enqueue($"{DateTime.UtcNow:HH:mm:ss.ffffff} kill {root}: {step}");
+        while (KillTrace.Count > MaxKillTrace && KillTrace.TryDequeue(out _))
+        {
+            // The oldest go once the trace is full.
         }
     }
 
