@@ -38,6 +38,7 @@ TransportInteropTests.HandshakeAndEncryptedRoundTrip(curve25519-sha256, chacha20
 TransportInteropTests.HandshakeAndEncryptedRoundTrip(diffie-hellman-group-exchange-sha256, chacha20-poly1305@openssh·com, ssh-ed25519)
 TransportInteropTests.HandshakeAndEncryptedRoundTrip(diffie-hellman-group16-sha512, chacha20-poly1305@openssh·com, ssh-ed25519)
 TransportInteropTests.HandshakeAndEncryptedRoundTrip(diffie-hellman-group18-sha512, chacha20-poly1305@openssh·com, ssh-ed25519)
+TransportInteropTests.HandshakeAndEncryptedRoundTrip(mlkem768x25519-sha256, chacha20-poly1305@openssh·com, ssh-ed25519)
 TransportInteropTests.HandshakeAndEncryptedRoundTrip(sntrup761x25519-sha512, chacha20-poly1305@openssh·com, ssh-ed25519)
 TransportInteropTests.HandshakeAndEncryptedRoundTrip(sntrup761x25519-sha512@openssh·com, chacha20-poly1305@openssh·com, ssh-ed25519)
 TransportInteropTests.PlainHmacSha2_HandshakeAndEncryptedRoundTrip(aes128-ctr, hmac-sha2-512)
