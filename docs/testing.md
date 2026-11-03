@@ -239,9 +239,11 @@ regression as well as a limit of the platform. A line starting with `#` in a lis
 When a runner can be set up to run a test, CI sets it up rather than list the skip. For example, macOS configures only `127.0.0.1`
 on its loopback interface, so the macOS unit jobs add `127.0.0.2` as an alias for the `BindAddress` tests.
 
-.NET's ML-KEM on Linux needs OpenSSL 3.5, and the Ubuntu 24.04 runners have 3.0, so the ML-KEM tests skip in the Linux jobs.
-One more job (`mlkem (Alpine 3.23)`) runs them where they cannot skip. It runs the tests built on the runner
-in .NET's Alpine 3.23 container, which has OpenSSL 3.5: the unit test classes with ML-KEM tests, and the handshakes against OpenSSH
+.NET's ML-KEM on Linux needs OpenSSL 3.5, and the Ubuntu 24.04 runners have 3.0, so the ML-KEM tests skip in the Linux jobs
+that run there. `ubuntu-latest` is Ubuntu 26.04, which has ML-KEM, so the container interop jobs also generate the
+`mlkem768x25519-sha256` handshake; the servers too old to offer it skip it as not offered, and their lists name it. While a job
+may still land on either image, a listed test that is not in the run is only a notice. One more job (`mlkem (Alpine 3.23)`)
+runs them where they cannot skip. It runs the tests built on the runner in .NET's Alpine 3.23 container, which has OpenSSL 3.5: the unit test classes with ML-KEM tests, and the handshakes against OpenSSH
 10.0, `mlkem768x25519-sha256` among them. Its lists are empty, and the job also checks that the ML-KEM cases passed. The hybrid
 handshake is only generated where the platform has ML-KEM, so its absence would not show as a skip.
 
