@@ -23,6 +23,7 @@ public sealed class ConfigForwardingTests : IDisposable
     [Arguments("[::1]:8080 [2001:db8::1]:22", "::1", 8080, "2001:db8::1", 22)]
     [Arguments("*:0  web:80", "*", 0, "web", 80)]
     [Arguments("localhost:2222 localhost:22", "localhost", 2222, "localhost", 22)]
+    [Arguments("[::1]:65535 [h]:65535", "::1", 65535, "h", 65535)]
     public async Task Forwards_Parse(string spec, string? bind, int port, string host, int hostPort)
     {
         var (listen, target) = ForwardSpec.ParseForward(spec)!.Value;
@@ -42,8 +43,23 @@ public sealed class ConfigForwardingTests : IDisposable
     [Arguments("8080 :22")]
     [Arguments("[::1 db:1")]
     [Arguments("8080 db:1 extra")]
+    [Arguments("/tmp/local:1 db:5432")] // a socket path, even with a colon in it
+    [Arguments("[::1] db:1")]
+    [Arguments("[::1]8080 db:1")]
+    [Arguments("8080 [::1]")]
+    [Arguments("8080 [::1]22")]
+    [Arguments("8080 []:22")]
     public async Task UnsupportedForwards_DoNotParse(string spec) =>
         await Assert.That(ForwardSpec.ParseForward(spec)).IsNull();
+
+    [Test]
+    public async Task TheParts_AreTrimmed_AndEmptyOnesDoNotParse()
+    {
+        await Assert.That(ForwardSpec.ParseListen(" 1080 ")).IsEqualTo(new ForwardListen(null, 1080));
+        await Assert.That(ForwardSpec.ParseTarget(" db:1 ")).IsEqualTo(new ForwardTarget("db", 1));
+        await Assert.That(ForwardSpec.ParseListen("")).IsNull();
+        await Assert.That(ForwardSpec.ParseTarget(" ")).IsNull();
+    }
 
     [Test]
     [Arguments(null, false, "127.0.0.1")]

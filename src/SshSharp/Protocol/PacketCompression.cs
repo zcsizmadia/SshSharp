@@ -41,6 +41,7 @@ internal sealed class ZlibCompressor : IDisposable
     /// <summary>Wipes the compressed payload once it has been encoded into a packet: it is the plaintext in another form.</summary>
     public void Clear() => _output.Clear();
 
+    // Stryker disable once Statement : ending the stream and wiping its output is hygiene that the API cannot observe
     public void Dispose()
     {
         // Disposing ends the stream with a final block and the checksum, written into the output and wiped with it; nothing is sent.
@@ -52,6 +53,7 @@ internal sealed class ZlibCompressor : IDisposable
     private static ZLibStream Create(Stream output)
     {
 #if NET10_0_OR_GREATER
+        // Stryker disable once Boolean : disposing CompressedOutput does nothing, so whether ZLibStream leaves it open makes no difference
         // OpenSSH's settings: Z_BEST_SPEED with Z_HUFFMAN_ONLY (window 15 and memory level 8 are zlib's defaults, as here).
         return new ZLibStream(output, new ZLibCompressionOptions { CompressionLevel = 1, CompressionStrategy = ZLibCompressionStrategy.HuffmanOnly },
             leaveOpen: true);
@@ -72,16 +74,21 @@ internal sealed class ZlibCompressor : IDisposable
 
         public void Clear()
         {
+            // Stryker disable once Statement : wiping the payload is hygiene that the API cannot observe
             CryptographicOperations.ZeroMemory(_buffer.AsSpan(0, _length));
             _length = 0;
         }
 
         public override void Write(ReadOnlySpan<byte> buffer)
         {
+            // Stryker disable once Equality : growing when the data would just fit leaves the output the same
             if (_buffer.Length - _length < buffer.Length)
             {
-                var larger = new byte[Math.Max(_buffer.Length * 2, _length + buffer.Length)];
+                // Stryker disable once Arithmetic : another growth factor leaves the output the same (the buffer is always large enough)
+                var doubled = _buffer.Length * 2;
+                var larger = new byte[Math.Max(doubled, _length + buffer.Length)];
                 _buffer.AsSpan(0, _length).CopyTo(larger);
+                // Stryker disable once Statement : wiping the old buffer is hygiene that the API cannot observe
                 CryptographicOperations.ZeroMemory(_buffer.AsSpan(0, _length));
                 _buffer = larger;
             }
@@ -94,8 +101,10 @@ internal sealed class ZlibCompressor : IDisposable
 
         public override void WriteByte(byte value) => Write([value]);
 
+        // Stryker disable once Boolean : ZLibStream asks a stream it writes to only whether it can write
         public override bool CanRead => false;
 
+        // Stryker disable once Boolean : ZLibStream asks a stream it writes to only whether it can write
         public override bool CanSeek => false;
 
         public override bool CanWrite => true;
@@ -267,8 +276,10 @@ internal sealed class ZlibDecompressor : IDisposable
 
         public override bool CanRead => true;
 
+        // Stryker disable once Boolean : ZLibStream asks a stream it reads from only whether it can read
         public override bool CanSeek => false;
 
+        // Stryker disable once Boolean : ZLibStream asks a stream it reads from only whether it can read
         public override bool CanWrite => false;
 
         public override long Length => throw new NotSupportedException();

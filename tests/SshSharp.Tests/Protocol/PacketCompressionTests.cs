@@ -98,6 +98,9 @@ public class PacketCompressionTests
             var error = await Assert.That(() => Inflate(decompressor, compressed)).Throws<SshProtocolException>();
             await Assert.That(error!.Message).Contains("inflates to 1000 bytes or more");
         }
+
+        // A limit must leave room for a message.
+        await Assert.That(() => new ZlibDecompressor(limit: 0)).ThrowsExactly<ArgumentOutOfRangeException>();
     }
 
     [Test]

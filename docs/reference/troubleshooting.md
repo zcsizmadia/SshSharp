@@ -43,7 +43,9 @@ by anyone between you and the proxy, so prefer a proxy on a trusted network.
 `ConnectTimeout` passed (`SshClientOptions.ConnectTimeout`, or `ssh_config`'s). A server that accepts TCP but does not answer the
 SSH version exchange (a busy sshd hitting `MaxStartups`, a port that is not SSH) looks like this. Check that the port speaks SSH
 (`nc host 22` shows `SSH-2.0-...`). A host name whose IPv6 address does not answer can use up the whole timeout before its IPv4
-address is tried: set `AddressFamily = SshAddressFamily.Inet` (`AddressFamily inet`) where the IPv6 route is broken.
+address is tried: set `AddressFamily = SshAddressFamily.Inet` (`AddressFamily inet`) where the IPv6 route is broken, or
+`StaggeredConnectDelay = TimeSpan.FromMilliseconds(250)` to race the addresses (see
+[Race the server's addresses](../connecting.md#race-the-servers-addresses)).
 
 ### No common algorithms
 

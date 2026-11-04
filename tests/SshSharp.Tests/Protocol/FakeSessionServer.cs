@@ -374,6 +374,9 @@ internal sealed class FakeSessionServer : IAsyncDisposable
 
     private int _keyboardRound = -1;
 
+    /// <summary>The service SSH_MSG_SERVICE_ACCEPT names; null names the one the client asked for.</summary>
+    public string? AcceptedService { get; init; }
+
     /// <summary>Sent as SSH_MSG_USERAUTH_BANNER before the first authentication reply.</summary>
     public string? AuthenticationBanner { get; init; }
 
@@ -512,7 +515,7 @@ internal sealed class FakeSessionServer : IAsyncDisposable
             case SshMessage.ServiceRequest:
             {
                 var name = reader.ReadUtf8String();
-                await _server.SendAsync(Build(w => { w.WriteByte(SshMessage.ServiceAccept); w.WriteString(name); }));
+                await _server.SendAsync(Build(w => { w.WriteByte(SshMessage.ServiceAccept); w.WriteString(AcceptedService ?? name); }));
                 break;
             }
 
@@ -684,6 +687,11 @@ internal sealed class FakeSessionServer : IAsyncDisposable
                     GssapiTokensReceived.Add(token);
                 }
 
+                if (gss.Banner is { } gssBanner)
+                {
+                    await _server.SendAsync(Build(w => { w.WriteByte(SshMessage.UserAuthBanner); w.WriteString(gssBanner); w.WriteString(""); }));
+                }
+
                 if (gss.SendStatusMessage)
                 {
                     // SSH_MSG_USERAUTH_GSSAPI_ERROR: the server's GSS-API status, informational.
@@ -695,6 +703,12 @@ internal sealed class FakeSessionServer : IAsyncDisposable
                     await _server.SendAsync(Build(w => { w.WriteByte(SshUserAuth.GssapiErrorToken); w.WriteString("server-error"u8); }));
                     _gssapiUser = null;
                     await FinishAuthAsync(SshUserAuth.GssapiMethod, ok: false);
+                    break;
+                }
+
+                if (gss.AnswerWithResponse)
+                {
+                    await _server.SendAsync(Build(w => { w.WriteByte(SshUserAuth.GssapiResponse); w.WriteString(SshSharp.Protocol.Gssapi.Krb5Oid); }));
                     break;
                 }
 
@@ -832,7 +846,8 @@ internal sealed class FakeSessionServer : IAsyncDisposable
 
                     if (HoldForwardReplies is { } hold && name == "streamlocal-forward@openssh.com")
                     {
-                        await hold.Task;
+                        // Disposing the server ends the wait: a test that fails before it releases the hold must not hang in DisposeAsync.
+                        await hold.Task.WaitAsync(_cts.Token);
                     }
 
                     if (wantReply)
@@ -866,7 +881,8 @@ internal sealed class FakeSessionServer : IAsyncDisposable
 
                     if (HoldForwardReplies is { } hold && name == "tcpip-forward")
                     {
-                        await hold.Task;
+                        // Disposing the server ends the wait: a test that fails before it releases the hold must not hang in DisposeAsync.
+                        await hold.Task.WaitAsync(_cts.Token);
                     }
 
                     if (wantReply)

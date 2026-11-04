@@ -123,7 +123,28 @@ always finish. A sweep cuts the connection at 13 points from the first byte to w
   parsers. A surviving mutant is a code change no test notices. The score is reported, not enforced. Each scope compiles only the
   tests that can reach its files, and slow tests stay out of the scopes they cannot help. When a test runs too long during coverage
   capture, Stryker runs it against every mutant, so the mutants that the fast tests miss time out instead of surviving, and a timeout
-  counts as detected. The encrypted private key fuzz test is in a file of its own for this reason.
+  counts as detected. The encrypted private key fuzz test is in a file of its own for this reason. The weekly run mutates only what
+  changed in the last eight days, so its scores cover those files alone; a run started by hand mutates everything. The workflow runs
+  on Linux, so code for Windows only is not scored there: its mutants are annotated, and the Windows test job exercises that code. A
+  mutant that cannot change what any caller sees (wiping a buffer, a message, an allocation size) is annotated in the code with the
+  reason, as `// Stryker disable once <mutator> : <reason>`.
+
+  **Timeouts overstate the scores.** Stryker compiles a check into every mutated expression, and in hot code those checks cost far
+  more than the code they guard: a tight arithmetic loop ran about 50 times slower. With the runner for Microsoft.Testing.Platform (a
+  preview in Stryker.NET 5), each check also reads the active mutant from a memory-mapped file, which made it about 225 times
+  slower. The time limit comes from a run without the checks. The managed cryptography's tests then time out whatever the mutant
+  does, and Stryker counts each as detected. In the full run of October 2026:
+
+  | Scope | Score | Killed mutants alone |
+  |---|---|---|
+  | sntrup761 | 100% | 8.6% |
+  | public-key, bcrypt-pbkdf, key-readers, userauth | 97–100% | 39–47% |
+  | key-writers, identification, ecdh-dh | 100% | 62–64% |
+
+  The job summary prints both. The true score lies between them: some timeouts are real loops, and some mutants would survive.
+  Raising the time limit would push the slowest scopes past the job's 340 minutes, so these scopes wait for a fix in Stryker
+  ([stryker-net#3915](https://github.com/stryker-mutator/stryker-net/issues/3915) for the mapped read,
+  [stryker-net#3904](https://github.com/stryker-mutator/stryker-net/issues/3904) for how timeouts are judged).
 
 ## Stress testing and intermittent failures
 
@@ -219,9 +240,11 @@ regression as well as a limit of the platform. A line starting with `#` in a lis
 When a runner can be set up to run a test, CI sets it up rather than list the skip. For example, macOS configures only `127.0.0.1`
 on its loopback interface, so the macOS unit jobs add `127.0.0.2` as an alias for the `BindAddress` tests.
 
-.NET's ML-KEM on Linux needs OpenSSL 3.5, and the Ubuntu 24.04 runners have 3.0, so the ML-KEM tests skip in the Linux jobs.
-One more job (`mlkem (Alpine 3.23)`) runs them where they cannot skip. It runs the tests built on the runner
-in .NET's Alpine 3.23 container, which has OpenSSL 3.5: the unit test classes with ML-KEM tests, and the handshakes against OpenSSH
+.NET's ML-KEM on Linux needs OpenSSL 3.5, and the Ubuntu 24.04 runners have 3.0, so the ML-KEM tests skip in the Linux jobs
+that run there. `ubuntu-latest` is Ubuntu 26.04, which has ML-KEM, so the container interop jobs also generate the
+`mlkem768x25519-sha256` handshake; the servers too old to offer it skip it as not offered, and their lists name it. While a job
+may still land on either image, a listed test that is not in the run is only a notice. One more job (`mlkem (Alpine 3.23)`)
+runs them where they cannot skip. It runs the tests built on the runner in .NET's Alpine 3.23 container, which has OpenSSL 3.5: the unit test classes with ML-KEM tests, and the handshakes against OpenSSH
 10.0, `mlkem768x25519-sha256` among them. Its lists are empty, and the job also checks that the ML-KEM cases passed. The hybrid
 handshake is only generated where the platform has ML-KEM, so its absence would not show as a skip.
 
@@ -246,8 +269,8 @@ runs, the instrumented build and the fault tests are what found them.
 
 ## Not covered yet
 
-- **An independent review of the managed cryptography,** still planned. Until then, it is checked against the reference
-  vectors, Wycheproof and the timing test.
+- **An independent audit of the managed cryptography.** None has been done, and none is planned. It is checked against the
+  reference vectors, Wycheproof, the timing tests and mutation testing ([review](crypto-review.md)).
 - **Interop coverage** in the coverage figure.
 - **Commercial negative-testing suites** (thousands of malformed messages against the client). Fuzzing covers the parsers, but not
   every message sequence.

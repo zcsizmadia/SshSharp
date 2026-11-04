@@ -47,6 +47,7 @@ internal sealed class SshUserAuth(SshTransport transport, string userName, Func<
         var type = reader.ReadByte();
         if (type != SshMessage.ServiceAccept || reader.ReadUtf8String() != ServiceName)
         {
+            // Stryker disable once String : the message is for people
             throw new SshException(SshFailureReason.ProtocolError, $"The server did not accept the {ServiceName} service (message {type}).");
         }
     }
@@ -166,6 +167,7 @@ internal sealed class SshUserAuth(SshTransport transport, string userName, Func<
     {
         var outcome = await RequestCoreAsync("keyboard-interactive", w =>
         {
+            // Stryker disable once String : the language tag is deprecated (RFC 4256 section 3.1), and servers ignore it
             w.WriteString(""); // language tag (deprecated)
             w.WriteString(""); // submethods: let the server choose
         }, Reply.InfoRequest, cancellationToken).ConfigureAwait(false);
@@ -174,6 +176,7 @@ internal sealed class SshUserAuth(SshTransport transport, string userName, Func<
         {
             if (round == MaxRounds)
             {
+                // Stryker disable once String : the message is for people
                 throw new SshException(SshFailureReason.AuthenticationFailed, $"The server asked more than {MaxRounds} rounds of keyboard-interactive questions.");
             }
 
@@ -185,6 +188,7 @@ internal sealed class SshUserAuth(SshTransport transport, string userName, Func<
 
             if (responses.Count != request.Prompts.Count)
             {
+                // Stryker disable once String : the message is for people
                 throw new InvalidOperationException($"The keyboard-interactive handler returned {responses.Count} responses for {request.Prompts.Count} prompts.");
             }
 
@@ -203,6 +207,7 @@ internal sealed class SshUserAuth(SshTransport transport, string userName, Func<
             }
             finally
             {
+                // Stryker disable once Statement : wiping the responses is hygiene that the API cannot observe
                 CryptographicOperations.ZeroMemory(message); // the responses are usually secrets, whether the send worked or not
             }
             outcome = await ReceiveReplyAsync(Reply.InfoRequest, cancellationToken).ConfigureAwait(false);
@@ -244,6 +249,7 @@ internal sealed class SshUserAuth(SshTransport transport, string userName, Func<
 
         if (received.Type != GssapiResponse || !received.Data.AsSpan().SequenceEqual(Gssapi.Krb5Oid))
         {
+            // Stryker disable once String : the message is for people
             throw new SshProtocolException("The server answered gssapi-with-mic with a mechanism it was not offered.");
         }
 
@@ -272,6 +278,7 @@ internal sealed class SshUserAuth(SshTransport transport, string userName, Func<
 
             if (round == MaxGssapiRounds)
             {
+                // Stryker disable once String : the message is for people
                 throw new SshException(SshFailureReason.AuthenticationFailed, $"The GSS-API context was not established in {MaxGssapiRounds} exchanges.");
             }
 
@@ -294,11 +301,13 @@ internal sealed class SshUserAuth(SshTransport transport, string userName, Func<
                 }
 
                 var failed = await ReceiveGssapiAsync(cancellationToken).ConfigureAwait(false);
+                // Stryker disable once String : the message is for people
                 return failed.Outcome ?? throw new SshProtocolException("The server sent another message after a GSS-API error token.");
             }
 
             if (received.Type != GssapiToken)
             {
+                // Stryker disable once String : the message is for people
                 throw new SshProtocolException($"Unexpected message {received.Type} during gssapi-with-mic.");
             }
 
@@ -330,6 +339,7 @@ internal sealed class SshUserAuth(SshTransport transport, string userName, Func<
             final = await ReceiveGssapiAsync(cancellationToken).ConfigureAwait(false);
         }
 
+        // Stryker disable once String : the message is for people
         return final.Outcome ?? throw new SshProtocolException($"Unexpected message {final.Type} after the GSS-API MIC.");
     }
 
@@ -369,6 +379,7 @@ internal sealed class SshUserAuth(SshTransport transport, string userName, Func<
                         bannerText = reader.ReadUtf8String();
                         break;
                     case SshMessage.UserAuthSuccess:
+                        // Stryker disable once Boolean : partial success counts only on a failure
                         return new GssapiReceived(type, [], new AuthOutcome(true, [], false));
                     case SshMessage.UserAuthFailure:
                         var methods = reader.ReadNameList();
@@ -378,6 +389,7 @@ internal sealed class SshUserAuth(SshTransport transport, string userName, Func<
                     case GssapiError:
                         break; // uint32 major, uint32 minor, string message, string language: the server's diagnostics, not a decision
                     default:
+                        // Stryker disable once String : the message is for people
                         throw new SshProtocolException($"Unexpected message {type} during gssapi-with-mic.");
                 }
             }
@@ -476,6 +488,7 @@ internal sealed class SshUserAuth(SshTransport transport, string userName, Func<
                         result = new Received(new AuthOutcome(false, methods, reader.ReadBoolean()), null);
                         break;
                     case SshMessage.UserAuthPkOk when reply == Reply.PkOk:
+                        // Stryker disable once Boolean : a PK_OK answer is read for KeyAcceptable alone
                         result = new Received(new AuthOutcome(false, [], false, KeyAcceptable: true), null);
                         break;
                     case SshMessage.UserAuthInfoRequest when reply == Reply.InfoRequest:
@@ -484,10 +497,12 @@ internal sealed class SshUserAuth(SshTransport transport, string userName, Func<
                     case SshMessage.UserAuthPasswordChangeRequest when reply == Reply.PasswordChange:
                         var prompt = reader.ReadUtf8String();
                         var language = reader.ReadUtf8String();
+                        // Stryker disable once Boolean : with a change request the caller reads only the request; the other fields are unset
                         result = new Received(new AuthOutcome(false, [], false, ChangeRequest: new PasswordChangeRequested(prompt, language)), null);
                         break;
                     default:
                         // Message 60 included: it is PK_OK, INFO_REQUEST or PASSWD_CHANGEREQ only in answer to the matching request.
+                        // Stryker disable once String : the message is for people
                         throw new SshProtocolException($"Unexpected message {type} during user authentication.");
                 }
             }
@@ -513,6 +528,7 @@ internal sealed class SshUserAuth(SshTransport transport, string userName, Func<
         var count = reader.ReadUInt32();
         if (count > MaxPrompts)
         {
+            // Stryker disable once String : the message is for people
             throw new SshProtocolException($"The server sent {count} keyboard-interactive prompts; at most {MaxPrompts} are accepted.");
         }
 

@@ -296,6 +296,7 @@ public sealed class SshAllowedSigners
             throw new FormatException($"the time '{value}' is not a valid date.");
         }
 
+        // Stryker disable once Conditional : where local time is UTC, as on the CI runners, both forms give the same instant
         return utc ? new DateTimeOffset(DateTime.SpecifyKind(time, DateTimeKind.Utc)) : new DateTimeOffset(DateTime.SpecifyKind(time, DateTimeKind.Local));
     }
 

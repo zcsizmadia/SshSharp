@@ -102,6 +102,7 @@ internal sealed class SftpGlob
                 t++;
                 n++;
             }
+            // Stryker disable once Equality : starToken is -1, or the token after a star, so never 0
             else if (starToken >= 0)
             {
                 t = starToken;

@@ -207,6 +207,21 @@ public sealed class SshConfigConnectOptions
     public SshAddressFamily? AddressFamily { get; init; }
 
     /// <summary>
+    /// Races the addresses of the first network connection this machine makes, to the destination or to the first ProxyJump hop, RFC 8305
+    /// style (see <see cref="SshClientOptions.StaggeredConnectDelay"/>): the next address is tried once the one before has had this long
+    /// or has failed. ssh_config has no directive for it; ssh tries the addresses in order. Not with a <c>ProxyCommand</c> or a
+    /// <see cref="Proxy"/>, which make the connection. Null (the default) tries them in order.
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException">The value is less than 10 milliseconds or more than 2 seconds.</exception>
+    public TimeSpan? StaggeredConnectDelay
+    {
+        get => _staggeredConnectDelay;
+        init => _staggeredConnectDelay = SshClientOptions.CheckStagger(value);
+    }
+
+    private readonly TimeSpan? _staggeredConnectDelay;
+
+    /// <summary>
     /// Sets socket options on the TCP connection this machine makes: to the destination, or to the first ProxyJump hop (see
     /// <see cref="SshClientOptions.ConfigureSocket"/>). It runs after the settings ssh_config gives the socket (<c>TCPKeepAlive</c>,
     /// on unless the configuration says <c>no</c>, and <c>IPQoS</c>), so what it sets wins. Not called with a <c>ProxyCommand</c> or a

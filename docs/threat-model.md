@@ -380,7 +380,11 @@ connection, but not read or change it: each host's key is verified end to end, b
   in a dot or space are refused too.
 - A single-file download refuses a second file or a directory.
 - File modes from the server apply only with `Preserve`, and only the permission bits, never set-id or sticky.
-- Remote paths are passed to the server's shell quoted as one word.
+- Remote paths, for downloads and uploads, are passed to the server's shell as one single-quoted word. That is safe with a POSIX
+  shell. On a Windows OpenSSH server the command runs through `cmd.exe`, which does not treat single quotes as quotes, or
+  PowerShell, which escapes a quote inside them differently. There, a path the application does not control can run a command as
+  the logged-in user: the issue behind CVE-2020-15778 and SSH.NET's GHSA-mggc-4xg6-vcxf. Applications pass such paths to SFTP,
+  which runs no shell.
 - Total size, file count and directory depth are not limited: a server can fill the target's disk.
 
 ### Secrets in memory and logs
@@ -434,9 +438,19 @@ connection, but not read or change it: each host's key is verified end to end, b
   an absolute path), so
   token values cannot inject commands; the run is limited to 30 seconds and 1 MiB of output. On Windows a batch file (`.bat`,
   `.cmd`) is refused, because Windows runs it through `cmd.exe`, which would reparse the arguments.
+- When the library stops one of these commands (`Match exec` cancelled or past its 30 seconds, `KnownHostsCommand` past its limit,
+  a `ProxyCommand` when its connection closes), it kills the command and every process it started. These processes run in the
+  application's own process group. Each gets `SIGKILL` alone, never `SIGSTOP` first: .NET's own tree kill stops each process
+  before killing it, and a background child left stopped when its shell died made macOS send `SIGHUP` to that group, which
+  terminates the application (#432). A process forked as its parent is killed is no longer in the tree (macOS completes the
+  fork), so each command also runs with `SSHSHARP_PROCESS_TREE` set to a random value of its own, which everything it starts
+  inherits: after the tree, every live process carrying that value is killed too, until none is left. Only processes of the
+  application's own user are found. A process that drops the variable from its environment and leaves the tree can escape.
 - On .NET 11, these commands inherit only their standard streams, not the other handles the application has open (sockets,
-  files, the agent's pipe), and outside Windows a command being stopped gets SIGTERM and half a second before it is killed.
-  Earlier runtimes inherit what the OS passes by default and kill at once.
+  files, the agent's pipe). Outside Windows, a command being stopped first gets `SIGTERM` and half a second to exit, so it can
+  close its connection; then it and every process it started are killed as above. If it exits in time, the processes it left
+  running are still killed: those carrying its `SSHSHARP_PROCESS_TREE` value. Earlier runtimes inherit what the OS passes by
+  default, and kill at once.
 - `Match localnetwork` reads the local interface addresses. As ssh_config(5) warns, a network address is not a trustworthy
   criterion: anyone who controls the network can choose which block applies.
 - Host name canonicalization (`CanonicalizeHostname`) with the built-in DNS canonicalizer (`UseDnsCanonicalizer`, off by default)

@@ -106,6 +106,7 @@ internal sealed class AesGcmProtector : PacketProtector
     {
         if (key.Length is not (16 or 32) || iv.Length < IvSize)
         {
+            // Stryker disable once String : the message is for people
             throw new ArgumentException("Expected a 16- or 32-byte key and at least 12 bytes of IV.");
         }
 
@@ -145,6 +146,7 @@ internal sealed class AesGcmProtector : PacketProtector
         return true;
     }
 
+    // Stryker disable once Block,Statement : releasing the platform object and wiping the IV is hygiene that the API cannot observe
     public override void Dispose()
     {
         _gcm.Dispose();
@@ -201,6 +203,7 @@ internal sealed class AesCtrEtmProtector : PacketProtector
         return true;
     }
 
+    // Stryker disable once Block,Statement : releasing the platform objects is hygiene that the API cannot observe
     public override void Dispose()
     {
         _ctr.Dispose();
@@ -266,6 +269,7 @@ internal sealed class AesCtrHmacProtector : PacketProtector
         return CryptographicOperations.FixedTimeEquals(expected, tag);
     }
 
+    // Stryker disable once Block,Statement : releasing the platform objects is hygiene that the API cannot observe
     public override void Dispose()
     {
         _ctr.Dispose();

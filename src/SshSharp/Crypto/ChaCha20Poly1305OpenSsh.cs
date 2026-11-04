@@ -22,6 +22,7 @@ internal sealed class ChaCha20Poly1305OpenSsh : IDisposable
     {
         if (key.Length != KeySize)
         {
+            // Stryker disable once String : the message is for people
             throw new ArgumentException("The key must be 64 bytes.", nameof(key));
         }
 
@@ -47,6 +48,7 @@ internal sealed class ChaCha20Poly1305OpenSsh : IDisposable
     {
         if (encryptedPacket.Length < LengthSize || tag.Length != TagSize || body.Length != encryptedPacket.Length - LengthSize)
         {
+            // Stryker disable once String : the message is for people
             throw new ArgumentException("Sizes do not match.");
         }
 
@@ -62,6 +64,7 @@ internal sealed class ChaCha20Poly1305OpenSsh : IDisposable
     {
         if (tag.Length != TagSize || plaintext.Length != ciphertext.Length)
         {
+            // Stryker disable once String : the message is for people
             throw new ArgumentException("Sizes do not match.");
         }
 
@@ -83,6 +86,7 @@ internal sealed class ChaCha20Poly1305OpenSsh : IDisposable
             ChaCha20.Xor(_payloadKey, nonce, 1, authenticated[skip..], body);
         }
 
+        // Stryker disable once Statement : wiping the one-time key from the stack is hygiene that the API cannot observe
         polyKey.Clear();
         return valid;
     }
@@ -97,6 +101,7 @@ internal sealed class ChaCha20Poly1305OpenSsh : IDisposable
     {
         if (output.Length != LengthSize + body.Length || tag.Length != TagSize)
         {
+            // Stryker disable once String : the message is for people
             throw new ArgumentException("Sizes do not match.");
         }
 
@@ -110,6 +115,7 @@ internal sealed class ChaCha20Poly1305OpenSsh : IDisposable
         ChaCha20.Xor(_lengthKey, nonce, 0, length, output[..LengthSize]);
         ChaCha20.Xor(_payloadKey, nonce, 1, body, output[LengthSize..]);
         Poly1305.ComputeTag(polyKey, output, tag);
+        // Stryker disable once Statement : wiping the one-time key from the stack is hygiene that the API cannot observe
         polyKey.Clear();
     }
 
@@ -121,6 +127,7 @@ internal sealed class ChaCha20Poly1305OpenSsh : IDisposable
 
     private static void Nonce(uint sequenceNumber, Span<byte> nonce)
     {
+        // Stryker disable once Statement : stackalloc zeroes the buffer (locals are initialized), so clearing it again changes nothing
         nonce.Clear();
         BinaryPrimitives.WriteUInt32BigEndian(nonce[4..], sequenceNumber);
     }
@@ -130,6 +137,7 @@ internal sealed class ChaCha20Poly1305OpenSsh : IDisposable
         Span<byte> block = stackalloc byte[ChaCha20.BlockSize];
         ChaCha20.Block(_payloadKey, 0, 0, BinaryPrimitives.ReadUInt32LittleEndian(nonce), BinaryPrimitives.ReadUInt32LittleEndian(nonce[4..]), block);
         block[..Poly1305.KeySize].CopyTo(polyKey);
+        // Stryker disable once Statement : wiping the keystream block from the stack is hygiene that the API cannot observe
         block.Clear();
     }
 }

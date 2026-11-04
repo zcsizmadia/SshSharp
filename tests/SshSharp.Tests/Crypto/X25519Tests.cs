@@ -119,6 +119,6 @@ public class X25519Tests
         var k = new byte[32];
         await Assert.That(() => X25519.GetPublicKey(new byte[31], new byte[32])).Throws<ArgumentException>();
         await Assert.That(() => X25519.GetPublicKey(k, new byte[31])).Throws<ArgumentException>();
-        await Assert.That(() => X25519.TryAgree(k, new byte[33], new byte[32])).Throws<ArgumentException>();
+        await Assert.That(() => X25519.TryAgree(k, new byte[33], new byte[32])).Throws<ArgumentException>().WithMessageContaining("X25519 keys must be 32 bytes.");
     }
 }

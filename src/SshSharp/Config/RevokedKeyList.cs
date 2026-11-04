@@ -79,6 +79,7 @@ internal sealed class RevokedKeyList
             var merged = new List<(ulong Low, ulong High)>(Serials.Count);
             foreach (var (low, high) in Serials)
             {
+                // Stryker disable once Equality,Arithmetic : ranges that only touch, left apart, are still found; only overlapping ones must merge
                 if (merged.Count > 0 && merged[^1].High != ulong.MaxValue && low <= merged[^1].High + 1)
                 {
                     merged[^1] = (merged[^1].Low, Math.Max(merged[^1].High, high));
@@ -156,19 +157,26 @@ internal sealed class RevokedKeyList
         }
 
         var list = Parse(data);
-        if (Parsed.Count >= MaxCachedFiles && !Parsed.ContainsKey(key))
-        {
-            // RevokedHostKeys can name a file per host (%h): bounded, by dropping the file used longest ago (clearing everything would
-            // parse nearly every file again once more hosts than that are in use).
-            var oldest = Parsed.MinBy(entry => entry.Value.LastUsed).Key;
-            if (oldest is not null)
-            {
-                Parsed.TryRemove(oldest, out _);
-            }
-        }
-
+        MakeRoom(Parsed, key);
         Parsed[key] = (hash, list, Environment.TickCount64);
         return list;
+    }
+
+    /// <summary>
+    /// Before <paramref name="key"/> goes into <paramref name="cache"/>: when the cache is full and the key is new, drops the file used
+    /// longest ago. RevokedHostKeys can name a file per host (%h), so the cache is bounded; clearing everything instead would parse nearly
+    /// every file again once more hosts than that are in use.
+    /// </summary>
+    internal static void MakeRoom(System.Collections.Concurrent.ConcurrentDictionary<string, (byte[] Hash, RevokedKeyList List, long LastUsed)> cache, string key)
+    {
+        if (cache.Count >= MaxCachedFiles && !cache.ContainsKey(key))
+        {
+            var oldest = cache.MinBy(entry => entry.Value.LastUsed).Key;
+            if (oldest is not null)
+            {
+                cache.TryRemove(oldest, out _);
+            }
+        }
     }
 
     /// <summary>Parses a KRL, or a list of public keys when the data does not start with the KRL magic.</summary>
@@ -222,6 +230,7 @@ internal sealed class RevokedKeyList
         return false;
     }
 
+    // Stryker disable once Equality : the count only saves hashing a key when no SHA-1 is listed; an empty set contains nothing anyway
     private bool IsKeyRevoked(ReadOnlySpan<byte> blob) =>
         _keys.Contains(Convert.ToHexString(blob))
         || (_sha1.Count > 0 && _sha1.Contains(Sha1Fingerprint(blob)))
@@ -504,14 +513,8 @@ internal sealed class RevokedKeyList
 
         public string ReadUtf8String()
         {
-            try
-            {
-                return new UTF8Encoding(false, throwOnInvalidBytes: true).GetString(ReadString());
-            }
-            catch (DecoderFallbackException ex)
-            {
-                throw new FormatException("A KRL name is not valid UTF-8.", ex);
-            }
+            var bytes = ReadString();
+            return System.Text.Unicode.Utf8.IsValid(bytes) ? Encoding.UTF8.GetString(bytes) : throw new FormatException("A KRL name is not valid UTF-8.");
         }
 
         /// <summary>A non-negative mpint, without its leading zero byte.</summary>

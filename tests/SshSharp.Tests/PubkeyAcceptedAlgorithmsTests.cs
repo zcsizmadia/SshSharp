@@ -169,7 +169,7 @@ public sealed class PubkeyAcceptedAlgorithmsTests : IDisposable
         await Assert.That(unknown!.Message).Contains("public key signature algorithm");
 
         var error = await Assert.That(() => AlgorithmPreferences.FromOptions(Options(SshAlgorithmList.Remove("*")))).Throws<ArgumentException>();
-        await Assert.That(error!.Message).Contains("SshClientOptions.PubkeyAcceptedAlgorithms leaves no public key signature algorithm");
+        await Assert.That(error!.Message).Contains("SshClientOptions.PubkeyAcceptedAlgorithms leaves no public key signature algorithm that SshSharp can use on this platform.");
     }
 
     [Test]
@@ -198,6 +198,7 @@ public sealed class PubkeyAcceptedAlgorithmsTests : IDisposable
             ["rsa-sha2-256", "rsa-sha2-512"])).IsEqualTo("rsa-sha2-512");
         await Assert.That(SshUserAuth.ChooseSignatureAlgorithm(rsa, new Dictionary<string, string>(), ["rsa-sha2-256"])).IsEqualTo("rsa-sha2-256");
         await Assert.That(SshUserAuth.ChooseSignatureAlgorithm(rsa, BothRsa, ["ssh-ed25519"])).IsNull();
+        await Assert.That(SshUserAuth.ChooseSignatureAlgorithm(rsa, new Dictionary<string, string>(), ["ssh-ed25519"])).IsNull(); // and without server-sig-algs
     }
 
     [Test]
@@ -301,7 +302,7 @@ public sealed class PubkeyAcceptedAlgorithmsTests : IDisposable
     {
         var error = await Assert.That(() => AlgorithmPreferences.FromConfig(Config(line + "\n"))).Throws<SshException>();
         await Assert.That(error!.Reason).IsEqualTo(SshFailureReason.ConnectFailed);
-        await Assert.That(error.Message).Contains(message);
+        await Assert.That(error.Message).Contains(message + " that SshSharp can use."); // nothing about FIPS mode, which is off
     }
 
     [Test]

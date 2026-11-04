@@ -47,7 +47,7 @@ internal sealed class ProxyCommandStream : Stream
         }
 
         ChildProcess.InheritStandardStreamsOnly(info);
-        var process = Process.Start(info) ?? throw new SshException(SshFailureReason.ConnectFailed, "The ProxyCommand could not be started.");
+        var process = ProcessTree.Start(info) ?? throw new SshException(SshFailureReason.ConnectFailed, "The ProxyCommand could not be started.");
         process.ErrorDataReceived += static (_, _) => { };
         process.BeginErrorReadLine();
         return new ProxyCommandStream(process);

@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using SshSharp.Config;
 
 namespace SshSharp.Tests.Config;
@@ -78,6 +79,11 @@ public class SshConfigMatchTests
         await Assert.That(Resolve("Tag blue\nMatch tagged blue\n Port 71\n", "a").Port).IsEqualTo(71);
         await Assert.That(Resolve("Match tagged red\n Port 72\n", "a", new SshConfigResolveOptions { Tag = "red", LocalUser = "l", HomeDirectory = "/h" }).Port).IsEqualTo(72);
         await Assert.That(Resolve("Match tagged red\n Port 72\n", "a").Port).IsEqualTo(22);
+
+        // The caller's tag wins over the file's.
+        var red = new SshConfigResolveOptions { Tag = "red", LocalUser = "l", HomeDirectory = "/h" };
+        await Assert.That(Resolve("Tag blue\nMatch tagged red\n Port 73\n", "a", red).Port).IsEqualTo(73);
+        await Assert.That(Resolve("Tag blue\nMatch tagged blue\n Port 74\n", "a", red).Port).IsEqualTo(22);
     }
 
     [Test]
@@ -127,6 +133,45 @@ public class SshConfigMatchTests
     }
 
     [Test]
+    public async Task Exec_ExpandsTheHostKeyAliasAndProxyJumpSetSoFar()
+    {
+        var commands = new List<string>();
+        var options = new SshConfigResolveOptions
+        {
+            LocalUser = "l",
+            HomeDirectory = "/h",
+            ExecMatcher = (command, _) => { commands.Add(command); return ValueTask.FromResult(false); },
+        };
+
+        Resolve("HostKeyAlias alias1\nProxyJump jump.example.com\nMatch exec \"c %k %j\"\n Port 5\n", "a", options);
+        Resolve("Match exec \"d %k %j\"\n Port 5\n", "a", options); // %k is the host without an alias, %j empty without a jump
+        Resolve("ProxyJump none\nMatch exec \"e %j\"\n Port 5\n", "a", options);
+        await Assert.That(string.Join("|", commands)).IsEqualTo("c alias1 jump.example.com|d a |e ");
+    }
+
+    [Test]
+    [Arguments("Port 2200\n", null, "2200")]
+    [Arguments("Port 1\n", null, "1")]
+    [Arguments("Port 65535\n", null, "65535")]
+    [Arguments("Port 0\n", null, "22")]
+    [Arguments("Port 65536\n", null, "22")]
+    [Arguments("Port 2200\n", 2222, "2222")]
+    public async Task Exec_ExpandsThePortSoFar_TheCallersFirst_AndOnlyAValidOne(string config, int? port, string expected)
+    {
+        var commands = new List<string>();
+        var options = new SshConfigResolveOptions
+        {
+            LocalUser = "l",
+            HomeDirectory = "/h",
+            Port = port,
+            ExecMatcher = (command, _) => { commands.Add(command); return ValueTask.FromResult(false); },
+        };
+
+        Resolve(config + "Match exec \"p %p\"\n User u\n", "a", options);
+        await Assert.That(commands.Single()).IsEqualTo("p " + expected);
+    }
+
+    [Test]
     public async Task Exec_IsNotRunWhenAnEarlierCriterionAlreadyFailed()
     {
         var ran = false;
@@ -168,11 +213,114 @@ public class SshConfigMatchTests
     }
 
     [Test]
+    public async Task RunShellAsync_ThatRunsOutOfTime_DoesNotMatch()
+    {
+        var command = OperatingSystem.IsWindows() ? "ping -n 30 127.0.0.1 >nul" : "sleep 30";
+        await Assert.That(await SshExecMatcher.RunShellWithinAsync(command, TimeSpan.FromMilliseconds(200), CancellationToken.None)).IsFalse();
+    }
+
+    [Test]
+    public async Task RunShellAsync_Cancelled_KillsTheCommand_AndWhatItStarted_WithoutAHangup()
+    {
+        // The command would write the marker a second later: from the shell itself on Windows, and from a background child elsewhere,
+        // which only killing the whole process tree stops. Killing it must not hang up this process's own group, as .NET's tree kill
+        // did on macOS by stopping the child first (#432).
+        var marker = Path.Combine(Path.GetTempPath(), "sshsharp-exec-" + Guid.NewGuid().ToString("N"));
+        var command = OperatingSystem.IsWindows()
+            ? $"ping -n 2 127.0.0.1 >nul & echo x > \"{marker}\""
+            : $"(sleep 1; echo x > '{marker}') & wait";
+        var hangups = 0;
+        using var hangup = OperatingSystem.IsWindows() ? null : PosixSignalRegistration.Create(PosixSignal.SIGHUP, context =>
+        {
+            Interlocked.Increment(ref hangups);
+            context.Cancel = true;
+        });
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(200));
+            var before = ProcessTree.RecentKills;
+            await Assert.That(() => SshExecMatcher.RunShellAsync(command, cts.Token)).Throws<OperationCanceledException>();
+
+            // For a failure: what of the command still ran right after the kill, and (in the stress workflow's instrumented build) how
+            // the kill went. A subshell outlived the kill of its own child on macOS once in 70 stress iterations, after #438.
+            var survivors = OperatingSystem.IsWindows() ? "" : await RunningAsync(marker);
+            var kills = ProcessTree.RecentKills;
+            kills = kills.StartsWith(before, StringComparison.Ordinal) ? kills[before.Length..] : kills;
+
+            await Task.Delay(TimeSpan.FromSeconds(2));
+            await Assert.That(File.Exists(marker)).IsFalse().Because($"running after the kill:\n{survivors}\nthe kill:\n{kills}");
+            await Assert.That(hangups).IsEqualTo(0);
+        }
+        finally
+        {
+            File.Delete(marker);
+        }
+    }
+
+    // The processes whose command line names the marker (the shell and its subshell), and every sleep, from ps.
+    private static async Task<string> RunningAsync(string marker)
+    {
+        var info = new System.Diagnostics.ProcessStartInfo("/bin/ps", "-A -o pid,ppid,pgid,stat,command") { RedirectStandardOutput = true };
+        string table;
+        try
+        {
+            using var ps = System.Diagnostics.Process.Start(info)!;
+            table = await ps.StandardOutput.ReadToEndAsync();
+            await ps.WaitForExitAsync();
+        }
+        catch (System.ComponentModel.Win32Exception ex)
+        {
+            return "(no ps: " + ex.Message + ")"; // only a failure's report needs it
+        }
+
+        return string.Join("\n", table.Split('\n').Where(line => line.Contains(marker, StringComparison.Ordinal) ||
+            line.Contains(" sleep ", StringComparison.Ordinal)));
+    }
+
+    /// <summary>
+    /// Runs <see cref="SshExecMatcher.RunShellAsync"/> on the thread pool and gives up after 30 seconds, so that a run that never ends
+    /// (even one blocked before its first await) fails the test with the step it was on, rather than hanging the test run.
+    /// </summary>
+    private static async Task<bool> RunShellWithinAsync(string step, string command, CancellationToken cancellationToken)
+    {
+        try
+        {
+            // The token goes to the command alone: it is what must answer the cancellation.
+            return await Task.Run(() => SshExecMatcher.RunShellAsync(command, cancellationToken))
+                .WaitAsync(TimeSpan.FromSeconds(30), CancellationToken.None);
+        }
+        catch (TimeoutException ex)
+        {
+            throw new TimeoutException($"{step} did not finish within 30 s.", ex);
+        }
+    }
+
+    [Test]
     public async Task RunShell_ReportsExitStatus()
     {
         await Assert.That(await SshExecMatcher.RunShellAsync("exit 0")).IsTrue();
         await Assert.That(await SshExecMatcher.RunShellAsync("exit 1")).IsFalse();
         await Assert.That(() => SshExecMatcher.RunShellAsync("")).Throws<ArgumentException>();
+    }
+
+    [Test]
+    public async Task RunShell_GivesTheCommandNoInput_AndReadsAwayItsOutput()
+    {
+        // sort reads its input to the end, and 1 MiB is far more than a pipe holds: either would wait out the deadline below if the
+        // input were left open or the output unread.
+        var path = Path.Combine(Path.GetTempPath(), "sshsharp-exec-" + Guid.NewGuid().ToString("N"));
+        await File.WriteAllTextAsync(path, new string('x', 1024 * 1024));
+        try
+        {
+            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+            await Assert.That(await RunShellWithinAsync("sort", "sort", deadline.Token)).IsTrue();
+            var print = OperatingSystem.IsWindows() ? $"type \"{path}\"" : $"cat '{path}'";
+            await Assert.That(await RunShellWithinAsync("Printing 1 MiB", print, deadline.Token)).IsTrue();
+        }
+        finally
+        {
+            File.Delete(path);
+        }
     }
 
     [Test]
@@ -228,6 +376,13 @@ public class SshConfigMatchTests
         await Assert.That(c.HostName).IsEqualTo("b.example");
         await Assert.That(c.Port).IsEqualTo(7);
         await Assert.That(c.Compression).IsTrue();
+    }
+
+    [Test]
+    public async Task SecondPass_KeepsAPercentSignInTheName_AsItIs()
+    {
+        // The name is expanded once, in the first pass; the second does not expand it again.
+        await Assert.That(Resolve("Match final\n Port 2\n", "a%h").HostName).IsEqualTo("a%h");
     }
 
     [Test]
@@ -315,13 +470,24 @@ public class SshConfigMatchTests
         var notFound = Canonicalizing((_, _) => null);
         await Assert.That(Resolve("CanonicalizeHostname yes\n", "web", notFound).HostName).IsEqualTo("web");
         await Assert.That(Resolve("CanonicalizeHostname yes\nCanonicalizeFallbackLocal yes\n", "web", notFound).HostName).IsEqualTo("web");
+        var off = await Assert.That(() => Resolve("CanonicalizeHostname yes\nCanonicalizeFallbackLocal false\n", "web", notFound)).Throws<InvalidOperationException>();
+        await Assert.That(off!.Message).Contains("CanonicalizeFallbackLocal is off");
         await Assert.That(() => Resolve("CanonicalizeHostname yes\nCanonicalizeFallbackLocal no\n", "web", notFound)).Throws<InvalidOperationException>();
     }
 
     [Test]
     public async Task Match_SyntaxErrors()
     {
-        await Assert.That(() => Resolve("Match host\n Port 1\n", "a")).Throws<FormatException>();
-        await Assert.That(() => Resolve("Match bogus\n Port 1\n", "a")).Throws<FormatException>();
+        var noHost = await Assert.That(() => Resolve("Match host\n Port 1\n", "a")).ThrowsExactly<FormatException>();
+        await Assert.That(noHost!.Message).Contains("Match criterion 'host' needs an argument");
+        var bogus = await Assert.That(() => Resolve("Match bogus\n Port 1\n", "a")).ThrowsExactly<FormatException>();
+        await Assert.That(bogus!.Message).Contains("Unsupported Match criterion 'bogus'");
+
+        // A session criterion needs its argument whether or not the caller described the session.
+        var shell = new SshConfigResolveOptions { LocalUser = "l", HomeDirectory = "/h", SessionType = "shell" };
+        var described = await Assert.That(() => Resolve("Match sessiontype\n Port 1\n", "a", shell)).ThrowsExactly<FormatException>();
+        await Assert.That(described!.Message).Contains("Match criterion 'sessiontype' needs an argument");
+        var undescribed = await Assert.That(() => Resolve("Match command\n Port 1\n", "a")).ThrowsExactly<FormatException>();
+        await Assert.That(undescribed!.Message).Contains("Match criterion 'command' needs an argument");
     }
 }

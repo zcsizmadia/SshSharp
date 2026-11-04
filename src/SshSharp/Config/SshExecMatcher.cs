@@ -16,15 +16,20 @@ public static class SshExecMatcher
     /// kills the command) after 30 seconds or when <paramref name="cancellationToken"/> is cancelled.
     /// </summary>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled.</exception>
-    public static async Task<bool> RunShellAsync(string command, CancellationToken cancellationToken = default)
+    public static Task<bool> RunShellAsync(string command, CancellationToken cancellationToken = default) => RunShellWithinAsync(command, Limit, cancellationToken);
+
+    /// <summary><see cref="RunShellAsync"/>, giving up after <paramref name="limit"/> rather than 30 seconds (tests use a short one).</summary>
+    internal static async Task<bool> RunShellWithinAsync(string command, TimeSpan limit, CancellationToken cancellationToken)
     {
         using var process = Start(command);
+
+        // Stryker disable once Block,Boolean : without shell execute, Process.Start returns a process or throws
         if (process is null)
         {
             return false;
         }
 
-        using var timeout = new CancellationTokenSource(Limit);
+        using var timeout = new CancellationTokenSource(limit);
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeout.Token);
         try
         {
@@ -35,7 +40,7 @@ public static class SshExecMatcher
         {
             ChildProcess.Stop(process);
             cancellationToken.ThrowIfCancellationRequested();
-            return false; // the 30 seconds ran out
+            return false; // the time limit ran out
         }
     }
 
@@ -43,9 +48,14 @@ public static class SshExecMatcher
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(command);
         var windows = OperatingSystem.IsWindows();
+
+        // Stryker disable once Conditional,String : the platform picks the shell; the mutation workflow runs on Linux, where cmd.exe is
+        // never chosen (the tests run commands through the shell on Windows too)
         var info = new ProcessStartInfo(windows ? "cmd.exe" : "/bin/sh")
         {
             UseShellExecute = false,
+
+            // Stryker disable once Boolean : a console window is not something a test can see
             CreateNoWindow = true,
             RedirectStandardInput = true,
 
@@ -57,6 +67,8 @@ public static class SshExecMatcher
         {
             // cmd.exe does not follow the C runtime's quoting rules that ArgumentList applies; "/s /c "..."" passes the command
             // through verbatim (cmd strips the outer quotes).
+            // Stryker disable once String : Windows only, where the mutation workflow does not run (the Windows test job runs commands
+            // through it)
             info.Arguments = "/d /s /c \"" + command + "\"";
         }
         else
@@ -67,13 +79,17 @@ public static class SshExecMatcher
 
         ChildProcess.InheritStandardStreamsOnly(info);
 
-        var process = Process.Start(info);
+        var process = ProcessTree.Start(info);
+
+        // Stryker disable once Block : as above, Process.Start does not return null here
         if (process is null)
         {
             return null;
         }
 
         process.StandardInput.Close();
+
+        // Stryker disable once Assignment : the output is read and dropped with or without a handler
         process.OutputDataReceived += static (_, _) => { };
         process.BeginOutputReadLine();
         return process;

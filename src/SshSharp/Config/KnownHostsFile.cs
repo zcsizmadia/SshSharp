@@ -274,6 +274,7 @@ public sealed class KnownHostsFile
             File.Move(temp, path, overwrite: true);
             return true;
         }
+        // Stryker disable once Equality : one retry more shows only in how long a failure takes; the tests see the retries and the failure
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException && attempt < ReplaceAttempts)
         {
             return false;
@@ -300,6 +301,7 @@ public sealed class KnownHostsFile
             KeepMode(path, temp);
             for (var attempt = 1; !TryReplace(temp, path, attempt); attempt++)
             {
+                // Stryker disable once Arithmetic : the back-off shows only in timing
                 Thread.Sleep(ReplaceRetryDelay * attempt);
             }
         }

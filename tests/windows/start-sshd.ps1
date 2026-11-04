@@ -13,8 +13,27 @@ New-LocalUser -Name sshsharp -Password (ConvertTo-SecureString $password -AsPlai
 Add-LocalGroupMember -Group Users -Member sshsharp
 
 New-ItemProperty -Path HKLM:\SOFTWARE\OpenSSH -Name DefaultShell -Value 'C:\Program Files\Git\bin\bash.exe' -PropertyType String -Force | Out-Null
+
+# Waits up to 60 s for sshd to reach $status, stopping it on the way when asked. Right after its first start, while it creates its host
+# keys, the service can refuse a stop ("Cannot stop 'sshd' service", one CI run of hundreds), so the stop is asked again until it takes;
+# what the service last said is in the error if it never does.
+function Wait-Sshd([string] $status, [switch] $stop) {
+  $deadline = (Get-Date).AddSeconds(60)
+  $last = $null
+  while ((Get-Service sshd).Status -ne $status) {
+    if ((Get-Date) -gt $deadline) {
+      throw "sshd did not reach $status within 60 s (it is $((Get-Service sshd).Status)): $last"
+    }
+    if ($stop -and (Get-Service sshd).Status -eq 'Running') {
+      try { Stop-Service sshd -ErrorAction Stop } catch { $last = $_.Exception.InnerException ?? $_.Exception }
+    }
+    Start-Sleep -Milliseconds 500
+  }
+}
+
 Start-Service sshd # creates the default sshd_config and host keys
-Stop-Service sshd
+Wait-Sshd Running
+Wait-Sshd Stopped -stop
 $config = "$env:ProgramData\ssh\sshd_config"
 @(
   'Port 2222'

@@ -68,6 +68,7 @@ internal static class SshConfigLine
 
         if (arguments.Count == 0)
         {
+            // Stryker disable once String : the message is for people
             throw new FormatException($"Missing argument for '{keyword}'.");
         }
 
@@ -98,6 +99,7 @@ internal static class SshConfigLine
             }
         }
 
+        // Stryker disable once String : the message is for people
         throw new FormatException("Unterminated quote.");
     }
 }

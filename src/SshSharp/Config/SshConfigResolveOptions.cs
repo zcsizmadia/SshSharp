@@ -85,6 +85,7 @@ public sealed class SshConfigResolveOptions
         {
             if (value is not (null or "shell" or "exec" or "subsystem" or "none"))
             {
+                // Stryker disable once String : the message is for people
                 throw new ArgumentException("The session type is shell, exec, subsystem or none.", nameof(value));
             }
 

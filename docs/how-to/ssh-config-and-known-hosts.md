@@ -40,6 +40,8 @@ work, retries for a server that may be restarting. Set them in `SshConfigConnect
   fails right after the file is read, before anything is sent, naming the directive. `PubkeyAcceptedKeyTypes ssh-rsa` (SHA-1 only)
   is the exception: no key is offered, a warning says why, and a password still logs in.
 - `AddressFamily` applies to the one TCP connection this machine makes: to the destination, or to the first `ProxyJump` hop.
+  So does `StaggeredConnectDelay`, which races that connection's addresses (see
+  [Race the server's addresses](../connecting.md#race-the-servers-addresses)); `ssh_config` has no directive for it.
 - `Compression` is the destination's, as `ssh -C`: `true` or `false` wins over its `Compression` line, and each `ProxyJump` hop
   keeps its own (see [Compress a slow link](tune-and-inspect-connections.md#compress-a-slow-link)).
 - `ConnectionAttempts` tries again only when the server could not be reached (refused, unreachable, timed out), one second

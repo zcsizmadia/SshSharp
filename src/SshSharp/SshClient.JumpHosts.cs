@@ -138,6 +138,7 @@ public sealed partial class SshClient
         await WithConnectionAttemptsAsync(
             async ct => options.Proxy is { } proxy
                 ? await proxy.ConnectAsync(host, port, local, ct).ConfigureAwait(false)
-                : (Stream)await TcpConnector.ConnectAsync(host, port, local, options.AddressFamily, what, options.ConfigureSocket, ct).ConfigureAwait(false),
+                : (Stream)await TcpConnector.ConnectAsync(host, port, local, options.AddressFamily, what, options.ConfigureSocket,
+                    options.StaggeredConnectDelay, options.TimeProvider, ct).ConfigureAwait(false),
             options.ConnectionAttempts, options.TimeProvider, options.Logger ?? NullLogger.Instance, cancellationToken).ConfigureAwait(false);
 }

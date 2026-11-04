@@ -107,9 +107,22 @@ public sealed class ConfigGapsTests : IDisposable
     [Arguments("/bin/a \"two words\" 'single quoted' x\\ y", new[] { "/bin/a", "two words", "single quoted", "x y" })]
     [Arguments("/bin/a \"say \\\"hi\\\"\"", new[] { "/bin/a", "say \"hi\"" })]
     [Arguments("/bin/a ''", new[] { "/bin/a", "" })]
+    [Arguments("/bin/a x\\y \"p\\ q\" end\\", new[] { "/bin/a", "x\\y", "p\\ q", "end\\" })] // a backslash before anything else is kept
     public async Task KnownHostsCommand_IsSplitAsOpenSshSplitsIt(string command, string[] expected)
     {
         await Assert.That(KnownHostsCommandRunner.Split(command)).IsEquivalentTo(expected);
+    }
+
+    [Test]
+    public async Task KnownHostsCommand_OutputIsReadUpToTheLimit_AndNoFurther()
+    {
+        var limit = KnownHostsCommandRunner.MaxOutput;
+        using var full = new MemoryStream(new byte[limit]);
+        await Assert.That((await KnownHostsCommandRunner.ReadBoundedAsync(full, Timeout())).Length).IsEqualTo(limit);
+
+        using var over = new MemoryStream(new byte[limit + 1]);
+        var error = await Assert.ThrowsAsync<SshException>(async () => await KnownHostsCommandRunner.ReadBoundedAsync(over, Timeout()));
+        await Assert.That(error!.Reason).IsEqualTo(SshFailureReason.ConnectFailed);
     }
 
     [Test]

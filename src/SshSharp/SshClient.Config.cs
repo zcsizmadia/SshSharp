@@ -130,7 +130,8 @@ public sealed partial class SshClient
                 var local = TcpConnector.FromConfig(hostConfig.BindAddress, hostConfig.BindInterface);
                 var connector = options.TcpConnector ?? (options.Proxy is { } proxy
                     ? ProxyConnector(proxy, local)
-                    : DirectConnector(local, TcpConnector.Configure(hostConfig.TcpKeepAlive, hostConfig.IPQoSBulk, options.ConfigureSocket, logger)));
+                    : DirectConnector(local, TcpConnector.Configure(hostConfig.TcpKeepAlive, hostConfig.IPQoSBulk, options.ConfigureSocket, logger),
+                        options.StaggeredConnectDelay, options.TimeProvider));
                 var family = options.AddressFamily ?? hostConfig.AddressFamily;
                 var attempts = options.ConnectionAttempts ?? hostConfig.ConnectionAttempts;
                 var (tcpStream, tcpOwner) = await WithConnectionAttemptsAsync(
@@ -285,12 +286,12 @@ public sealed partial class SshClient
 
     /// <summary>
     /// Opens the first hop over TCP, from the configured BindAddress or BindInterface when there is one, with the socket options of
-    /// <paramref name="configure"/>; the stream owns the socket.
+    /// <paramref name="configure"/>, racing the addresses <paramref name="stagger"/> apart when there is one; the stream owns the socket.
     /// </summary>
     private static Func<string, int, SshAddressFamily, CancellationToken, ValueTask<(Stream Stream, IAsyncDisposable? Owner)>> DirectConnector(IReadOnlyList<IPEndPoint>? local,
-        Action<System.Net.Sockets.Socket>? configure) =>
+        Action<System.Net.Sockets.Socket>? configure, TimeSpan? stagger, TimeProvider timeProvider) =>
         async (host, port, family, cancellationToken) =>
-            (await TcpConnector.ConnectAsync(host, port, local, family, "the server", configure, cancellationToken).ConfigureAwait(false), null);
+            (await TcpConnector.ConnectAsync(host, port, local, family, "the server", configure, stagger, timeProvider, cancellationToken).ConfigureAwait(false), null);
 
     /// <summary>
     /// The keys to offer, in ssh's order: identity files the agent holds (signed by the agent, so an encrypted file needs no passphrase),

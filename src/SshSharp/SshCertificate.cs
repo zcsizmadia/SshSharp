@@ -149,7 +149,7 @@ public sealed class SshCertificate
 
         // The comment is the rest of the line; one that runs onto further lines is left out rather than carried into a line it is written to.
         var comment = fields.Length == 3 ? fields[2].Trim() : null;
-        if (comment is not null && comment.AsSpan().IndexOfAny('\r', '\n') >= 0)
+        if (comment is not null && comment.AsSpan().ContainsAny('\r', '\n'))
         {
             comment = null;
         }
@@ -191,6 +191,7 @@ public sealed class SshCertificate
     internal static string CertificateKeyType(string certificateAlgorithm) => BaseAlgorithm(certificateAlgorithm) switch
     {
         SshAlgorithms.RsaSha2_256 or SshAlgorithms.RsaSha2_512 => "ssh-rsa" + Suffix,
+        // Stryker disable once Logical,String : only security-key names end in the domain once the suffix is off, and they start with sk-
         var sk when sk.StartsWith("sk-", StringComparison.Ordinal) && sk.EndsWith(OpenSshDomain, StringComparison.Ordinal) => sk[..^OpenSshDomain.Length] + Suffix,
         var other => other + Suffix,
     };
@@ -281,6 +282,7 @@ public sealed class SshCertificate
         reader.ReadString(); // signature
         if (!reader.IsEmpty)
         {
+            // Stryker disable once String : the message is for people
             throw new SshProtocolException("Trailing data after the certificate.");
         }
 
@@ -330,6 +332,7 @@ public sealed class SshCertificate
             }
 
             default:
+                // Stryker disable once String : the message is for people
                 throw new SshProtocolException($"Unsupported certificate key type '{keyType}'.");
         }
 

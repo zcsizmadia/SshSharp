@@ -24,7 +24,7 @@ internal static class ChildProcess
 
     /// <summary>
     /// Stops the program and everything it started: on .NET 11 outside Windows, SIGTERM first, so it can close its connections
-    /// cleanly, then a kill if it has not exited within half a second; otherwise a kill at once.
+    /// cleanly, then a kill (<see cref="ProcessTree.Kill"/>) if it has not exited within half a second; otherwise a kill at once.
     /// </summary>
     public static void Stop(Process process)
     {
@@ -35,6 +35,9 @@ internal static class ChildProcess
             {
                 if (process.Signal(PosixSignal.SIGTERM) && process.WaitForExit(StopGrace))
                 {
+                    // What it started may outlive it. Its pid may already be another process's, so no tree is walked from it: only the
+                    // processes carrying its mark are killed.
+                    ProcessTree.SweepAfterExit(process);
                     return;
                 }
             }
@@ -46,7 +49,7 @@ internal static class ChildProcess
 #endif
         try
         {
-            process.Kill(entireProcessTree: true);
+            ProcessTree.Kill(process);
         }
         catch (InvalidOperationException)
         {

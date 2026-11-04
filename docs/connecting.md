@@ -41,6 +41,43 @@ A name's addresses are tried in the order the system's resolver returns them, ea
 connects. Socket options set by `ConfigureSocket` or `ssh_config`'s `IPQoS` are set again on each one. When none connects, the
 error of the last is reported.
 
+### Race the server's addresses
+
+An address that does not answer at all (a broken IPv6 route, a firewall that drops rather than refuses) holds up the addresses after
+it until the system gives up on it, which can take minutes, or until `ConnectTimeout` ends the whole attempt. `AddressFamily` avoids
+that where you know which family is broken. `StaggeredConnectDelay` avoids it without knowing: the addresses are raced, as RFC 8305
+("Happy Eyeballs") describes.
+
+[!code-csharp[](snippets/Connecting.cs#staggered-connect)]
+
+The first address is tried as usual. When it has not connected within the delay, the next is tried as well, without stopping the
+first, and so on; when one fails, the next starts at once. The first to connect is used and the others are closed. IPv6 and IPv4
+addresses take turns, starting with the family the resolver put first:
+
+```mermaid
+sequenceDiagram
+    participant C as SshSharp
+    participant V6 as 2001:db8::10 (no answer)
+    participant V4 as 192.0.2.10
+    C->>V6: connect
+    Note over C: 250 ms, no answer
+    C->>V4: connect
+    V4-->>C: connected
+    C-xV6: closed
+    C->>V4: SSH handshake
+```
+
+- It is off by default (null), and the addresses are then tried one after another, as `ssh` does. RFC 8305 recommends 250 ms; the
+  delay must be from 10 ms to 2 s.
+- There is nothing to race for an IP address or a name with one address, nor through a `Proxy`, which resolves the name itself. With
+  `JumpHosts`, it applies to the connection to the first hop.
+- `AddressFamily` and `LocalEndPoint` still decide which addresses take part, and `ConnectTimeout` bounds the race. Each retry
+  that `ConnectionAttempts` makes races the addresses again.
+- `ConfigureSocket` is called once for each socket, before it connects, one socket at a time. A server may log the connections that
+  lost as closed before the SSH handshake.
+- The name is resolved once, by the system's resolver; SshSharp does not query IPv6 and IPv4 addresses separately.
+- `SshConfigConnectOptions.StaggeredConnectDelay` does the same when connecting by alias. `ssh_config` has no directive for it.
+
 ## Over any stream
 
 SSH can run over anything duplex: a WebSocket wrapper, a named pipe, a tunnel of your own. Without a host name there is
@@ -92,7 +129,8 @@ directory, environment, local user, host name canonicalization), a `Password` or
 configured one, `AskHostKey` and `ConfirmHostKeyUpdate`, `ConfirmAddKeyToAgent` (for `AddKeysToAgent ask`), `UseAgent`/`Agent`,
 `ForwardAgentFilter`, `AllowProxyCommand`, `AllowKnownHostsCommand`, a `Proxy` (HTTP or SOCKS), `ConfigureSocket` (run after
 `TCPKeepAlive` and `IPQoS`), `StartForwardings`, `AuthenticationBanner` and a `Logger`. `Port`, `ConnectTimeout`,
-`ConnectionAttempts`, `AddressFamily`, `KeepAliveInterval`, `KeepAliveCountMax` and `Compression` override what the configuration says (see
+`ConnectionAttempts`, `AddressFamily`, `KeepAliveInterval`, `KeepAliveCountMax` and `Compression` override what the configuration says, and
+`StaggeredConnectDelay` races the addresses, which `ssh_config` cannot ask for (see
 [Override what the configuration says](how-to/ssh-config-and-known-hosts.md#override-what-the-configuration-says)).
 
 ### Jump hosts and proxy commands

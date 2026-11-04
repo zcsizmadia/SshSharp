@@ -57,9 +57,10 @@ internal sealed class SshConfigResolver(IReadOnlyList<SshConfigDocument> documen
     }
 
     /// <summary><c>CanonicalizeHostname yes</c> or <c>always</c>, as the first pass left it.</summary>
-    private bool CanonicalizationEnabled() =>
-        _values.TryGetValue("canonicalizehostname", out var setting) && setting.Count > 0
-        && setting[0].ToLowerInvariant() is "yes" or "true" or "always";
+    private bool CanonicalizationEnabled() => First("canonicalizehostname")?.ToLowerInvariant() is "yes" or "true" or "always";
+
+    // The parser turns down a directive without arguments (SshConfigLine), so a list that is set is never empty.
+    private string? First(string key) => _values.TryGetValue(key, out var v) ? v[0] : null;
 
     private void Pass()
     {
@@ -162,8 +163,7 @@ internal sealed class SshConfigResolver(IReadOnlyList<SshConfigDocument> documen
         }
     }
 
-    private bool IsSet(string key) =>
-        _values.TryGetValue(key, out var v) && v.Count > 0 && !v[0].Trim().Equals("none", StringComparison.OrdinalIgnoreCase);
+    private bool IsSet(string key) => First(key) is { } value && !value.Trim().Equals("none", StringComparison.OrdinalIgnoreCase);
 
     private static bool IsProxyKeyword(string key) =>
         key.Equals("proxyjump", StringComparison.OrdinalIgnoreCase) || key.Equals("proxycommand", StringComparison.OrdinalIgnoreCase);
@@ -175,21 +175,22 @@ internal sealed class SshConfigResolver(IReadOnlyList<SshConfigDocument> documen
         originalHost, CurrentHost(), CurrentPort(), CurrentUser(), options.LocalUser, options.HomeDirectory,
         options.LocalHostName, options.GetEnvironmentVariable)
     {
-        HostKeyAlias = _values.TryGetValue("hostkeyalias", out var alias) && alias.Count > 0 ? alias[0] : null,
-        ProxyJump = IsSet("proxyjump") ? _values["proxyjump"][0] : string.Empty,
+        HostKeyAlias = First("hostkeyalias"),
+        ProxyJump = IsSet("proxyjump") ? First("proxyjump")! : string.Empty,
     };
 
     // In the second pass, ssh has replaced its HostName with the name the first pass settled on, so that is the name everywhere.
-    private string CurrentHost() => _finalHost ?? (_values.TryGetValue("hostname", out var v) && v.Count > 0
-        ? new SshTokenContext(originalHost, originalHost, 22, string.Empty, options.LocalUser, options.HomeDirectory, options.LocalHostName, options.GetEnvironmentVariable).ExpandTokens(v[0])
+    // HostName expands as SshConfig.Resolve expands it at the end, so Match host sees the name the result reports.
+    // Stryker disable once NullCoalescing : in the second pass the HostName is _finalHost with % escaped, which expands back to it
+    private string CurrentHost() => _finalHost ?? (First("hostname") is { } hostName
+        ? new SshTokenContext(originalHost, originalHost, 22, string.Empty, options.LocalUser, options.HomeDirectory, options.LocalHostName, options.GetEnvironmentVariable).ExpandTokens(hostName)
         : originalHost);
 
-    private int CurrentPort() => options.Port
-        ?? (_values.TryGetValue("port", out var v) && v.Count > 0 && int.TryParse(v[0], NumberStyles.None, CultureInfo.InvariantCulture, out var p) && p is >= 1 and <= 65535 ? p : 22);
+    private int CurrentPort() => options.Port ?? SshConfig.ParsePort(First("port")) ?? 22;
 
-    private string CurrentUser() => options.User ?? (_values.TryGetValue("user", out var v) && v.Count > 0 ? v[0] : options.LocalUser);
+    private string CurrentUser() => options.User ?? First("user") ?? options.LocalUser;
 
-    private string? CurrentTag() => options.Tag ?? (_values.TryGetValue("tag", out var v) && v.Count > 0 ? v[0] : null);
+    private string? CurrentTag() => options.Tag ?? First("tag");
 
     private bool EvaluateMatch(IReadOnlyList<string> criteria)
     {
@@ -260,6 +261,7 @@ internal sealed class SshConfigResolver(IReadOnlyList<SshConfigDocument> documen
         return result && !unsupported;
     }
 
+    // Stryker disable once Boolean : EvaluateMatch sends only the names listed here, so the last arm is never taken
     private bool EvaluateWithArgument(string name, string argument) => name switch
     {
         "host" => Glob.IsMatchList(argument, CurrentHost()),
@@ -284,12 +286,11 @@ internal sealed class SshConfigResolver(IReadOnlyList<SshConfigDocument> documen
             return null;
         }
 
-        var always = _values["canonicalizehostname"][0].Equals("always", StringComparison.OrdinalIgnoreCase);
+        var always = First("canonicalizehostname")!.Equals("always", StringComparison.OrdinalIgnoreCase);
 
         var viaProxy = IsSet("proxycommand") || IsSet("proxyjump") || options.ViaProxy;
         var host = CurrentHost();
-        var maxDots = _values.TryGetValue("canonicalizemaxdots", out var dots) && dots.Count > 0
-            && int.TryParse(dots[0], NumberStyles.None, CultureInfo.InvariantCulture, out var d) ? d : 1;
+        var maxDots = int.TryParse(First("canonicalizemaxdots"), NumberStyles.None, CultureInfo.InvariantCulture, out var d) ? d : 1;
         var domains = _values.TryGetValue("canonicaldomains", out var list) ? list : [];
         if (!always && viaProxy)
         {
@@ -321,7 +322,7 @@ internal sealed class SshConfigResolver(IReadOnlyList<SshConfigDocument> documen
     /// <exception cref="InvalidOperationException"><c>CanonicalizeFallbackLocal no</c>.</exception>
     private void RequireFallbackLocal()
     {
-        if (_values.TryGetValue("canonicalizefallbacklocal", out var fallback) && fallback.Count > 0 && fallback[0].ToLowerInvariant() is "no" or "false")
+        if (First("canonicalizefallbacklocal")?.ToLowerInvariant() is "no" or "false")
         {
             // The message leaves the host name out: exception messages end up in logs (docs/diagnostics.md).
             throw new InvalidOperationException("Could not canonicalize the host name, and CanonicalizeFallbackLocal is off.");
@@ -346,9 +347,12 @@ internal sealed class SshConfigResolver(IReadOnlyList<SshConfigDocument> documen
         }
 
         // The family the connection will use: the caller's override (SshConfigConnectOptions.AddressFamily), else the configuration's.
-        var family = options.AddressFamily ?? (_values.TryGetValue("addressfamily", out var af) && af.Count > 0
-            ? af[0].ToLowerInvariant() switch { "inet" => SshAddressFamily.Inet, "inet6" => SshAddressFamily.Inet6, _ => SshAddressFamily.Any }
-            : SshAddressFamily.Any);
+        var family = options.AddressFamily ?? First("addressfamily")?.ToLowerInvariant() switch
+        {
+            "inet" => SshAddressFamily.Inet,
+            "inet6" => SshAddressFamily.Inet6,
+            _ => SshAddressFamily.Any,
+        };
         if (host.EndsWith('.'))
         {
             if (answers.Lookup(host, family) is { } anchored)
@@ -395,6 +399,8 @@ internal sealed class SshConfigResolver(IReadOnlyList<SshConfigDocument> documen
         }
 
         var followed = FollowCname(host, canonicalName);
+
+        // Stryker disable once Conditional : the same name back is what the HostName already gives, so taking it changes nothing
         return string.Equals(followed, host, StringComparison.Ordinal) ? null : followed;
     }
 
@@ -423,13 +429,12 @@ internal sealed class SshConfigResolver(IReadOnlyList<SshConfigDocument> documen
 
     /// <summary>
     /// <c>CanonicalizePermittedCNAMEs source_domains:target_domains ...</c>: each rule a pair of comma-separated pattern lists; <c>none</c>
-    /// or unset for no rules. A rule without a colon or with an empty side, which ssh rejects, is left out.
+    /// or unset for no rules. A rule without a colon or with an empty side, which ssh rejects, is left out (<c>none</c> has no colon).
     /// </summary>
     private List<(string Sources, string Targets)> PermittedCnames()
     {
         var rules = new List<(string, string)>();
-        if (!_values.TryGetValue("canonicalizepermittedcnames", out var arguments)
-            || (arguments.Count == 1 && arguments[0].Equals("none", StringComparison.OrdinalIgnoreCase)))
+        if (!_values.TryGetValue("canonicalizepermittedcnames", out var arguments))
         {
             return rules;
         }
@@ -437,6 +442,8 @@ internal sealed class SshConfigResolver(IReadOnlyList<SshConfigDocument> documen
         foreach (var argument in arguments)
         {
             var colon = argument.IndexOf(':', StringComparison.Ordinal);
+
+            // Stryker disable once Equality,Arithmetic : an empty side matches no name, and the names and targets compared are never empty
             if (colon > 0 && colon < argument.Length - 1)
             {
                 rules.Add((argument[..colon], argument[(colon + 1)..]));
@@ -474,8 +481,10 @@ internal sealed class SshConfigCallbackAnswers
 
     public void RecordLookup(string name, SshAddressFamily family, string? canonical) => _lookups[LookupKey(name, family)] = canonical;
 
+    // Stryker disable once String : a resolution asks the canonicalizer about one host and one list of domains, so keys cannot collide
     private static string Key(string host, IReadOnlyList<string> domains) => host + "\0" + string.Join("\0", domains);
 
+    // Stryker disable once String : every lookup of a resolution is for the same family, so the names alone tell keys apart
     private static string LookupKey(string name, SshAddressFamily family) => name + "\0" + ((int)family).ToString(CultureInfo.InvariantCulture);
 }
 

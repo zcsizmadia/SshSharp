@@ -50,6 +50,13 @@ public class AlgorithmOptionsTests
         await Assert.That(string.Join(",", SshAlgorithmList.Append("a", "d").Apply(defaults))).IsEqualTo("a,b,c,d"); // a default stays put, as with +
         await Assert.That(string.Join(",", SshAlgorithmList.Prepend("c", "d").Apply(defaults))).IsEqualTo("c,d,a,b");
         await Assert.That(string.Join(",", SshAlgorithmList.Remove("b", "x*").Apply(defaults))).IsEqualTo("a,c");
+
+        // ssh_config's plain and + lists take wildcards too, standing for the known names they match, a leading one included.
+        await Assert.That(string.Join(",", SshAlgorithmList.Apply("*b", defaults, ["ab", "c", "bb"]))).IsEqualTo("ab,bb");
+        await Assert.That(() => SshAlgorithmList.Only("a").Apply(null!)).ThrowsExactly<ArgumentNullException>();
+        var noDefaults = await Assert.That(() => SshAlgorithmList.Apply("", null!)).ThrowsExactly<ArgumentNullException>();
+        await Assert.That(noDefaults!.ParamName).IsEqualTo("defaults"); // the guard's, not the copy's
+
     }
 
     [Test]
@@ -78,6 +85,7 @@ public class AlgorithmOptionsTests
 
         // Wildcards only where ssh_config takes them: in a list that removes.
         await Assert.That(() => SshAlgorithmList.Only("aes*")).Throws<ArgumentException>();
+        await Assert.That(() => SshAlgorithmList.Append("*-ctr")).Throws<ArgumentException>();
         await Assert.That(() => SshAlgorithmList.Parse("^aes?28-ctr")).Throws<ArgumentException>();
         await Assert.That(SshAlgorithmList.Remove("aes*").ToString()).IsEqualTo("-aes*");
     }
@@ -93,7 +101,15 @@ public class AlgorithmOptionsTests
             Ciphers = SshAlgorithmList.Only("aes128-cbc"),
         }).Throws<ArgumentException>();
         await Assert.That(error!.Message).Contains("'aes128-cbc' is not a cipher");
-        await Assert.That(error.Message).Contains("aes256-gcm@openssh.com");
+        await Assert.That(error.Message[(error.Message.IndexOf("Supported: ", StringComparison.Ordinal) + 11)..].TrimEnd('.').Split(", ")).Contains("aes256-gcm@openssh.com");
+
+        // The message names the kind of list.
+        var kex = await Assert.That(() => new SshClientOptions { UserName = "tester", HostKeyVerifier = SshHostKeyVerifier.Pinned("SHA256:unused"), KexAlgorithms = SshAlgorithmList.Only("diffie-hellman-group1-sha1") }).Throws<ArgumentException>();
+        await Assert.That(kex!.Message).Contains("is not a key exchange algorithm");
+        var hostKey = await Assert.That(() => new SshClientOptions { UserName = "tester", HostKeyVerifier = SshHostKeyVerifier.Pinned("SHA256:unused"), HostKeyAlgorithms = SshAlgorithmList.Only("ssh-dss") }).Throws<ArgumentException>();
+        await Assert.That(hostKey!.Message).Contains("is not a host key algorithm");
+        var mac = await Assert.That(() => new SshClientOptions { UserName = "tester", HostKeyVerifier = SshHostKeyVerifier.Pinned("SHA256:unused"), Macs = SshAlgorithmList.Only("hmac-md5") }).Throws<ArgumentException>();
+        await Assert.That(mac!.Message).Contains("is not a MAC");
 
         // A name of another kind is no better than an unknown one.
         await Assert.That(() => new SshClientOptions { UserName = "tester", HostKeyVerifier = SshHostKeyVerifier.Pinned("SHA256:unused"), Macs = SshAlgorithmList.Append("aes128-ctr") })

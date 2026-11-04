@@ -53,8 +53,18 @@ public class SshConfigLineTests
     }
 
     [Test]
+    public async Task InQuotes_ABackslashEscapesOnlyAQuoteOrABackslash()
+    {
+        // "a\b" keeps its backslash; "c\\" ends in one; "\\d" starts with one.
+        var ok = SshConfigLine.TryParse("Host \"a\\b\" \"c\\\\\" \"\\\\d\"", out _, out var args, out _);
+        await Assert.That(ok).IsTrue();
+        await Assert.That(string.Join("|", args)).IsEqualTo("a\\b|c\\|\\d");
+    }
+
+    [Test]
     public async Task UnterminatedQuote_Throws()
     {
-        await Assert.That(() => SshConfigLine.TryParse("Host \"abc", out _, out _, out _)).Throws<FormatException>();
+        await Assert.That(() => SshConfigLine.TryParse("Host \"abc", out _, out _, out _)).ThrowsExactly<FormatException>();
+        await Assert.That(() => SshConfigLine.TryParse("Host \"abc\\", out _, out _, out _)).ThrowsExactly<FormatException>(); // a backslash last
     }
 }

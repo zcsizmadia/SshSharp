@@ -133,6 +133,7 @@ public sealed class SshAlgorithmList
         ArgumentNullException.ThrowIfNull(algorithms, parameterName);
         if (algorithms.Length == 0)
         {
+            // Stryker disable once String : the message is for people
             throw new ArgumentException("The list needs at least one algorithm.", parameterName);
         }
 
@@ -140,12 +141,14 @@ public sealed class SshAlgorithmList
         {
             if (string.IsNullOrWhiteSpace(name) || name.Any(c => c == ',' || char.IsWhiteSpace(c)))
             {
+                // Stryker disable once String : the message is for people
                 throw new ArgumentException($"'{name}' is not an algorithm name: names are not empty and have no commas or white space.", parameterName);
             }
 
             // ssh_config takes wildcards only in a list that removes; elsewhere a name with one would match nothing a server offers.
             if (operation != '-' && name.AsSpan().IndexOfAny('*', '?') >= 0)
             {
+                // Stryker disable once String : the message is for people
                 throw new ArgumentException($"'{name}': wildcards are allowed only in a list that removes algorithms (Remove, or '-' in ssh_config).",
                     parameterName);
             }

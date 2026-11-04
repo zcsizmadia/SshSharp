@@ -308,4 +308,77 @@ public class SshConfigTests
         await Assert.That(c.HashKnownHosts).IsEqualTo(hash);
         await Assert.That(c.UpdateHostKeys).IsEqualTo(update);
     }
+
+    private static SshHostConfig ResolveWith(string settings) => SshConfig.Parse("Host *\n" + settings).Resolve("h", Options);
+
+    [Test]
+    public async Task LoadDefault_ReadsTheUsersConfigFromTheHomeDirectory()
+    {
+        var home = Directory.CreateTempSubdirectory("sshsharp-home-").FullName;
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(home, ".ssh"));
+            File.WriteAllText(Path.Combine(home, ".ssh", "config"), "Host h\n Port 2201\n");
+            await Assert.That(SshConfig.LoadDefault(home).Resolve("h", Options).Port).IsEqualTo(2201);
+        }
+        finally
+        {
+            Directory.Delete(home, recursive: true);
+        }
+    }
+
+    [Test]
+    public async Task Combine_RefusesNull() =>
+        await Assert.That(() => SshConfig.Combine(null!)).Throws<ArgumentNullException>().WithParameterName("configs");
+
+    [Test]
+    public async Task NumericDirectives_KeepTheirLimits()
+    {
+        await Assert.That(ResolveWith(" Port 65535\n").Port).IsEqualTo(65535);
+        await Assert.That(ResolveWith(" ObscureKeystrokeTiming interval:1\n").ObscureKeystrokeTiming).IsEqualTo(TimeSpan.FromMilliseconds(1));
+        await Assert.That(ResolveWith(" RequiredRsaSize 1024\n").RequiredRsaSize).IsEqualTo(1024);
+        await Assert.That(ResolveWith(" RequiredRsaSize 1023\n").RequiredRsaSize).IsNull(); // below what ssh accepts
+        await Assert.That(ResolveWith(" RequiredRsaSize 3072\n").RequiredRsaSize).IsEqualTo(3072);
+    }
+
+    [Test]
+    public async Task PreferredAuthentications_DropsEmptyEntries() =>
+        await Assert.That(ResolveWith(" PreferredAuthentications publickey,,password\n").PreferredAuthentications)
+            .IsEquivalentTo(new[] { "publickey", "password" });
+
+    [Test]
+    public async Task IdentityAgent_ALoneDollar_IsAPath_NotAVariable() =>
+        await Assert.That(ResolveWith(" IdentityAgent $\n").IdentityAgent).IsEqualTo("$");
+
+    [Test]
+    public async Task SetEnv_SkipsAnEntryWithoutAName()
+    {
+        // Not first: an '=' right after the keyword separates it from its arguments, as in ssh_config.
+        var env = ResolveWith(" SetEnv FOO=bar =nameless\n").SetEnv;
+        await Assert.That(env.Keys).IsEquivalentTo(new[] { "FOO" });
+    }
+
+    [Test]
+    public async Task ResolveAsync_GivesUp_WhenAConfigNeeds256Answers()
+    {
+        // Each Match exec command is a question of its own, and each answer takes a pass.
+        var config = SshConfig.Parse(string.Concat(Enumerable.Range(0, 256).Select(i => $"Match exec \"check {i}\"\n Port 2200\n")));
+        var options = new SshConfigResolveOptions
+        {
+            LocalUser = "alice",
+            HomeDirectory = "/home/alice",
+            ExecMatcher = (_, _) => ValueTask.FromResult(false),
+        };
+        await Assert.That(async () => await config.ResolveAsync("h", options)).Throws<InvalidOperationException>();
+        await Assert.That((await SshConfig.Parse(string.Concat(Enumerable.Range(0, 255).Select(i => $"Match exec \"check {i}\"\n Port 2200\n")))
+            .ResolveAsync("h", options)).Port).IsEqualTo(22);
+    }
+
+    [Test]
+    public async Task AddKeysToAgent_ConfirmAlone_AndMalformedValues()
+    {
+        await Assert.That(ResolveWith(" AddKeysToAgent confirm\n").AddKeysToAgent).IsEqualTo(new SshAgentKeyConstraints { Confirm = true });
+        await Assert.That(ResolveWith(" AddKeysToAgent yes 0\n").AddKeysToAgent).IsNull(); // a lifetime must be positive
+        await Assert.That(ResolveWith(" AddKeysToAgent yes 1h extra\n").AddKeysToAgent).IsNull();
+    }
 }

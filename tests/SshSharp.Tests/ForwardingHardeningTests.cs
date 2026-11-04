@@ -219,7 +219,8 @@ public class ForwardingHardeningTests
         }
 
         await cancel.CancelAsync();
-        await Assert.That(async () => await attempt).Throws<OperationCanceledException>();
+        // Bounded by time, not by a token: a token that ran out would be an OperationCanceledException too, and pass.
+        await Assert.That(async () => await attempt.WaitAsync(TimeSpan.FromSeconds(60))).Throws<OperationCanceledException>();
 
         // The client withdraws it (the cancel follows the request, so the server handles it after accepting).
         server.HoldForwardReplies!.SetResult();
@@ -251,7 +252,8 @@ public class ForwardingHardeningTests
         }
 
         await cancel.CancelAsync();
-        await Assert.That(async () => await attempt).Throws<OperationCanceledException>();
+        // Bounded by time, not by a token: a token that ran out would be an OperationCanceledException too, and pass.
+        await Assert.That(async () => await attempt.WaitAsync(TimeSpan.FromSeconds(60))).Throws<OperationCanceledException>();
         server.HoldForwardReplies!.SetResult();
         while (!server.CancelledRemoteForwards.Contains(7100) && DateTime.UtcNow < deadline)
         {

@@ -223,6 +223,7 @@ public sealed class SshSignature
     public override string ToString()
     {
         var base64 = Convert.ToBase64String(_blob);
+        // Stryker disable once Arithmetic : the capacity only saves the builder from growing; the text is the same whatever it is
         var text = new StringBuilder(BeginMarker.Length + EndMarker.Length + base64.Length + (base64.Length / 70) + 4);
         text.Append(BeginMarker).Append('\n');
         for (var i = 0; i < base64.Length; i += 70)
@@ -278,6 +279,7 @@ public sealed class SshSignature
         ArgumentException.ThrowIfNullOrEmpty(@namespace);
         if (hashAlgorithm is not ("sha256" or "sha512"))
         {
+            // Stryker disable once String : the message is for people
             throw new ArgumentException($"The hash algorithm must be sha512 or sha256, not '{hashAlgorithm}'.", nameof(hashAlgorithm));
         }
     }

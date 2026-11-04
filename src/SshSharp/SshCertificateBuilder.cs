@@ -79,6 +79,7 @@ public sealed class SshCertificateBuilder
 
         if (type is not (SshCertificateType.User or SshCertificateType.Host))
         {
+            // Stryker disable once String : the message is for people
             throw new ArgumentOutOfRangeException(nameof(type), type, "A certificate is a user or a host certificate.");
         }
 
@@ -309,6 +310,7 @@ public sealed class SshCertificateBuilder
 
     private List<KeyValuePair<string, string>> CheckExtensions()
     {
+        // Stryker disable once String : the message is for people
         var extensions = Sorted(Extensions, "extension");
         foreach (var (name, value) in extensions)
         {
@@ -374,11 +376,11 @@ public sealed class SshCertificateBuilder
         foreach (var entry in value.Split(','))
         {
             var slash = entry.IndexOf('/', StringComparison.Ordinal);
-            var address = slash < 0 ? entry : entry[..slash];
+            var address = slash == -1 ? entry : entry[..slash];
             // IPAddress also reads shortened IPv4 forms ("192.0.2"), which sshd does not: an IPv4 address has its four parts.
             var valid = IPAddress.TryParse(address, out var parsed) && !address.Contains('%', StringComparison.Ordinal)
                 && (parsed.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork || address.Count(c => c == '.') == 3);
-            if (valid && slash >= 0)
+            if (valid && slash != -1)
             {
                 var maxBits = parsed!.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork ? 32 : 128;
                 valid = int.TryParse(entry.AsSpan(slash + 1), NumberStyles.None, CultureInfo.InvariantCulture, out var bits) && bits <= maxBits;

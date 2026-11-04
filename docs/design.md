@@ -55,6 +55,21 @@ signatures (SSHSIG), typed exceptions, keep-alive, `ping@openssh.com` (`PingAsyn
 
 Out: server-side SSH, `ControlMaster` multiplexing, GSSAPI key exchange (`gssapi-keyex`), X11 forwarding (to be added if users ask).
 
+Planned and requested work is tracked in GitHub issues. Features that wait for a user to ask carry the `on request` label. The ideas
+below have no issue: none is planned, and each would need a reason first.
+
+- A managed ML-KEM fallback for .NET 8, or for platforms without ML-KEM: new managed crypto, so high risk.
+- X11 forwarding: untrusted by default, with a fake cookie in place of the real one as `ssh -X` does, and a threat-model section,
+  because a forwarded display can be read and typed into.
+- UMAC MACs: another managed primitive (the BCL has no UMAC) for algorithms that every server pairs with HMAC-SHA2.
+- A `ControlMaster` client for an existing `ControlPath`.
+- `SshSharp.Compat`: an SSH.NET-shaped package with synchronous wrappers.
+- In CI: Terrapin-Scanner in client mode (it overlaps the ssh-audit job), and more interop servers (Paramiko, wolfSSH, Bitvise).
+
+Decided against: SSH3 (its drafts expired), Ed448 and curve448, `tun` forwarding, a server side, SSHFP, SFTP versions 4 to 6, and
+plain `zlib` compression before authentication (the delayed `zlib@openssh.com` ships). Shipping the in-memory test server as a
+`SshSharp.Testing` package is not planned either.
+
 ## Packages
 
 | Package | Contents |
@@ -119,7 +134,7 @@ docs/                      # guides, design notes, the API reference site (DocFX
 
 - **Managed X25519/Ed25519** (X25519 only before .NET 11, or where the OS lacks it) is the riskiest code: it signs with users' long-term keys. The managed sntrup761 handles the
   post-quantum half of a key exchange. Both are checked against official vectors, reviewed for constant time with a
-  dudect-style timing test (`docs/crypto-review.md`), and await an outside review. The BCL is used wherever it
+  dudect-style timing test (`docs/crypto-review.md`), but not independently audited. The BCL is used wherever it
   provides the primitive on both target frameworks.
 - **`ssh_config` runs commands** (`Match exec`, `ProxyCommand`). Caller inputs are validated, `Match exec` is opt-in, and
   the threat model (`docs/threat-model.md`) records what is trusted.

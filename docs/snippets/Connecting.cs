@@ -233,6 +233,22 @@ internal static class Connecting
         // </address-family>
     }
 
+    public static async Task StaggeredConnectAsync(IReadOnlyList<SshPrivateKey> keys, SshHostKeyVerifier verifier, CancellationToken cancellationToken)
+    {
+        // <staggered-connect>
+        // The server's addresses are raced, RFC 8305 style: each has 250 ms to connect before the next is tried too, and the first
+        // connection made is used. A broken IPv6 route then costs 250 ms, not the system's connect timeout.
+        await using var client = await SshClient.ConnectAsync("example.com", 22, new SshClientOptions
+        {
+            UserName = "deploy",
+            PrivateKeys = keys,
+            HostKeyVerifier = verifier,
+            StaggeredConnectDelay = TimeSpan.FromMilliseconds(250), // RFC 8305's recommendation; null (the default) tries them in order
+            ConnectTimeout = TimeSpan.FromSeconds(15),
+        }, cancellationToken);
+        // </staggered-connect>
+    }
+
     public static SshHostKeyVerifier VerifierFromConfig()
     {
         // <verifier-from-config>
