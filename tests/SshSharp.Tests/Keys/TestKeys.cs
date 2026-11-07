@@ -63,7 +63,12 @@ internal static class TestKeys
     public static string OpenSshRsa(int bits, out byte[] publicBlob)
     {
         using var rsa = RSA.Create(bits);
-        var p = rsa.ExportParameters(true);
+        return OpenSshRsa(rsa.ExportParameters(true), out publicBlob);
+    }
+
+    /// <summary>An unencrypted OpenSSH RSA key with exactly these parts, consistent or not (for tests of what the parser refuses).</summary>
+    public static string OpenSshRsa(RSAParameters p, out byte[] publicBlob)
+    {
         publicBlob = Blob(w => { w.WriteString("ssh-rsa"); w.WriteMpint(p.Exponent); w.WriteMpint(p.Modulus); });
         return OpenSsh(publicBlob, w =>
         {
