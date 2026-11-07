@@ -123,6 +123,18 @@ internal static class ProcessTree
         }
     }
 
+    /// <summary>
+    /// Kills what a command started by <see cref="Start"/> left running after it exited: every live process carrying its mark. No tree
+    /// is walked, since the command's pid may already be another process's.
+    /// </summary>
+    public static void SweepAfterExit(Process process)
+    {
+        if (Tags.TryGetValue(process, out var tag))
+        {
+            Sweep(tag);
+        }
+    }
+
     /// <summary>The bytes <see cref="Tagged"/> looks for: the variable, its value and the NUL that ends them.</summary>
     internal static byte[] Tag(string value) => Encoding.ASCII.GetBytes(TagVariable + "=" + value + "\0");
 

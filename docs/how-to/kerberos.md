@@ -33,7 +33,7 @@ Host build
 
 ## Notes and pitfalls
 
-- **.NET 10 only.** It relies on `NegotiateAuthentication.ComputeIntegrityCheck`, which .NET 8 lacks. Check
+- **.NET 10 and later.** It relies on `NegotiateAuthentication.ComputeIntegrityCheck`, which .NET 8 lacks. Check
   `SshGssapiOptions.IsSupported`; on .NET 8 the method is not offered and the others are tried.
 - **Order.** When on, Kerberos is tried first (as in `ssh`'s default order), and only if the server offers it. If it fails (no
   ticket, an unknown service principal), the other methods follow.

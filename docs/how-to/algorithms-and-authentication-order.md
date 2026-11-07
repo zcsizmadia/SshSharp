@@ -123,7 +123,7 @@ replacing the key.
   example `Only` with a cipher `FipsMode` excludes) throws `ArgumentException` before anything is sent.
 - **FIPS mode still applies.** With `FipsMode = true`, the algorithms it excludes are removed from your transport lists too (not from `PubkeyAcceptedAlgorithms`); see
   [FIPS mode](fips-mode.md).
-- **ML-KEM needs the platform.** The `mlkem*` methods are accepted everywhere but offered only on .NET 10 with platform ML-KEM, so
+- **ML-KEM needs the platform.** The `mlkem*` methods are accepted everywhere but offered only on .NET 10 and later with platform ML-KEM, so
   the same options work on .NET 8.
 - **Host certificates.** When the host key verifier trusts a certificate authority for the host, the certificate versions of the
   allowed host key algorithms are asked for first, as `ssh` does, with the defaults or an `Append` or `Remove` list (whose patterns

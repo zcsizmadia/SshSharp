@@ -117,10 +117,10 @@ internal abstract class ClientKeyExchange : IDisposable
 /// <summary><c>curve25519-sha256</c> (RFC 8731).</summary>
 internal sealed class Curve25519KeyExchange : ClientKeyExchange
 {
-    private readonly byte[] _privateKey = RandomNumberGenerator.GetBytes(X25519.KeySize);
-    private readonly byte[] _publicKey = new byte[X25519.KeySize];
+    private readonly X25519KeyPair _key = X25519KeyPair.Generate();
+    private readonly byte[] _publicKey;
 
-    public Curve25519KeyExchange() => X25519.GetPublicKey(_privateKey, _publicKey);
+    public Curve25519KeyExchange() => _publicKey = _key.PublicKey.ToArray();
 
     public override HashAlgorithmName Hash => HashAlgorithmName.SHA256;
 
@@ -143,7 +143,7 @@ internal sealed class Curve25519KeyExchange : ClientKeyExchange
         }
 
         var shared = new byte[X25519.KeySize];
-        if (!X25519.TryAgree(_privateKey, serverPublic, shared))
+        if (!_key.TryAgree(serverPublic, shared))
         {
             throw new SshException(SshFailureReason.KeyExchangeFailed, "The server sent a low-order Curve25519 point.");
         }
@@ -162,10 +162,7 @@ internal sealed class Curve25519KeyExchange : ClientKeyExchange
         }
     }
 
-    public override void Dispose()
-    {
-        CryptographicOperations.ZeroMemory(_privateKey);
-    }
+    public override void Dispose() => _key.Dispose();
 }
 
 /// <summary><c>ecdh-sha2-nistp256/384/521</c> (RFC 5656).</summary>
@@ -332,13 +329,13 @@ internal sealed class DhKeyExchange : ClientKeyExchange
 internal sealed class Sntrup761X25519KeyExchange : ClientKeyExchange
 {
     private readonly byte[] _secretKey = new byte[Sntrup761.SecretKeySize];
-    private readonly byte[] _privateKey = RandomNumberGenerator.GetBytes(X25519.KeySize);
+    private readonly X25519KeyPair _key = X25519KeyPair.Generate();
     private readonly byte[] _clientInit = new byte[Sntrup761.PublicKeySize + X25519.KeySize];
 
     public Sntrup761X25519KeyExchange()
     {
         Sntrup761.GenerateKeyPair(_clientInit.AsSpan(0, Sntrup761.PublicKeySize), _secretKey);
-        X25519.GetPublicKey(_privateKey, _clientInit.AsSpan(Sntrup761.PublicKeySize));
+        _key.PublicKey.CopyTo(_clientInit.AsSpan(Sntrup761.PublicKeySize));
     }
 
     public override HashAlgorithmName Hash => HashAlgorithmName.SHA512;
@@ -368,7 +365,7 @@ internal sealed class Sntrup761X25519KeyExchange : ClientKeyExchange
         try
         {
             Sntrup761.Decapsulate(secrets.AsSpan(0, Sntrup761.SharedSecretSize), serverReply.AsSpan(0, Sntrup761.CiphertextSize), _secretKey);
-            if (!X25519.TryAgree(_privateKey, serverReply.AsSpan(Sntrup761.CiphertextSize), secrets.AsSpan(Sntrup761.SharedSecretSize)))
+            if (!_key.TryAgree(serverReply.AsSpan(Sntrup761.CiphertextSize), secrets.AsSpan(Sntrup761.SharedSecretSize)))
             {
                 throw new SshException(SshFailureReason.KeyExchangeFailed, "The server sent a low-order Curve25519 point.");
             }
@@ -390,7 +387,7 @@ internal sealed class Sntrup761X25519KeyExchange : ClientKeyExchange
     public override void Dispose()
     {
         CryptographicOperations.ZeroMemory(_secretKey);
-        CryptographicOperations.ZeroMemory(_privateKey);
+        _key.Dispose();
     }
 }
 
@@ -407,14 +404,14 @@ internal sealed class MlKem768X25519KeyExchange : ClientKeyExchange
     private const int CiphertextSize = 1088;
 
     private readonly MLKem _mlkem = MLKem.GenerateKey(MLKemAlgorithm.MLKem768);
-    private readonly byte[] _privateKey = RandomNumberGenerator.GetBytes(X25519.KeySize);
+    private readonly X25519KeyPair _key = X25519KeyPair.Generate();
     private readonly byte[] _clientInit;
 
     public MlKem768X25519KeyExchange()
     {
         _clientInit = new byte[EncapsulationKeySize + X25519.KeySize];
         _mlkem.ExportEncapsulationKey(_clientInit.AsSpan(0, EncapsulationKeySize));
-        X25519.GetPublicKey(_privateKey, _clientInit.AsSpan(EncapsulationKeySize));
+        _key.PublicKey.CopyTo(_clientInit.AsSpan(EncapsulationKeySize));
     }
 
     public override HashAlgorithmName Hash => HashAlgorithmName.SHA256;
@@ -451,7 +448,7 @@ internal sealed class MlKem768X25519KeyExchange : ClientKeyExchange
                 throw new SshException(SshFailureReason.KeyExchangeFailed, $"ML-KEM decapsulation failed: {ex.Message}", ex);
             }
 
-            if (!X25519.TryAgree(_privateKey, serverReply.AsSpan(CiphertextSize), secrets.AsSpan(32)))
+            if (!_key.TryAgree(serverReply.AsSpan(CiphertextSize), secrets.AsSpan(32)))
             {
                 throw new SshException(SshFailureReason.KeyExchangeFailed, "The server sent a low-order Curve25519 point.");
             }
@@ -473,7 +470,7 @@ internal sealed class MlKem768X25519KeyExchange : ClientKeyExchange
     public override void Dispose()
     {
         _mlkem.Dispose();
-        CryptographicOperations.ZeroMemory(_privateKey);
+        _key.Dispose();
     }
 }
 

@@ -119,6 +119,35 @@ public class ProcessTreeTests
     }
 
     [Test]
+    public async Task SweepAfterExit_EndsWhatTheCommandLeftRunning_AndNoOtherCommandsProcesses()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            Skip.Test("Windows uses .NET's own tree kill, which needs no mark.");
+            return;
+        }
+
+        var (first, firstOrphan) = await StartWithOrphanAsync();
+        var (second, secondOrphan) = await StartWithOrphanAsync();
+        using (first)
+        using (second)
+        {
+            try
+            {
+                ProcessTree.SweepAfterExit(first);
+
+                await Assert.That(await GoneWithinAsync(firstOrphan)).IsTrue();
+                await Assert.That(IsRunning(secondOrphan)).IsTrue();
+            }
+            finally
+            {
+                KillIfRunning(firstOrphan);
+                KillIfRunning(secondOrphan);
+            }
+        }
+    }
+
+    [Test]
     public async Task Start_MarksEachCommandWithAValueOfItsOwn()
     {
         if (OperatingSystem.IsWindows())

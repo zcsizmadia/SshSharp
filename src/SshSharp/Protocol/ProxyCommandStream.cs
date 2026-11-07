@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using SshSharp.Config;
 
 namespace SshSharp.Protocol;
 
@@ -45,6 +46,7 @@ internal sealed class ProxyCommandStream : Stream
             info.ArgumentList.Add("exec " + command);
         }
 
+        ChildProcess.InheritStandardStreamsOnly(info);
         var process = ProcessTree.Start(info) ?? throw new SshException(SshFailureReason.ConnectFailed, "The ProxyCommand could not be started.");
         process.ErrorDataReceived += static (_, _) => { };
         process.BeginErrorReadLine();
@@ -92,7 +94,7 @@ internal sealed class ProxyCommandStream : Stream
             {
                 if (!_process.HasExited)
                 {
-                    ProcessTree.Kill(_process);
+                    ChildProcess.Stop(_process); // SIGTERM first where there are signals, so the command can close its connection
                 }
             }
             catch (InvalidOperationException)
