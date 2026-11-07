@@ -453,12 +453,16 @@ public sealed class SshCertificate
     /// <summary>
     /// Checks the certificate as a host's (<see cref="IsValidFor"/> with <see cref="SshCertificateType.Host"/>, for an authority the caller
     /// already matched). Returns why it is not acceptable, or null. As OpenSSH's client: a certificate without principals is no host's
-    /// (not any host's, which would let a key its authority certified by mistake pose as every host).
+    /// (not any host's, which would let a key its authority certified by mistake pose as every host). The reason does not name the host,
+    /// as ssh's does not ("name is not a listed principal"), so it can be logged.
     /// </summary>
-    internal string? CheckForHost(string hostName, DateTimeOffset now) => Check(SshCertificateType.Host, hostName, now);
+    internal string? CheckForHost(string hostName, DateTimeOffset now) => Check(SshCertificateType.Host, hostName, now, namePrincipal: false);
 
-    /// <summary>The checks of <see cref="IsValidFor"/> after the authority: why the certificate is not acceptable, or null.</summary>
-    private string? Check(SshCertificateType type, string principal, DateTimeOffset time)
+    /// <summary>
+    /// The checks of <see cref="IsValidFor"/> after the authority: why the certificate is not acceptable, or null. The reason names the
+    /// principal unless <paramref name="namePrincipal"/> is false.
+    /// </summary>
+    private string? Check(SshCertificateType type, string principal, DateTimeOffset time, bool namePrincipal = true)
     {
         if (Type != type)
         {
@@ -486,7 +490,7 @@ public sealed class SshCertificate
             : Principals.Contains(principal, StringComparer.Ordinal);
         if (!matches)
         {
-            return $"it is not issued for {principal}";
+            return namePrincipal ? $"it is not issued for {principal}" : "it is not issued for the name connected to (the host name, or HostKeyAlias)";
         }
 
         return CriticalOptions.Count > 0 ? $"it has critical options this check cannot enforce ({string.Join(", ", CriticalOptions.Keys)})" : null;

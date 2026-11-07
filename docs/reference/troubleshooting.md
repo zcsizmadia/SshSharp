@@ -122,6 +122,13 @@ With `StrictHostKeyChecking.Yes`, an unknown host is refused. Add its key (compa
 The server presented a different key than `known_hosts` has. It may be a reinstalled server, or an interception. Find out which
 before removing the old line (`ssh-keygen -R host`). `UpdateHostKeys` avoids this for planned rotations.
 
+### `HostKeyRejected`: "The host certificate ... could not be used either"
+
+A trusted authority signed the server's certificate, but it is expired, not yet valid, or not issued for the name you connected to
+(an IP address or a short name, say). As `ssh` does, the key was then checked as a plain key, and `known_hosts` has no line for it.
+Renew the certificate or add the name to its principals, connect by a name it lists, or add the host's plain key. See
+[Host certificates that cannot be used](../host-keys.md#host-certificates-that-cannot-be-used).
+
 ### Over a stream: "There is no host name to look up in known_hosts"
 
 A connection over your own `Stream` has no host name. Set `SshClientOptions.HostKeyAlias`.

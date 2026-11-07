@@ -40,8 +40,10 @@ A host certificate lets clients trust every server the CA signed, without a `kno
 @cert-authority *.example.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA...
 ```
 
-`KnownHostsVerifier` then accepts a host certificate from that CA for matching host names, within its validity period. To apply
-your own rules, see the [custom verifier](verify-host-keys.md#write-a-verifier).
+`KnownHostsVerifier` then accepts a host certificate from that CA for matching host names, within its validity period. A
+certificate that cannot be used (expired, or not issued for the name connected to) is logged as a warning, and its key is checked
+as a plain key, as `ssh` does: see [Host certificates that cannot be used](../host-keys.md#host-certificates-that-cannot-be-used).
+To apply your own rules, see the [custom verifier](verify-host-keys.md#write-a-verifier).
 
 ## Check a certificate
 

@@ -266,19 +266,77 @@ public sealed class CertificateTests : IDisposable
     }
 
     [Test]
-    public async Task ATrustedAuthority_ButAWrongPrincipalOrAnExpiredCertificate_IsRefused()
+    public async Task ATrustedAuthority_ButAWrongPrincipalOrAnExpiredCertificate_IsRefused_WhenItsKeyIsNotKnown()
     {
         File.WriteAllText(KnownHosts, AuthorityLine("*.example.com"));
         await using (var server = new FakeSessionServer(WithHostCertificate(FakeHostKey.Ed25519(), principals: ["other.example.com"])))
         {
             var ex = await Assert.ThrowsAsync<SshHostKeyException>(async () => await ConnectAsync(server));
-            await Assert.That(ex!.Message).Contains("not issued for srv.example.com");
+            await Assert.That(ex!.Message).Contains("not in known_hosts").And.Contains("not issued for the name connected to");
         }
 
         await using (var server = new FakeSessionServer(WithHostCertificate(FakeHostKey.Ed25519(), before: DateTimeOffset.UtcNow.AddMinutes(-5))))
         {
             var ex = await Assert.ThrowsAsync<SshHostKeyException>(async () => await ConnectAsync(server));
             await Assert.That(ex!.Message).Contains("valid only");
+        }
+    }
+
+    [Test]
+    public async Task AnExpiredCertificateFromATrustedAuthority_ConnectsByItsKnownPlainKey_AndLogsAWarning()
+    {
+        // As ssh: the certificate proves nothing once expired, so its key is checked as a plain key, which known_hosts has.
+        var key = FakeHostKey.Ed25519();
+        File.WriteAllText(KnownHosts, AuthorityLine("*.example.com") + $"{Host} {key.KeyType} {Convert.ToBase64String(key.Blob)}\n");
+        await using var server = new FakeSessionServer(WithHostCertificate(key, before: DateTimeOffset.UtcNow.AddMinutes(-5)));
+        _ = server.StartAsync();
+        var logger = new WarningLogger();
+        await using var client = await SshClient.ConnectAsync(server.ClientStream, new SshClientOptions
+        {
+            UserName = "tester",
+            Password = TestSecrets.Password,
+            HostKeyAlias = Host,
+            HostKeyVerifier = new KnownHostsVerifier([KnownHosts]) { Policy = StrictHostKeyChecking.Yes },
+            Logger = logger,
+        }, leaveOpen: true, Timeout());
+
+        await Assert.That(client.HostKey.Certificate).IsNotNull();
+        await Assert.That(client.HostKey.PublicKey.ToArray()).IsEquivalentTo(key.Blob);
+        var warning = logger.Warnings.Single(w => w.Contains("cannot be used", StringComparison.Ordinal));
+        await Assert.That(warning).Contains("valid only").And.Contains(client.HostKey.Fingerprint).And.DoesNotContain(Host);
+    }
+
+    /// <summary>Collects warnings.</summary>
+    private sealed class WarningLogger : Microsoft.Extensions.Logging.ILogger
+    {
+        private readonly List<string> _warnings = [];
+
+        public IReadOnlyList<string> Warnings
+        {
+            get
+            {
+                lock (_warnings)
+                {
+                    return [.. _warnings];
+                }
+            }
+        }
+
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull => null;
+
+        public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => true;
+
+        public void Log<TState>(Microsoft.Extensions.Logging.LogLevel logLevel, Microsoft.Extensions.Logging.EventId eventId, TState state, Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            if (logLevel == Microsoft.Extensions.Logging.LogLevel.Warning)
+            {
+                lock (_warnings)
+                {
+                    _warnings.Add(formatter(state, exception));
+                }
+            }
         }
     }
 

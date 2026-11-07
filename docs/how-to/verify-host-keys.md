@@ -76,7 +76,9 @@ being connected to:
 
 [!code-csharp[](../snippets/HostKeys.cs#custom)]
 
-With `known_hosts`, the same is a single line: `@cert-authority *.example.com ssh-ed25519 AAAA...`.
+With `known_hosts`, a single line trusts the same authority: `@cert-authority *.example.com ssh-ed25519 AAAA...`. Unlike this
+verifier, `KnownHostsVerifier` then checks a certificate that cannot be used (expired, or for another name) as its plain key, as
+`ssh` does ([Host certificates that cannot be used](../host-keys.md#host-certificates-that-cannot-be-used)).
 
 ## Get a new server's keys
 
