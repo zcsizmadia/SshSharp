@@ -110,7 +110,7 @@ internal sealed class SshConfigResolver(IReadOnlyList<SshConfigDocument> documen
                 path = Path.Join(directory, path);
             }
 
-            IEnumerable<string> files = Glob.HasWildcards(path) ? Glob.ExpandFiles(path) : File.Exists(path) ? [path] : [];
+            IEnumerable<string> files = Glob.HasWildcards(path) ? Glob.ExpandFiles(path) : Glob.Exists(path, directory: false) ? [path] : [];
             foreach (var file in files)
             {
                 if (++_includedFiles > MaxIncludedFiles)

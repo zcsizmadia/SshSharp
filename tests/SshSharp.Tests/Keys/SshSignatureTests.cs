@@ -417,6 +417,35 @@ public class SshSignatureTests
     }
 
     [Test]
+    public async Task AllowedSigners_RefuseACertificateItsAuthoritySignedWithSha1()
+    {
+        // As OpenSSH 10.6p2 (9327423571): a cert-authority line does not vouch for a certificate the authority signed with ssh-rsa
+        // (SHA-1), whatever the authority's key; the same certificate signed with rsa-sha2-256 is accepted.
+        using var rsa = System.Security.Cryptography.RSA.Create(2048);
+        using var authority = SshPrivateKey.Parse(TestKeys.OpenSshRsa(rsa.ExportParameters(true), out _));
+        using var key = Generate(SshKeyType.Ed25519, 0);
+        var signers = SshAllowedSigners.Parse($"*@example.com cert-authority {KeyText(authority)}\n");
+        var sha2 = TestKeys.Certificate(authority, key.PublicKey.ToArray(), SshCertificateType.User, ["dev@example.com"], authorityAlgorithm: "rsa-sha2-256");
+
+        // The same body, its signature replaced by one over the same bytes with SHA-1 (which this library's keys refuse to make).
+        const int sha2SignatureField = 4 + 4 + 12 + 4 + 256; // string(string("rsa-sha2-256") + string(256-byte signature))
+        var body = sha2[..^sha2SignatureField];
+        var sha1 = rsa.SignData(body, System.Security.Cryptography.HashAlgorithmName.SHA1, System.Security.Cryptography.RSASignaturePadding.Pkcs1);
+        byte[] signatureBlob = [.. Length(7), .. "ssh-rsa"u8, .. Length(sha1.Length), .. sha1];
+        byte[] sha1Certificate = [.. body, .. Length(signatureBlob.Length), .. signatureBlob];
+
+        async Task<bool> AcceptedAsync(byte[] certificate)
+        {
+            using var certified = key.WithCertificate(SshCertificate.Parse(TestKeys.CertificateLine(certificate)));
+            var signature = await SshSignature.SignAsync(certified, Message, "git");
+            return signers.Verify(signature, "dev@example.com", Message, "git");
+        }
+
+        await Assert.That(await AcceptedAsync(sha2)).IsTrue();
+        await Assert.That(await AcceptedAsync(sha1Certificate)).IsFalse();
+    }
+
+    [Test]
     [Arguments("namespaces=\"git\",namespaces=\"file\"")]
     [Arguments("valid-after=\"20260101\",valid-after=\"20270101\"")]
     [Arguments("valid-before=\"20260101\",VALID-BEFORE=\"20270101\"")]

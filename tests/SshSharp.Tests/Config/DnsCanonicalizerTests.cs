@@ -150,6 +150,19 @@ public sealed class DnsCanonicalizerTests
     }
 
     [Test]
+    public async Task ACnameInCapitals_CannotSlipPastANegatedTarget_AndIsFollowedLowercased()
+    {
+        // As OpenSSH 10.6p2 (42751c85c5): the target is matched without regard to case, so a DNS answer in capitals cannot evade a
+        // negated pattern, and the name connected to is lowercase.
+        const string Rule = "CanonicalizePermittedCNAMEs *.corp.example.com:!evil.example.net,*.example.net\n";
+        var evil = new FakeDns(("web.corp.example.com.", "EVIL.example.net"));
+        await Assert.That((await ResolveAsync(Canonicalize + Rule, "web", evil)).HostName).IsEqualTo("web.corp.example.com");
+
+        var fine = new FakeDns(("web.corp.example.com.", "LB-7.CDN.Example.NET"));
+        await Assert.That((await ResolveAsync(Canonicalize + Rule, "web", fine)).HostName).IsEqualTo("lb-7.cdn.example.net");
+    }
+
+    [Test]
     public async Task WithoutACanonicalName_TheNameIsKeptAsFound()
     {
         // A resolver that reports the name itself (no CNAME, or a platform that does not say).
