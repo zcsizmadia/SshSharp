@@ -1,3 +1,6 @@
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+
 namespace SshSharp;
 
 /// <summary>What a <see cref="SshHostKeyVerifier"/> is asked to decide: which host this is and the key it proved it holds.</summary>
@@ -28,6 +31,9 @@ public sealed class SshHostKeyContext
     /// otherwise the host and port. Null when neither is known.
     /// </summary>
     public KnownHostsLookup? KnownHostsLookup => HostKeyAlias is { } alias ? new(alias, 22) : Host is { } host ? new(host, Port) : null;
+
+    /// <summary>The connection's logger (<see cref="SshClientOptions.Logger"/>), for what a built-in verifier reports without refusing.</summary>
+    internal ILogger Logger { get; init; } = NullLogger.Instance;
 }
 
 /// <summary>The name and port a host key is looked up under in <c>known_hosts</c> (see <see cref="SshHostKeyContext.KnownHostsLookup"/>).</summary>

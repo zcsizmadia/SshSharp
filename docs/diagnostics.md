@@ -57,7 +57,9 @@ var options = new SshClientOptions
 };
 ```
 
-Information: connected (algorithms and host key fingerprint), authenticated (method), identity files and agent keys that
+Warning, among others: a host key that was not accepted, and a host certificate from a trusted authority that cannot be used
+(expired, or not issued for the name connected to), whose key is then checked as a plain key; both name fingerprints, never the
+host. Information: connected (algorithms and host key fingerprint), authenticated (method), identity files and agent keys that
 were skipped, host keys recorded by `UpdateHostKeys`, forwardings started (never with a socket path), connection attempts that will be tried again (`ConnectionAttempts`). Debug: key exchanges, rekeys, channels, sessions, authentication
 attempts. Logs never contain passwords, private keys, command text or user names. An agent that cannot be reached is logged
 without its socket or pipe path, which can hold the user's name (Pageant's pipe does): a system error shows as its type or socket

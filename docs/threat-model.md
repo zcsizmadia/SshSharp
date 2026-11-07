@@ -105,6 +105,15 @@ A man in the middle can read, change, drop and inject bytes. The server itself m
   line of a type it never accepts (DSA, or one it does not know) is skipped, as OpenSSH skips it, since no key it could name is ever
   accepted. The KRL parser is bounded (16 MiB files, 1 MiB per serial bitmap) and fuzzed. KRL signatures are not verified: the file
   is local configuration, trusted like `known_hosts`. Refusals name the directive (`RevokedHostKeys`), not the file's path.
+- **Host certificates (`@cert-authority`):** a certificate is trusted only when an `@cert-authority` line for the host lists its
+  authority and it is valid now, for the name connected to (or `HostKeyAlias`), with a valid signature and no critical options.
+  One that fails those checks proves nothing, and, as in `ssh` (`check_host_key`: "Retry with plain key"), its certified key is
+  then checked as a plain key with the `StrictHostKeyChecking` rules, as for a certificate from an authority that is not listed:
+  a plain `known_hosts` line accepts it, `Yes` refuses it, and `AcceptNew`, `No` and an accepted `Ask` record the plain key, never
+  the certificate. This trusts nothing a plain key would not be trusted for: the server still proved it holds that key, and the
+  certificate adds nothing. The unusable certificate is logged as a warning with the key's and the authority's fingerprints and
+  the problem, never the host name or the key id (often a host name). A certificate whose key or authority is revoked
+  (`@revoked`, `RevokedHostKeys`) is refused outright, with no fallback.
 
 ### Compression
 

@@ -53,6 +53,10 @@ public sealed class SshHostKeyPrompt
 /// <item>An unknown key is refused (<see cref="StrictHostKeyChecking.Yes"/>), offered to <see cref="AskHostKey"/>, or recorded and trusted
 /// (<see cref="StrictHostKeyChecking.AcceptNew"/>, <see cref="StrictHostKeyChecking.No"/>). AcceptNew refuses it when keys of other types
 /// are already recorded for the host, so a man in the middle cannot get a weaker key type accepted silently.</item>
+/// <item>A host certificate from an <c>@cert-authority</c> for the host is trusted while it is valid for the host. One that cannot be used
+/// (expired, not yet valid, not issued for the name connected to) is logged as a warning, and its key is then checked as a plain key by
+/// the rules above, as ssh does; so is a certificate from no listed authority. A certificate whose key or authority is <c>@revoked</c>
+/// is refused.</item>
 /// </list>
 /// New keys are appended to the first user file. The file is rewritten only by <see cref="UpdateHostKeys"/>, to remove keys the server no longer announces.
 /// </summary>
@@ -273,13 +277,36 @@ public sealed class KnownHostsVerifier : SshHostKeyVerifier
             return refusal;
         }
 
-        if (context.HostKey.Certificate is { } certificate
-            && await VerifyCertificateAsync(certificate, context.HostKey, name, port, cancellationToken).ConfigureAwait(false) is { } certificateVerdict)
+        string? unusable = null;
+        if (context.HostKey.Certificate is { } certificate)
         {
-            return certificateVerdict;
+            var (certificateVerdict, problem) = await VerifyCertificateAsync(certificate, context.HostKey, name, port, cancellationToken).ConfigureAwait(false);
+            if (certificateVerdict is { } verdict)
+            {
+                return verdict;
+            }
+
+            if (problem is not null)
+            {
+                // As ssh's check_host_key ("No matching CA found. Retry with plain key"): a trusted authority's certificate that cannot be
+                // used (expired, or not issued for this name) is not a refusal, only a certificate that proves nothing. The key it
+                // certifies is checked as a plain key below, and the problem is said when that refuses it too.
+                SshLog.HostCertificateUnusable(context.Logger, context.HostKey.Fingerprint, certificate.AuthorityFingerprint, problem);
+                unusable = $"The host certificate (key id '{certificate.KeyId}', authority {certificate.AuthorityFingerprint}) could not be used either: {problem}.";
+            }
         }
 
-        // No trusted authority for the certificate: like ssh, check the certified key as a plain key.
+        var plain = await VerifyPlainKeyAsync(context, name, port, cancellationToken).ConfigureAwait(false);
+        return plain.IsAccepted || unusable is null ? plain : SshHostKeyVerdict.Reject($"{plain.Reason} {unusable}");
+    }
+
+    /// <summary>
+    /// Checks the key as a plain key, with the <c>StrictHostKeyChecking</c> policy: a host key, or the key a host certificate certifies
+    /// when no listed authority signed the certificate or the certificate cannot be used. Like ssh, that key (never the certificate) is
+    /// what an accepted unknown key records.
+    /// </summary>
+    private async ValueTask<SshHostKeyVerdict> VerifyPlainKeyAsync(SshHostKeyContext context, string name, int port, CancellationToken cancellationToken)
+    {
         var key = context.HostKey;
         var revoked = false;
         var matched = false;
@@ -346,11 +373,13 @@ public sealed class KnownHostsVerifier : SshHostKeyVerifier
     }
 
     /// <summary>
-    /// Checks a host certificate against the <c>@cert-authority</c> lines for the host. Returns null when no listed authority signed it
-    /// (the caller then falls back to the plain key), or the verdict: trusted, or refused with the reason.
+    /// Checks a host certificate against the <c>@cert-authority</c> and <c>@revoked</c> lines for the host. Returns the verdict when there
+    /// is one: trusted, or refused because the certificate's key or authority is revoked. Otherwise the caller falls back to the plain key,
+    /// as ssh does: when no listed authority signed the certificate, or when one did but the certificate cannot be used (the problem, which
+    /// does not name the host).
     /// </summary>
-    private async ValueTask<SshHostKeyVerdict?> VerifyCertificateAsync(SshCertificate certificate, SshHostKey presented, string name, int port,
-        CancellationToken cancellationToken)
+    private async ValueTask<(SshHostKeyVerdict? Verdict, string? Problem)> VerifyCertificateAsync(SshCertificate certificate, SshHostKey presented,
+        string name, int port, CancellationToken cancellationToken)
     {
         var trusted = false;
         await foreach (var file in SourcesAsync(name, port, "HOSTNAME", presented, asCertificate: true, cancellationToken).ConfigureAwait(false))
@@ -360,7 +389,7 @@ public sealed class KnownHostsVerifier : SshHostKeyVerifier
                 var isAuthority = entry.PublicKey.Span.SequenceEqual(certificate.AuthorityKey.Span);
                 if (entry.Marker == KnownHostsMarker.Revoked && (isAuthority || entry.PublicKey.Span.SequenceEqual(certificate.PublicKey.Span)))
                 {
-                    return SshHostKeyVerdict.Reject($"The host certificate's {(isAuthority ? "authority" : "key")} is marked @revoked in known_hosts.");
+                    return (SshHostKeyVerdict.Reject($"The host certificate's {(isAuthority ? "authority" : "key")} is marked @revoked in known_hosts."), null);
                 }
 
                 trusted |= entry.Marker == KnownHostsMarker.CertAuthority && isAuthority;
@@ -369,12 +398,10 @@ public sealed class KnownHostsVerifier : SshHostKeyVerifier
 
         if (!trusted)
         {
-            return null;
+            return (null, null);
         }
 
-        return certificate.CheckForHost(name, Clock.GetUtcNow()) is { } problem
-            ? SshHostKeyVerdict.Reject($"The host certificate (key id '{certificate.KeyId}', authority {certificate.AuthorityFingerprint}) is not acceptable: {problem}.")
-            : SshHostKeyVerdict.Accept();
+        return certificate.CheckForHost(name, Clock.GetUtcNow()) is { } problem ? (null, problem) : (SshHostKeyVerdict.Accept(), null);
     }
 
     /// <summary>
