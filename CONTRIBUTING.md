@@ -62,6 +62,19 @@ The site is written to `docs/_site`, which is not committed. On a pull request, 
 Public API changes are tracked by the PublicAPI analyzers: add new members to the project's `PublicAPI.Unshipped.txt`. Package
 validation checks each package against the last release, so 1.x changes must be additive.
 
+## Target frameworks
+
+The projects take their target frameworks from two properties in `Directory.Build.props`, not from each project file:
+`SshSharpTargetFrameworks` for the packages, the tests and the benchmarks, and `SshSharpAppTargetFramework` for the samples, the doc
+snippets, the AOT smoke test and the fuzzer. Adding a .NET version, after it is GA:
+
+- add it to `SshSharpTargetFrameworks` (and move `SshSharpAppTargetFramework` to it if the apps should follow);
+- update the SDK in `global.json`, and the runtimes `.github/actions/setup-dotnet` installs beside it;
+- add its test steps to `ci.yml` and `publish.yml`, and its framework to the stress loop in `stress.yml`;
+- add its skip baselines in `tests/ci/skips` (`unit-<os>-<tfm>.txt`), copied from the previous version's and then trimmed;
+- put code that needs it behind `#if NETxx_0_OR_GREATER` with a working fallback, and update the README badge and the docs that list
+  the supported runtimes.
+
 ## Tests
 
 New behavior needs tests in `tests/SshSharp.Tests`. Interop tests against real servers run in CI.
