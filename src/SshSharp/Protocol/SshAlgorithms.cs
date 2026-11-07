@@ -224,6 +224,7 @@ internal static class SshAlgorithms
         {
             AlgorithmKind.Kex => FipsKex.Contains(n),
             AlgorithmKind.HostKey => FipsHostKeys.Contains(SshCertificate.BaseAlgorithm(n)), // a certificate is as approved as its key
+            AlgorithmKind.CASignature => FipsHostKeys.Contains(n), // an authority vouches for a host as a host key does: the same rule
             AlgorithmKind.Cipher => Ciphers.TryGetValue(n, out var c) && c.IsFipsApproved,
             AlgorithmKind.Mac => Macs.TryGetValue(n, out var m) && m.IsFipsApproved,
             _ => true,

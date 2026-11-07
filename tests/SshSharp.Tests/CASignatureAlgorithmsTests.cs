@@ -135,13 +135,15 @@ public sealed class CASignatureAlgorithmsTests : IDisposable
             await Assert.That(error!.Message).Contains($"'{refused}' is not a CA signature algorithm SshSharp supports");
         }
 
-        // FIPS mode does not narrow it: it governs what is negotiated, not who signed a certificate.
+        // FIPS mode narrows it as it narrows the host keys: no Ed25519 authority.
+        string[] fips = ["ecdsa-sha2-nistp256", "ecdsa-sha2-nistp384", "ecdsa-sha2-nistp521", "rsa-sha2-512", "rsa-sha2-256"];
         await Assert.That(AlgorithmPreferences.FromOptions(new SshClientOptions
         {
             UserName = "tester",
             HostKeyVerifier = SshHostKeyVerifier.Pinned("SHA256:unused"),
             FipsMode = true,
-        }).CASignatures).IsEquivalentTo(BuiltIn);
+        }).CASignatures).IsEquivalentTo(fips);
+        await Assert.That(AlgorithmPreferences.Fips().CASignatures).IsEquivalentTo(fips);
 
         var empty = await Assert.That(() => AlgorithmPreferences.FromOptions(Options(SshAlgorithmList.Remove("*")))).Throws<ArgumentException>();
         await Assert.That(empty!.Message).Contains("SshClientOptions.CASignatureAlgorithms leaves no CA signature algorithm");
@@ -168,7 +170,7 @@ public sealed class CASignatureAlgorithmsTests : IDisposable
         var refused = await verifier.VerifyAsync(narrowed, default);
         await Assert.That(refused.IsAccepted).IsFalse();
         await Assert.That(refused.Reason).Contains("not in known_hosts, and StrictHostKeyChecking is yes").And.Contains("could not be used either")
-            .And.Contains("its authority signed it with ecdsa-sha2-nistp256, which CASignatureAlgorithms does not allow");
+            .And.Contains("its authority signed it with ecdsa-sha2-nistp256, which is not allowed here");
 
         // The warning names the keys and the algorithm, never the host or the key id.
         var (level, message) = log.Entries.Single();
@@ -253,7 +255,7 @@ public sealed class CASignatureAlgorithmsTests : IDisposable
 
         await Assert.That(certificate.SignatureAlgorithm).IsEqualTo("ecdsa-sha2-nistp384");
         await Assert.That(certificate.CheckForHost(Host, now, ["ssh-ed25519", "ecdsa-sha2-nistp256"]))
-            .IsEqualTo("its authority signed it with ecdsa-sha2-nistp384, which CASignatureAlgorithms does not allow");
+            .IsEqualTo("its authority signed it with ecdsa-sha2-nistp384, which is not allowed here (CASignatureAlgorithms, or FIPS mode)");
         await Assert.That(certificate.CheckForHost(Host, now, ["ecdsa-sha2-nistp384"])).Contains("valid only");
         await Assert.That(certificate.CheckForHost(Host, now.AddMinutes(-2), ["ecdsa-sha2-nistp384"])).IsNull();
     }
@@ -299,13 +301,56 @@ public sealed class CASignatureAlgorithmsTests : IDisposable
         await using (var server = new FakeSessionServer(WithCertificate(ecdsaAuthority)))
         {
             var error = await Assert.That(async () => await ConnectAsync(server, SshAlgorithmList.Only("ssh-ed25519"))).Throws<SshHostKeyException>();
-            await Assert.That(error!.Message).Contains("ecdsa-sha2-nistp256, which CASignatureAlgorithms does not allow");
+            await Assert.That(error!.Message).Contains("ecdsa-sha2-nistp256, which is not allowed here");
         }
 
         await using (var server = new FakeSessionServer(WithCertificate(ed25519Authority)))
         {
             await using var ed25519 = await ConnectAsync(server, SshAlgorithmList.Only("ssh-ed25519"));
             await Assert.That(ed25519.HostKey.Certificate!.AuthorityFingerprint).IsEqualTo(ed25519Authority.Fingerprint);
+        }
+    }
+
+    [Test]
+    public async Task InFipsMode_ACertificateFromAnEd25519Authority_CannotBeUsed_AndItsKeyIsCheckedAsAPlainKey()
+    {
+        // FIPS mode accepts no Ed25519 host key, so no Ed25519 authority either: an ECDSA host key's certificate it signed proves nothing
+        // there, and the connection stands or falls with the plain key, as for any certificate that cannot be used.
+        using var ed25519Authority = SshPrivateKey.Generate(SshKeyType.Ed25519);
+        var hostKey = FakeHostKey.Ecdsa(256);
+        FakeServerOptions Server() => new()
+        {
+            HostKey = hostKey,
+            HostCertificate = FakeHostKey.Certified(hostKey, TestKeys.Certificate(ed25519Authority, hostKey.Blob, SshCertificateType.Host, [Host])),
+            Kex = SshAlgorithms.EcdhNistp256,
+            Cipher = "aes256-gcm@openssh.com",
+        };
+
+        async Task<SshClient> ConnectAsync(FakeSessionServer server)
+        {
+            _ = server.StartAsync();
+            return await SshClient.ConnectAsync(server.ClientStream, new SshClientOptions
+            {
+                UserName = "tester",
+                Password = TestSecrets.Password,
+                HostKeyAlias = Host,
+                HostKeyVerifier = new KnownHostsVerifier([KnownHosts]) { Policy = StrictHostKeyChecking.Yes },
+                FipsMode = true,
+            }, leaveOpen: true, Timeout());
+        }
+
+        File.WriteAllText(KnownHosts, AuthorityLine(ed25519Authority));
+        await using (var server = new FakeSessionServer(Server()))
+        {
+            var error = await Assert.That(async () => await ConnectAsync(server)).Throws<SshHostKeyException>();
+            await Assert.That(error!.Message).Contains("ssh-ed25519, which is not allowed here");
+        }
+
+        File.AppendAllText(KnownHosts, $"{Host} {hostKey.KeyType} {Convert.ToBase64String(hostKey.Blob)}\n");
+        await using (var server = new FakeSessionServer(Server()))
+        {
+            await using var client = await ConnectAsync(server);
+            await Assert.That(client.HostKey.Certificate).IsNotNull();
         }
     }
 
@@ -344,7 +389,7 @@ public sealed class CASignatureAlgorithmsTests : IDisposable
         else
         {
             var error = await Assert.That(async () => await ConnectAsync()).Throws<SshHostKeyException>();
-            await Assert.That(error!.Message).Contains("CASignatureAlgorithms does not allow");
+            await Assert.That(error!.Message).Contains("is not allowed here");
         }
     }
 

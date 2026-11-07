@@ -47,6 +47,7 @@ internal sealed class AlgorithmPreferences
     {
         Kex = SshAlgorithms.FilterFips(SshAlgorithms.DefaultKex, AlgorithmKind.Kex),
         HostKeys = SshAlgorithms.FilterFips(SshAlgorithms.DefaultHostKeys, AlgorithmKind.HostKey),
+        CASignatures = SshAlgorithms.FilterFips(SshAlgorithms.CASignatures, AlgorithmKind.CASignature),
         Ciphers = SshAlgorithms.FilterFips(SshAlgorithms.DefaultCiphers, AlgorithmKind.Cipher),
         Macs = SshAlgorithms.FilterFips(SshAlgorithms.DefaultMacs, AlgorithmKind.Mac),
         FipsMode = true,
@@ -173,7 +174,11 @@ internal sealed class AlgorithmPreferences
 
             // FIPS mode does not restrict the client's own keys (FilterFips keeps them all), as before this list was applied.
             PublicKeys = publicKeys is null ? null : Resolve(publicKeys, SshAlgorithms.PublicKeySignatures, AlgorithmKind.PublicKey),
-            CASignatures = caSignatures is null ? SshAlgorithms.CASignatures : ResolveCASignatures(caSignatures),
+            // FIPS mode narrows it as it narrows the host keys: a host certificate signed with Ed25519 is trusted on a signature FIPS mode
+            // does not accept from a host key, so such a certificate cannot be used, and its key is checked as a plain key.
+            CASignatures = fipsMode
+                ? SshAlgorithms.FilterFips(caSignatures is null ? SshAlgorithms.CASignatures : ResolveCASignatures(caSignatures), AlgorithmKind.CASignature)
+                : caSignatures is null ? SshAlgorithms.CASignatures : ResolveCASignatures(caSignatures),
             HostKeySpecification = hostKeys,
             FipsMode = fipsMode,
         };

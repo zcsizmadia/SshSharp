@@ -126,7 +126,7 @@ before removing the old line (`ssh-keygen -R host`). `UpdateHostKeys` avoids thi
 
 A trusted authority signed the server's certificate, but it is expired, not yet valid, not issued for the name you connected to
 (an IP address or a short name, say), or signed with an algorithm `CASignatureAlgorithms` does not allow ("its authority signed it
-with ecdsa-sha2-nistp256, which CASignatureAlgorithms does not allow"). As `ssh` does, the key was then checked as a plain key, and
+with ecdsa-sha2-nistp256, which is not allowed here"). As `ssh` does, the key was then checked as a plain key, and
 `known_hosts` has no line for it. Renew the certificate or add the name to its principals, connect by a name it lists, have it
 signed by an authority the list allows, or add the host's plain key. See
 [Host certificates that cannot be used](../host-keys.md#host-certificates-that-cannot-be-used).

@@ -43,7 +43,8 @@ The certificate authority that signed a host certificate may have signed it with
 authority of at least 2048 bits. SHA-1 `ssh-rsa` signatures and FIDO security keys (`sk-ssh-ed25519@openssh.com`,
 `sk-ecdsa-sha2-nistp256@openssh.com`) are refused, which is stricter than OpenSSH's default `CASignatureAlgorithms`.
 `SshClientOptions.CASignatureAlgorithms` (`CASignatureAlgorithms` in `ssh_config`) <span class="badge text-bg-primary">1.2</span>
-narrows the set, never widens it. FIPS mode does not change it.
+narrows the set, never widens it. FIPS mode narrows it as it narrows the host keys, to ECDSA and `rsa-sha2-*`: a certificate an
+Ed25519 authority signed cannot be used there, and its key is checked as a plain key.
 
 ## Ciphers
 

@@ -498,7 +498,7 @@ public sealed class SshCertificate
         if (caSignatureAlgorithms is not null && SignatureAlgorithm is { } algorithm && SshAlgorithms.CASignatures.Contains(algorithm)
             && !caSignatureAlgorithms.Contains(algorithm))
         {
-            return $"its authority signed it with {algorithm}, which CASignatureAlgorithms does not allow";
+            return $"its authority signed it with {algorithm}, which is not allowed here (CASignatureAlgorithms, or FIPS mode)";
         }
 
         if (!VerifySignature())
