@@ -347,6 +347,43 @@ public sealed class ConnectionOptionsTests
     }
 
     [Test]
+    public async Task ALargeWindow_IsReplenishedBeforeAPeerThatCapsItRunsOut()
+    {
+        // Older Dropbear uses at most 500,000,000 bytes of any window and drops the rest (#452). With the largest window, waiting for
+        // half of it to be consumed would wait for bytes it never sends. Here the cap is 100,000,000 bytes, more than the client's
+        // largest step between adjusts, so the transfer must go on past it.
+        const long cap = 100_000_000;
+        const int chunks = 160; // 160 MiB, past the cap
+        var chunk = Pattern(1024 * 1024);
+        await using var server = new FakeSessionServer
+        {
+            Password = Password,
+            ClientWindowCap = cap,
+            OnExec = async script =>
+            {
+                for (var i = 0; i < chunks; i++)
+                {
+                    await script.StdoutAsync(chunk);
+                }
+
+                await script.FinishAsync(0);
+            },
+        };
+        await using var client = await ConnectAsync(server, Options(window: SshClientOptions.MaxChannelWindowSize));
+
+        await using var session = await client.StartCommandAsync("produce", cancellationToken: Timeout());
+        var buffer = new byte[256 * 1024];
+        long received = 0;
+        int read;
+        while ((read = await session.StandardOutput.ReadAsync(buffer, Timeout())) > 0)
+        {
+            received += read;
+        }
+
+        await Assert.That(received).IsEqualTo((long)chunks * chunk.Length);
+    }
+
+    [Test]
     public async Task RekeyAsync_WhileOutputStreams_LosesNothing()
     {
         var output = Pattern(8 * 1024 * 1024);
