@@ -98,6 +98,13 @@ internal static class SshAlgorithms
         SshEd25519, EcdsaNistp256, EcdsaNistp384, EcdsaNistp521, RsaSha2_512, RsaSha2_256,
     ];
 
+    /// <summary>
+    /// The signature algorithms a certificate authority may sign a host certificate with: those of the host keys. The defaults of
+    /// <c>CASignatureAlgorithms</c>, which can only narrow them: SHA-1 <c>ssh-rsa</c> and the FIDO security keys' <c>sk-*</c>, which
+    /// OpenSSH's defaults have, are refused whatever the list says.
+    /// </summary>
+    public static IReadOnlyList<string> CASignatures => DefaultHostKeys;
+
     /// <summary>OpenSSH certificate host key algorithms (PROTOCOL.certkeys), offered first when a certificate authority is trusted for the host.</summary>
     public static IReadOnlyList<string> CertificateHostKeys { get; } =
     [
@@ -234,4 +241,7 @@ internal enum AlgorithmKind
 
     /// <summary>Signature algorithms for public-key authentication (<c>PubkeyAcceptedAlgorithms</c>).</summary>
     PublicKey,
+
+    /// <summary>Signature algorithms a certificate authority may sign host certificates with (<c>CASignatureAlgorithms</c>).</summary>
+    CASignature,
 }

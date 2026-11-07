@@ -4,9 +4,9 @@ namespace SshSharp;
 
 /// <summary>
 /// An algorithm list for <see cref="SshClientOptions.KexAlgorithms"/>, <see cref="SshClientOptions.HostKeyAlgorithms"/>,
-/// <see cref="SshClientOptions.Ciphers"/>, <see cref="SshClientOptions.Macs"/> or <see cref="SshClientOptions.PubkeyAcceptedAlgorithms"/>,
-/// in the forms ssh_config's <c>Ciphers</c>, <c>KexAlgorithms</c>, <c>MACs</c>, <c>HostKeyAlgorithms</c> and
-/// <c>PubkeyAcceptedAlgorithms</c> take: a list that replaces SshSharp's defaults (<see cref="Only"/>), or a change to them that keeps
+/// <see cref="SshClientOptions.Ciphers"/>, <see cref="SshClientOptions.Macs"/>, <see cref="SshClientOptions.PubkeyAcceptedAlgorithms"/>
+/// or <see cref="SshClientOptions.CASignatureAlgorithms"/>, in the forms ssh_config's <c>Ciphers</c>, <c>KexAlgorithms</c>, <c>MACs</c>,
+/// <c>HostKeyAlgorithms</c>, <c>PubkeyAcceptedAlgorithms</c> and <c>CASignatureAlgorithms</c> take: a list that replaces SshSharp's defaults (<see cref="Only"/>), or a change to them that keeps
 /// up with new defaults in later versions (<see cref="Append"/>, <see cref="Prepend"/>, <see cref="Remove"/>).
 /// </summary>
 /// <remarks>

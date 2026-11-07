@@ -56,7 +56,9 @@ A man in the middle can read, change, drop and inject bytes. The server itself m
   and `FipsMode` still applies on top. The one setting that lowers the bar is the smallest RSA host key
   (`SshClientOptions.RequiredRsaSize`, `RequiredRSASize` in `ssh_config`): an application may accept down to 1024 bits for an old
   device, as `ssh` allows, and never less. A value above 2048 also applies to the RSA authority that signed a host certificate, as
-  in OpenSSH 10.6p2; a lower one does not lower the 2048 bits every certificate's authority needs.
+  in OpenSSH 10.6p2; a lower one does not lower the 2048 bits every certificate's authority needs. The algorithms a host
+  certificate's authority may have signed with (`SshClientOptions.CASignatureAlgorithms`, `CASignatureAlgorithms` in
+  `ssh_config`) can likewise only be narrowed: SHA-1 `ssh-rsa` and `sk-*` signatures stay refused whatever the list says.
 - **Malformed input:** every parser treats its input as hostile, rejecting it with a protocol error, never with an
   unexpected exception (mutation-fuzzed in every test run). Peer public keys are validated: points on the curve,
   no small-order Ed25519 keys, an RSA exponent ≥ 3, and an RSA modulus of at most 16384 bits (OpenSSH's limit), so a server or a
@@ -106,7 +108,8 @@ A man in the middle can read, change, drop and inject bytes. The server itself m
   accepted. The KRL parser is bounded (16 MiB files, 1 MiB per serial bitmap) and fuzzed. KRL signatures are not verified: the file
   is local configuration, trusted like `known_hosts`. Refusals name the directive (`RevokedHostKeys`), not the file's path.
 - **Host certificates (`@cert-authority`):** a certificate is trusted only when an `@cert-authority` line for the host lists its
-  authority and it is valid now, for the name connected to (or `HostKeyAlias`), with a valid signature and no critical options.
+  authority and it is valid now, for the name connected to (or `HostKeyAlias`), with a valid signature, made with an algorithm
+  `CASignatureAlgorithms` allows, and no critical options.
   One that fails those checks proves nothing, and, as in `ssh` (`check_host_key`: "Retry with plain key"), its certified key is
   then checked as a plain key with the `StrictHostKeyChecking` rules, as for a certificate from an authority that is not listed:
   a plain `known_hosts` line accepts it, `Yes` refuses it, and `AcceptNew`, `No` and an accepted `Ask` record the plain key, never

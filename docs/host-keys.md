@@ -64,8 +64,10 @@ var verifier = new KnownHostsVerifier([knownHostsPath])
 
 ### Host certificates that cannot be used
 
-A certificate from a trusted authority can still be unusable: expired, not yet valid, or not issued for the name connected to (an
-IP address or a short name, when the certificate lists the full name). As `ssh` does, the verifier then logs a warning (the key's
+A certificate from a trusted authority can still be unusable: expired, not yet valid, not issued for the name connected to (an
+IP address or a short name, when the certificate lists the full name), or signed with an algorithm `CASignatureAlgorithms` leaves
+out ([`SshClientOptions.CASignatureAlgorithms`](how-to/algorithms-and-authentication-order.md#trust-host-certificates-only-from-some-kinds-of-authority)
+<span class="badge text-bg-primary">1.2</span>, an Ed25519-only policy, say). As `ssh` does, the verifier then logs a warning (the key's
 and the authority's fingerprints and the problem, never the host name) and checks the certified key as a plain key, exactly as it
 checks the key of a certificate from an authority `known_hosts` does not list:
 
@@ -75,7 +77,7 @@ flowchart TD
     R -- yes --> X[Refused]
     R -- no --> T{"Signed by an @cert-authority<br/>for the host?"}
     T -- no --> P[Check the certified key as a plain key]
-    T -- yes --> U{"Valid now, for this name?"}
+    T -- yes --> U{"Signed with an allowed algorithm,<br/>valid now, for this name?"}
     U -- yes --> OK[Accepted, nothing recorded]
     U -- no --> W[Warning logged] --> P
     P --> S[StrictHostKeyChecking, as for any key]

@@ -36,6 +36,15 @@ OpenSSH host certificates of the same types (`ssh-ed25519-cert-v01@openssh.com`,
 `rsa-sha2-512-cert-v01@openssh.com`, `rsa-sha2-256-cert-v01@openssh.com`) are proposed first when a `@cert-authority` line in
 `known_hosts` covers the host.
 
+### Certificate authority signatures
+
+The certificate authority that signed a host certificate may have signed it with any algorithm of the host key table:
+`ssh-ed25519`, `ecdsa-sha2-nistp256`, `ecdsa-sha2-nistp384`, `ecdsa-sha2-nistp521`, `rsa-sha2-512` or `rsa-sha2-256`, with an RSA
+authority of at least 2048 bits. SHA-1 `ssh-rsa` signatures and FIDO security keys (`sk-ssh-ed25519@openssh.com`,
+`sk-ecdsa-sha2-nistp256@openssh.com`) are refused, which is stricter than OpenSSH's default `CASignatureAlgorithms`.
+`SshClientOptions.CASignatureAlgorithms` (`CASignatureAlgorithms` in `ssh_config`) <span class="badge text-bg-primary">1.2</span>
+narrows the set, never widens it. FIPS mode does not change it.
+
 ## Ciphers
 
 | Algorithm | Notes | FIPS mode |
@@ -126,6 +135,11 @@ A server that offers nothing else fails the connection with `SshFailureReason.Ke
   [Choose algorithms and authentication methods](../how-to/algorithms-and-authentication-order.md).
 - **Host certificates:** when a certificate authority is trusted for the host, the certificate algorithms are asked for first
   with the default `HostKeyAlgorithms` or a `+` or `-` change to it; a plain or `^` list is used as written, as in `ssh`.
+- **Certificate authorities:** `SshClientOptions.CASignatureAlgorithms` (`CASignatureAlgorithms` in `ssh_config`) lists the
+  [signature algorithms](#certificate-authority-signatures) an authority may have signed a host certificate with, in the same four
+  forms. It can only narrow SshSharp's set: in `ssh_config`, `ssh-rsa`, `sk-*` and unknown names are dropped (so `+ssh-rsa` changes
+  nothing); in code they throw `ArgumentException`. A list that leaves none is an error, before anything is sent. A certificate
+  signed with an algorithm it leaves out cannot be used, and its key is checked as a plain key, as `ssh` does.
 - **FIPS mode:** `SshClientOptions.FipsMode` restricts every transport list, yours included, to the FIPS column (`PubkeyAcceptedAlgorithms`, which governs your own keys, is not filtered); see
   [FIPS mode](../how-to/fips-mode.md).
 - **RSA host key size:** `SshClientOptions.RequiredRsaSize` (`RequiredRSASize` in `ssh_config`), 2048 bits by default, 1024 at
