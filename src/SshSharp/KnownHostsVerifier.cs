@@ -54,9 +54,9 @@ public sealed class SshHostKeyPrompt
 /// (<see cref="StrictHostKeyChecking.AcceptNew"/>, <see cref="StrictHostKeyChecking.No"/>). AcceptNew refuses it when keys of other types
 /// are already recorded for the host, so a man in the middle cannot get a weaker key type accepted silently.</item>
 /// <item>A host certificate from an <c>@cert-authority</c> for the host is trusted while it is valid for the host. One that cannot be used
-/// (expired, not yet valid, not issued for the name connected to) is logged as a warning, and its key is then checked as a plain key by
-/// the rules above, as ssh does; so is a certificate from no listed authority. A certificate whose key or authority is <c>@revoked</c>
-/// is refused.</item>
+/// (expired, not yet valid, not issued for the name connected to, or signed with an algorithm <c>CASignatureAlgorithms</c> leaves out)
+/// is logged as a warning, and its key is then checked as a plain key by the rules above, as ssh does; so is a certificate from no listed
+/// authority. A certificate whose key or authority is <c>@revoked</c> is refused.</item>
 /// </list>
 /// New keys are appended to the first user file. The file is rewritten only by <see cref="UpdateHostKeys"/>, to remove keys the server no longer announces.
 /// </summary>
@@ -103,7 +103,10 @@ public sealed class KnownHostsVerifier : SshHostKeyVerifier
     }
 
     /// <summary>The files, policy and hashing from a resolved <c>ssh_config</c> (<c>UserKnownHostsFile</c>, <c>GlobalKnownHostsFile</c>,
-    /// <c>StrictHostKeyChecking</c>, <c>HashKnownHosts</c>).</summary>
+    /// <c>StrictHostKeyChecking</c>, <c>HashKnownHosts</c>), and the CA signature algorithms it trusts host certificates from
+    /// (<c>CASignatureAlgorithms</c>, which can only narrow SshSharp's set; see <see cref="SshClientOptions.CASignatureAlgorithms"/>).</summary>
+    /// <exception cref="SshException"><c>CASignatureAlgorithms</c> leaves no CA signature algorithm that SshSharp accepts
+    /// (<see cref="SshFailureReason.ConnectFailed"/>).</exception>
     public static KnownHostsVerifier FromConfig(SshHostConfig config) => FromConfig(config, ask: null, confirmUpdate: null);
 
     internal static KnownHostsVerifier FromConfig(SshHostConfig config, Func<SshHostKeyPrompt, CancellationToken, ValueTask<bool>>? ask,
@@ -117,6 +120,7 @@ public sealed class KnownHostsVerifier : SshHostKeyVerifier
             Policy = config.StrictHostKeyChecking,
             HashNewEntries = config.HashKnownHosts,
             RevokedHostKeys = config.RevokedHostKeys,
+            CASignatureAlgorithms = Protocol.AlgorithmPreferences.CASignaturesFromConfig(config.CASignatureAlgorithms),
             AskHostKey = ask,
             UpdateHostKeys = update,
             ConfirmHostKeyUpdate = config.UpdateHostKeys == Config.UpdateHostKeys.Ask ? confirmUpdate : null,
@@ -239,6 +243,13 @@ public sealed class KnownHostsVerifier : SshHostKeyVerifier
     /// </summary>
     public Func<SshHostKeyUpdate, CancellationToken, ValueTask<bool>>? ConfirmHostKeyUpdate { get; init; }
 
+    /// <summary>
+    /// The CA signature algorithms of the configuration the verifier was made from (<see cref="FromConfig(SshHostConfig)"/>), or null. A
+    /// host certificate is trusted only when its authority signed it with one this list and the connection's
+    /// (<see cref="SshClientOptions.CASignatureAlgorithms"/>) both allow: each can only narrow what the other allows.
+    /// </summary>
+    internal IReadOnlyList<string>? CASignatureAlgorithms { get; init; }
+
     /// <summary>The clock for certificate validity; replaceable in tests.</summary>
     internal TimeProvider Clock { get; init; } = TimeProvider.System;
 
@@ -280,7 +291,7 @@ public sealed class KnownHostsVerifier : SshHostKeyVerifier
         string? unusable = null;
         if (context.HostKey.Certificate is { } certificate)
         {
-            var (certificateVerdict, problem) = await VerifyCertificateAsync(certificate, context.HostKey, name, port, cancellationToken).ConfigureAwait(false);
+            var (certificateVerdict, problem) = await VerifyCertificateAsync(certificate, context, name, port, cancellationToken).ConfigureAwait(false);
             if (certificateVerdict is { } verdict)
             {
                 return verdict;
@@ -289,8 +300,9 @@ public sealed class KnownHostsVerifier : SshHostKeyVerifier
             if (problem is not null)
             {
                 // As ssh's check_host_key ("No matching CA found. Retry with plain key"): a trusted authority's certificate that cannot be
-                // used (expired, or not issued for this name) is not a refusal, only a certificate that proves nothing. The key it
-                // certifies is checked as a plain key below, and the problem is said when that refuses it too.
+                // used (expired, not issued for this name, or signed with a CA signature algorithm not allowed) is not a refusal, only a
+                // certificate that proves nothing. The key it certifies is checked as a plain key below, and the problem is said when that
+                // refuses it too.
                 SshLog.HostCertificateUnusable(context.Logger, context.HostKey.Fingerprint, certificate.AuthorityFingerprint, problem);
                 unusable = $"The host certificate (key id '{certificate.KeyId}', authority {certificate.AuthorityFingerprint}) could not be used either: {problem}.";
             }
@@ -376,13 +388,13 @@ public sealed class KnownHostsVerifier : SshHostKeyVerifier
     /// Checks a host certificate against the <c>@cert-authority</c> and <c>@revoked</c> lines for the host. Returns the verdict when there
     /// is one: trusted, or refused because the certificate's key or authority is revoked. Otherwise the caller falls back to the plain key,
     /// as ssh does: when no listed authority signed the certificate, or when one did but the certificate cannot be used (the problem, which
-    /// does not name the host).
+    /// does not name the host). As ssh's <c>sshkey_cert_check_host</c>, a CA signature algorithm that is not allowed is such a problem.
     /// </summary>
-    private async ValueTask<(SshHostKeyVerdict? Verdict, string? Problem)> VerifyCertificateAsync(SshCertificate certificate, SshHostKey presented,
+    private async ValueTask<(SshHostKeyVerdict? Verdict, string? Problem)> VerifyCertificateAsync(SshCertificate certificate, SshHostKeyContext context,
         string name, int port, CancellationToken cancellationToken)
     {
         var trusted = false;
-        await foreach (var file in SourcesAsync(name, port, "HOSTNAME", presented, asCertificate: true, cancellationToken).ConfigureAwait(false))
+        await foreach (var file in SourcesAsync(name, port, "HOSTNAME", context.HostKey, asCertificate: true, cancellationToken).ConfigureAwait(false))
         {
             foreach (var entry in file.Find(name, port))
             {
@@ -401,7 +413,10 @@ public sealed class KnownHostsVerifier : SshHostKeyVerifier
             return (null, null);
         }
 
-        return certificate.CheckForHost(name, Clock.GetUtcNow()) is { } problem ? (null, problem) : (SshHostKeyVerdict.Accept(), null);
+        IReadOnlyList<string> allowed = CASignatureAlgorithms is { } configured
+            ? [.. context.CASignatureAlgorithms.Where(configured.Contains)]
+            : context.CASignatureAlgorithms;
+        return certificate.CheckForHost(name, Clock.GetUtcNow(), allowed) is { } problem ? (null, problem) : (SshHostKeyVerdict.Accept(), null);
     }
 
     /// <summary>

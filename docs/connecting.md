@@ -113,7 +113,7 @@ What is taken from the configuration: `HostName`, `Port`, `User`, `IdentityFile`
 `IdentitiesOnly`, `UserKnownHostsFile`, `GlobalKnownHostsFile`, `RevokedHostKeys`, `StrictHostKeyChecking`, `HashKnownHosts`,
 `UpdateHostKeys`, `HostKeyAlias`, `KexAlgorithms`, `HostKeyAlgorithms`, `Ciphers`, `MACs`, `PubkeyAcceptedAlgorithms` (which
 keys are offered, and how RSA keys sign; one that allows nothing SshSharp uses, such as `PubkeyAcceptedKeyTypes ssh-rsa`, offers
-no key but leaves passwords working), `RequiredRSASize`, `PreferredAuthentications`, `PubkeyAuthentication`, `PasswordAuthentication`, `KbdInteractiveAuthentication`,
+no key but leaves passwords working), `RequiredRSASize`, `CASignatureAlgorithms`, `PreferredAuthentications`, `PubkeyAuthentication`, `PasswordAuthentication`, `KbdInteractiveAuthentication`,
 `NumberOfPasswordPrompts`, `BatchMode`, `ProxyJump`, `ProxyCommand`, `ServerAliveInterval`, `ServerAliveCountMax`,
 `ConnectTimeout`, `ConnectionAttempts`, `AddressFamily`, `BindAddress`, `BindInterface`, `TCPKeepAlive`, `IPQoS`, `Compression`, `ForwardAgent`,
 `AddKeysToAgent` (`ask` with `ConfirmAddKeyToAgent`), `GSSAPIAuthentication`, `GSSAPIDelegateCredentials`, `ChannelTimeout`,
@@ -500,7 +500,8 @@ To change the lists, set `KexAlgorithms`, `HostKeyAlgorithms`, `Ciphers` or `Mac
 to the front, `Append` adds at the end (leaving one that is already a default in place, as `+` does), and `Only` replaces them.
 `FipsMode` still applies on top. `PubkeyAcceptedAlgorithms` decides which of `PrivateKeys` are offered and the signature algorithm
 an RSA key uses. `RequiredRsaSize` sets the
-smallest RSA host key accepted (2048 bits by default). See
+smallest RSA host key accepted (2048 bits by default). `CASignatureAlgorithms` narrows the signature algorithms a certificate
+authority may have signed a host certificate with. See
 [Choose algorithms and authentication methods](how-to/algorithms-and-authentication-order.md).
 
 ```csharp

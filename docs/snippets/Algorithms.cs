@@ -101,6 +101,22 @@ internal static class Algorithms
         return options;
     }
 
+    public static SshClientOptions Ed25519AuthoritiesOnly(SshPrivateKey key)
+    {
+        // <ca-signature-algorithms>
+        // Trust host certificates only from authorities that sign with Ed25519. A certificate an ECDSA or RSA authority signed cannot
+        // be used: its key is checked as a plain key, which StrictHostKeyChecking.Yes refuses unless known_hosts lists it.
+        var options = new SshClientOptions
+        {
+            UserName = "deploy",
+            PrivateKeys = [key],
+            HostKeyVerifier = KnownHostsVerifier.ForCurrentUser(StrictHostKeyChecking.Yes),
+            CASignatureAlgorithms = SshAlgorithmList.Only("ssh-ed25519"),
+        };
+        // </ca-signature-algorithms>
+        return options;
+    }
+
     public static SshClientOptions KeysOnly(SshPrivateKey key)
     {
         // <auth-order>

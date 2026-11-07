@@ -41,8 +41,11 @@ A host certificate lets clients trust every server the CA signed, without a `kno
 ```
 
 `KnownHostsVerifier` then accepts a host certificate from that CA for matching host names, within its validity period. A
-certificate that cannot be used (expired, or not issued for the name connected to) is logged as a warning, and its key is checked
-as a plain key, as `ssh` does: see [Host certificates that cannot be used](../host-keys.md#host-certificates-that-cannot-be-used).
+certificate that cannot be used (expired, not issued for the name connected to, or signed with an algorithm
+`CASignatureAlgorithms` leaves out) is logged as a warning, and its key is checked as a plain key, as `ssh` does: see [Host certificates that cannot be used](../host-keys.md#host-certificates-that-cannot-be-used).
+To trust only authorities that sign with some algorithms (Ed25519 only, say), set `SshClientOptions.CASignatureAlgorithms`, or
+`CASignatureAlgorithms` in `ssh_config` <span class="badge text-bg-primary">1.2</span>: see
+[Trust host certificates only from some kinds of authority](algorithms-and-authentication-order.md#trust-host-certificates-only-from-some-kinds-of-authority).
 To apply your own rules, see the [custom verifier](verify-host-keys.md#write-a-verifier).
 
 ## Check a certificate
