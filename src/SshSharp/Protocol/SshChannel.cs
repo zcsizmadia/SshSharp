@@ -414,11 +414,18 @@ internal sealed class SshChannel
         }
     }
 
+    /// <summary>
+    /// The most bytes consumed before the window is replenished, whatever its size. Older Dropbear never uses more than 500,000,000
+    /// bytes of a window (its TRANS_MAX_WINDOW) and drops the rest of a larger one, so with a window over 1,000,000,000 bytes, waiting for
+    /// half of it to be consumed meant waiting for bytes it would never send: both sides stopped (#452).
+    /// </summary>
+    internal const uint MaxAdjustStep = 64 * 1024 * 1024;
+
     /// <summary>Called when the consumer is done with received bytes: replenishes the peer's window in large steps.</summary>
     internal void Consumed(int length)
     {
         var total = Interlocked.Add(ref _consumedSinceAdjust, length);
-        if (total < _windowSize / 2)
+        if (total < Math.Min(_windowSize / 2, MaxAdjustStep))
         {
             return;
         }

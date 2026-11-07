@@ -20,7 +20,8 @@ Channels the server opens are accepted only when you asked for them (a forwardin
 ## Flow control
 
 Each side of a channel grants the other a window: how many bytes it may send before it must wait. SshSharp grants 2 MiB per
-channel by default (`SshClientOptions.ChannelWindowSize`) and tops the window up as your code consumes data. If your code stops reading, the window runs out and the server stops
+channel by default (`SshClientOptions.ChannelWindowSize`) and tops the window up as your code consumes data: once half the window
+has been read, or 64 MiB for a window over 128 MiB, since older Dropbear never uses more than 500,000,000 bytes of a window. If your code stops reading, the window runs out and the server stops
 sending on that channel, which pushes back all the way to the program on the server:
 
 ```mermaid

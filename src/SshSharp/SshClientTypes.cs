@@ -621,7 +621,9 @@ public sealed class SshClientOptions
     /// consumed some. One channel moves at most one window per round trip, so on a link with a large bandwidth-delay product (a fast,
     /// distant link) a larger window makes a single download, command output or tunnel faster: 2 MiB per 100 ms of round trip is about
     /// 20 MiB/s. Each channel can then hold up to this much received data that your code has not read yet. It applies to every channel:
-    /// sessions, SFTP, SCP, tunnels and forwarded connections. Default 2 MiB, as OpenSSH. Between 1 KiB and 1 GiB.
+    /// sessions, SFTP, SCP, tunnels and forwarded connections. Default 2 MiB, as OpenSSH. Between 1 KiB and 1 GiB. The window is topped
+    /// up once half of it has been consumed, or 64 MiB for a window over 128 MiB: older Dropbear never uses more than 500,000,000 bytes
+    /// of a window, and would otherwise wait for an adjustment that never came.
     /// </summary>
     /// <exception cref="ArgumentOutOfRangeException">The value is below 1 KiB or above 1 GiB.</exception>
     public int ChannelWindowSize
