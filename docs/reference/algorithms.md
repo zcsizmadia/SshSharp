@@ -129,7 +129,7 @@ A server that offers nothing else fails the connection with `SshFailureReason.Ke
 - **FIPS mode:** `SshClientOptions.FipsMode` restricts every transport list, yours included, to the FIPS column (`PubkeyAcceptedAlgorithms`, which governs your own keys, is not filtered); see
   [FIPS mode](../how-to/fips-mode.md).
 - **RSA host key size:** `SshClientOptions.RequiredRsaSize` (`RequiredRSASize` in `ssh_config`), 2048 bits by default, 1024 at
-  the least.
+  the least. Above 2048, it also applies to a host certificate's RSA authority; an authority is never accepted under 2048 bits.
 - **Rekeying:** `RekeyAfterBytes` (1 GiB) and `RekeyAfterTime` (1 hour).
 - **Compression:** `SshClientOptions.Compression` (`Compression` in `ssh_config`) offers `zlib@openssh.com` before `none`.
 
