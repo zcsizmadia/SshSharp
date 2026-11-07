@@ -11,8 +11,8 @@
 
     <!--
       The target frameworks, in one place: a new .NET version is added here, not in each project.
-      SshSharpTargetFrameworks: the packages, the tests and the benchmarks (every supported runtime).
-      SshSharpAppTargetFramework: the samples, the doc snippets, the AOT smoke test and the fuzzer (one runtime is enough).
+      SshSharpTargetFrameworks: the packages, the tests, the benchmarks and the AOT smoke test (every supported runtime).
+      SshSharpAppTargetFramework: the samples, the doc snippets and the fuzzer (one runtime is enough; the LTS one users run).
     -->
     <SshSharpTargetFrameworks>net8.0;net10.0;net11.0</SshSharpTargetFrameworks>
     <SshSharpAppTargetFramework>net10.0</SshSharpAppTargetFramework>

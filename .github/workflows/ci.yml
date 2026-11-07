@@ -276,11 +276,17 @@ jobs:
         env:
           TESTS: /*/*/*/*[((Category=Integration)|(Category=LocalTools))&(Category!=SshAudit)&(Category!=Measure)&(Category!=Handshakes)]
       - name: Native AOT smoke test against the real server
-        # Trim and AOT warnings fail the publish; the binary then connects and uses every main feature.
+        # Trim and AOT warnings fail the publish; the binary then connects and uses every main feature. Once per target framework,
+        # read from the project (Directory.Build.props), so a new .NET version needs no change here.
         run: |
           set -euo pipefail
-          dotnet publish tests/SshSharp.AotSmoke -c Release -o "$RUNNER_TEMP/aot"
-          "$RUNNER_TEMP/aot/SshSharp.AotSmoke"
+          frameworks="$(dotnet msbuild tests/SshSharp.AotSmoke -getProperty:TargetFrameworks)"
+          for framework in ${frameworks//;/ }; do
+            echo "::group::Native AOT smoke test ($framework)"
+            dotnet publish tests/SshSharp.AotSmoke -c Release -f "$framework" -o "$RUNNER_TEMP/aot-$framework"
+            "$RUNNER_TEMP/aot-$framework/SshSharp.AotSmoke"
+            echo "::endgroup::"
+          done
       - name: The server's host key in ~/.ssh/known_hosts, for the samples
         # The samples connect through ssh_config as ssh does: the agent's keys (SSH_AUTH_SOCK, set above) and ~/.ssh/known_hosts. The
         # plain host keys, and the CA that signed the Ed25519 one, so either way of presenting it is trusted. It runs after the tests,

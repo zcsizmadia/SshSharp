@@ -65,8 +65,8 @@ validation checks each package against the last release, so 1.x changes must be 
 ## Target frameworks
 
 The projects take their target frameworks from two properties in `Directory.Build.props`, not from each project file:
-`SshSharpTargetFrameworks` for the packages, the tests and the benchmarks, and `SshSharpAppTargetFramework` for the samples, the doc
-snippets, the AOT smoke test and the fuzzer. Adding a .NET version, after it is GA:
+`SshSharpTargetFrameworks` for the packages, the tests, the benchmarks and the AOT smoke test (CI publishes and runs it for each), and
+`SshSharpAppTargetFramework` for the samples, the doc snippets and the fuzzer. Adding a .NET version, after it is GA:
 
 - add it to `SshSharpTargetFrameworks` (and move `SshSharpAppTargetFramework` to it if the apps should follow);
 - update the SDK in `global.json`, and the runtimes `.github/actions/setup-dotnet` installs beside it;
