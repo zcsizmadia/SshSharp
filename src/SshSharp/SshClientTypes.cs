@@ -760,7 +760,9 @@ public sealed class SshClientOptions
 
     /// <summary>
     /// The smallest RSA host key accepted, in bits, as ssh_config's <c>RequiredRSASize</c>; a smaller one fails the connection with an
-    /// <see cref="SshHostKeyException"/>. Default 2048 (ssh's default is 1024). At least 1024, the least ssh accepts.
+    /// <see cref="SshHostKeyException"/>. Default 2048 (ssh's default is 1024). At least 1024, the least ssh accepts. A value above
+    /// 2048 also applies to the RSA authority that signed a host certificate, as in OpenSSH 10.6p2; a certificate's authority is never
+    /// accepted under 2048 bits, whatever the value.
     /// </summary>
     /// <exception cref="ArgumentOutOfRangeException">The value is below 1024.</exception>
     public int RequiredRsaSize

@@ -55,7 +55,8 @@ A man in the middle can read, change, drop and inject bytes. The server itself m
   `Macs`, or the `ssh_config` directives), but only among the algorithms SshSharp implements, so no list brings a legacy one back,
   and `FipsMode` still applies on top. The one setting that lowers the bar is the smallest RSA host key
   (`SshClientOptions.RequiredRsaSize`, `RequiredRSASize` in `ssh_config`): an application may accept down to 1024 bits for an old
-  device, as `ssh` allows, and never less.
+  device, as `ssh` allows, and never less. A value above 2048 also applies to the RSA authority that signed a host certificate, as
+  in OpenSSH 10.6p2; a lower one does not lower the 2048 bits every certificate's authority needs.
 - **Malformed input:** every parser treats its input as hostile, rejecting it with a protocol error, never with an
   unexpected exception (mutation-fuzzed in every test run). Peer public keys are validated: points on the curve,
   no small-order Ed25519 keys, an RSA exponent ≥ 3, and an RSA modulus of at most 16384 bits (OpenSSH's limit), so a server or a

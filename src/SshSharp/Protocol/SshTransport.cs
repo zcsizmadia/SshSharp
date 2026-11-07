@@ -1051,6 +1051,27 @@ internal sealed class SshTransport : IAsyncDisposable
             throw new SshHostKeyException($"The server's RSA host key is only {key.KeySizeBits} bits (minimum {_options.MinimumRsaBits}).");
         }
 
+        // As OpenSSH 10.6p2's RequiredRSASize: a host certificate's RSA authority is held to the same minimum as an RSA host key. The
+        // certificate's own check only refuses an authority under 2048 bits, whatever the setting.
+        if (certificate is not null && _options.MinimumRsaBits > SshClientOptions.DefaultMinimumRsaBits)
+        {
+            VerifyingKey authority;
+            try
+            {
+                authority = VerifyingKey.Parse(certificate.AuthorityKey.Span);
+            }
+            catch (SshProtocolException ex)
+            {
+                throw new SshHostKeyException("The server's host certificate has a malformed authority key: " + ex.Message);
+            }
+
+            if (authority.KeyType == "ssh-rsa" && authority.KeySizeBits < _options.MinimumRsaBits)
+            {
+                throw new SshHostKeyException(
+                    $"The RSA key of the authority that signed the server's host certificate is only {authority.KeySizeBits} bits (minimum {_options.MinimumRsaBits}).");
+            }
+        }
+
         var info = new HostKeyInfo(negotiated.HostKey, key.KeyType, key.Blob, key.Fingerprint, key.KeySizeBits, result.HostKeyBlob, certificate);
         HostKey = info;
         InitialSignature = result.Signature;

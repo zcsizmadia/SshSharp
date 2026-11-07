@@ -174,6 +174,57 @@ public sealed class CertificateTests : IDisposable
     };
 
     [Test]
+    public async Task RequiredRsaSize_AppliesToTheAuthorityOfAHostCertificate()
+    {
+        // As OpenSSH 10.6p2: RequiredRSASize holds a host certificate's RSA authority to the same minimum as an RSA host key.
+        using var small = SshPrivateKey.Generate(SshKeyType.Rsa, rsaBits: 2048);
+        using var large = SshPrivateKey.Generate(SshKeyType.Rsa, rsaBits: 3072);
+        var servers = new List<FakeSessionServer>();
+
+        async Task<SshClient> ConnectAsync(SshPrivateKey authority, int requiredRsaSize)
+        {
+            File.WriteAllText(KnownHosts, $"@cert-authority * {authority.KeyType} {Convert.ToBase64String(authority.PublicKey.Span)}\n");
+            var key = FakeHostKey.Ed25519();
+            var server = new FakeSessionServer(new FakeServerOptions
+            {
+                HostKey = key,
+                HostCertificate = FakeHostKey.Certified(key, TestKeys.Certificate(authority, key.Blob, SshCertificateType.Host, [Host])),
+            });
+            servers.Add(server);
+            _ = server.StartAsync();
+            return await SshClient.ConnectAsync(server.ClientStream, new SshClientOptions
+            {
+                UserName = "tester",
+                Password = TestSecrets.Password,
+                HostKeyAlias = Host,
+                RequiredRsaSize = requiredRsaSize,
+                HostKeyVerifier = new KnownHostsVerifier([KnownHosts]) { Policy = StrictHostKeyChecking.Yes },
+            }, leaveOpen: true, Timeout());
+        }
+
+        try
+        {
+            var refused = await Assert.That(async () => await ConnectAsync(small, 3072)).Throws<SshHostKeyException>();
+            await Assert.That(refused!.Message).Contains("authority").And.Contains("2048 bits (minimum 3072)");
+
+            await using (var byDefault = await ConnectAsync(small, SshClientOptions.DefaultMinimumRsaBits))
+            {
+                await Assert.That(byDefault.HostKey.Certificate).IsNotNull();
+            }
+
+            await using var largeEnough = await ConnectAsync(large, 3072);
+            await Assert.That(largeEnough.HostKey.Certificate).IsNotNull();
+        }
+        finally
+        {
+            foreach (var server in servers)
+            {
+                await server.DisposeAsync();
+            }
+        }
+    }
+
+    [Test]
     public async Task AHostCertificateFromATrustedAuthority_IsAccepted_WithoutAnyKnownHostsEntryForTheKey()
     {
         File.WriteAllText(KnownHosts, AuthorityLine("*.example.com"));
