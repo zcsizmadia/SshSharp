@@ -18,8 +18,41 @@ internal sealed record SshTokenContext(
     /// <summary>The <c>HostKeyAlias</c>, if set (<c>%k</c> falls back to the host name).</summary>
     public string? HostKeyAlias { get; init; }
 
-    /// <summary>The <c>ProxyJump</c> value, or empty (<c>%j</c>).</summary>
+    /// <summary>The <c>ProxyJump</c> specification as <c>%j</c> gives it (see <see cref="JumpSpec"/>), or empty.</summary>
     public string ProxyJump { get; init; } = string.Empty;
+
+    /// <summary>
+    /// <c>%j</c> for a <c>ProxyJump</c> value, as OpenSSH 10.6p2 forms it (and <c>ssh -G</c> prints it): the hops before the last one as
+    /// written, then the last one as <c>[user@]host[:port]</c>, with the host in brackets when it is an address (it contains <c>:</c>,
+    /// or only digits and dots). Empty for no value or <c>none</c>. A last hop that does not parse is kept as written; connecting
+    /// through it fails anyway.
+    /// </summary>
+    public static string JumpSpec(string? proxyJump)
+    {
+        if (proxyJump is null || proxyJump.Equals("none", StringComparison.OrdinalIgnoreCase))
+        {
+            return string.Empty;
+        }
+
+        var comma = proxyJump.LastIndexOf(',');
+        string? user;
+        string host;
+        int? port;
+        try
+        {
+            (user, host, port) = SshClient.ParseDestination(proxyJump[(comma + 1)..]);
+        }
+        catch (Exception ex) when (ex is ArgumentException or FormatException or OverflowException)
+        {
+            return proxyJump;
+        }
+
+        var address = host.Contains(':', StringComparison.Ordinal) || host.All(c => char.IsAsciiDigit(c) || c == '.');
+        return (comma < 0 ? string.Empty : proxyJump[..(comma + 1)])
+            + (user is null ? string.Empty : user + "@")
+            + (address ? "[" + host + "]" : host)
+            + (port is { } p ? ":" + p.ToString(System.Globalization.CultureInfo.InvariantCulture) : string.Empty);
+    }
 
     /// <summary>Tokens only some keywords have (<c>KnownHostsCommand</c>'s <c>%H %I %K %f %t</c>), by letter.</summary>
     public IReadOnlyDictionary<char, string>? Extra { get; init; }
@@ -161,11 +194,16 @@ internal sealed record SshTokenContext(
         return dot < 0 ? LocalHostName : LocalHostName[..dot];
     }
 
-    /// <summary>OpenSSH's <c>%C</c>: SHA-1 of <c>%l%h%p%r%j</c> (an empty <c>%j</c> gives the pre-9.x value).</summary>
+    /// <summary>
+    /// OpenSSH's <c>%C</c>: SHA-1 of <c>%l</c>, <c>%h</c>, <c>%p</c>, <c>%r</c> and <c>%j</c>, each followed by a NUL, as OpenSSH 10.6p2
+    /// hashes them. The NULs keep the fields apart, so host 192.0.2.1 on port 2222 and 192.0.2.12 on port 222 no longer hash alike;
+    /// older OpenSSH concatenated them without, so its values differ.
+    /// </summary>
     [SuppressMessage("Security", "CA5350", Justification = "SHA-1 is how OpenSSH defines the %C token; it is a file-name hash, not a security control.")]
     private string ConnectionHash()
     {
-        var data = Encoding.UTF8.GetBytes(LocalHostName + Host + Port.ToString(System.Globalization.CultureInfo.InvariantCulture) + RemoteUser + ProxyJump);
+        var data = Encoding.UTF8.GetBytes(string.Concat(
+            LocalHostName, "\0", Host, "\0", Port.ToString(System.Globalization.CultureInfo.InvariantCulture), "\0", RemoteUser, "\0", ProxyJump, "\0"));
         return Convert.ToHexString(SHA1.HashData(data)).ToLowerInvariant();
     }
 

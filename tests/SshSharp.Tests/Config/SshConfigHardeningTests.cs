@@ -112,6 +112,10 @@ public class SshConfigHardeningTests
         await Assert.That(c.IdentityFiles.Single()).IsEqualTo("/home/local/.ssh/j1-key");
         await Assert.That(c.HostKeyAlias).IsEqualTo("alias1");
 
+        // %j is the whole specification, the last hop as ssh prints it.
+        var uri = Resolve("Host a\n ProxyJump j0,ssh://alice@192.0.2.10:2222\n IdentityFile /keys/%j\n", "a");
+        await Assert.That(uri.IdentityFiles.Single()).IsEqualTo("/keys/j0,alice@[192.0.2.10]:2222");
+
         // Without HostKeyAlias, %k is the host name.
         var plain = Resolve("Host a\n HostName real\n UserKnownHostsFile /kh/%k\n", "a");
         await Assert.That(plain.UserKnownHostsFiles.Single()).IsEqualTo("/kh/real");

@@ -39,6 +39,43 @@ public class SshTokensTests
     }
 
     [Test]
+    public async Task ConnectionHash_IsOpenSsh106p2s_WithEachFieldNulTerminated()
+    {
+        // SHA-1 of "laptop.corp.example\0real.example.com\0" "2222\0bob\0" + %j + "\0", as OpenSSH 10.6p2's ssh_connection_hash.
+        await Assert.That(Context().ExpandTokens("%C")).IsEqualTo("8bf3d5e25763262ea4768b72db65e6bd159321a0");
+        await Assert.That((Context() with { ProxyJump = "jump.example.com" }).ExpandTokens("%C")).IsEqualTo("4f1e25ea4131f3d7c0247bcf869d5a53d674dede");
+    }
+
+    [Test]
+    public async Task ConnectionHash_KeepsTheFieldsApart()
+    {
+        // Run together, "192.0.2.1" + "2222" and "192.0.2.12" + "222" are the same text; older OpenSSH hashed them alike.
+        var a = (Context() with { Host = "192.0.2.1", Port = 2222 }).ExpandTokens("%C");
+        var b = (Context() with { Host = "192.0.2.12", Port = 222 }).ExpandTokens("%C");
+        await Assert.That(a).IsNotEqualTo(b);
+    }
+
+    [Test]
+    [Arguments(null, "")]
+    [Arguments("none", "")]
+    [Arguments("j1", "j1")]
+    [Arguments("user@j1", "user@j1")]
+    [Arguments("j1:2222", "j1:2222")]
+    [Arguments("user@j1:2222", "user@j1:2222")]
+    [Arguments("j2,j1", "j2,j1")]
+    [Arguments("ssh://u2@j2:22,ssh://alice@jump.example.com:2222", "ssh://u2@j2:22,alice@jump.example.com:2222")]
+    [Arguments("192.0.2.10", "[192.0.2.10]")]
+    [Arguments("192.0.2.10:2222", "[192.0.2.10]:2222")]
+    [Arguments("[2001:db8::1]:22", "[2001:db8::1]:22")]
+    [Arguments("ssh://[2001:db8::1]", "[2001:db8::1]")]
+    [Arguments("j1:notaport", "j1:notaport")] // does not parse: kept as written
+    public async Task JumpSpec_IsTheWholeProxyJump_WithTheLastHopAsSshPrintsIt(string? proxyJump, string expected)
+    {
+        // As OpenSSH 10.6p2's ssh_jump_spec (and its regress test proxyjump.sh): earlier hops as written, the last one rebuilt.
+        await Assert.That(SshTokenContext.JumpSpec(proxyJump)).IsEqualTo(expected);
+    }
+
+    [Test]
     public async Task ExpandTokens_UnknownOrTrailing_Throws()
     {
         await Assert.That(() => Context().ExpandTokens("%z")).Throws<FormatException>();

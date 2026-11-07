@@ -176,7 +176,7 @@ internal sealed class SshConfigResolver(IReadOnlyList<SshConfigDocument> documen
         options.LocalHostName, options.GetEnvironmentVariable)
     {
         HostKeyAlias = First("hostkeyalias"),
-        ProxyJump = IsSet("proxyjump") ? First("proxyjump")! : string.Empty,
+        ProxyJump = SshTokenContext.JumpSpec(First("proxyjump")),
     };
 
     // In the second pass, ssh has replaced its HostName with the name the first pass settled on, so that is the name everywhere.
