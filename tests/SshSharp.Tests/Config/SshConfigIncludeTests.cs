@@ -109,6 +109,39 @@ public sealed class SshConfigIncludeTests : IDisposable
     }
 
     [Test]
+    [Arguments("locked/conf.d/*.conf")]
+    [Arguments("locked/conf.d/a.conf")]
+    [Arguments("locked/*/a.conf")]
+    public async Task AnIncludeBehindADirectoryThatMayNotBeSearched_IsAnError_NotLeftOut(string pattern)
+    {
+        // As OpenSSH 10.6p2 (c30113f351): a directory on the way that cannot be searched fails the Include, rather than leave out the
+        // settings it holds. A missing path is still nothing to include (Globs_AreInLexicalOrder_MissingFilesAreIgnored).
+        if (OperatingSystem.IsWindows())
+        {
+            Skip.Test("Unix file modes are needed.");
+            return;
+        }
+
+        File_("locked/conf.d/a.conf", "Port 32\n");
+        var locked = Path.Combine(_dir, "locked");
+        File.SetUnixFileMode(locked, UnixFileMode.None);
+        try
+        {
+            if (Directory.Exists(Path.Combine(locked, "conf.d")))
+            {
+                Skip.Test("Running as root: a directory with no permissions can still be searched.");
+                return;
+            }
+
+            await Assert.That(() => Resolve($"Include {P(pattern)}\n", "a")).Throws<UnauthorizedAccessException>();
+        }
+        finally
+        {
+            File.SetUnixFileMode(locked, (UnixFileMode)0x1C0); // 0700, so the test's directory can be removed
+        }
+    }
+
+    [Test]
     public async Task Globs_WorkInDirectorySegments_AndDotPatternsMatchHiddenFiles()
     {
         File_("site1/x.conf", "User one\n");

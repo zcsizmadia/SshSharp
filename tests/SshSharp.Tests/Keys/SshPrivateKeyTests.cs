@@ -58,6 +58,44 @@ public class SshPrivateKeyTests
     }
 
     [Test]
+    public async Task AnRsaKeyWhosePrimesAreNotItsModulus_IsRefused()
+    {
+        // OpenSSH 10.6p2 checks that p * q = n. Here the key is proven by signing and verifying with its public key, which such a key
+        // fails on every platform. (A wrong d or iqmp is not refused everywhere: Windows recomputes them from p and q, and the key then
+        // signs correctly, so it is usable. Checking them here would mean arithmetic on the private values that is not constant time.)
+        using var rsa = RSA.Create(2048);
+        using var other = RSA.Create(2048);
+        var p = rsa.ExportParameters(true);
+        p.Q = other.ExportParameters(true).Q;
+
+        await Assert.That(() => SshPrivateKey.Parse(TestKeys.OpenSshRsa(p, out _))).Throws<FormatException>();
+    }
+
+    [Test]
+    public async Task AnRsaKeyOverTheLargestSize_IsRefusedBeforeItIsUsed()
+    {
+        // A 16392-bit modulus (made up: no private operation should run on it). The size is checked before the key is built, as for
+        // public keys, rather than left to the self-check's signature.
+        var modulus = RandomNumberGenerator.GetBytes(2049);
+        modulus[0] |= 0x80;
+        var half = RandomNumberGenerator.GetBytes(1025);
+        var parameters = new RSAParameters
+        {
+            Modulus = modulus,
+            Exponent = [1, 0, 1],
+            D = RandomNumberGenerator.GetBytes(2049),
+            P = half,
+            Q = half,
+            DP = half,
+            DQ = half,
+            InverseQ = half,
+        };
+
+        await Assert.That(() => SshPrivateKey.Parse(TestKeys.OpenSshRsa(parameters, out _))).Throws<FormatException>()
+            .WithMessageContaining("at most 16384 bits");
+    }
+
+    [Test]
     public async Task Pem_Pkcs8_Pkcs1_Sec1_AndEncryptedPkcs8()
     {
         using var rsa = RSA.Create(2048);
