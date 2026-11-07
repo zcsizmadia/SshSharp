@@ -12,6 +12,7 @@ control, `SshClientOptions` takes the same settings as `ssh_config`, typed:
 | `PubkeyAcceptedAlgorithms` | `PubkeyAcceptedAlgorithms` | Which keys are offered, and the signature algorithm each uses. |
 | `PreferredAuthentications` | `PreferredAuthentications` | Which authentication methods are tried, in what order. |
 | `RequiredRsaSize` | `RequiredRSASize` | The smallest RSA host key accepted, in bits. |
+| `CASignatureAlgorithms` | `CASignatureAlgorithms` | The signature algorithms a certificate authority may have signed a host certificate with. |
 
 ## When to use
 
@@ -20,6 +21,7 @@ control, `SshClientOptions` takes the same settings as `ssh_config`, typed:
 - A service account must log in with its key only, never fall back to a password prompt.
 - Only some key types may be used to log in (Ed25519 only, say), even when the agent holds others.
 - Servers' RSA host keys must be larger than 2048 bits.
+- Host certificates must come from certificate authorities that sign with Ed25519 (or another algorithm a policy names).
 
 When you connect by `ssh_config` alias, the directives in the table apply instead; see
 [Use ssh_config and known_hosts](ssh-config-and-known-hosts.md).
@@ -115,6 +117,30 @@ method is tried only when the server offers it and its credentials are set.
 A smaller RSA host key fails the connection with `SshFailureReason.HostKeyRejected`. The default is 2048 bits. The setting can go as
 low as 1024 for an old device that cannot have a larger key, as `ssh_config`'s `RequiredRSASize` can, but no lower; prefer
 replacing the key.
+
+## Trust host certificates only from some kinds of authority
+
+`CASignatureAlgorithms` lists the signature algorithms a certificate authority may have signed a host certificate with, as
+`ssh_config`'s directive of that name does <span class="badge text-bg-primary">1.2</span>. Unset, SshSharp accepts `ssh-ed25519`,
+the three `ecdsa-sha2-nistp*` and `rsa-sha2-512`, `rsa-sha2-256`. A list can only narrow that set: SHA-1 `ssh-rsa` and the FIDO
+`sk-*` algorithms, which `ssh`'s defaults have, are never accepted from an authority, and naming one throws `ArgumentException`.
+
+[!code-csharp[](../snippets/Algorithms.cs#ca-signature-algorithms)]
+
+What counts is the algorithm of the authority's signature, not its key type: an RSA authority signs as `rsa-sha2-512` or
+`rsa-sha2-256`. A host certificate signed with an algorithm the list leaves out cannot be used, as one that has expired: as `ssh`
+does, the verifier logs a warning and checks the certified key as a plain key (see
+[Host certificates that cannot be used](../host-keys.md#host-certificates-that-cannot-be-used)). A list that leaves nothing, such as
+`Remove("*")`, throws `ArgumentException` before anything is sent. `FipsMode` does not change it: it decides what is negotiated,
+while a certificate's authority is checked after that.
+
+```mermaid
+flowchart LR
+    builtin["SshSharp's set<br/>Ed25519, ECDSA, RSA SHA-2"] --> list["CASignatureAlgorithms<br/>(can only remove)"]
+    list --> check{"The authority signed<br/>with one of them?"}
+    check -- yes --> cert["The certificate is checked:<br/>validity, principals"]
+    check -- no --> plain["Unusable: warning logged,<br/>key checked as a plain key"]
+```
 
 ## Notes and pitfalls
 

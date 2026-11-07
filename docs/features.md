@@ -41,7 +41,7 @@ The four packages share one version: `SshSharp` (the client), `SshSharp.Extensio
 | `known_hosts` | Hashed hosts, `@cert-authority`, `@revoked`, and the `StrictHostKeyChecking` policies; new keys recorded as `ssh` records them | <xref:SshSharp.KnownHostsVerifier>; `UserKnownHostsFile`, `StrictHostKeyChecking`, `HashKnownHosts` | [Verify host keys](how-to/verify-host-keys.md) |
 | Pinned keys | Accept only the fingerprints or public keys you name | `SshHostKeyVerifier.Pinned` (fingerprints, or `SshPublicKey` <span class="badge text-bg-primary">1.1</span>) | [Verify host keys](how-to/verify-host-keys.md) |
 | Your own rule | Decide each host key in code | `SshHostKeyVerifier.FromDelegate` | [Verify host keys](how-to/verify-host-keys.md) |
-| Host certificates | Trust host keys signed by a certificate authority | `@cert-authority` lines | [Host keys](host-keys.md) |
+| Host certificates | Trust host keys signed by a certificate authority; only from authorities that sign with the algorithms you allow <span class="badge text-bg-primary">1.2</span> | `@cert-authority` lines; `SshClientOptions.CASignatureAlgorithms`, `CASignatureAlgorithms` | [Host keys](host-keys.md) |
 | Revoked host keys | OpenSSH KRLs and key lists | `KnownHostsVerifier.RevokedHostKeys`; `RevokedHostKeys` | [Host keys](host-keys.md) |
 | Host key rotation | Learns the server's other host keys (`hostkeys-00@openssh.com`) | `KnownHostsVerifier.UpdateHostKeys`; `UpdateHostKeys` | [Host keys](host-keys.md) |
 | `KnownHostsCommand` | Gets known hosts from a command (an opt-in) | `KnownHostsCommand`; `AllowKnownHostsCommand` | [Directives](reference/ssh-config.md) |
