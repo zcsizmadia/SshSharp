@@ -164,4 +164,8 @@ internal static partial class SshLog
 
     [LoggerMessage(EventId = 55, Level = LogLevel.Warning, Message = "A client of the SOCKS proxy on {LocalEndPoint} failed to authenticate ({Reason}); its connection was closed")]
     public static partial void SocksAuthenticationFailed(ILogger logger, string localEndPoint, string reason);
+
+    // Fingerprints and the problem only: a certificate's key id and principals are often host names.
+    [LoggerMessage(EventId = 56, Level = LogLevel.Warning, Message = "The host certificate for key {Fingerprint} from the trusted authority {Authority} cannot be used ({Problem}); checking the key as a plain key, as ssh does")]
+    public static partial void HostCertificateUnusable(ILogger logger, string fingerprint, string authority, string problem);
 }

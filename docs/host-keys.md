@@ -26,7 +26,8 @@ var custom = new KnownHostsVerifier(["/etc/myapp/known_hosts"])
 
 `No` turns off protection against a changed key, so use it only where interception is not a concern. `@revoked` entries
 reject a key in every mode, and `@cert-authority`
-entries accept host certificates signed by that authority for the host. The `known_hosts` format is fully supported:
+entries accept host certificates signed by that authority for the host (one that cannot be used falls back to its plain key,
+[as in `ssh`](#host-certificates-that-cannot-be-used)). The `known_hosts` format is fully supported:
 hashed hosts, `[host]:port`, wildcards and negation.
 
 ```csharp
@@ -60,6 +61,33 @@ var verifier = new KnownHostsVerifier([knownHostsPath])
         Confirm($"Update known_hosts for {update.Host}: add {string.Join(", ", update.Added)}; remove {string.Join(", ", update.Removed)}?")),
 };
 ```
+
+### Host certificates that cannot be used
+
+A certificate from a trusted authority can still be unusable: expired, not yet valid, not issued for the name connected to (an
+IP address or a short name, when the certificate lists the full name), or signed with an algorithm `CASignatureAlgorithms` leaves
+out ([`SshClientOptions.CASignatureAlgorithms`](how-to/algorithms-and-authentication-order.md#trust-host-certificates-only-from-some-kinds-of-authority)
+<span class="badge text-bg-primary">1.2</span>, an Ed25519-only policy, say). As `ssh` does, the verifier then logs a warning (the key's
+and the authority's fingerprints and the problem, never the host name) and checks the certified key as a plain key, exactly as it
+checks the key of a certificate from an authority `known_hosts` does not list:
+
+```mermaid
+flowchart TD
+    A[Host certificate] --> R{"Key or authority revoked?<br/>(RevokedHostKeys, @revoked)"}
+    R -- yes --> X[Refused]
+    R -- no --> T{"Signed by an @cert-authority<br/>for the host?"}
+    T -- no --> P[Check the certified key as a plain key]
+    T -- yes --> U{"Signed with an allowed algorithm,<br/>valid now, for this name?"}
+    U -- yes --> OK[Accepted, nothing recorded]
+    U -- no --> W[Warning logged] --> P
+    P --> S[StrictHostKeyChecking, as for any key]
+```
+
+So a host whose plain key is also in `known_hosts` keeps connecting when its certificate expires. Without that line, the key is
+an unknown key: `Yes` refuses it, and the refusal says why the certificate could not be used; `AcceptNew` and `No` record it, and
+`Ask` offers it to `AskHostKey`, as `ssh` does. What is recorded is the plain key, never the certificate. A revoked key or
+authority (`@revoked`, `RevokedHostKeys`) is refused with no fallback. To accept only certificates, use `StrictHostKeyChecking.Yes`
+and keep plain lines for the host out of `known_hosts`, or [write a verifier](how-to/verify-host-keys.md#write-a-verifier).
 
 ### Revoked host keys
 

@@ -689,7 +689,8 @@ public sealed partial class SshClient : IAsyncDisposable
                 SshHostKeyVerdict verdict;
                 try
                 {
-                    verdict = await options.HostKeyVerifier.VerifyAsync(new SshHostKeyContext(host, port, options.HostKeyAlias, key), ct).ConfigureAwait(false);
+                    var context = new SshHostKeyContext(host, port, options.HostKeyAlias, key) { Logger = logger, CASignatureAlgorithms = preferences.CASignatures };
+                    verdict = await options.HostKeyVerifier.VerifyAsync(context, ct).ConfigureAwait(false);
                 }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {

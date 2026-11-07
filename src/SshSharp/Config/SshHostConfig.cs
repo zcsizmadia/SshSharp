@@ -152,6 +152,12 @@ public sealed class SshHostConfig
     /// <summary>Raw <c>PubkeyAcceptedAlgorithms</c> specification, or null.</summary>
     public string? PubkeyAcceptedAlgorithms { get; init; }
 
+    /// <summary>
+    /// Raw <c>CASignatureAlgorithms</c> specification, or null: the signature algorithms a certificate authority may have signed a host
+    /// certificate with. It can only narrow SshSharp's set (see <see cref="SshClientOptions.CASignatureAlgorithms"/>).
+    /// </summary>
+    public string? CASignatureAlgorithms { get; init; }
+
     /// <summary>The interval for server keep-alive messages, or null for none.</summary>
     public TimeSpan? ServerAliveInterval { get; init; }
 

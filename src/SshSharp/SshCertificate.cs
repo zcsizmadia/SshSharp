@@ -453,16 +453,52 @@ public sealed class SshCertificate
     /// <summary>
     /// Checks the certificate as a host's (<see cref="IsValidFor"/> with <see cref="SshCertificateType.Host"/>, for an authority the caller
     /// already matched). Returns why it is not acceptable, or null. As OpenSSH's client: a certificate without principals is no host's
-    /// (not any host's, which would let a key its authority certified by mistake pose as every host).
+    /// (not any host's, which would let a key its authority certified by mistake pose as every host). The reason does not name the host,
+    /// as ssh's does not ("name is not a listed principal"), so it can be logged. When <paramref name="caSignatureAlgorithms"/> is given,
+    /// the authority must have signed with one of them (ssh's <c>CASignatureAlgorithms</c>, "Certificate signed with disallowed
+    /// algorithm").
     /// </summary>
-    internal string? CheckForHost(string hostName, DateTimeOffset now) => Check(SshCertificateType.Host, hostName, now);
+    internal string? CheckForHost(string hostName, DateTimeOffset now, IReadOnlyList<string>? caSignatureAlgorithms = null) =>
+        Check(SshCertificateType.Host, hostName, now, namePrincipal: false, caSignatureAlgorithms);
 
-    /// <summary>The checks of <see cref="IsValidFor"/> after the authority: why the certificate is not acceptable, or null.</summary>
-    private string? Check(SshCertificateType type, string principal, DateTimeOffset time)
+    /// <summary>
+    /// The algorithm the authority signed the certificate with (<c>ssh-ed25519</c>, <c>rsa-sha2-512</c>), as the signature names it; null
+    /// when the signature is malformed, which <see cref="VerifySignature"/> refuses.
+    /// </summary>
+    internal string? SignatureAlgorithm
+    {
+        get
+        {
+            try
+            {
+                return new SshReader(Signature).ReadUtf8String();
+            }
+            catch (SshProtocolException)
+            {
+                return null;
+            }
+        }
+    }
+
+    /// <summary>
+    /// The checks of <see cref="IsValidFor"/> after the authority: why the certificate is not acceptable, or null. The reason names the
+    /// principal unless <paramref name="namePrincipal"/> is false. An authority's signature algorithm that SshSharp accepts but
+    /// <paramref name="caSignatureAlgorithms"/> leaves out is said by name; any other (<c>ssh-rsa</c>) fails as an invalid signature, as
+    /// it always has, so a name the certificate chose never reaches the reason.
+    /// </summary>
+    private string? Check(SshCertificateType type, string principal, DateTimeOffset time, bool namePrincipal = true,
+        IReadOnlyList<string>? caSignatureAlgorithms = null)
     {
         if (Type != type)
         {
             return Type == SshCertificateType.User ? "it is a user certificate, not a host certificate" : "it is a host certificate, not a user certificate";
+        }
+
+        // Before the signature is checked: one made with an algorithm not allowed is not worth verifying.
+        if (caSignatureAlgorithms is not null && SignatureAlgorithm is { } algorithm && SshAlgorithms.CASignatures.Contains(algorithm)
+            && !caSignatureAlgorithms.Contains(algorithm))
+        {
+            return $"its authority signed it with {algorithm}, which is not allowed here (CASignatureAlgorithms, or FIPS mode)";
         }
 
         if (!VerifySignature())
@@ -486,7 +522,7 @@ public sealed class SshCertificate
             : Principals.Contains(principal, StringComparer.Ordinal);
         if (!matches)
         {
-            return $"it is not issued for {principal}";
+            return namePrincipal ? $"it is not issued for {principal}" : "it is not issued for the name connected to (the host name, or HostKeyAlias)";
         }
 
         return CriticalOptions.Count > 0 ? $"it has critical options this check cannot enforce ({string.Join(", ", CriticalOptions.Keys)})" : null;

@@ -29,6 +29,12 @@ and `SshConfigResolveOptions` supplies the home directory, environment, local us
   the same holds for `Match version`, which concerns another OpenSSH release. ProxyJump hops are resolved with session type
   `none` and no command, as ssh resolves the `ssh -W` it runs for each hop.
 - `RefuseConnection yes` (OpenSSH 10.0) makes connecting by that alias fail at once, before any network activity.
+- `%j` is the whole `ProxyJump` specification: the hops before the last one as written, then the last one as `ssh -G` prints it,
+  `[user@]host[:port]`, with an address in brackets (`ProxyJump ssh://alice@192.0.2.10:2222` gives `alice@[192.0.2.10]:2222`).
+  `%C` is the SHA-1 of `%l`, `%h`, `%p`, `%r` and `%j`, each followed by a NUL, so that host `192.0.2.1` on port `2222` and
+  `192.0.2.12` on port `222` differ. Both are as in OpenSSH 10.6p2 <span class="badge text-bg-primary">1.2</span>: older OpenSSH
+  hashed the fields run together, and put only the last hop's host name in `%j`, so paths built with `%C` (an `IdentityFile`, a
+  `UserKnownHostsFile` or a forwarded socket's path, say) differ between SshSharp 1.2 and `ssh` before 10.6p2.
 
 `Match exec` runs a local command, so it is evaluated only when `SshConfigResolveOptions.ExecMatcher` is set, for configuration files
 you trust (`ExecMatcher = (command, ct) => new(SshExecMatcher.RunShellAsync(command, ct))` runs it in the system shell); without

@@ -75,6 +75,31 @@ internal static class Glob
     public static bool HasWildcards(string pattern) => pattern.AsSpan().IndexOfAny('*', '?') >= 0;
 
     /// <summary>
+    /// Whether <paramref name="path"/> is an existing file (or directory). A path that cannot be looked at, because a directory on the way
+    /// may not be searched, is an <see cref="UnauthorizedAccessException"/>, not a missing file: as OpenSSH 10.6p2 fails an <c>Include</c>
+    /// whose glob hits such a directory, rather than leave out the settings the file holds.
+    /// </summary>
+    internal static bool Exists(string path, bool directory)
+    {
+        if (directory ? Directory.Exists(path) : File.Exists(path))
+        {
+            return true;
+        }
+
+        try
+        {
+            // Only to learn why it was not found: denied access throws, and so does nothing else that matters here.
+            _ = File.GetAttributes(path);
+        }
+        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
+        {
+            // It is not there.
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// Expands a rooted path pattern to existing files, in ordinal order. Wildcards may appear in any path segment and do not
     /// match names starting with a dot unless the pattern segment does.
     /// </summary>
@@ -94,7 +119,7 @@ internal static class Glob
                 if (!HasWildcards(segment))
                 {
                     var candidate = Path.Join(dir, segment);
-                    if (isLast ? File.Exists(candidate) : Directory.Exists(candidate))
+                    if (Exists(candidate, directory: !isLast))
                     {
                         next.Add(candidate);
                     }

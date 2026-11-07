@@ -616,6 +616,13 @@ internal static class PrivateKeyParser
         {
             throw new FormatException($"RSA keys must be at least {MinimumRsaBits} bits; this one is {bits}.");
         }
+
+        // Checked here, before the key is built or used, as OpenSSH checks a key read from PEM against its limit before any arithmetic.
+        // The self-check's public key parse would refuse it too, but only after a private-key operation on a modulus of any size.
+        if (bits > VerifyingKey.MaxRsaBits)
+        {
+            throw new FormatException($"RSA keys may have at most {VerifyingKey.MaxRsaBits} bits; this one has {bits}.");
+        }
     }
 
     private static byte[] PemBody(string text, string label)

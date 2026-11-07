@@ -261,7 +261,7 @@ public sealed class SshConfig
             Port = port,
             RemoteUser = user,
             HostKeyAlias = hostKeyAlias,
-            ProxyJump = proxyJump is null || proxyJump.Equals("none", StringComparison.OrdinalIgnoreCase) ? string.Empty : proxyJump,
+            ProxyJump = SshTokenContext.JumpSpec(proxyJump),
         };
 
         var identityFiles = All("identityfile").Select(v => ctx.ExpandPath(ctx.ExpandTokens(v))).ToList();
@@ -312,6 +312,7 @@ public sealed class SshConfig
             Macs = First("macs"),
             Compression = Bool(First("compression"), false),
             PubkeyAcceptedAlgorithms = First("pubkeyacceptedalgorithms") ?? First("pubkeyacceptedkeytypes"),
+            CASignatureAlgorithms = First("casignaturealgorithms"),
             ServerAliveInterval = Time(First("serveraliveinterval")) is { } sai && sai > TimeSpan.Zero ? sai : null,
             ServerAliveCountMax = int.TryParse(First("serveralivecountmax"), NumberStyles.None, CultureInfo.InvariantCulture, out var count) ? count : 3,
             ConnectTimeout = Time(First("connecttimeout")),

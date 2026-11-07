@@ -1,4 +1,6 @@
 #nullable enable
+SshSharp.Config.SshHostConfig.CASignatureAlgorithms.get -> string?
+SshSharp.Config.SshHostConfig.CASignatureAlgorithms.init -> void
 SshSharp.Sftp.SftpListOptions.IgnoreCase.get -> bool
 SshSharp.Sftp.SftpListOptions.IgnoreCase.init -> void
 SshSharp.Sftp.SftpListOptions.SkipUnreadableDirectories.get -> bool
@@ -11,6 +13,8 @@ SshSharp.Sftp.SftpTransferOptions.TimeTolerance.get -> System.TimeSpan
 SshSharp.Sftp.SftpTransferOptions.TimeTolerance.init -> void
 SshSharp.Sftp.SftpTransferSummary.UnreadableDirectories.get -> System.Collections.Generic.IReadOnlyList<string!>!
 SshSharp.Sftp.SftpTransferSummary.UnreadableDirectories.init -> void
+SshSharp.SshClientOptions.CASignatureAlgorithms.get -> SshSharp.SshAlgorithmList?
+SshSharp.SshClientOptions.CASignatureAlgorithms.init -> void
 SshSharp.SshClientOptions.StaggeredConnectDelay.get -> System.TimeSpan?
 SshSharp.SshClientOptions.StaggeredConnectDelay.init -> void
 SshSharp.SshConfigConnectOptions.StaggeredConnectDelay.get -> System.TimeSpan?

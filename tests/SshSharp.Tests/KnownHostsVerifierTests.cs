@@ -1,7 +1,10 @@
 using System.Buffers;
 using System.Security.Cryptography;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Time.Testing;
 using SshSharp.Config;
 using SshSharp.Protocol;
+using SshSharp.Tests.Keys;
 
 namespace SshSharp.Tests;
 
@@ -172,6 +175,157 @@ public sealed class KnownHostsVerifierTests : IDisposable
         var verdict = await Verifier(StrictHostKeyChecking.No).VerifyAsync(Context(key), default);
         await Assert.That(verdict.IsAccepted).IsFalse();
         await Assert.That(verdict.Reason).Contains("@revoked");
+    }
+
+    // ---- host certificates: one from a trusted authority that cannot be used falls back to the plain key, as ssh does ----
+
+    private static readonly DateTimeOffset Now = new(2026, 6, 1, 12, 0, 0, TimeSpan.Zero);
+
+    /// <summary>A host key with a certificate for it from <paramref name="authority"/>, unusable for the default host as <paramref name="problem"/> says.</summary>
+    private static SshHostKey CertifiedKey(SshPrivateKey authority, SshPrivateKey host, string problem = "expired")
+    {
+        var (principals, after, before) = problem switch
+        {
+            "expired" => (new[] { "server.example" }, (DateTimeOffset?)null, (DateTimeOffset?)Now.AddHours(-1)),
+            "not yet valid" => (["server.example"], Now.AddHours(1), null),
+            "principal" => (["other.example"], null, null),
+            _ => (["server.example"], null, null),
+        };
+        var blob = host.PublicKey.ToArray();
+        var certificate = SshCertificate.FromBlob(TestKeys.Certificate(authority, blob, SshCertificateType.Host, principals, after, before, keyId: "web-1"));
+        return new SshHostKey(certificate.Algorithm, host.KeyType, host.Fingerprint, blob, 256) { Certificate = certificate };
+    }
+
+    private static string AuthorityLine(SshPrivateKey authority, string marker = "@cert-authority") =>
+        $"{marker} * {authority.KeyType} {Convert.ToBase64String(authority.PublicKey.Span)}\n";
+
+    private KnownHostsVerifier CertificateVerifier(StrictHostKeyChecking policy, Func<SshHostKeyPrompt, CancellationToken, ValueTask<bool>>? ask = null) =>
+        new([UserFile]) { Policy = policy, AskHostKey = ask, Clock = new FakeTimeProvider(Now) };
+
+    private static SshHostKeyContext LoggedContext(SshHostKey key, ListLogger log) => new("server.example", 22, null, key) { Logger = log };
+
+    [Test]
+    [Arguments("expired")]
+    [Arguments("not yet valid")]
+    [Arguments("principal")]
+    public async Task AnUnusableCertificateFromATrustedAuthority_IsCheckedAsItsPlainKey_WhichAKnownLineAccepts(string problem)
+    {
+        using var authority = SshPrivateKey.Generate(SshKeyType.Ed25519);
+        using var host = SshPrivateKey.Generate(SshKeyType.Ed25519);
+        var key = CertifiedKey(authority, host, problem);
+        var contents = AuthorityLine(authority) + Line("server.example", key);
+        File.WriteAllText(UserFile, contents);
+
+        var log = new ListLogger();
+        var verdict = await CertificateVerifier(StrictHostKeyChecking.Yes).VerifyAsync(LoggedContext(key, log), default);
+        await Assert.That(verdict.IsAccepted).IsTrue();
+        await Assert.That(File.ReadAllText(UserFile)).IsEqualTo(contents);
+
+        // The problem is a warning that names the keys, never the host (nor the key id, which is often a host name).
+        await Assert.That(log.Entries.Count).IsEqualTo(1);
+        var (level, message) = log.Entries[0];
+        await Assert.That(level).IsEqualTo(LogLevel.Warning);
+        await Assert.That(message).Contains(host.Fingerprint).And.Contains(authority.Fingerprint).And.Contains("plain key");
+        await Assert.That(message).DoesNotContain("server.example").And.DoesNotContain("other.example").And.DoesNotContain("web-1");
+    }
+
+    [Test]
+    public async Task AnUnusableCertificate_WithoutAPlainLine_IsRefusedByYes_AndItsPlainKeyIsWhatAcceptNewAndAskRecord()
+    {
+        using var authority = SshPrivateKey.Generate(SshKeyType.Ed25519);
+        using var host = SshPrivateKey.Generate(SshKeyType.Ed25519);
+        var key = CertifiedKey(authority, host);
+        File.WriteAllText(UserFile, AuthorityLine(authority));
+
+        var refused = await CertificateVerifier(StrictHostKeyChecking.Yes).VerifyAsync(Context(key), default);
+        await Assert.That(refused.IsAccepted).IsFalse();
+        await Assert.That(refused.Reason).Contains("not in known_hosts, and StrictHostKeyChecking is yes").And.Contains("could not be used either")
+            .And.Contains("valid only");
+        await Assert.That(File.ReadAllText(UserFile)).IsEqualTo(AuthorityLine(authority));
+
+        // As with ssh, Ask offers the key; the prompt's context still has the certificate.
+        SshHostKeyPrompt? prompt = null;
+        var declined = await CertificateVerifier(StrictHostKeyChecking.Ask, (p, _) =>
+        {
+            prompt = p;
+            return ValueTask.FromResult(false);
+        }).VerifyAsync(Context(key), default);
+        await Assert.That(declined.IsAccepted).IsFalse();
+        await Assert.That(declined.Reason).Contains("was not accepted").And.Contains("could not be used either");
+        await Assert.That(prompt!.Context.HostKey.Certificate).IsNotNull();
+
+        // AcceptNew records the certified key as a plain key (ssh drops the certificate before it retries), which is then known.
+        var recorded = await CertificateVerifier(StrictHostKeyChecking.AcceptNew).VerifyAsync(Context(key), default);
+        await Assert.That(recorded.IsAccepted).IsTrue();
+        await Assert.That(File.ReadAllText(UserFile))
+            .IsEqualTo(AuthorityLine(authority) + $"server.example ssh-ed25519 {Convert.ToBase64String(host.PublicKey.Span)}\n");
+        await Assert.That((await CertificateVerifier(StrictHostKeyChecking.Yes).VerifyAsync(Context(key), default)).IsAccepted).IsTrue();
+    }
+
+    [Test]
+    public async Task AnUnusableCertificate_ForAKeyThatChanged_IsRefusedAsAChangedKey()
+    {
+        using var authority = SshPrivateKey.Generate(SshKeyType.Ed25519);
+        using var host = SshPrivateKey.Generate(SshKeyType.Ed25519);
+        File.WriteAllText(UserFile, AuthorityLine(authority) + Line("server.example", Ed25519Key()));
+        var verdict = await CertificateVerifier(StrictHostKeyChecking.AcceptNew).VerifyAsync(Context(CertifiedKey(authority, host, "principal")), default);
+        await Assert.That(verdict.IsAccepted).IsFalse();
+        await Assert.That(verdict.Reason).Contains("has changed").And.Contains("not issued for the name connected to");
+    }
+
+    [Test]
+    public async Task ARevokedAuthorityOrKey_RefusesAnUnusableCertificate_WithoutFallingBackToThePlainKey()
+    {
+        using var authority = SshPrivateKey.Generate(SshKeyType.Ed25519);
+        using var host = SshPrivateKey.Generate(SshKeyType.Ed25519);
+        var key = CertifiedKey(authority, host);
+        var trusted = AuthorityLine(authority) + Line("server.example", key);
+
+        File.WriteAllText(UserFile, trusted + AuthorityLine(authority, "@revoked"));
+        var verdict = await CertificateVerifier(StrictHostKeyChecking.No).VerifyAsync(Context(key), default);
+        await Assert.That(verdict.IsAccepted).IsFalse();
+        await Assert.That(verdict.Reason).Contains("authority is marked @revoked");
+
+        File.WriteAllText(UserFile, trusted + Line("*", key, "@revoked "));
+        verdict = await CertificateVerifier(StrictHostKeyChecking.No).VerifyAsync(Context(key), default);
+        await Assert.That(verdict.IsAccepted).IsFalse();
+        await Assert.That(verdict.Reason).Contains("key is marked @revoked");
+
+        // RevokedHostKeys is checked before anything else, the certificate included.
+        var revokedFile = Path.Combine(_dir, "revoked");
+        File.WriteAllText(revokedFile, $"{key.KeyType} {Convert.ToBase64String(key.PublicKey.Span)}\n");
+        File.WriteAllText(UserFile, trusted);
+        var withList = new KnownHostsVerifier([UserFile]) { Policy = StrictHostKeyChecking.No, RevokedHostKeys = revokedFile, Clock = new FakeTimeProvider(Now) };
+        verdict = await withList.VerifyAsync(Context(key), default);
+        await Assert.That(verdict.IsAccepted).IsFalse();
+        await Assert.That(verdict.Reason).Contains("revoked by file");
+    }
+
+    [Test]
+    public async Task AValidCertificateFromATrustedAuthority_IsAccepted_WithoutAWarningOrAKnownHostsChange()
+    {
+        using var authority = SshPrivateKey.Generate(SshKeyType.Ed25519);
+        using var host = SshPrivateKey.Generate(SshKeyType.Ed25519);
+        File.WriteAllText(UserFile, AuthorityLine(authority));
+        var log = new ListLogger();
+        var verdict = await CertificateVerifier(StrictHostKeyChecking.AcceptNew).VerifyAsync(LoggedContext(CertifiedKey(authority, host, "valid"), log), default);
+        await Assert.That(verdict.IsAccepted).IsTrue();
+        await Assert.That(File.ReadAllText(UserFile)).IsEqualTo(AuthorityLine(authority));
+        await Assert.That(log.Entries).IsEmpty();
+    }
+
+    /// <summary>Collects log entries.</summary>
+    private sealed class ListLogger : ILogger
+    {
+        public List<(LogLevel Level, string Message)> Entries { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
+            Entries.Add((logLevel, formatter(state, exception)));
     }
 
     [Test]

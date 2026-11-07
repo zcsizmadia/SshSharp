@@ -1,3 +1,6 @@
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+
 namespace SshSharp;
 
 /// <summary>What a <see cref="SshHostKeyVerifier"/> is asked to decide: which host this is and the key it proved it holds.</summary>
@@ -28,6 +31,15 @@ public sealed class SshHostKeyContext
     /// otherwise the host and port. Null when neither is known.
     /// </summary>
     public KnownHostsLookup? KnownHostsLookup => HostKeyAlias is { } alias ? new(alias, 22) : Host is { } host ? new(host, Port) : null;
+
+    /// <summary>The connection's logger (<see cref="SshClientOptions.Logger"/>), for what a built-in verifier reports without refusing.</summary>
+    internal ILogger Logger { get; init; } = NullLogger.Instance;
+
+    /// <summary>
+    /// The signature algorithms a certificate authority may have signed a host certificate with (<see cref="SshClientOptions.CASignatureAlgorithms"/>,
+    /// or ssh_config's <c>CASignatureAlgorithms</c>), for a built-in verifier that trusts certificate authorities.
+    /// </summary>
+    internal IReadOnlyList<string> CASignatureAlgorithms { get; init; } = Protocol.SshAlgorithms.CASignatures;
 }
 
 /// <summary>The name and port a host key is looked up under in <c>known_hosts</c> (see <see cref="SshHostKeyContext.KnownHostsLookup"/>).</summary>

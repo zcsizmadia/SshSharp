@@ -14,7 +14,7 @@ value.
 |---|---|
 | `Host` | Patterns with `*`, `?` and `!` negation. |
 | `Match` | `all`, `host`, `originalhost`, `user`, `localuser`, `canonical`, `final`, `exec`, `tagged`, `localnetwork`, `sessiontype`, `command`; negation with `!`. `exec` runs only with `SshConfigResolveOptions.ExecMatcher`; `sessiontype` and `command` match only when `SessionType` (and `Command`) are given; `version` never matches. `canonical`, `final` and the second pass behave as in `ssh` (see [Host name canonicalization](../config-files.md#host-name-canonicalization)). |
-| `Include` | Globs, relative to `~/.ssh` (user file) or the system directory; at most 16 levels and 1,024 files. |
+| `Include` | Globs, relative to `~/.ssh` (user file) or the system directory; at most 16 levels and 1,024 files. A path that does not exist includes nothing; one behind a directory that may not be searched is an error (`UnauthorizedAccessException`), as in OpenSSH 10.6p2, rather than settings silently left out. |
 | `Tag` | Matched by `Match tagged`; `SshConfigResolveOptions.Tag` overrides it. |
 
 ## Destination and transport
@@ -66,14 +66,17 @@ them to it):
 | `Ciphers` | `Ciphers` | Yes. `SshClientOptions.Ciphers` in code. |
 | `MACs` | `Macs` | Yes. `SshClientOptions.Macs` in code. |
 | `PubkeyAcceptedAlgorithms` (`PubkeyAcceptedKeyTypes`) | `PubkeyAcceptedAlgorithms` | Yes, as in `ssh`: a key (an identity file's, the agent's, or one in `SshConfigConnectOptions.PrivateKeys`) is offered only with an algorithm the list allows, and is skipped when it allows none of the key's (a key with a certificate needs the certificate's algorithm, such as `ssh-ed25519-cert-v01@openssh.com`). An RSA key signs with the list's first RSA algorithm (`rsa-sha2-512` or `rsa-sha2-256`) that the server lists in `server-sig-algs` (RFC 8308). SHA-1 `ssh-rsa` is never used, so `+ssh-rsa` changes nothing. A list that leaves nothing SshSharp can use (`PubkeyAcceptedKeyTypes ssh-rsa`, common in older configurations) offers no key: each is reported as `NoAcceptedAlgorithm`, a warning names the directive, and password, keyboard-interactive and GSSAPI logins still work. Unset, every key is offered with its own algorithms. `SshClientOptions.PubkeyAcceptedAlgorithms` in code. |
-| `RequiredRSASize` | `RequiredRsaSize` | Yes: the smallest RSA host key accepted (default 2048; values under 1024 are ignored, as `ssh` refuses them). `SshClientOptions.RequiredRsaSize` in code. |
+| `RequiredRSASize` | `RequiredRsaSize` | Yes: the smallest RSA host key accepted, and above 2048 also the smallest RSA authority of a host certificate, as in OpenSSH 10.6p2 (default 2048; values under 1024 are ignored, as `ssh` refuses them). `SshClientOptions.RequiredRsaSize` in code. |
+| `CASignatureAlgorithms` | `CASignatureAlgorithms` | Yes <span class="badge text-bg-primary">1.2</span>: the signature algorithms a certificate authority may have signed a host certificate with (an `@cert-authority` in `known_hosts`). It can only narrow SshSharp's set, `ssh-ed25519`, `ecdsa-sha2-nistp256/384/521`, `rsa-sha2-512` and `rsa-sha2-256`: SHA-1 `ssh-rsa` and the `sk-*` algorithms, which `ssh`'s defaults have, are dropped like any name SshSharp does not implement, so `+ssh-rsa` changes nothing. A certificate signed with an algorithm the list leaves out cannot be used, as `ssh` has it ("Certificate signed with disallowed algorithm"): a warning is logged and its key is checked as a plain key (see [Host certificates that cannot be used](../host-keys.md#host-certificates-that-cannot-be-used)). It applies through the configured `known_hosts` checking, and through `KnownHostsVerifier.FromConfig`. `SshClientOptions.CASignatureAlgorithms` in code. |
 | `Compression` | `Compression` | Yes: `yes` offers `zlib@openssh.com` (OpenSSH's delayed compression, which starts after authentication) before `none`; `no`, the default, offers only `none`. `SshClientOptions.Compression` in code. See [Compress a slow link](../how-to/tune-and-inspect-connections.md#compress-a-slow-link). |
 
 Each list is applied as `ssh` applies it: `+` adds names after the defaults (one that is already a default stays where it is),
 `^` puts them first, `-` removes what its patterns match, and in every form a wildcard stands for the names it matches
-(`Ciphers aes*-ctr` is `aes256-ctr,aes192-ctr,aes128-ctr`). A `KexAlgorithms`, `HostKeyAlgorithms`, `Ciphers` or `MACs` list that
-leaves no algorithm SshSharp can use fails the connection before anything is sent (right after the configuration is read), with an
-`SshException` (`ConnectFailed`) that names the directive: the connection could not work. A `PubkeyAcceptedAlgorithms` list that
+(`Ciphers aes*-ctr` is `aes256-ctr,aes192-ctr,aes128-ctr`). A `KexAlgorithms`, `HostKeyAlgorithms`, `Ciphers`, `MACs` or
+`CASignatureAlgorithms` list that leaves no algorithm SshSharp can use fails the connection before anything is sent (right after the
+configuration is read), with an `SshException` (`ConnectFailed`) that names the directive: the connection could not work, or, for
+`CASignatureAlgorithms`, no host certificate could ever be used. `KnownHostsVerifier.FromConfig` throws the same for such a
+`CASignatureAlgorithms`. A `PubkeyAcceptedAlgorithms` list that
 leaves nothing only means no key is offered, as above, since the other authentication methods may still log in.
 
 The `SshClientOptions` lists take an `SshAlgorithmList` in the same `+`, `-`, `^` and plain forms (wildcards in `Remove` only); see
@@ -167,6 +170,7 @@ A dash means there is no typed equivalent. The "Applied" tables above say how ea
 | `KexAlgorithms`, `HostKeyAlgorithms`, `Ciphers`, `MACs` | `KexAlgorithms`, `HostKeyAlgorithms`, `Ciphers`, `Macs` | - | - |
 | `PubkeyAcceptedAlgorithms` | `PubkeyAcceptedAlgorithms` | - | - |
 | `RequiredRSASize` | `RequiredRsaSize` | - | - |
+| `CASignatureAlgorithms` | `CASignatureAlgorithms` | - | - |
 | `Compression` | `Compression` | `Compression` (the destination only) | `Compression` |
 | `StrictHostKeyChecking` | `HostKeyVerifier = new KnownHostsVerifier(...) { Policy = ... }` | `HostKeyVerifier` (replaces it), `AskHostKey` (answers `ask`) | `AcceptNewHostKeys` (`accept-new`; otherwise `yes`), `HostKeyFingerprints` (pinned keys instead) |
 | `UserKnownHostsFile`, `GlobalKnownHostsFile` | The `KnownHostsVerifier` constructor's two lists | - | `KnownHostsFiles` |

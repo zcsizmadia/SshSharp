@@ -162,6 +162,14 @@ internal sealed class FakeSessionServer : IAsyncDisposable
     /// <summary>Ignore the client's window and send data regardless (protocol violation).</summary>
     public bool IgnoreClientWindow { get; init; }
 
+    /// <summary>
+    /// The most window the server takes from the client, at the open and after each adjust, as older Dropbear does (its
+    /// TRANS_MAX_WINDOW, 500,000,000 bytes): window it is offered beyond this is lost, not saved for later.
+    /// </summary>
+    public long? ClientWindowCap { get; init; }
+
+    private long CapClientWindow(long window) => ClientWindowCap is { } cap ? Math.Min(window, cap) : window;
+
     public Func<ExecScript, Task> OnExec { get; set; } = script => script.FinishAsync(0);
 
     /// <summary>Runs for a "shell" request (the script's command is empty).</summary>
@@ -916,7 +924,7 @@ internal sealed class FakeSessionServer : IAsyncDisposable
                 channel.ClientId = reader.ReadUInt32();
                 lock (channel)
                 {
-                    channel.ClientWindow = reader.ReadUInt32();
+                    channel.ClientWindow = CapClientWindow(reader.ReadUInt32());
                 }
 
                 channel.ClientMaxPacket = reader.ReadUInt32();
@@ -1035,7 +1043,7 @@ internal sealed class FakeSessionServer : IAsyncDisposable
                     }
                 }
 
-                var channel = new ServerChannel(_nextId++) { ClientId = clientId, ClientWindow = window, ClientMaxPacket = maxPacket, Tunnel = tunnel };
+                var channel = new ServerChannel(_nextId++) { ClientId = clientId, ClientWindow = CapClientWindow(window), ClientMaxPacket = maxPacket, Tunnel = tunnel };
                 lock (_channels)
                 {
                     _channels[channel.Id] = channel;
@@ -1152,7 +1160,7 @@ internal sealed class FakeSessionServer : IAsyncDisposable
                 var channel = Find(reader.ReadUInt32());
                 lock (channel)
                 {
-                    channel.ClientWindow += reader.ReadUInt32();
+                    channel.ClientWindow = CapClientWindow(channel.ClientWindow + reader.ReadUInt32());
                 }
 
                 channel.WindowChanged.Release();

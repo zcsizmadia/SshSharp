@@ -27,6 +27,12 @@ internal sealed class AlgorithmPreferences
     /// </summary>
     public bool NoPublicKeyAlgorithm => PublicKeys is { Count: 0 };
 
+    /// <summary>
+    /// The signature algorithms a certificate authority may have signed a host certificate with (<c>CASignatureAlgorithms</c>), which
+    /// the host key verifier gets: SshSharp's set (<see cref="SshAlgorithms.CASignatures"/>), or the part of it a list leaves.
+    /// </summary>
+    public IReadOnlyList<string> CASignatures { get; init; } = SshAlgorithms.CASignatures;
+
     /// <summary>Whether the lists were restricted to FIPS-approved algorithms, which certificate host key algorithms added later must be too.</summary>
     public bool FipsMode { get; init; }
 
@@ -41,6 +47,7 @@ internal sealed class AlgorithmPreferences
     {
         Kex = SshAlgorithms.FilterFips(SshAlgorithms.DefaultKex, AlgorithmKind.Kex),
         HostKeys = SshAlgorithms.FilterFips(SshAlgorithms.DefaultHostKeys, AlgorithmKind.HostKey),
+        CASignatures = SshAlgorithms.FilterFips(SshAlgorithms.CASignatures, AlgorithmKind.CASignature),
         Ciphers = SshAlgorithms.FilterFips(SshAlgorithms.DefaultCiphers, AlgorithmKind.Cipher),
         Macs = SshAlgorithms.FilterFips(SshAlgorithms.DefaultMacs, AlgorithmKind.Mac),
         FipsMode = true,
@@ -54,24 +61,42 @@ internal sealed class AlgorithmPreferences
     /// only SHA-1 RSA, which SshSharp never uses) is not an error: no key is offered (<see cref="NoPublicKeyAlgorithm"/>), and the other
     /// authentication methods still work.
     /// </summary>
-    /// <exception cref="SshException"><c>KexAlgorithms</c>, <c>HostKeyAlgorithms</c>, <c>Ciphers</c> or <c>MACs</c> leaves no algorithm of its
-    /// kind that SshSharp can use (<see cref="SshFailureReason.ConnectFailed"/>).</exception>
+    /// <exception cref="SshException"><c>KexAlgorithms</c>, <c>HostKeyAlgorithms</c>, <c>Ciphers</c>, <c>MACs</c> or
+    /// <c>CASignatureAlgorithms</c> leaves no algorithm of its kind that SshSharp can use (<see cref="SshFailureReason.ConnectFailed"/>).</exception>
     public static AlgorithmPreferences FromConfig(SshHostConfig config, bool fipsMode = false, bool? compression = null)
     {
         ArgumentNullException.ThrowIfNull(config);
         var preferences = From(SshAlgorithmList.FromConfig(config.KexAlgorithms), SshAlgorithmList.FromConfig(config.HostKeyAlgorithms),
             SshAlgorithmList.FromConfig(config.Ciphers), SshAlgorithmList.FromConfig(config.Macs), SshAlgorithmList.FromConfig(config.PubkeyAcceptedAlgorithms),
-            compression ?? config.Compression, fipsMode);
+            SshAlgorithmList.FromConfig(config.CASignatureAlgorithms), compression ?? config.Compression, fipsMode);
 
         // Said now, naming the directive, rather than as a negotiation failure that looks like the server's doing. An empty
         // PubkeyAcceptedAlgorithms is left out: it only means no key is offered (the connection logs that), and failing every connection
         // for it would turn away password logins that worked before the list was applied.
-        if (Empty(preferences, "KexAlgorithms", "HostKeyAlgorithms", "Ciphers", "MACs", publicKeys: null) is { } problem)
+        if (Empty(preferences, "KexAlgorithms", "HostKeyAlgorithms", "Ciphers", "MACs", publicKeys: null, "CASignatureAlgorithms") is { } problem)
         {
             throw new SshException(SshFailureReason.ConnectFailed, $"ssh_config's {problem} that SshSharp can use{(fipsMode ? " in FIPS mode" : string.Empty)}.");
         }
 
         return preferences;
+    }
+
+    /// <summary>
+    /// The CA signature algorithms an ssh_config <c>CASignatureAlgorithms</c> specification leaves, for a <see cref="KnownHostsVerifier"/>
+    /// made from the configuration; null when it is unset (SshSharp's set applies).
+    /// </summary>
+    /// <exception cref="SshException">The list leaves no CA signature algorithm SshSharp accepts (<see cref="SshFailureReason.ConnectFailed"/>).</exception>
+    public static IReadOnlyList<string>? CASignaturesFromConfig(string? specification)
+    {
+        if (SshAlgorithmList.FromConfig(specification) is not { } list)
+        {
+            return null;
+        }
+
+        var signatures = ResolveCASignatures(list);
+        return signatures.Count > 0
+            ? signatures
+            : throw new SshException(SshFailureReason.ConnectFailed, "ssh_config's CASignatureAlgorithms leaves no CA signature algorithm that SshSharp can use.");
     }
 
     /// <summary>Builds preferences from the typed lists of <see cref="SshClientOptions"/>, whose names were checked when they were set.</summary>
@@ -80,12 +105,13 @@ internal sealed class AlgorithmPreferences
     {
         ArgumentNullException.ThrowIfNull(options);
         var preferences = From(options.KexAlgorithms, options.HostKeyAlgorithms, options.Ciphers, options.Macs, options.PubkeyAcceptedAlgorithms,
-            options.Compression, options.FipsMode);
+            options.CASignatureAlgorithms, options.Compression, options.FipsMode);
 
         // Said now, with the option named, rather than as a negotiation failure that looks like the server's doing.
         const string Options = nameof(SshClientOptions) + ".";
         if (Empty(preferences, Options + nameof(SshClientOptions.KexAlgorithms), Options + nameof(SshClientOptions.HostKeyAlgorithms),
-            Options + nameof(SshClientOptions.Ciphers), Options + nameof(SshClientOptions.Macs), Options + nameof(SshClientOptions.PubkeyAcceptedAlgorithms))
+            Options + nameof(SshClientOptions.Ciphers), Options + nameof(SshClientOptions.Macs), Options + nameof(SshClientOptions.PubkeyAcceptedAlgorithms),
+            Options + nameof(SshClientOptions.CASignatureAlgorithms))
             is { } problem)
         {
             throw new ArgumentException($"{problem} that SshSharp can use on this platform{(options.FipsMode ? " in FIPS mode" : string.Empty)}.",
@@ -99,7 +125,8 @@ internal sealed class AlgorithmPreferences
     /// The first list that is empty, as "<c>name</c> leaves no <c>kind</c> algorithm", or null when none is. The public key list is
     /// checked only when <paramref name="publicKeys"/> names it.
     /// </summary>
-    private static string? Empty(AlgorithmPreferences preferences, string kex, string hostKeys, string ciphers, string macs, string? publicKeys)
+    private static string? Empty(AlgorithmPreferences preferences, string kex, string hostKeys, string ciphers, string macs, string? publicKeys,
+        string caSignatures)
     {
         foreach (var (list, name, kind) in new (IReadOnlyList<string>?, string?, string)[]
         {
@@ -108,6 +135,7 @@ internal sealed class AlgorithmPreferences
             (preferences.Ciphers, ciphers, "cipher"),
             (preferences.Macs, macs, "MAC"),
             (preferences.PublicKeys, publicKeys, "public key signature"),
+            (preferences.CASignatures, caSignatures, "CA signature"),
         })
         {
             if (name is not null && list is { Count: 0 })
@@ -127,7 +155,7 @@ internal sealed class AlgorithmPreferences
     /// cryptographic algorithm, and FIPS 140 says nothing about it.
     /// </summary>
     private static AlgorithmPreferences From(SshAlgorithmList? kex, SshAlgorithmList? hostKeys, SshAlgorithmList? ciphers, SshAlgorithmList? macs,
-        SshAlgorithmList? publicKeys, bool compression, bool fipsMode)
+        SshAlgorithmList? publicKeys, SshAlgorithmList? caSignatures, bool compression, bool fipsMode)
     {
         IReadOnlyList<string> Resolve(SshAlgorithmList? spec, IReadOnlyList<string> defaults, AlgorithmKind kind)
         {
@@ -146,10 +174,24 @@ internal sealed class AlgorithmPreferences
 
             // FIPS mode does not restrict the client's own keys (FilterFips keeps them all), as before this list was applied.
             PublicKeys = publicKeys is null ? null : Resolve(publicKeys, SshAlgorithms.PublicKeySignatures, AlgorithmKind.PublicKey),
+            // FIPS mode narrows it as it narrows the host keys: a host certificate signed with Ed25519 is trusted on a signature FIPS mode
+            // does not accept from a host key, so such a certificate cannot be used, and its key is checked as a plain key.
+            CASignatures = fipsMode
+                ? SshAlgorithms.FilterFips(caSignatures is null ? SshAlgorithms.CASignatures : ResolveCASignatures(caSignatures), AlgorithmKind.CASignature)
+                : caSignatures is null ? SshAlgorithms.CASignatures : ResolveCASignatures(caSignatures),
             HostKeySpecification = hostKeys,
             FipsMode = fipsMode,
         };
     }
+
+    /// <summary>
+    /// A <c>CASignatureAlgorithms</c> list applied to SshSharp's set, then cut back to it: the list can only narrow the set, so SHA-1
+    /// <c>ssh-rsa</c> and the <c>sk-*</c> algorithms, which a <c>+</c> list adds back in ssh, stay refused (dropped, as names SshSharp
+    /// does not implement are from the other lists). FIPS mode does not restrict it: FIPS mode governs what is negotiated, and an
+    /// authority's signature is checked after that, as before the list existed.
+    /// </summary>
+    private static IReadOnlyList<string> ResolveCASignatures(SshAlgorithmList list) =>
+        [.. list.Apply(SshAlgorithms.CASignatures, Known(AlgorithmKind.CASignature)).Where(n => IsImplemented(n, AlgorithmKind.CASignature))];
 
     /// <summary>
     /// Checks a list set on <see cref="SshClientOptions"/>: every name (and every pattern without wildcards) must be an algorithm of
@@ -179,6 +221,7 @@ internal sealed class AlgorithmPreferences
                     AlgorithmKind.HostKey => "host key algorithm",
                     AlgorithmKind.Cipher => "cipher",
                     AlgorithmKind.PublicKey => "public key signature algorithm",
+                    AlgorithmKind.CASignature => "CA signature algorithm",
                     _ => "MAC",
                 };
                 throw new ArgumentException($"'{name}' is not a {what} SshSharp supports. Supported: {string.Join(", ", known)}.", parameterName);
@@ -196,6 +239,7 @@ internal sealed class AlgorithmPreferences
         AlgorithmKind.Cipher => SshAlgorithms.CipherNames,
         AlgorithmKind.Mac => SshAlgorithms.MacNames,
         AlgorithmKind.PublicKey => SshAlgorithms.PublicKeySignatures,
+        AlgorithmKind.CASignature => SshAlgorithms.CASignatures,
         _ => [],
     };
 
@@ -224,6 +268,7 @@ internal sealed class AlgorithmPreferences
             Macs = Macs,
             Compression = Compression,
             PublicKeys = PublicKeys,
+            CASignatures = CASignatures,
             HostKeySpecification = HostKeySpecification,
             FipsMode = FipsMode,
         };
@@ -237,6 +282,7 @@ internal sealed class AlgorithmPreferences
         AlgorithmKind.Kex => SshAlgorithms.DefaultKex.Contains(name),
         AlgorithmKind.HostKey => SshAlgorithms.DefaultHostKeys.Contains(name) || SshAlgorithms.CertificateHostKeys.Contains(name),
         AlgorithmKind.PublicKey => SshAlgorithms.PublicKeySignatures.Contains(name),
+        AlgorithmKind.CASignature => SshAlgorithms.CASignatures.Contains(name),
         _ => true,
     };
 }

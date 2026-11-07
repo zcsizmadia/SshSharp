@@ -621,7 +621,9 @@ public sealed class SshClientOptions
     /// consumed some. One channel moves at most one window per round trip, so on a link with a large bandwidth-delay product (a fast,
     /// distant link) a larger window makes a single download, command output or tunnel faster: 2 MiB per 100 ms of round trip is about
     /// 20 MiB/s. Each channel can then hold up to this much received data that your code has not read yet. It applies to every channel:
-    /// sessions, SFTP, SCP, tunnels and forwarded connections. Default 2 MiB, as OpenSSH. Between 1 KiB and 1 GiB.
+    /// sessions, SFTP, SCP, tunnels and forwarded connections. Default 2 MiB, as OpenSSH. Between 1 KiB and 1 GiB. The window is topped
+    /// up once half of it has been consumed, or 64 MiB for a window over 128 MiB: older Dropbear never uses more than 500,000,000 bytes
+    /// of a window, and would otherwise wait for an adjustment that never came.
     /// </summary>
     /// <exception cref="ArgumentOutOfRangeException">The value is below 1 KiB or above 1 GiB.</exception>
     public int ChannelWindowSize
@@ -759,8 +761,28 @@ public sealed class SshClientOptions
     private readonly SshAlgorithmList? _pubkeyAcceptedAlgorithms;
 
     /// <summary>
+    /// The signature algorithms a certificate authority may have signed a host certificate with, as ssh_config's
+    /// <c>CASignatureAlgorithms</c>: for example <c>SshAlgorithmList.Only("ssh-ed25519")</c> to trust only certificates an Ed25519
+    /// authority signed. Null (the default) allows SshSharp's set: <c>ssh-ed25519</c>, the three <c>ecdsa-sha2-nistp*</c> and
+    /// <c>rsa-sha2-512</c>, <c>rsa-sha2-256</c>. The list can only narrow that set: SHA-1 <c>ssh-rsa</c> and the FIDO <c>sk-*</c>
+    /// algorithms, which ssh's defaults have, are never accepted. A host certificate signed with an algorithm the list leaves out cannot
+    /// be used, as one that has expired: <see cref="KnownHostsVerifier"/> logs a warning and checks its key as a plain key, as ssh does.
+    /// <see cref="FipsMode"/> does not apply to it.
+    /// </summary>
+    /// <exception cref="ArgumentException">A name is not a CA signature algorithm SshSharp accepts.</exception>
+    public SshAlgorithmList? CASignatureAlgorithms
+    {
+        get => _caSignatureAlgorithms;
+        init => _caSignatureAlgorithms = Protocol.AlgorithmPreferences.Validate(value, Protocol.AlgorithmKind.CASignature, nameof(value));
+    }
+
+    private readonly SshAlgorithmList? _caSignatureAlgorithms;
+
+    /// <summary>
     /// The smallest RSA host key accepted, in bits, as ssh_config's <c>RequiredRSASize</c>; a smaller one fails the connection with an
-    /// <see cref="SshHostKeyException"/>. Default 2048 (ssh's default is 1024). At least 1024, the least ssh accepts.
+    /// <see cref="SshHostKeyException"/>. Default 2048 (ssh's default is 1024). At least 1024, the least ssh accepts. A value above
+    /// 2048 also applies to the RSA authority that signed a host certificate, as in OpenSSH 10.6p2; a certificate's authority is never
+    /// accepted under 2048 bits, whatever the value.
     /// </summary>
     /// <exception cref="ArgumentOutOfRangeException">The value is below 1024.</exception>
     public int RequiredRsaSize
