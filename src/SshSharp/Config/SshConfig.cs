@@ -261,7 +261,7 @@ public sealed class SshConfig
             Port = port,
             RemoteUser = user,
             HostKeyAlias = hostKeyAlias,
-            ProxyJump = proxyJump is null || proxyJump.Equals("none", StringComparison.OrdinalIgnoreCase) ? string.Empty : proxyJump,
+            ProxyJump = SshTokenContext.JumpSpec(proxyJump),
         };
 
         var identityFiles = All("identityfile").Select(v => ctx.ExpandPath(ctx.ExpandTokens(v))).ToList();
