@@ -147,7 +147,7 @@ public sealed class UpdateHostKeysTests : IDisposable
         }, leaveOpen: true, Timeout());
 
         await skipped.Reason.Task.WaitAsync(Timeout());
-        await Assert.That(skipped.Reason.Task.Result).Contains("not in known_hosts");
+        await Assert.That(skipped.Reason.Task.Result).Contains("not in a user known_hosts file");
         await Assert.That(Recorded()).IsEquivalentTo([Line(real).TrimEnd()]);
         await Assert.That(Proved(server)).IsFalse();
     }
@@ -240,24 +240,22 @@ public sealed class UpdateHostKeysTests : IDisposable
         var current = FakeHostKey.Ed25519();
         var retired = FakeHostKey.Ecdsa(256);
         var added = FakeHostKey.Rsa(2048);
-        var wildcardKey = FakeHostKey.Ecdsa(384);
+        var otherHostKey = FakeHostKey.Ecdsa(384);
         File.WriteAllText(KnownHosts, string.Join(string.Empty,
             "# keys for the rotating host\n",
             Line(current),
             Line(retired),
-            $"*.example.com {wildcardKey.KeyType} {Convert.ToBase64String(wildcardKey.Blob)}\n", // also about other hosts: kept
-            $"@revoked {Host} {retired.KeyType} {Convert.ToBase64String(retired.Blob)}\n", // a marker line: kept
+            LineFor("other.example.com", otherHostKey), // another host: kept
             $"{KnownHostsEntry.HashHost(Host, 22)} {retired.KeyType} {Convert.ToBase64String(retired.Blob)}\n")); // hashed, this host: removed
         await using var server = new FakeSessionServer(new FakeServerOptions { HostKey = current }) { AnnouncedHostKeys = [current, added] };
         await using var client = await ConnectAsync(server, update: true);
 
-        var lines = await WaitForLinesAsync(l => l.Any(x => x.Contains(added.KeyType, StringComparison.Ordinal)) && l.Length == 5);
+        var lines = await WaitForLinesAsync(l => l.Any(x => x.Contains(added.KeyType, StringComparison.Ordinal)) && l.Length == 4);
         await Assert.That(lines).IsEquivalentTo(new[]
         {
             "# keys for the rotating host",
             Line(current).TrimEnd(),
-            $"*.example.com {wildcardKey.KeyType} {Convert.ToBase64String(wildcardKey.Blob)}",
-            $"@revoked {Host} {retired.KeyType} {Convert.ToBase64String(retired.Blob)}",
+            LineFor("other.example.com", otherHostKey).TrimEnd(),
             Line(added).TrimEnd(),
         });
     }
@@ -338,6 +336,181 @@ public sealed class UpdateHostKeysTests : IDisposable
         var yes = KnownHostsVerifier.FromConfig(SshConfig.Parse("UpdateHostKeys yes\n").Resolve("h", resolve), ask: null, confirmUpdate: (_, _) => ValueTask.FromResult(false));
         await Assert.That(yes.UpdateHostKeys).IsTrue();
         await Assert.That(yes.ConfirmHostKeyUpdate is null).IsTrue();
+    }
+
+    // ssh's gates on the update (OpenSSH 9.2p1, client_input_hostkeys and hostkeys_find in clientloop.c, check_host_key in
+    // sshconnect.c). Each test sets up one case where ssh leaves known_hosts alone, or, for removals alone, where it updates
+    // without a proof.
+
+    private static string LineFor(string hosts, FakeHostKey key) => $"{hosts} {key.KeyType} {Convert.ToBase64String(key.Blob)}\n";
+
+    private async Task<SshClient> ConnectAsync(FakeSessionServer server, StrictHostKeyChecking policy, string? globalFile = null)
+    {
+        _ = server.StartAsync();
+        return await SshClient.ConnectAsync(server.ClientStream, new SshClientOptions
+        {
+            UserName = "tester",
+            Password = TestSecrets.Password,
+            HostKeyAlias = Host,
+            HostKeyVerifier = new KnownHostsVerifier([KnownHosts], globalFile is null ? null : [globalFile]) { Policy = policy, UpdateHostKeys = true },
+        }, leaveOpen: true, Timeout());
+    }
+
+    /// <summary>Gives a skipped update the time an applied one would take, so a test that expects no change does not pass early.</summary>
+    private static async Task SettleAsync(SshClient client)
+    {
+        await client.RunCommandAsync("sync", Timeout());
+        await Task.Delay(200);
+    }
+
+    [Test]
+    public async Task RemovalsAlone_AreAppliedWithoutAProof()
+    {
+        // ssh: "We can proceed to do this without requiring a fresh proof from the server" (nnew == 0).
+        var current = FakeHostKey.Ed25519();
+        var retired = FakeHostKey.Ecdsa(256);
+        File.WriteAllText(KnownHosts, Line(current) + Line(retired));
+        await using var server = new FakeSessionServer(new FakeServerOptions { HostKey = current }) { AnnouncedHostKeys = [current] };
+        await using var client = await ConnectAsync(server, StrictHostKeyChecking.Yes);
+
+        var lines = await WaitForLinesAsync(l => l.Length == 1);
+        await Assert.That(lines).IsEquivalentTo([Line(current).TrimEnd()]);
+        await Assert.That(Proved(server)).IsFalse();
+    }
+
+    [Test]
+    public async Task AKeyFirstRecordedByAcceptNew_DoesNotUpdateOnThatConnection()
+    {
+        // ssh turns UpdateHostKeys off for a connection whose key was neither known nor confirmed by the user: accept-new records the
+        // key and nothing else, and the update starts with the next connection.
+        var current = FakeHostKey.Ed25519();
+        var other = FakeHostKey.Ecdsa(256);
+        await using var server = new FakeSessionServer(new FakeServerOptions { HostKey = current }) { AnnouncedHostKeys = [current, other] };
+        await using var client = await ConnectAsync(server, StrictHostKeyChecking.AcceptNew);
+        await SettleAsync(client);
+
+        await Assert.That(Proved(server)).IsFalse();
+        await Assert.That(Recorded()).IsEquivalentTo([Line(current).TrimEnd()]);
+    }
+
+    [Test]
+    public async Task AKeyTheUserConfirmed_UpdatesOnThatConnection()
+    {
+        // ssh's "user explicitly confirmed": unlike AcceptNew, a key accepted at the Ask prompt is trusted for the update.
+        var current = FakeHostKey.Ed25519();
+        var other = FakeHostKey.Ecdsa(256);
+        await using var server = new FakeSessionServer(new FakeServerOptions { HostKey = current }) { AnnouncedHostKeys = [current, other] };
+        _ = server.StartAsync();
+        await using var client = await SshClient.ConnectAsync(server.ClientStream, new SshClientOptions
+        {
+            UserName = "tester",
+            Password = TestSecrets.Password,
+            HostKeyAlias = Host,
+            HostKeyVerifier = new KnownHostsVerifier([KnownHosts])
+            {
+                Policy = StrictHostKeyChecking.Ask,
+                AskHostKey = (_, _) => ValueTask.FromResult(true),
+                UpdateHostKeys = true,
+            },
+        }, leaveOpen: true, Timeout());
+
+        var lines = await WaitForLinesAsync(l => l.Length == 2);
+        await Assert.That(lines).IsEquivalentTo([Line(current).TrimEnd(), Line(other).TrimEnd()]);
+    }
+
+    [Test]
+    public async Task ALineForMoreThanHostAndAddress_SkipsTheUpdate()
+    {
+        // ssh never writes a list longer than host,ip, and skips the update when one matches (hostspec_is_complex).
+        var current = FakeHostKey.Ed25519();
+        var retired = FakeHostKey.Ecdsa(256);
+        var original = Line(current) + LineFor($"{Host},192.0.2.10,alias.example.com", retired);
+        File.WriteAllText(KnownHosts, original);
+        await using var server = new FakeSessionServer(new FakeServerOptions { HostKey = current }) { AnnouncedHostKeys = [current] };
+        await using var client = await ConnectAsync(server, StrictHostKeyChecking.Yes);
+        await SettleAsync(client);
+
+        await Assert.That(File.ReadAllText(KnownHosts)).IsEqualTo(original);
+    }
+
+    [Test]
+    public async Task AWildcardLineForTheHost_SkipsTheUpdate()
+    {
+        var current = FakeHostKey.Ed25519();
+        var retired = FakeHostKey.Ecdsa(256);
+        var shared = FakeHostKey.Ecdsa(384);
+        var original = Line(current) + Line(retired) + LineFor("*.example.com", shared);
+        File.WriteAllText(KnownHosts, original);
+        await using var server = new FakeSessionServer(new FakeServerOptions { HostKey = current }) { AnnouncedHostKeys = [current] };
+        await using var client = await ConnectAsync(server, StrictHostKeyChecking.Yes);
+        await SettleAsync(client);
+
+        await Assert.That(File.ReadAllText(KnownHosts)).IsEqualTo(original);
+    }
+
+    [Test]
+    public async Task ACertAuthorityLineForTheHost_SkipsTheUpdate()
+    {
+        // ssh: "CA/revocation marker, manual host list or wildcard host pattern found, skipping UserKnownHostsFile update".
+        var current = FakeHostKey.Ed25519();
+        var retired = FakeHostKey.Ecdsa(256);
+        var ca = FakeHostKey.Ed25519();
+        var original = Line(current) + Line(retired) + LineFor("@cert-authority *.example.com", ca);
+        File.WriteAllText(KnownHosts, original);
+        await using var server = new FakeSessionServer(new FakeServerOptions { HostKey = current }) { AnnouncedHostKeys = [current] };
+        await using var client = await ConnectAsync(server, StrictHostKeyChecking.Yes);
+        await SettleAsync(client);
+
+        await Assert.That(File.ReadAllText(KnownHosts)).IsEqualTo(original);
+    }
+
+    [Test]
+    public async Task AnAnnouncedKeyRecordedUnderAnotherName_SkipsTheUpdate()
+    {
+        // ssh: "host key found matching a different name/address, skipping UserKnownHostsFile update" (other_name_seen).
+        var current = FakeHostKey.Ed25519();
+        var retired = FakeHostKey.Ecdsa(256);
+        var original = Line(current) + Line(retired) + LineFor("alias.example.com", current);
+        File.WriteAllText(KnownHosts, original);
+        await using var server = new FakeSessionServer(new FakeServerOptions { HostKey = current }) { AnnouncedHostKeys = [current] };
+        await using var client = await ConnectAsync(server, StrictHostKeyChecking.Yes);
+        await SettleAsync(client);
+
+        await Assert.That(File.ReadAllText(KnownHosts)).IsEqualTo(original);
+    }
+
+    [Test]
+    public async Task ARetiredKeyAlsoRecordedUnderAnotherName_SkipsTheUpdate()
+    {
+        // ssh: "key(s) for <host> exist under other names; skipping UserKnownHostsFile update" (old_key_seen), so a host with several
+        // names does not lose the key under one of them only.
+        var current = FakeHostKey.Ed25519();
+        var retired = FakeHostKey.Ecdsa(256);
+        var original = Line(current) + Line(retired) + LineFor("alias.example.com", retired);
+        File.WriteAllText(KnownHosts, original);
+        await using var server = new FakeSessionServer(new FakeServerOptions { HostKey = current }) { AnnouncedHostKeys = [current] };
+        await using var client = await ConnectAsync(server, StrictHostKeyChecking.Yes);
+        await SettleAsync(client);
+
+        await Assert.That(File.ReadAllText(KnownHosts)).IsEqualTo(original);
+    }
+
+    [Test]
+    public async Task AKeyTrustedThroughTheGlobalFile_DoesNotUpdateTheUserFile()
+    {
+        // ssh: "host key found in GlobalKnownHostsFile; disabling UpdateHostkeys".
+        var current = FakeHostKey.Ed25519();
+        var retired = FakeHostKey.Ecdsa(256);
+        var global = Path.Combine(_dir, "ssh_known_hosts");
+        File.WriteAllText(global, Line(current));
+        var original = Line(retired);
+        File.WriteAllText(KnownHosts, original);
+        await using var server = new FakeSessionServer(new FakeServerOptions { HostKey = current }) { AnnouncedHostKeys = [current, FakeHostKey.Ecdsa(384)] };
+        await using var client = await ConnectAsync(server, StrictHostKeyChecking.Yes, global);
+        await SettleAsync(client);
+
+        await Assert.That(Proved(server)).IsFalse();
+        await Assert.That(File.ReadAllText(KnownHosts)).IsEqualTo(original);
     }
 
     private static string Fingerprint(FakeHostKey key) =>

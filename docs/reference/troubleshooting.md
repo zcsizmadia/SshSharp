@@ -122,6 +122,13 @@ With `StrictHostKeyChecking.Yes`, an unknown host is refused. Add its key (compa
 The server presented a different key than `known_hosts` has. It may be a reinstalled server, or an interception. Find out which
 before removing the old line (`ssh-keygen -R host`). `UpdateHostKeys` avoids this for planned rotations.
 
+### `UpdateHostKeys` changes nothing
+
+As `ssh`, it leaves `known_hosts` alone after a first connection with `AcceptNew`, for a key trusted through a global file, and
+when a wildcard, `@cert-authority` or `@revoked` line applies to the host or a key is also recorded under another name. The Debug
+log says which ("Host key update skipped: ..."); see [Host keys](../host-keys.md#known_hosts) for the full list. On a
+load-balanced name, it can remove the other backends' keys: use a host certificate there.
+
 ### `HostKeyRejected`: "The host certificate ... could not be used either"
 
 A trusted authority signed the server's certificate, but it is expired, not yet valid, not issued for the name you connected to

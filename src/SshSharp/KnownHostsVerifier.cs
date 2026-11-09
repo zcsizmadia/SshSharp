@@ -156,8 +156,11 @@ public sealed class KnownHostsVerifier : SshHostKeyVerifier
     /// <summary>
     /// Keep known_hosts in step with the host keys a server announces after authentication (OpenSSH's <c>UpdateHostKeys</c>): new keys are
     /// added once the server has proven it holds them, and this host's keys it no longer announces are removed. This lets a server rotate
-    /// its keys without users seeing "host key changed". Only the first user file changes, only lines for exactly this host (not wildcard
-    /// lines, not <c>@cert-authority</c> or <c>@revoked</c> ones), and connections authenticated with a host certificate are not used.
+    /// its keys without users seeing "host key changed". Only the first user file changes, and connections authenticated with a host
+    /// certificate are not used. As ssh, nothing changes when the connection's key was not already in a user file (a global file,
+    /// <c>KnownHostsCommand</c>, or <see cref="StrictHostKeyChecking.AcceptNew"/> on first contact), when a wildcard,
+    /// <c>@cert-authority</c> or <c>@revoked</c> line or one naming more than <c>host,address</c> applies to the host, or when a key
+    /// involved is also recorded under another name.
     /// Default false (<c>UpdateHostKeys yes</c> in ssh_config turns it on through <see cref="FromConfig(SshHostConfig)"/>; see
     /// <see cref="ConfirmHostKeyUpdate"/> for <c>ask</c>).
     /// </summary>
@@ -195,23 +198,73 @@ public sealed class KnownHostsVerifier : SshHostKeyVerifier
     }
 
     /// <summary>
-    /// This host's keys in the first user file that the server no longer announces: plain entries for exactly this host (lines matched
-    /// only through a wildcard, global files and marked lines are left alone), of key types this client understands.
+    /// ssh's checks before an update (OpenSSH's <c>client_input_hostkeys</c>), over all the user files: the reason to leave them alone, or
+    /// else this host's keys in the first user file that the server no longer announces (of key types this client understands).
     /// </summary>
-    internal async ValueTask<List<byte[]>> StaleHostKeysAsync(string name, int port, IReadOnlyList<byte[]> announced, CancellationToken cancellationToken)
+    internal async ValueTask<(string? Skip, List<byte[]> Stale)> CheckHostKeyUpdateAsync(string name, int port, byte[] current, IReadOnlyList<byte[]> announced,
+        CancellationToken cancellationToken)
     {
-        if (_userFiles.Count == 0)
+        var files = new List<KnownHostsFile>();
+        foreach (var path in _userFiles)
         {
-            return [];
+            files.Add(await KnownHostsFile.LoadAsync(path, cancellationToken).ConfigureAwait(false));
         }
 
-        var file = await KnownHostsFile.LoadAsync(_userFiles[0], cancellationToken).ConfigureAwait(false);
-        var host = KnownHostsEntry.FormatHost(name, port);
-        return [.. file.Find(name, port)
-            .Where(e => e.Marker == KnownHostsMarker.None && (e.IsHashed || e.HostPatterns.Split(',').Contains(host, StringComparer.OrdinalIgnoreCase)))
-            .Where(e => SshClient.IsSupportedKey(e.PublicKey.ToArray()) && !announced.Any(a => a.AsSpan().SequenceEqual(e.PublicKey.Span)))
-            .Select(e => e.PublicKey.ToArray())];
+        static bool Same(KnownHostsEntry entry, byte[] key) => entry.PublicKey.Span.SequenceEqual(key);
+
+        // Only a connection whose key a user file holds may update it: not one trusted through a global file or KnownHostsCommand, and
+        // not a changed key let through by StrictHostKeyChecking no (the server is then unauthenticated).
+        if (!files.Any(f => f.Find(name, port).Any(e => e.Marker == KnownHostsMarker.None && Same(e, current))))
+        {
+            return ("the connection's host key is not in a user known_hosts file", []);
+        }
+
+        List<byte[]> stale = [];
+        for (var i = 0; i < files.Count; i++)
+        {
+            foreach (var entry in files[i].Entries)
+            {
+                if (!entry.Matches(name, port))
+                {
+                    // The same key under another name or address: changing this host's lines would make the names disagree.
+                    if (announced.Any(key => Same(entry, key)))
+                    {
+                        return ("an announced key is also recorded under another name", []);
+                    }
+
+                    continue;
+                }
+
+                // Lines ssh never writes, which may stand for other hosts too: the user wrote them, so they are not edited.
+                if (entry.Marker != KnownHostsMarker.None)
+                {
+                    return ("a @cert-authority or @revoked line applies to the host", []);
+                }
+
+                if (IsComplexHostSpec(entry))
+                {
+                    return ("a wildcard line, or a line naming more than a host and its address, applies to the host", []);
+                }
+
+                if (i == 0 && !announced.Any(key => Same(entry, key)) && SshClient.IsSupportedKey(entry.PublicKey.ToArray()))
+                {
+                    stale.Add(entry.PublicKey.ToArray());
+                }
+            }
+        }
+
+        // Removing a key that another name still uses would leave the names of one host with different keys.
+        if (stale.Any(key => files.Any(f => f.Entries.Any(e => !e.Matches(name, port) && Same(e, key)))))
+        {
+            return ("a key to remove is also recorded under another name", []);
+        }
+
+        return (null, stale);
     }
+
+    /// <summary>A wildcard, or more host names than ssh writes (<c>host[,address]</c>); as OpenSSH's <c>hostspec_is_complex</c>.</summary>
+    private static bool IsComplexHostSpec(KnownHostsEntry entry) =>
+        !entry.IsHashed && (entry.HostPatterns.AsSpan().IndexOfAny('*', '?') >= 0 || entry.HostPatterns.AsSpan().Count(',') > 1);
 
     /// <summary>Appends keys the server has proven it holds, then removes the ones it no longer announces.</summary>
     internal async ValueTask ApplyHostKeyUpdateAsync(string name, int port, IReadOnlyList<byte[]> added, IReadOnlyList<byte[]> removed, CancellationToken cancellationToken)
@@ -381,7 +434,7 @@ public sealed class KnownHostsVerifier : SshHostKeyVerifier
                 break;
         }
 
-        return await RecordAsync(name, port, key, cancellationToken).ConfigureAwait(false);
+        return await RecordAsync(name, port, key, confirmed: Policy == StrictHostKeyChecking.Ask, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -455,7 +508,7 @@ public sealed class KnownHostsVerifier : SshHostKeyVerifier
         _ => ex.GetType().Name,
     };
 
-    private async ValueTask<SshHostKeyVerdict> RecordAsync(string name, int port, SshHostKey key, CancellationToken cancellationToken)
+    private async ValueTask<SshHostKeyVerdict> RecordAsync(string name, int port, SshHostKey key, bool confirmed, CancellationToken cancellationToken)
     {
         if (!KnownHostsEntry.IsLiteralHost(name))
         {
@@ -468,6 +521,6 @@ public sealed class KnownHostsVerifier : SshHostKeyVerifier
             await KnownHostsFile.AppendAsync(_userFiles[0], name, port, key.KeyType, key.PublicKey, HashNewEntries, cancellationToken).ConfigureAwait(false);
         }
 
-        return SshHostKeyVerdict.Accept();
+        return SshHostKeyVerdict.Accept() with { Learned = !confirmed };
     }
 }
