@@ -9,11 +9,29 @@ public sealed partial class SshClient
 {
     private const string ProveRequest = "hostkeys-prove-00@openssh.com";
 
+    /// <summary>The outcome of a connection's first host key check, which decides whether it may update known_hosts.</summary>
+    private sealed class FirstHostKeyCheck
+    {
+        public bool Done { get; set; }
+
+        /// <summary>The key was recorded without the user confirming it (<see cref="SshHostKeyVerdict.Learned"/>).</summary>
+        public bool Learned { get; set; }
+    }
+
     /// <summary>Subscribes to the server's host key announcements when the verifier records updates (OpenSSH's UpdateHostKeys).</summary>
-    private static void WatchHostKeyUpdates(SshConnection connection, SshClientOptions options, string? host, int port, SshHostKey hostKey, ILogger logger)
+    private static void WatchHostKeyUpdates(SshConnection connection, SshClientOptions options, string? host, int port, SshHostKey hostKey,
+        bool learnedOnThisConnection, ILogger logger)
     {
         if (options.HostKeyVerifier is not KnownHostsVerifier { UpdateHostKeys: true } knownHosts || hostKey.Certificate is not null)
         {
+            return;
+        }
+
+        if (learnedOnThisConnection)
+        {
+            // As ssh: a key recorded without the user confirming it (AcceptNew) is trusted on first use only, so this connection records
+            // that key and nothing else. Updates start with the next connection.
+            SshLog.HostKeyUpdateSkipped(logger, "the host key was first recorded on this connection");
             return;
         }
 
@@ -45,16 +63,14 @@ public sealed partial class SshClient
 
             // The key this connection was verified with stays, whatever the announcement says.
             supported.Add(current);
-            var unknown = await knownHosts.UnknownHostKeysAsync(name, port, supported, connection.Closed).ConfigureAwait(false);
-            if (unknown.Any(key => key.AsSpan().SequenceEqual(current)))
+            var (skip, stale) = await knownHosts.CheckHostKeyUpdateAsync(name, port, current, supported, connection.Closed).ConfigureAwait(false);
+            if (skip is not null)
             {
-                // The connection's own key is not in known_hosts: it was accepted although it changed (StrictHostKeyChecking no). The
-                // server is unauthenticated, so it must not add keys, and above all must not have the real ones removed as stale.
-                SshLog.HostKeyUpdateSkipped(logger, "the connection's host key is not in known_hosts");
+                SshLog.HostKeyUpdateSkipped(logger, skip);
                 return;
             }
 
-            var stale = await knownHosts.StaleHostKeysAsync(name, port, supported, connection.Closed).ConfigureAwait(false);
+            var unknown = await knownHosts.UnknownHostKeysAsync(name, port, supported, connection.Closed).ConfigureAwait(false);
             if (unknown.Count == 0 && stale.Count == 0)
             {
                 return;

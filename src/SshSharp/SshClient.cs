@@ -586,10 +586,11 @@ public sealed partial class SshClient : IAsyncDisposable
         using var own = measurement is null ? new ConnectMeasurement(tcpPort: null) : null;
         measurement ??= own!;
 
+        var firstCheck = new FirstHostKeyCheck();
         SshTransportOptions transportOptions;
         try
         {
-            transportOptions = await TransportOptionsAsync(options, host, port, logger, cancellationToken).ConfigureAwait(false);
+            transportOptions = await TransportOptionsAsync(options, host, port, logger, firstCheck, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -610,7 +611,7 @@ public sealed partial class SshClient : IAsyncDisposable
             var acceptedKeys = new List<SshPrivateKey>();
             await AuthenticateAsync(transport, options, transportOptions.Preferences.PublicKeys, logger, acceptedKeys, host, port, cancellationToken)
                 .ConfigureAwait(false);
-            var client = CompleteConnection(transport, stream, options, leaveOpen, owner, host, port, logger, measurement);
+            var client = CompleteConnection(transport, stream, options, leaveOpen, owner, host, port, firstCheck.Learned, logger, measurement);
             client.AcceptedKeys = acceptedKeys;
             return client;
         }
@@ -655,7 +656,8 @@ public sealed partial class SshClient : IAsyncDisposable
     }
 
     /// <summary>The transport's settings: algorithm preferences (certificate host keys first when an authority is trusted) and host key checks.</summary>
-    private static async Task<SshTransportOptions> TransportOptionsAsync(SshClientOptions options, string? host, int port, ILogger logger, CancellationToken cancellationToken)
+    private static async Task<SshTransportOptions> TransportOptionsAsync(SshClientOptions options, string? host, int port, ILogger logger,
+        FirstHostKeyCheck firstCheck, CancellationToken cancellationToken)
     {
         var preferences = options.AlgorithmPreferences ?? AlgorithmPreferences.FromOptions(options);
         bool prefersCertificates;
@@ -705,6 +707,13 @@ public sealed partial class SshClient : IAsyncDisposable
                     throw new SshHostKeyException(verdict.Reason ?? $"The host key {info.Fingerprint} was not accepted.", key);
                 }
 
+                // The first key exchange's verdict is the connection's; a rekey checks the same key again, recorded by then.
+                if (!firstCheck.Done)
+                {
+                    firstCheck.Done = true;
+                    firstCheck.Learned = verdict.Learned;
+                }
+
                 return true;
             },
         };
@@ -712,7 +721,7 @@ public sealed partial class SshClient : IAsyncDisposable
 
     /// <summary>Starts the connection layer over an authenticated transport and records the outcome.</summary>
     private static SshClient CompleteConnection(SshTransport transport, Stream stream, SshClientOptions options, bool leaveOpen, IAsyncDisposable? owner,
-        string? host, int port, ILogger logger, ConnectMeasurement measurement)
+        string? host, int port, bool hostKeyLearned, ILogger logger, ConnectMeasurement measurement)
     {
         var activity = measurement.Activity;
         var hostKey = transport.HostKey!;
@@ -726,7 +735,7 @@ public sealed partial class SshClient : IAsyncDisposable
         };
 
         // Before the receive loop starts: the server announces its host keys right after authentication.
-        WatchHostKeyUpdates(connection, options, host, port, publicHostKey, logger);
+        WatchHostKeyUpdates(connection, options, host, port, publicHostKey, hostKeyLearned, logger);
         connection.Start();
         if (options.EffectiveKeepAliveInterval is { } keepAlive)
         {

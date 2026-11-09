@@ -48,10 +48,9 @@ var verifier = new KnownHostsVerifier([knownHostsPath])
 ```
 
 `UpdateHostKeys = true` (`UpdateHostKeys yes`) keeps `known_hosts` in step with the keys the server announces after login:
-keys it proves it holds are added, and this host's keys it no longer announces are removed, so a key rotation does not break
-the next connection. Only the first user file changes, only lines for exactly this host (wildcard lines and `@cert-authority`
-or `@revoked` lines are left alone), and never the key the connection was verified with. To confirm changes first (as
-`UpdateHostKeys ask`), set `ConfirmHostKeyUpdate`:
+keys it proves it holds are added, and this host's keys it no longer announces are removed (that needs no proof, as in `ssh`), so
+a key rotation does not break the next connection. Only the first user file changes, and never the key the connection was
+verified with. To confirm changes first (as `UpdateHostKeys ask`), set `ConfirmHostKeyUpdate`:
 
 ```csharp
 var verifier = new KnownHostsVerifier([knownHostsPath])
@@ -61,6 +60,36 @@ var verifier = new KnownHostsVerifier([knownHostsPath])
         Confirm($"Update known_hosts for {update.Host}: add {string.Join(", ", update.Added)}; remove {string.Join(", ", update.Removed)}?")),
 };
 ```
+
+As `ssh` does, the update leaves `known_hosts` alone when it cannot tell what a change would mean for other hosts or names, or when
+the connection was not trusted through the user's own file:
+
+```mermaid
+flowchart TD
+    A[Server announces its host keys] --> C{"Connection's key in a user<br/>known_hosts file, before this connection?"}
+    C -- "no (global file, KnownHostsCommand,<br/>AcceptNew just recorded it, changed key let through)" --> S[Leave known_hosts alone]
+    C -- yes --> L{"A line for the host that is a wildcard,<br/>names more than host and address,<br/>or is @cert-authority / @revoked?"}
+    L -- yes --> S
+    L -- no --> O{"An announced key, or one to remove,<br/>also recorded under another name?"}
+    O -- yes --> S
+    O -- no --> U["Remove keys no longer announced;<br/>add new ones once proven"]
+```
+
+- **The connection's key comes from the user's file.** A key trusted through `GlobalKnownHostsFile` or `KnownHostsCommand`, or a
+  changed key let through by `StrictHostKeyChecking no`, updates nothing. A key that `AcceptNew` records is trusted on first use
+  only, so that connection records it and nothing else; the update starts with the next connection. A key you accept at the
+  `AskHostKey` prompt counts as confirmed, and updates on the same connection.
+- **Only lines `ssh` writes itself.** One `@cert-authority` or `@revoked` line for the host (even `@cert-authority *.example.com`),
+  a wildcard line, or a line naming more than `host,address` cancels the whole update: those lines are yours, and may stand for
+  other hosts too.
+- **One key, one set of names.** When an announced key, or a key about to be removed, is also recorded under another name or
+  address, nothing changes, so the names of one host do not end up with different keys.
+- **Host certificates** are never used for an update.
+
+> [!WARNING]
+> Behind a load balancer, each backend announces only its own keys. With the keys of all backends pinned under one name, one
+> connection removes the others' keys, and the next connection to another backend fails with "the key changed". Use a host
+> certificate there, or leave `UpdateHostKeys` off for that host.
 
 ### Host certificates that cannot be used
 
