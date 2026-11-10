@@ -1222,9 +1222,13 @@ public sealed partial class SshClient : IAsyncDisposable
         public bool IsSet => !withheld && (options.Password is not null || options.PasswordProvider is not null);
 
         /// <summary>Whether <see cref="NextAsync"/> may still give a password.</summary>
-        public bool HasMore => !withheld
-            && ((options.Password is not null && !_givenRejected)
-                || (options.PasswordProvider is not null && !_declined && _prompts < options.NumberOfPasswordPrompts));
+        public bool HasMore => !withheld && (GivenLeft || ProviderLeft);
+
+        // The given password, until the server refuses it.
+        private bool GivenLeft => options.Password is not null && !_givenRejected;
+
+        // The provider, until it declines or has been asked NumberOfPasswordPrompts times.
+        private bool ProviderLeft => options.PasswordProvider is not null && !_declined && _prompts < options.NumberOfPasswordPrompts;
 
         /// <summary>The next password; null when there is none left, with Declined when the provider just said to stop.</summary>
         public async ValueTask<(string? Password, bool Declined)> NextAsync(string method, CancellationToken cancellationToken)
@@ -1234,13 +1238,13 @@ public sealed partial class SshClient : IAsyncDisposable
                 return (null, false);
             }
 
-            if (options.Password is { } given && !_givenRejected)
+            if (GivenLeft)
             {
                 _lastWasGiven = true;
-                return (given, false);
+                return (options.Password, false);
             }
 
-            if (options.PasswordProvider is not { } provider || _declined || _prompts >= options.NumberOfPasswordPrompts)
+            if (!ProviderLeft || options.PasswordProvider is not { } provider)
             {
                 return (null, false);
             }
