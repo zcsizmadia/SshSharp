@@ -462,7 +462,8 @@ connection, but not read or change it: each host's key is verified end to end, b
   before killing it, and a background child left stopped when its shell died made macOS send `SIGHUP` to that group, which
   terminates the application (#432). A process forked as its parent is killed is no longer in the tree (macOS completes the
   fork), so each command also runs with `SSHSHARP_PROCESS_TREE` set to a random value of its own, which everything it starts
-  inherits: after the tree, every live process carrying that value is killed too, until none is left. Only processes of the
+  inherits: after the tree, every live process carrying that value is killed too, until none is left, each parent before its
+  children, so that a shell cannot run its next command between its child's death and its own. Only processes of the
   application's own user are found. A process that drops the variable from its environment and leaves the tree can escape.
 - On .NET 11, these commands inherit only their standard streams, not the other handles the application has open (sockets,
   files, the agent's pipe). Outside Windows, a command being stopped first gets `SIGTERM` and half a second to exit, so it can

@@ -26,7 +26,8 @@ namespace SshSharp;
 /// by <see cref="Start"/> carries an environment variable with a random value of its own, which everything it starts inherits, and the
 /// kill ends with a sweep: while any process carrying that value is alive, it gets SIGKILL too. A process that is gone has finished
 /// any fork it was in, so once none is left, nothing that inherited the value is. A process that drops the variable from its
-/// environment and leaves the tree is not found.
+/// environment and leaves the tree is not found. The sweep kills each parent before its children, as the tree walk does: a shell
+/// outlives its killed child for long enough to run its next command.
 /// </para>
 /// </remarks>
 internal static class ProcessTree
@@ -151,7 +152,7 @@ internal static class ProcessTree
                 return;
             }
 
-            foreach (var pid in tagged)
+            foreach (var pid in ParentsFirst(tagged))
             {
                 var result = KillOne(pid);
                 Trace(root, $"{pid}: {result}"); // not inside the call: it compiles away outside the stress build, arguments and all
@@ -160,6 +161,46 @@ internal static class ProcessTree
             // SIGKILL is sent at once, but each process finishes exiting a moment later; until then it still reads as alive.
             Thread.Sleep(1);
         }
+    }
+
+    /// <summary>
+    /// <paramref name="pids"/> with each one's parent before it. A shell whose child is killed first runs its next command before its
+    /// own SIGKILL lands: macOS lists pids newest first, and a subshell whose sleep was killed wrote its file (once in 7 net11.0 stress
+    /// iterations on macOS, where after a SIGTERM the sweep alone ends what the command left).
+    /// </summary>
+    internal static List<int> ParentsFirst(List<int> pids)
+    {
+        var children = OperatingSystem.IsLinux() ? LinuxChildren() : null;
+        return ParentsFirst(pids, parent => children is null ? MacChildren(parent) : children.GetValueOrDefault(parent) ?? []);
+    }
+
+    /// <summary>
+    /// <paramref name="pids"/>, breadth first from those whose parent is not among them, with <paramref name="childrenOf"/> giving each
+    /// one's children. A pid no walk reaches keeps its place at the end.
+    /// </summary>
+    internal static List<int> ParentsFirst(List<int> pids, Func<int, IReadOnlyList<int>> childrenOf)
+    {
+        var listed = new HashSet<int>(pids);
+        var childrenListed = pids.Distinct().ToDictionary(pid => pid, pid => childrenOf(pid).Where(listed.Contains).ToList());
+        var below = new HashSet<int>(childrenListed.Values.SelectMany(list => list));
+        var order = new List<int>();
+        var placed = new HashSet<int>();
+        var queue = new Queue<int>(pids.Where(pid => !below.Contains(pid)));
+        while (queue.Count > 0)
+        {
+            var pid = queue.Dequeue();
+            if (placed.Add(pid))
+            {
+                order.Add(pid);
+                foreach (var child in childrenListed[pid])
+                {
+                    queue.Enqueue(child);
+                }
+            }
+        }
+
+        order.AddRange(pids.Where(placed.Add));
+        return order;
     }
 
     /// <summary>The live processes, other than this one, whose environment holds <paramref name="tag"/>.</summary>

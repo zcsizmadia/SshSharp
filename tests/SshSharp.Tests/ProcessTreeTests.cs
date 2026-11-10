@@ -148,6 +148,67 @@ public class ProcessTreeTests
     }
 
     [Test]
+    public async Task Sweep_ListsAParentBeforeItsChild()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            Skip.Test("Windows uses .NET's own tree kill, which needs no mark.");
+            return;
+        }
+
+        // A marked subshell whose sleep (kept from replacing it by the "; true") is marked too, both outliving the command: the sweep
+        // must kill the subshell first, or it would run its next command once the sleep dies.
+        var value = Convert.ToHexString(Guid.NewGuid().ToByteArray());
+        var info = new ProcessStartInfo("/bin/sh") { UseShellExecute = false, RedirectStandardInput = true };
+        info.Environment[ProcessTree.TagVariable] = value;
+        info.ArgumentList.Add("-c");
+        info.ArgumentList.Add("(sleep 30; true) & exit 0");
+        using var process = Process.Start(info)!;
+        await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
+        var tag = ProcessTree.Tag(value);
+        try
+        {
+            var deadline = DateTime.UtcNow.AddSeconds(10);
+            var tagged = ProcessTree.Tagged(tag);
+            while (tagged.Count < 2 && DateTime.UtcNow < deadline)
+            {
+                await Task.Delay(20);
+                tagged = ProcessTree.Tagged(tag);
+            }
+
+            await Assert.That(tagged.Count).IsEqualTo(2);
+            var subshell = tagged.Single(pid => ProcessTree.Descendants(pid).Count == 1);
+            var sleep = ProcessTree.Descendants(subshell).Single();
+
+            await Assert.That(ProcessTree.ParentsFirst(tagged)).IsEquivalentTo(new[] { subshell, sleep }, TUnit.Assertions.Enums.CollectionOrdering.Matching);
+        }
+        finally
+        {
+            ProcessTree.Sweep(tag);
+        }
+    }
+
+    [Test]
+    [Arguments(new[] { 3, 2, 1 }, new[] { 1, 2, 3 })]
+    [Arguments(new[] { 1, 2, 3 }, new[] { 1, 2, 3 })]
+    [Arguments(new[] { 5, 3, 2, 1 }, new[] { 1, 2, 5, 3 })]
+    [Arguments(new[] { 5, 3, 4, 1 }, new[] { 3, 4, 1, 5 })]
+    [Arguments(new[] { 3, 2 }, new[] { 2, 3 })]
+    [Arguments(new[] { 4, 9, 3 }, new[] { 4, 9, 3 })]
+    [Arguments(new[] { 2, 2, 3 }, new[] { 2, 3 })]
+    [Arguments(new[] { 11, 10, 1 }, new[] { 1, 11, 10 })]
+    [Arguments(new int[0], new int[0])]
+    public async Task ParentsFirst_PutsEachParentBeforeItsChildren(int[] pids, int[] expected)
+    {
+        // 1 → 2 → 3, and 1 → 5. A pid whose parent is not listed starts a walk of its own (3 without 2, 4 without 7). 9 → 3 is a second
+        // parent, and 10 ↔ 11 a cycle, which no real tree has: neither breaks the order, and what no walk reaches keeps its place.
+        var children = new Dictionary<int, int[]> { [1] = [2, 5], [2] = [3], [9] = [3], [7] = [4], [10] = [11], [11] = [10] };
+        var order = ProcessTree.ParentsFirst([.. pids], pid => children.GetValueOrDefault(pid) ?? []);
+
+        await Assert.That(order).IsEquivalentTo(expected, TUnit.Assertions.Enums.CollectionOrdering.Matching);
+    }
+
+    [Test]
     public async Task Start_MarksEachCommandWithAValueOfItsOwn()
     {
         if (OperatingSystem.IsWindows())
