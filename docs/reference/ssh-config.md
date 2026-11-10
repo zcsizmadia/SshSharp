@@ -3,7 +3,8 @@
 SshSharp resolves `ssh_config` with OpenSSH's rules (first value wins, `Host` and `Match` blocks, `Include`, `%` tokens, `~` and
 environment variables, algorithm lists with `+`, `-` and `^`), and `SshClient.ConnectAsync(destination)` applies the result. This
 page lists what each directive does in SshSharp. Directives not listed are parsed and available in `SshHostConfig.Options`, but
-have no effect.
+have no effect. For behavior beyond the configuration file (protocol extensions, host key rules, what is left out by design), see
+[OpenSSH compatibility](openssh-compatibility.md).
 
 Keywords are case-insensitive, as in OpenSSH. The **Property** column is the `SshHostConfig` property that holds the resolved
 value.

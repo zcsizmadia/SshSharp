@@ -52,7 +52,8 @@ The file adapters follow a reconnecting connection when built from a session fac
 [Follow a connection that drops](../how-to/file-system-adapters.md#follow-a-connection-that-drops).
 
 **Does it support `ControlMaster` / connection multiplexing between processes?**
-No. Within a process, one `SshClient` already multiplexes any number of channels.
+No. Within a process, one `SshClient` already multiplexes any number of channels. For what else behaves as `ssh` does, and what
+differs, see [OpenSSH compatibility](openssh-compatibility.md).
 
 **Can I connect through an HTTP or SOCKS proxy?**
 Yes: `SshClientOptions.Proxy = SshProxy.Http(...)`, `SshProxy.Socks5(...)` or `SshProxy.FromUri(...)`.

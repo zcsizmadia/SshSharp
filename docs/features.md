@@ -2,6 +2,7 @@
 
 Everything SshSharp does, one row per feature, with the API or `ssh_config` directive to use and the page that shows how.
 <span class="badge text-bg-primary">1.1</span> and <span class="badge text-bg-primary">1.2</span> mark a feature added in that release.
+[OpenSSH compatibility](reference/openssh-compatibility.md) lists what behaves as `ssh` does and what differs.
 
 The four packages share one version: `SshSharp` (the client), `SshSharp.Extensions.DependencyInjection`,
 `SshSharp.IO.Abstractions` and `SshSharp.FileProviders`. All target .NET 8, .NET 10 and .NET 11 <span class="badge text-bg-primary">1.2</span> and have no native dependencies.

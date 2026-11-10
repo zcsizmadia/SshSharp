@@ -137,6 +137,8 @@
       href: ../reference/ssh-config.md
     - name: Algorithms
       href: ../reference/algorithms.md
+    - name: OpenSSH compatibility
+      href: ../reference/openssh-compatibility.md
     - name: Errors and failure reasons
       href: ../reference/errors.md
     - name: FAQ
