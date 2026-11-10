@@ -679,9 +679,20 @@ public class RemoteForwardingHandlerTests
         await using var client = await ConnectAsync(server);
         await using var forwarding = await ForwardAsync(client, unix, async (_, ct) =>
         {
-            await using var registration = ct.Register(() => cancelled.TrySetResult());
+            // The handler records its own cancellation. A registration on ct would race it: Task.Delay's callback, registered later, runs
+            // first, and the handler can resume inside it and dispose the registration before that one runs (net11.0 stress, 3 in 7).
             running.SetResult();
-            await Task.Delay(System.Threading.Timeout.Infinite, ct);
+            try
+            {
+                await Task.Delay(System.Threading.Timeout.Infinite, ct);
+            }
+            finally
+            {
+                if (ct.IsCancellationRequested)
+                {
+                    cancelled.TrySetResult();
+                }
+            }
         });
 
         _ = await ConnectRemoteAsync(server, forwarding);
