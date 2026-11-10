@@ -13,7 +13,7 @@ internal readonly record struct SocksRequest(string Host, int Port, int Version)
 /// The user name and password a SOCKS 5 client must give (RFC 1929). Only keyed digests of the two are kept, not the password, and a
 /// client's attempt is compared with them in constant time: both are digested (the time that takes depends only on what the client
 /// sent, which it knows) and the two digests, side by side, are compared with the expected pair in one
-/// <see cref="CryptographicOperations.FixedTimeEquals"/>, which does not stop at the first byte that differs. So the time to answer
+/// <see cref="CryptographicOperations.FixedTimeEquals(ReadOnlySpan{byte}, ReadOnlySpan{byte})"/>, which does not stop at the first byte that differs. So the time to answer
 /// tells nothing about the expected values, their lengths included, nor about which of the two was wrong.
 /// </summary>
 internal sealed class SocksCredentials

@@ -9,6 +9,14 @@
     <Deterministic>true</Deterministic>
     <ContinuousIntegrationBuild Condition="'$(GITHUB_ACTIONS)' == 'true'">true</ContinuousIntegrationBuild>
 
+    <!--
+      The target frameworks, in one place: a new .NET version is added here, not in each project.
+      SshSharpTargetFrameworks: the packages, the tests, the benchmarks and the AOT smoke test (every supported runtime).
+      SshSharpAppTargetFramework: the samples, the doc snippets and the fuzzer (one runtime is enough; the LTS one users run).
+    -->
+    <SshSharpTargetFrameworks>net8.0;net10.0;net11.0</SshSharpTargetFrameworks>
+    <SshSharpAppTargetFramework>net10.0</SshSharpAppTargetFramework>
+
     <!-- Package metadata shared by the published packages (only the src projects are packable). -->
     <Authors>zcsizmadia</Authors>
 

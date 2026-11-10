@@ -23,9 +23,8 @@ Run the Docs workflow's steps locally (CONTRIBUTING.md, "Checking the site local
 
 - **1.x is additive.** Never change or remove anything in `PublicAPI.Shipped.txt`. New public members go in
   `PublicAPI.Unshipped.txt`. Package validation compares each package with the last release.
-- **Target frameworks:** `net8.0` and `net10.0`.
+- **Target frameworks:** `net8.0`, `net10.0` and `net11.0`. The SDK is pinned by `global.json`.
   - `net8.0` stays well past its November 2026 end of support. Don't propose dropping it.
-  - `net11.0` is added only after .NET 11 is GA (draft #267). Don't merge it before then.
   - Code that needs a newer runtime goes behind `#if NET10_0_OR_GREATER` (or later) with a working fallback.
 - **Native AOT:** the library is AOT-compatible (`IsAotCompatible`). No reflection-based serialization, no dynamic code. The AOT
   smoke test (`tests/SshSharp.AotSmoke`) must keep publishing cleanly.

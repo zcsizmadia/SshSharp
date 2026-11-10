@@ -48,8 +48,15 @@ public class WycheproofTests
     }
 
     [Test]
-    public async Task X25519_AgreesOrRefusesAsWycheproofExpects()
+    [Arguments(false)]
+    [Arguments(true)]
+    public async Task X25519_AgreesOrRefusesAsWycheproofExpects(bool platform)
     {
+        if (platform && !X25519KeyPair.UsesPlatform)
+        {
+            Skip.Test("The platform's X25519 needs .NET 11 on an OS that provides it.");
+        }
+
         var root = Load("x25519_test.json");
         var mismatches = new List<string>();
         var tested = 0;
@@ -58,7 +65,8 @@ public class WycheproofTests
             tested++;
             var expected = Hex(test, "shared");
             var shared = new byte[32];
-            var agreed = X25519.TryAgree(Hex(test, "private"), Hex(test, "public"), shared);
+            using var pair = X25519KeyPair.FromPrivateKey(Hex(test, "private"), platform);
+            var agreed = pair.TryAgree(Hex(test, "public"), shared);
             var result = test.GetProperty("result").GetString();
 
             // Refusing is right for an all-zero result (a low-order point; RFC 7748 section 6.1 lets a protocol abort), which Wycheproof

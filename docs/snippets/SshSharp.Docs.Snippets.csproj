@@ -3,7 +3,7 @@
        (DocFX's [!code-csharp[](...#tag)]), and the project is built with the solution in CI, so every example compiles against the
        current API. Nothing here runs: the methods take a connected client and are never called. -->
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework>$(SshSharpAppTargetFramework)</TargetFramework>
     <OutputType>Library</OutputType>
     <IsPackable>false</IsPackable>
     <!-- Examples, not a library: their names, literals and shapes follow the page they illustrate. -->

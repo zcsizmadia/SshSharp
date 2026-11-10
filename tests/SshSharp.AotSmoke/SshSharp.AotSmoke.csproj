@@ -1,9 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <!-- Published with Native AOT in CI and run against a real server: proves the library works trimmed and AOT-compiled, not only
-       that its analyzers are satisfied. Trim and AOT warnings fail the publish (warnings are errors), one per member. -->
+       that its analyzers are satisfied. Trim and AOT warnings fail the publish (warnings are errors), one per member. Every target
+       framework the library has, since each compiles code the others do not (#if NET10_0_OR_GREATER, NET11_0_OR_GREATER). -->
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFrameworks>$(SshSharpTargetFrameworks)</TargetFrameworks>
     <IsPackable>false</IsPackable>
     <PublishAot>true</PublishAot>
     <TrimmerSingleWarn>false</TrimmerSingleWarn>

@@ -2,7 +2,7 @@
   <!-- A worker service (BackgroundService) on an SSH server's shared connection. Built with the solution, so it keeps compiling as the
        API changes. -->
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework>$(SshSharpAppTargetFramework)</TargetFramework>
     <IsPackable>false</IsPackable>
     <UserSecretsId>sshsharp-samples-worker</UserSecretsId>
   </PropertyGroup>
