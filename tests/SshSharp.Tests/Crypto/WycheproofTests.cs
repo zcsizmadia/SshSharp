@@ -288,54 +288,77 @@ public class WycheproofTests
         var root = Load(file);
         var mismatches = new List<string>();
         var tested = 0;
-        foreach (var group in root.GetProperty("testGroups").EnumerateArray())
-        {
-            var curve = group.GetProperty("curve").GetString() switch
-            {
-                "secp256r1" => NistCurve.P256,
-                "secp384r1" => NistCurve.P384,
-                "secp521r1" => NistCurve.P521,
-                var other => throw new InvalidOperationException($"{file}: unexpected curve {other}"),
-            };
-            var size = curve.FieldSize;
-            foreach (var test in group.GetProperty("tests").EnumerateArray())
-            {
-                tested++;
-                var point = Hex(test, "public");
-                var expected = FixedWidth(Hex(test, "shared"), size);
-                byte[]? shared = null;
-                string? refusal = null;
-                if (point.Length != 1 + (2 * size) || point[0] != 4)
-                {
-                    refusal = "not an uncompressed point";
-                }
-                else
-                {
-                    try
-                    {
-                        using var own = ECDiffieHellman.Create(new ECParameters { Curve = curve.Curve, D = FixedWidth(Hex(test, "private"), size) });
-                        shared = curve.TryDeriveSecret(own, point.AsSpan(1, size), point.AsSpan(1 + size));
-                        refusal = shared is null ? "not on the curve" : null;
-                    }
-                    catch (CryptographicException ex)
-                    {
-                        refusal = $"the platform refused it ({ex.Message})";
-                    }
-                }
 
-                // Accepting with a different secret is wrong whatever the label; refusing is wrong only for a valid vector.
-                if (shared is not null && !FixedWidth(shared, size).AsSpan().SequenceEqual(expected))
+        // The vectors share a few dozen private keys (P-521: 34 for 661 vectors), so each is created once. Creating one from its scalar
+        // is what costs on macOS: its Security framework took 2 min 13 s for the P-521 file in CI (Windows: 3 s), close enough to the
+        // 3-minute test timeout that a loaded stress runner crossed it. A key the platform refuses is not kept, so each of its vectors is
+        // refused on its own as before.
+        var ownKeys = new Dictionary<string, ECDiffieHellman>(StringComparer.Ordinal);
+        try
+        {
+            foreach (var group in root.GetProperty("testGroups").EnumerateArray())
+            {
+                var curve = group.GetProperty("curve").GetString() switch
                 {
-                    mismatches.Add($"{Describe(test)}: agreed on {Convert.ToHexString(shared)}, expected {Convert.ToHexString(expected)}");
-                }
-                else if (shared is not null && test.GetProperty("result").GetString() == "invalid")
+                    "secp256r1" => NistCurve.P256,
+                    "secp384r1" => NistCurve.P384,
+                    "secp521r1" => NistCurve.P521,
+                    var other => throw new InvalidOperationException($"{file}: unexpected curve {other}"),
+                };
+                var size = curve.FieldSize;
+                foreach (var test in group.GetProperty("tests").EnumerateArray())
                 {
-                    mismatches.Add($"{Describe(test)}: agreed with an invalid point");
+                    tested++;
+                    var point = Hex(test, "public");
+                    var expected = FixedWidth(Hex(test, "shared"), size);
+                    byte[]? shared = null;
+                    string? refusal = null;
+                    if (point.Length != 1 + (2 * size) || point[0] != 4)
+                    {
+                        refusal = "not an uncompressed point";
+                    }
+                    else
+                    {
+                        try
+                        {
+                            var d = FixedWidth(Hex(test, "private"), size);
+                            var keyId = Convert.ToHexString(d);
+                            if (!ownKeys.TryGetValue(keyId, out var own))
+                            {
+                                own = ECDiffieHellman.Create(new ECParameters { Curve = curve.Curve, D = d });
+                                ownKeys.Add(keyId, own);
+                            }
+
+                            shared = curve.TryDeriveSecret(own, point.AsSpan(1, size), point.AsSpan(1 + size));
+                            refusal = shared is null ? "not on the curve" : null;
+                        }
+                        catch (CryptographicException ex)
+                        {
+                            refusal = $"the platform refused it ({ex.Message})";
+                        }
+                    }
+
+                    // Accepting with a different secret is wrong whatever the label; refusing is wrong only for a valid vector.
+                    if (shared is not null && !FixedWidth(shared, size).AsSpan().SequenceEqual(expected))
+                    {
+                        mismatches.Add($"{Describe(test)}: agreed on {Convert.ToHexString(shared)}, expected {Convert.ToHexString(expected)}");
+                    }
+                    else if (shared is not null && test.GetProperty("result").GetString() == "invalid")
+                    {
+                        mismatches.Add($"{Describe(test)}: agreed with an invalid point");
+                    }
+                    else if (shared is null && test.GetProperty("result").GetString() == "valid")
+                    {
+                        mismatches.Add($"{Describe(test)}: refused a valid exchange: {refusal}");
+                    }
                 }
-                else if (shared is null && test.GetProperty("result").GetString() == "valid")
-                {
-                    mismatches.Add($"{Describe(test)}: refused a valid exchange: {refusal}");
-                }
+            }
+        }
+        finally
+        {
+            foreach (var key in ownKeys.Values)
+            {
+                key.Dispose();
             }
         }
 
