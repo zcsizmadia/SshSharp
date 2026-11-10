@@ -26,7 +26,7 @@ runs:
     # only these steps, so the rest of the job keeps the default GC settings. A failed install there still gets one more try. Everywhere
     # else a failure fails the job at once. Remove both once a PowerShell 7.6 release with PowerShell/PowerShell#28186 is on the image.
     - id: install
-      uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+      uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
       continue-on-error: ${{ runner.os == 'Windows' && runner.arch == 'ARM64' }}
       env:
         DOTNET_GCgen0size: '4000000'
@@ -36,7 +36,7 @@ runs:
         cache: ${{ inputs.cache == 'true' }}
         cache-dependency-path: '**/Directory.Packages.props'
     - if: steps.install.outcome == 'failure'
-      uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+      uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
       env:
         DOTNET_GCgen0size: '4000000'
       with:
