@@ -4,7 +4,7 @@ Everything SshSharp does, one row per feature, with the API or `ssh_config` dire
 <span class="badge text-bg-primary">1.1</span> and <span class="badge text-bg-primary">1.2</span> mark a feature added in that release.
 
 The four packages share one version: `SshSharp` (the client), `SshSharp.Extensions.DependencyInjection`,
-`SshSharp.IO.Abstractions` and `SshSharp.FileProviders`. All target .NET 8 and .NET 10 and have no native dependencies.
+`SshSharp.IO.Abstractions` and `SshSharp.FileProviders`. All target .NET 8, .NET 10 and .NET 11 <span class="badge text-bg-primary">1.2</span> and have no native dependencies.
 
 ## Connecting and configuration
 
@@ -38,12 +38,12 @@ The four packages share one version: `SshSharp` (the client), `SshSharp.Extensio
 
 | Feature | What it does | API / `ssh_config` | Docs |
 |---|---|---|---|
-| `known_hosts` | Hashed hosts, `@cert-authority`, `@revoked`, and the `StrictHostKeyChecking` policies; new keys recorded as `ssh` records them | <xref:SshSharp.KnownHostsVerifier>; `UserKnownHostsFile`, `StrictHostKeyChecking`, `HashKnownHosts` | [Verify host keys](how-to/verify-host-keys.md) |
+| `known_hosts` | Hashed hosts, `@cert-authority`, `@revoked`, and the `StrictHostKeyChecking` policies; new keys recorded as `ssh` records them; a port-less `@revoked` line applies on every port, and a changed key let through by `No` gets no password, agent or forwarding, as in `ssh` <span class="badge text-bg-primary">1.2</span> | <xref:SshSharp.KnownHostsVerifier>; `UserKnownHostsFile`, `StrictHostKeyChecking`, `HashKnownHosts` | [Verify host keys](how-to/verify-host-keys.md) |
 | Pinned keys | Accept only the fingerprints or public keys you name | `SshHostKeyVerifier.Pinned` (fingerprints, or `SshPublicKey` <span class="badge text-bg-primary">1.1</span>) | [Verify host keys](how-to/verify-host-keys.md) |
 | Your own rule | Decide each host key in code | `SshHostKeyVerifier.FromDelegate` | [Verify host keys](how-to/verify-host-keys.md) |
-| Host certificates | Trust host keys signed by a certificate authority; only from authorities that sign with the algorithms you allow <span class="badge text-bg-primary">1.2</span> | `@cert-authority` lines; `SshClientOptions.CASignatureAlgorithms`, `CASignatureAlgorithms` | [Host keys](host-keys.md) |
+| Host certificates | Trust host keys signed by a certificate authority; only from authorities that sign with the algorithms you allow; one that cannot be used falls back to the plain key, as in `ssh` <span class="badge text-bg-primary">1.2</span> | `@cert-authority` lines; `SshClientOptions.CASignatureAlgorithms`, `CASignatureAlgorithms` | [Host keys](host-keys.md) |
 | Revoked host keys | OpenSSH KRLs and key lists | `KnownHostsVerifier.RevokedHostKeys`; `RevokedHostKeys` | [Host keys](host-keys.md) |
-| Host key rotation | Learns the server's other host keys (`hostkeys-00@openssh.com`) | `KnownHostsVerifier.UpdateHostKeys`; `UpdateHostKeys` | [Host keys](host-keys.md) |
+| Host key rotation | Learns the server's other host keys (`hostkeys-00@openssh.com`), and leaves `known_hosts` alone in the same cases as `ssh` <span class="badge text-bg-primary">1.2</span> | `KnownHostsVerifier.UpdateHostKeys`; `UpdateHostKeys` | [Host keys](host-keys.md) |
 | `KnownHostsCommand` | Gets known hosts from a command (an opt-in) | `KnownHostsCommand`; `AllowKnownHostsCommand` | [Directives](reference/ssh-config.md) |
 | Host key scanning | Fetches a server's host keys without logging in, as `ssh-keyscan` | `SshClient.ScanHostKeysAsync` | [Verify host keys](how-to/verify-host-keys.md) |
 
@@ -52,7 +52,7 @@ The four packages share one version: `SshSharp` (the client), `SshSharp.Extensio
 | Feature | What it does | API / `ssh_config` | Docs |
 |---|---|---|---|
 | Public keys | Ed25519, ECDSA and RSA (SHA-2 signatures), encrypted or not; certificates paired with their keys | `SshClientOptions.PrivateKeys`, `SshPrivateKey.LoadAsync`; `IdentityFile`, `CertificateFile` | [Keys and the SSH agent](how-to/agent-and-keys.md) |
-| Key formats | Reads OpenSSH, PKCS#1, PKCS#8, SEC1 and PuTTY `.ppk`, each also encrypted (traditional `Proc-Type: 4,ENCRYPTED` PEM with AES; OpenSSH keys with every `ssh-keygen -Z` cipher) | `SshPrivateKey.Parse`, `LoadAsync` | [Encrypted key files](how-to/agent-and-keys.md#encrypted-key-files) |
+| Key formats | Reads OpenSSH, PKCS#1, PKCS#8, SEC1 and PuTTY `.ppk`, each also encrypted (traditional `Proc-Type: 4,ENCRYPTED` PEM with AES; OpenSSH keys with every `ssh-keygen -Z` cipher, `chacha20-poly1305@openssh.com` included) <span class="badge text-bg-primary">1.2</span> | `SshPrivateKey.Parse`, `LoadAsync` | [Encrypted key files](how-to/agent-and-keys.md#encrypted-key-files) |
 | Key generation | Ed25519, ECDSA and RSA keys, saved as `ssh-keygen` saves them | `SshPrivateKey.Generate`, `SaveAsync` | [Authentication](authentication.md) |
 | Key export | PKCS#8 and PuTTY `.ppk` v3, and OpenSSH with your own bcrypt rounds <span class="badge text-bg-primary">1.1</span> | `ToPkcs8PrivateKey`, `ToPuttyPrivateKey`, `SaveAsync(path, SshPrivateKeyFormat, ...)` | [Keys and the SSH agent](how-to/agent-and-keys.md) |
 | Public keys as a type | Parse `.pub` and `authorized_keys` lines, take fingerprints, verify signatures <span class="badge text-bg-primary">1.1</span> | <xref:SshSharp.SshPublicKey> | [Keys and the SSH agent](how-to/agent-and-keys.md) |
@@ -161,6 +161,6 @@ The four packages share one version: `SshSharp` (the client), `SshSharp.Extensio
 | Feature | What it does | API | Docs |
 |---|---|---|---|
 | Logging | `ILogger` events; never host names, user names, passwords or key material | `SshClientOptions.Logger` | [Logging and diagnostics](how-to/logging-and-diagnostics.md) |
-| Traces | `ActivitySource` spans for connecting (`SshSharp.Connect`, with `SshSharp.Authenticate` inside it), running commands (`SshSharp.Command`) and SFTP and SCP transfers (`SshSharp.Sftp.*`, `SshSharp.Scp.*`), following OpenTelemetry's conventions | `SshTelemetry.SourceName` (`"SshSharp"`) | [Errors and diagnostics](diagnostics.md) |
-| Metrics | `Meter` instruments: open connections and channels, connect duration, bytes sent and received, key exchanges, commands, SFTP and SCP file data, forwarded connections, keep-alive round trips, the shared connection's reconnections | `SshTelemetry.SourceName` | [Errors and diagnostics](diagnostics.md) |
+| Traces | `ActivitySource` spans for connecting (`SshSharp.Connect`, with `SshSharp.Authenticate` inside it <span class="badge text-bg-primary">1.2</span>), running commands (`SshSharp.Command`) and SFTP and SCP <span class="badge text-bg-primary">1.2</span> transfers (`SshSharp.Sftp.*`, `SshSharp.Scp.*`), following OpenTelemetry's conventions | `SshTelemetry.SourceName` (`"SshSharp"`) | [Errors and diagnostics](diagnostics.md) |
+| Metrics | `Meter` instruments: open connections and channels, connect duration, bytes sent and received, key exchanges, commands, SFTP and SCP file data, forwarded connections, keep-alive round trips, the shared connection's reconnections <span class="badge text-bg-primary">1.2</span> | `SshTelemetry.SourceName` | [Errors and diagnostics](diagnostics.md) |
 | Errors | One exception type with a machine-readable reason | `SshException.Reason` (<xref:SshSharp.SshFailureReason>) | [Errors and failure reasons](reference/errors.md) |
