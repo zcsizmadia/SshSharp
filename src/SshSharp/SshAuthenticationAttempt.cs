@@ -41,7 +41,11 @@ public enum SshAuthenticationOutcome
     /// </summary>
     PasswordChangeRequired,
 
-    /// <summary>The method could not be used on this side: no Kerberos ticket, or no GSS-API library or .NET 10 for <c>gssapi-with-mic</c>.</summary>
+    /// <summary>
+    /// The method could not be used on this side: no Kerberos ticket, or no GSS-API library or .NET 10 for <c>gssapi-with-mic</c>; or, for
+    /// <c>password</c> and <c>keyboard-interactive</c>, the host key has changed and was accepted only because of
+    /// <see cref="Config.StrictHostKeyChecking.No"/>, so no password or answer is sent to the server (as ssh does). Nothing was sent.
+    /// </summary>
     Unavailable,
 }
 

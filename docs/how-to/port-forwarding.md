@@ -249,6 +249,9 @@ before disposing; forwardings to a host and port, or dynamic ones, close their c
   proxy [a password](#with-a-password-beyond-loopback).
 - **Server policy.** sshd's `AllowTcpForwarding no` refuses tunnels: each forwarded connection is closed, and `OpenTcpTunnelAsync`
   throws `SshException` with `ChannelClosed`. A bind address other than loopback for remote forwarding needs `GatewayPorts`.
+- **A changed host key.** On a connection whose host key changed and was accepted only because `StrictHostKeyChecking` is `no`,
+  no port is forwarded, as with ssh: the forwarding methods throw `SshHostKeyException` and `ssh_config`'s forwardings are not
+  started. Tunnels (`OpenTcpTunnelAsync`) still work. See [A changed key under `No`](verify-host-keys.md#a-changed-key-under-no).
 - **Lifetime.** Forwarding runs until the forwarder is disposed, the client is disposed, or the connection ends. Watch
   `client.ConnectionClosed` if you need to know (see [Keep-alive and reconnecting](keepalive-and-reconnect.md)).
 - **Remote destinations come from the server's side.** With remote dynamic forwarding, every destination is allowed when

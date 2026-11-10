@@ -56,6 +56,10 @@ var options = new SshClientOptions { UserName = "deploy", Password = password, H
 When the server takes passwords only through keyboard-interactive (sshd with PAM and `PasswordAuthentication no`), the
 password answers a round that asks for exactly one hidden input. It is never sent to a visible prompt or to a second round.
 
+No password or keyboard-interactive answer is sent to a server whose host key has changed and was accepted only because
+`StrictHostKeyChecking` is `no`, as ssh does: it may be a man in the middle. Keys still log in. See
+[A changed key under `No`](how-to/verify-host-keys.md#a-changed-key-under-no).
+
 ### Asking for the password
 
 `PasswordProvider` asks for the password only when authentication reaches it, after Kerberos and the keys, as `ssh` prompts
@@ -278,7 +282,8 @@ Each session asks the server for it, and the agent connections the server opens 
 announces RFC 9987's `agent-forward` (OpenSSH 10.3+) is asked with the standard `agent-req`; others with OpenSSH's
 `auth-agent-req@openssh.com`. Forward only to
 servers you trust: while you are connected, anyone with enough rights on the server can make your agent sign (they cannot read
-the keys). Connecting by `ssh_config` alias follows `ForwardAgent yes`.
+the keys). Connecting by `ssh_config` alias follows `ForwardAgent yes`. The agent is not forwarded to a server whose host key has
+changed and was accepted only because `StrictHostKeyChecking` is `no`.
 
 **An agent in your process.** `SshAgent.FromKeys(keys)` serves keys this process holds over the agent protocol: key files,
 generated keys, Windows key store keys, keys behind an `SshKeySigner` (a cloud KMS, an HSM) and keys paired with certificates.

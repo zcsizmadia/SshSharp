@@ -46,7 +46,8 @@ flowchart LR
 ## What is left to you
 
 - **Host key policy.** Choose a verifier that fits ([Verify host keys](../how-to/verify-host-keys.md)). `StrictHostKeyChecking.No`
-  and a verifier that always accepts turn off protection against interception.
+  and a verifier that always accepts turn off protection against interception. (With `No`, a connection whose key changed sends
+  no password and forwards nothing, as ssh does; a verifier that always accepts gives no such signal.)
 - **Shell quoting.** Command lines are run by the server's shell; quote untrusted input
   ([Run a command](../how-to/run-a-command.md#pass-arguments-safely)).
 - **Agent forwarding** lets anyone with enough rights on the server use your agent while you are connected. Forward only to trusted

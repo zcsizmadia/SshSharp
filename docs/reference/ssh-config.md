@@ -86,7 +86,7 @@ The `SshClientOptions` lists take an `SshAlgorithmList` in the same `+`, `-`, `^
 
 | Directive | Property | Applied |
 |---|---|---|
-| `StrictHostKeyChecking` | `StrictHostKeyChecking` | Yes (`yes`, `accept-new`, `ask`, `no`). `ask` uses `SshConfigConnectOptions.AskHostKey`. |
+| `StrictHostKeyChecking` | `StrictHostKeyChecking` | Yes (`yes`, `accept-new`, `ask`, `no`). `ask` uses `SshConfigConnectOptions.AskHostKey`. With `no`, a changed key is accepted as in ssh, but [without password or keyboard-interactive authentication, agent forwarding or port forwarding](../how-to/verify-host-keys.md#a-changed-key-under-no). |
 | `UserKnownHostsFile`, `GlobalKnownHostsFile` | `UserKnownHostsFiles`, `GlobalKnownHostsFiles` | Yes. |
 | `HashKnownHosts` | `HashKnownHosts` | Yes, for entries the client adds. |
 | `UpdateHostKeys` | `UpdateHostKeys` | Yes; `ask` uses `ConfirmHostKeyUpdate`. |

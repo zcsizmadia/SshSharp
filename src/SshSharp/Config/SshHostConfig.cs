@@ -12,7 +12,13 @@ public enum StrictHostKeyChecking
     /// <summary>Accept and record unknown keys; refuse changed keys.</summary>
     AcceptNew,
 
-    /// <summary>Accept unknown keys, and allow changed keys with a warning (<c>no</c> or <c>off</c>).</summary>
+    /// <summary>
+    /// Accept and record unknown keys, and allow changed keys with a warning (<c>no</c> or <c>off</c>). As in ssh, a connection whose key
+    /// has changed is not trusted: password and keyboard-interactive authentication (and so password changes), agent forwarding, and port
+    /// forwarding (ssh_config's <c>LocalForward</c>, <c>RemoteForward</c> and <c>DynamicForward</c>, and the forwarding methods of
+    /// <see cref="SshClient"/>) are disabled on it, so a man in the middle gets no password and no access to this side. Public key and
+    /// GSS-API authentication still work.
+    /// </summary>
     No,
 }
 

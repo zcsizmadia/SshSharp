@@ -49,7 +49,9 @@ public sealed class SshHostKeyPrompt
 /// Verifies host keys against OpenSSH <c>known_hosts</c> files, with <c>StrictHostKeyChecking</c> semantics:
 /// <list type="bullet">
 /// <item>A recorded key that matches is trusted; one listed as <c>@revoked</c> is always refused.</item>
-/// <item>A different key of a recorded type ("the host key has changed") is refused, except with <see cref="StrictHostKeyChecking.No"/>.</item>
+/// <item>A different key of a recorded type ("the host key has changed") is refused, except with <see cref="StrictHostKeyChecking.No"/>,
+/// which accepts it as ssh does: the connection goes on, but password and keyboard-interactive authentication, agent forwarding and
+/// port forwarding are disabled on it, so a man in the middle gets no password and no access to this side.</item>
 /// <item>An unknown key is refused (<see cref="StrictHostKeyChecking.Yes"/>), offered to <see cref="AskHostKey"/>, or recorded and trusted
 /// (<see cref="StrictHostKeyChecking.AcceptNew"/>, <see cref="StrictHostKeyChecking.No"/>). AcceptNew refuses it when keys of other types
 /// are already recorded for the host, so a man in the middle cannot get a weaker key type accepted silently.</item>
@@ -440,8 +442,10 @@ public sealed class KnownHostsVerifier : SshHostKeyVerifier
 
         if (changed)
         {
+            // As ssh, No lets the connection go on, but the key proves nothing about the server: the connection must not send it
+            // anything a man in the middle could use (see SshHostKeyVerdict.IsUntrusted).
             return Policy == StrictHostKeyChecking.No
-                ? SshHostKeyVerdict.Accept()
+                ? SshHostKeyVerdict.AcceptUntrusted()
                 : SshHostKeyVerdict.Reject(
                     $"The {key.KeyType} host key has changed to {key.Fingerprint}. Someone could be intercepting the connection, or the host key was "
                     + "replaced; if the change is expected, remove the old entry from known_hosts.");

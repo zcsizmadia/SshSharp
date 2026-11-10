@@ -130,24 +130,31 @@ public sealed class UpdateHostKeysTests : IDisposable
     public async Task AChangedKeyAcceptedWithStrictHostKeyCheckingNo_UpdatesNothing()
     {
         // A man in the middle presents its own key; StrictHostKeyChecking no lets the connection through, but its announcement must not
-        // add its keys or have the real one removed as stale.
+        // add its keys or have the real one removed as stale. A key logs in: the connection gives such a server no password.
         var real = FakeHostKey.Ed25519();
         var impostor = FakeHostKey.Ed25519();
         File.WriteAllText(KnownHosts, Line(real));
-        await using var server = new FakeSessionServer(new FakeServerOptions { HostKey = impostor }) { AnnouncedHostKeys = [impostor, FakeHostKey.Ecdsa(256)] };
+        using var key = SshPrivateKey.Parse(Keys.TestKeys.OpenSshEd25519(out var blob));
+        await using var server = new FakeSessionServer(new FakeServerOptions { HostKey = impostor })
+        {
+            AnnouncedHostKeys = [impostor, FakeHostKey.Ecdsa(256)],
+            AuthorizedKeys = [blob],
+            AdvertisedMethods = ["publickey"],
+        };
         _ = server.StartAsync();
         var skipped = new SkipLogger();
         await using var client = await SshClient.ConnectAsync(server.ClientStream, new SshClientOptions
         {
             UserName = "tester",
-            Password = TestSecrets.Password,
+            PrivateKeys = [key],
             HostKeyAlias = Host,
             HostKeyVerifier = new KnownHostsVerifier([KnownHosts]) { Policy = StrictHostKeyChecking.No, UpdateHostKeys = true },
             Logger = skipped,
         }, leaveOpen: true, Timeout());
 
+        // The untrusted connection is turned away before the known_hosts checks, which would refuse it too (its key is in no user file).
         await skipped.Reason.Task.WaitAsync(Timeout());
-        await Assert.That(skipped.Reason.Task.Result).Contains("not in a user known_hosts file");
+        await Assert.That(skipped.Reason.Task.Result).Contains("is not trusted");
         await Assert.That(Recorded()).IsEquivalentTo([Line(real).TrimEnd()]);
         await Assert.That(Proved(server)).IsFalse();
     }

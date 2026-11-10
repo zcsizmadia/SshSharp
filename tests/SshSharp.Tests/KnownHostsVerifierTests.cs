@@ -65,7 +65,9 @@ public sealed class KnownHostsVerifierTests : IDisposable
         File.WriteAllText(UserFile, Line("server.example", key));
         foreach (var policy in Enum.GetValues<StrictHostKeyChecking>())
         {
-            await Assert.That((await Verifier(policy).VerifyAsync(Context(key), default)).IsAccepted).IsTrue();
+            var verdict = await Verifier(policy).VerifyAsync(Context(key), default);
+            await Assert.That(verdict.IsAccepted).IsTrue();
+            await Assert.That(verdict.IsUntrusted).IsFalse();
         }
     }
 
@@ -85,8 +87,11 @@ public sealed class KnownHostsVerifierTests : IDisposable
         await Assert.That((await Verifier(StrictHostKeyChecking.Yes).VerifyAsync(Context(key), default)).IsAccepted).IsTrue();
         await Assert.That(File.ReadAllLines(UserFile).Length).IsEqualTo(1);
 
+        // No records an unknown key and trusts it, as ssh does: only a changed key leaves the connection untrusted.
         var other = Ed25519Key();
-        await Assert.That((await Verifier(StrictHostKeyChecking.No).VerifyAsync(Context(other, host: "other.example"), default)).IsAccepted).IsTrue();
+        var recorded = await Verifier(StrictHostKeyChecking.No).VerifyAsync(Context(other, host: "other.example"), default);
+        await Assert.That(recorded.IsAccepted).IsTrue();
+        await Assert.That(recorded.IsUntrusted).IsFalse();
         await Assert.That(File.ReadAllLines(UserFile).Length).IsEqualTo(2);
     }
 
@@ -103,7 +108,10 @@ public sealed class KnownHostsVerifierTests : IDisposable
             await Assert.That(verdict.Reason).Contains("changed");
         }
 
-        await Assert.That((await Verifier(StrictHostKeyChecking.No).VerifyAsync(Context(changed), default)).IsAccepted).IsTrue();
+        // Accepted, but not trusted: the connection then sends no password and forwards nothing (see ChangedHostKeyTests).
+        var accepted = await Verifier(StrictHostKeyChecking.No).VerifyAsync(Context(changed), default);
+        await Assert.That(accepted.IsAccepted).IsTrue();
+        await Assert.That(accepted.IsUntrusted).IsTrue();
         await Assert.That(File.ReadAllText(UserFile)).IsEqualTo(Line("server.example", old));
     }
 

@@ -70,6 +70,7 @@ public sealed partial class SshClient
         ObjectDisposedException.ThrowIf(_disposed != 0, this);
         cancellationToken.ThrowIfCancellationRequested();
         ThrowIfConnectionFailed();
+        ThrowIfForwardingDisabled();
         var listener = LocalListener.Start(localEndPoint, (socket, ct) => OpenForwardedAsync(socket, remoteHost, remotePort, ct),
             ForwardedConnectionMeasurement.Local, _connection.Closed);
         var bound = listener.LocalEndPoint.ToString();
@@ -92,6 +93,7 @@ public sealed partial class SshClient
         ObjectDisposedException.ThrowIf(_disposed != 0, this);
         cancellationToken.ThrowIfCancellationRequested();
         ThrowIfConnectionFailed();
+        ThrowIfForwardingDisabled();
         var listener = LocalListener.Start(localEndPoint, (_, ct) => OpenForwardedSocketAsync(remoteSocketPath, ct),
             ForwardedConnectionMeasurement.Local, _connection.Closed);
         var bound = listener.LocalEndPoint.ToString();
@@ -175,6 +177,7 @@ public sealed partial class SshClient
         ObjectDisposedException.ThrowIf(_disposed != 0, this);
         cancellationToken.ThrowIfCancellationRequested();
         ThrowIfConnectionFailed();
+        ThrowIfForwardingDisabled();
         var listener = LocalListener.StartUnix(localSocketPath, unlinkExisting, socketMode,
             remoteSocketPath is null
                 ? (socket, ct) => OpenForwardedAsync(socket, remoteHost!, remotePort, ct)
@@ -233,6 +236,7 @@ public sealed partial class SshClient
         ObjectDisposedException.ThrowIf(_disposed != 0, this);
         cancellationToken.ThrowIfCancellationRequested();
         ThrowIfConnectionFailed();
+        ThrowIfForwardingDisabled();
         var listener = LocalListener.Start(localEndPoint, (socket, ct) => OpenSocksAsync(socket, required, ct),
             ForwardedConnectionMeasurement.Dynamic, _connection.Closed);
         var bound = listener.LocalEndPoint.ToString();
@@ -251,6 +255,22 @@ public sealed partial class SshClient
             throw failure as SshException ?? new SshException(SshFailureReason.ConnectionClosed, "The connection has failed: " + failure.Message, failure);
         }
     }
+
+    /// <summary>
+    /// A connection whose host key changed and was accepted anyway (<see cref="StrictHostKeyChecking.No"/>) forwards no ports, so a man in
+    /// the middle neither receives the connections meant for the host nor gets to open connections on this side. As in ssh, which also
+    /// refuses forwardings asked for after connecting (its <c>~C</c> command line and multiplexing), this holds for the whole connection.
+    /// </summary>
+    private void ThrowIfForwardingDisabled()
+    {
+        if (HostKeyUntrusted)
+        {
+            throw new SshHostKeyException(ForwardingDisabledMessage, HostKey);
+        }
+    }
+
+    private const string ForwardingDisabledMessage =
+        "Port forwarding is disabled to avoid man-in-the-middle attacks: the host key has changed and was accepted only because StrictHostKeyChecking is no.";
 
     /// <summary>The channel for one locally forwarded connection, or null (logged) when the server refuses it.</summary>
     private async Task<SshChannel?> OpenForwardedAsync(Socket socket, string host, int port, CancellationToken cancellationToken)
@@ -481,6 +501,7 @@ public sealed partial class SshClient
     private async Task<SshRemoteSocketForwarder> StartRemoteSocketForwardAsync(string remoteSocketPath, Func<string, SshRemoteSocketForwarder> create, CancellationToken cancellationToken)
     {
         ObjectDisposedException.ThrowIf(_disposed != 0, this);
+        ThrowIfForwardingDisabled();
         EnsureChannelDispatch();
         var forwarder = create(remoteSocketPath);
         if (!_remoteSocketForwards.TryAdd(remoteSocketPath, forwarder))
@@ -547,6 +568,7 @@ public sealed partial class SshClient
     private async Task<SshRemotePortForwarder> StartRemoteForwardAsync(string bindAddress, int remotePort, Func<int, SshRemotePortForwarder> create, CancellationToken cancellationToken)
     {
         ObjectDisposedException.ThrowIf(_disposed != 0, this);
+        ThrowIfForwardingDisabled();
         EnsureChannelDispatch();
 
         GlobalReply reply;
@@ -645,7 +667,7 @@ public sealed partial class SshClient
         {
             // Agent forwarding: only when this client forwards an agent (the server asks for it after the agent request). RFC 9987 calls
             // the channel "agent-connect"; OpenSSH's older name is accepted too, whichever request the server answered.
-            return _options.ForwardAgent is { } agent ? channel => _ = RelayAgentAsync(channel, agent) : null;
+            return ForwardedAgent is { } agent ? channel => _ = RelayAgentAsync(channel, agent) : null;
         }
 
         Func<SshChannel, Task>? accept = null;
@@ -826,6 +848,18 @@ public sealed partial class SshClient
     /// </summary>
     internal async Task StartConfiguredForwardingsAsync(SshHostConfig hostConfig, CancellationToken cancellationToken)
     {
+        if (HostKeyUntrusted && hostConfig.LocalForwards.Count + hostConfig.RemoteForwards.Count + hostConfig.DynamicForwards.Count > 0)
+        {
+            // As ssh: none is started on a connection whose host key is not trusted, and with ExitOnForwardFailure that fails it.
+            if (hostConfig.ExitOnForwardFailure)
+            {
+                throw new SshHostKeyException(ForwardingDisabledMessage, HostKey);
+            }
+
+            SshLog.ConfiguredForwardingsDisabled(_logger);
+            return;
+        }
+
         foreach (var spec in hostConfig.LocalForwards)
         {
             await TryForwardAsync("LocalForward", spec, async () =>

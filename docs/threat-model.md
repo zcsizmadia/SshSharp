@@ -88,6 +88,23 @@ A man in the middle can read, change, drop and inject bytes. The server itself m
   must lie in [2, p-2], and the server's public value in (1, p-1). That (p-1)/2 is prime is not proven: it would cost another
   full-size exponentiation (about 0.65 s at 8192 bits) on every connection. A failed check fails the connection with
   `KeyExchangeFailed` before the client's public value is sent.
+- **A changed host key under `StrictHostKeyChecking no`:** accepted, as ssh accepts it, but the connection is not trusted: a key
+  that differs from the one in `known_hosts` is what a man in the middle presents, and `no` lets it through. So, as ssh does, the
+  client then gives that server nothing it could use against the user or this machine:
+  - no password, no password change and no keyboard-interactive answers (`Password`, `PasswordProvider`, `ChangePassword` and
+    `KeyboardInteractive` are not used, and the provider is not asked); public key and GSS-API authentication still work, since
+    a signature bound to the session gives a man in the middle nothing to replay elsewhere;
+  - no agent forwarding: sessions do not ask for it, and agent channels the server opens are refused;
+  - no port forwarding for the whole connection: `LocalForward`, `RemoteForward` and `DynamicForward` are not started (with
+    `ExitOnForwardFailure` the connection fails), and `SshClient`'s forwarding methods (local, remote, dynamic and Unix socket
+    forwarding) throw `SshHostKeyException`. A man in the middle would otherwise receive the connections meant for the host, or
+    open connections on this side. Tunnels (`OpenTcpTunnelAsync`, `OpenUnixSocketTunnelAsync`, as `ssh -W`, which ProxyJump uses)
+    still work: they listen nowhere and serve only this process;
+  - no host key updates (below).
+
+  A warning with the new key's fingerprint (no host name) is logged once per connection. Each `ProxyJump` or `JumpHosts` hop is
+  verified on its own, so a hop whose key changed loses its own password and agent forwarding, and the destination keeps them if
+  its key is trusted. Only `KnownHostsVerifier` reports a key as changed; a custom verifier's verdict is all or nothing.
 - **Host key rotation (`UpdateHostKeys`):** off by default. A new key is recorded only after the server proves it holds it
   (`hostkeys-prove-00@openssh.com`), and any invalid proof cancels the whole update. Removing keys the server no longer announces
   needs no proof, as in `ssh`, so the update is applied only when the connection itself was trusted through the user's own file

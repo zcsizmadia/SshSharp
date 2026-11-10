@@ -22,9 +22,13 @@ var custom = new KnownHostsVerifier(["/etc/myapp/known_hosts"])
 | `Yes` | accepted | rejected | rejected |
 | `AcceptNew` | accepted | recorded and accepted, unless another key type is already known for the host | rejected |
 | `Ask` (default) | accepted | `AskHostKey` decides (rejected without it); recorded when accepted | rejected |
-| `No` | accepted | accepted and recorded | accepted (not recorded) |
+| `No` | accepted | accepted and recorded | accepted (not recorded), without passwords or forwarding |
 
-`No` turns off protection against a changed key, so use it only where interception is not a concern. `@revoked` entries
+`No` turns off protection against a changed key, so use it only where interception is not a concern. As in ssh, a connection
+whose key has changed goes on, but is not trusted: it sends no password or keyboard-interactive answers (public keys and GSS-API
+still log in), forwards no agent, and forwards no ports, neither the configured `LocalForward`, `RemoteForward` and
+`DynamicForward` nor any asked for later, which throw `SshHostKeyException`. A warning is logged. See
+[Verify host keys](how-to/verify-host-keys.md#a-changed-key-under-no). `@revoked` entries
 reject a key in every mode, and one written without a port (`@revoked server.example <key>`) rejects it on every port of the
 host, as in OpenSSH 10.6p2. `@cert-authority`
 entries accept host certificates signed by that authority for the host (one that cannot be used falls back to its plain key,

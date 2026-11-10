@@ -30,11 +30,35 @@ common policies and how to choose.
 | `Yes` | accepted | rejected | rejected |
 | `AcceptNew` | accepted | recorded and accepted, unless another key type is already known for the host | rejected |
 | `Ask` (default) | accepted | `AskHostKey` decides (rejected without it); recorded when accepted | rejected |
-| `No` | accepted | accepted and recorded | accepted (not recorded) |
+| `No` | accepted | accepted and recorded | accepted (not recorded), [without passwords or forwarding](#a-changed-key-under-no) |
 
 > [!CAUTION]
 > `StrictHostKeyChecking.No` accepts a changed key, which is exactly what an interception looks like. Use it only where
 > interception is not a concern, such as a throwaway container in a test.
+
+### A changed key under `No`
+
+When the server's key differs from the one `known_hosts` has, `No` lets the connection go on, as ssh does, but does not trust it.
+Nothing a man in the middle could use is given to the server:
+
+| On a connection whose key changed | What happens |
+|---|---|
+| `Password`, `PasswordProvider`, `ChangePassword` | Not used, and the provider is not asked. |
+| `KeyboardInteractive` (and a password answering it) | Not used. |
+| `PrivateKeys`, the agent's keys, GSS-API | Used as usual. |
+| `ForwardAgent` | Not forwarded: not asked for, and the server's agent channels are refused. |
+| `LocalForward`, `RemoteForward`, `DynamicForward` | Not started (logged); with `ExitOnForwardFailure`, the connection fails with `SshHostKeyException`. |
+| `ForwardLocalPortAsync`, `ForwardRemotePortAsync`, `ForwardDynamicPortAsync` and the other forwarding methods | Throw `SshHostKeyException`, "Port forwarding is disabled to avoid man-in-the-middle attacks". |
+| `OpenTcpTunnelAsync`, `OpenUnixSocketTunnelAsync` (as `ssh -W`, and ProxyJump through this host) | Work as usual. |
+| `UpdateHostKeys` | Nothing is updated. |
+
+When a password was the only way in, authentication fails with `SshAuthenticationException`, whose message says the password was
+disabled because the host key changed, and whose `Attempts` list `password` (or `keyboard-interactive`) as `Unavailable`. A
+`Warning` with the new key's fingerprint is logged once per connection. Each ProxyJump hop is checked on its own: a hop whose key
+changed loses its own password and agent forwarding, not the destination's.
+
+If the change is expected (the server was reinstalled), confirm the new fingerprint out of band and remove the old line
+(`ssh-keygen -R host`), or let `UpdateHostKeys` follow planned rotations, rather than relying on `No`.
 
 ## Pin fingerprints
 

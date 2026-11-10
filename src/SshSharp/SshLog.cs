@@ -168,4 +168,11 @@ internal static partial class SshLog
     // Fingerprints and the problem only: a certificate's key id and principals are often host names.
     [LoggerMessage(EventId = 56, Level = LogLevel.Warning, Message = "The host certificate for key {Fingerprint} from the trusted authority {Authority} cannot be used ({Problem}); checking the key as a plain key, as ssh does")]
     public static partial void HostCertificateUnusable(ILogger logger, string fingerprint, string authority, string problem);
+
+    // The fingerprint only, never the host: the warning ssh prints, once per connection.
+    [LoggerMessage(EventId = 61, Level = LogLevel.Warning, Message = "The host key has changed to {Fingerprint} and was accepted because StrictHostKeyChecking is no. Someone could be intercepting the connection: password and keyboard-interactive authentication, agent forwarding and port forwarding are disabled on it to avoid man-in-the-middle attacks")]
+    public static partial void HostKeyUntrusted(ILogger logger, string fingerprint);
+
+    [LoggerMessage(EventId = 62, Level = LogLevel.Warning, Message = "The forwardings ssh_config names for this host were not started: the host key has changed, and port forwarding is disabled to avoid man-in-the-middle attacks")]
+    public static partial void ConfiguredForwardingsDisabled(ILogger logger);
 }

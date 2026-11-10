@@ -24,7 +24,7 @@ Exception
 | Reason | Meaning | Type | What to do |
 |---|---|---|---|
 | `ConnectFailed` | The TCP connection, a proxy (a custom one's connector included, with its exception inside), a `ProxyJump` or `JumpHosts` hop or a `ProxyCommand` could not be established. | `SshException` | Check name, port, firewall and proxy; retry with backoff. |
-| `HostKeyRejected` | The host key verifier refused the server's key: unknown, changed or revoked. | `SshHostKeyException` | Do not retry with a looser policy. Confirm the key out of band. |
+| `HostKeyRejected` | The host key verifier refused the server's key: unknown, changed or revoked. Also thrown by a forwarding method on a connection whose key changed and was accepted only by `StrictHostKeyChecking.No`. | `SshHostKeyException` | Do not retry with a looser policy. Confirm the key out of band. |
 | `AuthenticationFailed` | No credential was accepted. | `SshAuthenticationException` | Compare `AllowedMethods` with the credentials you gave; `Attempts` lists each key (by fingerprint) and method tried, and what became of it. |
 | `KeyExchangeFailed` | No common algorithms, or the key exchange failed. | `SshException` | The server needs a modern algorithm; see [Algorithms](algorithms.md). |
 | `ProtocolError` | The server sent something that violates the protocol. | `SshProtocolException` | Report it with a `Debug` log; usually a server bug or interference on the path. |

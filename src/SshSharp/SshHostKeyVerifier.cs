@@ -50,10 +50,11 @@ public sealed record KnownHostsLookup(string Name, int Port);
 /// <summary>A verifier's decision about a host key.</summary>
 public readonly record struct SshHostKeyVerdict
 {
-    private SshHostKeyVerdict(bool isAccepted, string? reason)
+    private SshHostKeyVerdict(bool isAccepted, string? reason, bool isUntrusted = false)
     {
         IsAccepted = isAccepted;
         Reason = reason;
+        IsUntrusted = isUntrusted;
     }
 
     /// <summary>Whether the key is trusted.</summary>
@@ -70,6 +71,16 @@ public readonly record struct SshHostKeyVerdict
 
     /// <summary>Trust the key.</summary>
     public static SshHostKeyVerdict Accept() => new(true, null);
+
+    /// <summary>
+    /// The key was accepted although it does not match the one recorded for the host (<see cref="Config.StrictHostKeyChecking.No"/>): the
+    /// connection goes on, but the server is not known to be the host, so nothing a man in the middle could use is sent to it or offered
+    /// to it (passwords, keyboard-interactive answers, the forwarded agent, port forwardings), as ssh does.
+    /// </summary>
+    internal bool IsUntrusted { get; }
+
+    /// <summary>Accept a key that has changed, without trusting it (see <see cref="IsUntrusted"/>).</summary>
+    internal static SshHostKeyVerdict AcceptUntrusted() => new(true, null, isUntrusted: true);
 
     /// <summary>Refuse the key, with the reason the connection fails with.</summary>
     public static SshHostKeyVerdict Reject(string reason)

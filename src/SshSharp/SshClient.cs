@@ -40,6 +40,16 @@ public sealed partial class SshClient : IAsyncDisposable
     /// <summary>What binds an agent connection to this session; forwarded agent connections are bound with it (<c>is_forwarding</c>).</summary>
     internal AgentBinding? AgentBinding { get; init; }
 
+    /// <summary>
+    /// The host key was accepted although it changed (<see cref="Config.StrictHostKeyChecking.No"/>, see
+    /// <see cref="SshHostKeyVerdict.IsUntrusted"/>): the agent is not forwarded and port forwardings are refused on this connection, as
+    /// ssh does.
+    /// </summary>
+    internal bool HostKeyUntrusted { get; init; }
+
+    /// <summary>The agent this connection forwards: none when the host key is not trusted, as a man in the middle would get to use it.</summary>
+    private SshAgent? ForwardedAgent => HostKeyUntrusted ? null : _options.ForwardAgent;
+
     /// <summary>The keys the server accepted during authentication (a success, or a partial success on the way), for AddKeysToAgent.</summary>
     internal IReadOnlyList<SshPrivateKey> AcceptedKeys { get; private set; } = [];
 
@@ -503,7 +513,7 @@ public sealed partial class SshClient : IAsyncDisposable
     /// <summary>With <see cref="SshClientOptions.ForwardAgent"/>, asks the server to forward the agent on this session.</summary>
     private async Task RequestAgentForwardingAsync(SshChannel channel, CancellationToken cancellationToken)
     {
-        if (_options.ForwardAgent is not null)
+        if (ForwardedAgent is not null)
         {
             // No reply, as ssh sends it: a server that does not forward agents just ignores it. RFC 9987 names the request "agent-req",
             // to be used only when the server announces "agent-forward"; otherwise OpenSSH's name, which servers have long understood.
@@ -588,9 +598,10 @@ public sealed partial class SshClient : IAsyncDisposable
 
         var firstCheck = new FirstHostKeyCheck();
         SshTransportOptions transportOptions;
+        var trust = new HostKeyTrust();
         try
         {
-            transportOptions = await TransportOptionsAsync(options, host, port, logger, firstCheck, cancellationToken).ConfigureAwait(false);
+            transportOptions = await TransportOptionsAsync(options, host, port, logger, firstCheck, trust, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -609,9 +620,10 @@ public sealed partial class SshClient : IAsyncDisposable
         {
             await transport.ConnectAsync(cancellationToken).ConfigureAwait(false);
             var acceptedKeys = new List<SshPrivateKey>();
-            await AuthenticateAsync(transport, options, transportOptions.Preferences.PublicKeys, logger, acceptedKeys, host, port, cancellationToken)
-                .ConfigureAwait(false);
-            var client = CompleteConnection(transport, stream, options, leaveOpen, owner, host, port, firstCheck.Learned, logger, measurement);
+            await AuthenticateAsync(transport, options, transportOptions.Preferences.PublicKeys, logger, acceptedKeys, host, port, trust.Untrusted,
+                cancellationToken).ConfigureAwait(false);
+            var client = CompleteConnection(transport, stream, options, leaveOpen, owner, host, port, firstCheck.Learned, logger, measurement,
+                trust.Untrusted);
             client.AcceptedKeys = acceptedKeys;
             return client;
         }
@@ -655,9 +667,18 @@ public sealed partial class SshClient : IAsyncDisposable
         }
     }
 
-    /// <summary>The transport's settings: algorithm preferences (certificate host keys first when an authority is trusted) and host key checks.</summary>
+    /// <summary>Whether the host key was accepted without being trusted (<see cref="SshHostKeyVerdict.IsUntrusted"/>), set when it is verified.</summary>
+    private sealed class HostKeyTrust
+    {
+        public bool Untrusted { get; set; }
+    }
+
+    /// <summary>
+    /// The transport's settings: algorithm preferences (certificate host keys first when an authority is trusted) and host key checks,
+    /// whose outcome goes to <paramref name="firstCheck"/> and <paramref name="trust"/>.
+    /// </summary>
     private static async Task<SshTransportOptions> TransportOptionsAsync(SshClientOptions options, string? host, int port, ILogger logger,
-        FirstHostKeyCheck firstCheck, CancellationToken cancellationToken)
+        FirstHostKeyCheck firstCheck, HostKeyTrust trust, CancellationToken cancellationToken)
     {
         var preferences = options.AlgorithmPreferences ?? AlgorithmPreferences.FromOptions(options);
         bool prefersCertificates;
@@ -714,6 +735,12 @@ public sealed partial class SshClient : IAsyncDisposable
                     firstCheck.Learned = verdict.Learned;
                 }
 
+                if (verdict.IsUntrusted)
+                {
+                    SshLog.HostKeyUntrusted(logger, info.Fingerprint);
+                    trust.Untrusted = true;
+                }
+
                 return true;
             },
         };
@@ -721,7 +748,7 @@ public sealed partial class SshClient : IAsyncDisposable
 
     /// <summary>Starts the connection layer over an authenticated transport and records the outcome.</summary>
     private static SshClient CompleteConnection(SshTransport transport, Stream stream, SshClientOptions options, bool leaveOpen, IAsyncDisposable? owner,
-        string? host, int port, bool hostKeyLearned, ILogger logger, ConnectMeasurement measurement)
+        string? host, int port, bool hostKeyLearned, ILogger logger, ConnectMeasurement measurement, bool hostKeyUntrusted)
     {
         var activity = measurement.Activity;
         var hostKey = transport.HostKey!;
@@ -735,7 +762,7 @@ public sealed partial class SshClient : IAsyncDisposable
         };
 
         // Before the receive loop starts: the server announces its host keys right after authentication.
-        WatchHostKeyUpdates(connection, options, host, port, publicHostKey, hostKeyLearned, logger);
+        WatchHostKeyUpdates(connection, options, host, port, publicHostKey, hostKeyLearned, hostKeyUntrusted, logger);
         connection.Start();
         if (options.EffectiveKeepAliveInterval is { } keepAlive)
         {
@@ -768,6 +795,7 @@ public sealed partial class SshClient : IAsyncDisposable
             ConnectedAt = options.TimeProvider.GetUtcNow(),
             RemoteEndPoint = remote,
             LocalEndPoint = local,
+            HostKeyUntrusted = hostKeyUntrusted,
         };
     }
 
@@ -808,14 +836,14 @@ public sealed partial class SshClient : IAsyncDisposable
     /// requests it took, or <c>error.type</c>. Never the user name, nor which keys were offered.
     /// </summary>
     private static async Task AuthenticateAsync(SshTransport transport, SshClientOptions options, IReadOnlyList<string>? allowedSignatures, ILogger logger,
-        List<SshPrivateKey> acceptedKeys, string? host, int port, CancellationToken cancellationToken)
+        List<SshPrivateKey> acceptedKeys, string? host, int port, bool hostKeyUntrusted, CancellationToken cancellationToken)
     {
         using var activity = SshTelemetry.Activities.StartActivity("SshSharp.Authenticate");
         var auth = new SshUserAuth(transport, options.UserName, options.AuthenticationBanner);
         try
         {
-            var method = await AuthenticateCoreAsync(auth, transport, options, allowedSignatures, logger, acceptedKeys, host, port, cancellationToken)
-                .ConfigureAwait(false);
+            var method = await AuthenticateCoreAsync(auth, transport, options, allowedSignatures, logger, acceptedKeys, host, port, hostKeyUntrusted,
+                cancellationToken).ConfigureAwait(false);
             activity?.SetTag("ssh.auth.method", method);
         }
         catch (Exception ex)
@@ -830,9 +858,12 @@ public sealed partial class SshClient : IAsyncDisposable
         }
     }
 
-    /// <summary>Walks the methods until one gets in, and returns its name; throws <see cref="SshAuthenticationException"/> when none does.</summary>
+    /// <summary>
+    /// Walks the methods until one gets in, and returns its name; throws <see cref="SshAuthenticationException"/> when none does. With
+    /// <paramref name="hostKeyUntrusted"/>, the methods that give the server a secret (password and keyboard-interactive) are not used.
+    /// </summary>
     private static async Task<string> AuthenticateCoreAsync(SshUserAuth auth, SshTransport transport, SshClientOptions options, IReadOnlyList<string>? allowedSignatures,
-        ILogger logger, List<SshPrivateKey> acceptedKeys, string? host, int port, CancellationToken cancellationToken)
+        ILogger logger, List<SshPrivateKey> acceptedKeys, string? host, int port, bool hostKeyUntrusted, CancellationToken cancellationToken)
     {
         await auth.RequestServiceAsync(cancellationToken).ConfigureAwait(false);
 
@@ -869,7 +900,24 @@ public sealed partial class SshClient : IAsyncDisposable
             }
         }
 
-        var passwords = new PasswordSource(options, host, port);
+        // As ssh when it accepts a changed host key (StrictHostKeyChecking no): the server may be a man in the middle, so it gets no
+        // password and no keyboard-interactive answers, as if none were configured. Public key and GSS-API authentication give it nothing
+        // it could use elsewhere. What was configured is listed as unavailable, so a failure says what was held back.
+        var secretsWithheld = hostKeyUntrusted && (options.Password is not null || options.PasswordProvider is not null || options.KeyboardInteractive is not null);
+        if (hostKeyUntrusted)
+        {
+            if (options.KeyboardInteractive is not null)
+            {
+                Report("keyboard-interactive", SshAuthenticationOutcome.Unavailable);
+            }
+
+            if (options.Password is not null || options.PasswordProvider is not null)
+            {
+                Report("password", SshAuthenticationOutcome.Unavailable);
+            }
+        }
+
+        var passwords = new PasswordSource(options, host, port, withheld: hostKeyUntrusted);
         var passwordThroughKeyboard = false;
         var passes = 0;
         bool progressed;
@@ -979,7 +1027,7 @@ public sealed partial class SshClient : IAsyncDisposable
 
                         break;
 
-                    case "keyboard-interactive":
+                    case "keyboard-interactive" when !hostKeyUntrusted:
                         if (options.KeyboardInteractive is { } respond)
                         {
                             if (!methods.Contains("keyboard-interactive"))
@@ -1076,7 +1124,10 @@ public sealed partial class SshClient : IAsyncDisposable
 
         SshLog.AuthenticationFailed(logger, string.Join(", ", methods));
         var tried = attempts.Count > 0 ? $" Attempts: {string.Join("; ", attempts)}." : " No method was tried: give credentials for one of them.";
-        throw new SshAuthenticationException($"Authentication failed. The server accepts: {string.Join(", ", methods)}.{tried}", methods, attempts);
+        var withheld = secretsWithheld
+            ? " Password and keyboard-interactive authentication are disabled because the host key has changed and StrictHostKeyChecking is no."
+            : string.Empty;
+        throw new SshAuthenticationException($"Authentication failed. The server accepts: {string.Join(", ", methods)}.{tried}{withheld}", methods, attempts);
     }
 
     /// <summary>
@@ -1156,9 +1207,10 @@ public sealed partial class SshClient : IAsyncDisposable
 
     /// <summary>
     /// The passwords to try, in order: <see cref="SshClientOptions.Password"/>, then what <see cref="SshClientOptions.PasswordProvider"/>
-    /// answers, at most <see cref="SshClientOptions.NumberOfPasswordPrompts"/> times per connection.
+    /// answers, at most <see cref="SshClientOptions.NumberOfPasswordPrompts"/> times per connection. With <c>withheld</c> (a host key that
+    /// is not trusted) there are none, and the provider is never asked.
     /// </summary>
-    private sealed class PasswordSource(SshClientOptions options, string? host, int port)
+    private sealed class PasswordSource(SshClientOptions options, string? host, int port, bool withheld)
     {
         private bool _givenRejected;
         private bool _lastWasGiven;
@@ -1167,16 +1219,21 @@ public sealed partial class SshClient : IAsyncDisposable
         private int _prompts;
 
         /// <summary>Whether there is a password, or a provider to ask for one.</summary>
-        public bool IsSet => options.Password is not null || options.PasswordProvider is not null;
+        public bool IsSet => !withheld && (options.Password is not null || options.PasswordProvider is not null);
 
         /// <summary>Whether <see cref="NextAsync"/> may still give a password.</summary>
-        public bool HasMore =>
-            (options.Password is not null && !_givenRejected)
-            || (options.PasswordProvider is not null && !_declined && _prompts < options.NumberOfPasswordPrompts);
+        public bool HasMore => !withheld
+            && ((options.Password is not null && !_givenRejected)
+                || (options.PasswordProvider is not null && !_declined && _prompts < options.NumberOfPasswordPrompts));
 
         /// <summary>The next password; null when there is none left, with Declined when the provider just said to stop.</summary>
         public async ValueTask<(string? Password, bool Declined)> NextAsync(string method, CancellationToken cancellationToken)
         {
+            if (withheld)
+            {
+                return (null, false);
+            }
+
             if (options.Password is { } given && !_givenRejected)
             {
                 _lastWasGiven = true;

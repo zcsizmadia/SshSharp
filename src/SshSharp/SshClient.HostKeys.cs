@@ -20,10 +20,18 @@ public sealed partial class SshClient
 
     /// <summary>Subscribes to the server's host key announcements when the verifier records updates (OpenSSH's UpdateHostKeys).</summary>
     private static void WatchHostKeyUpdates(SshConnection connection, SshClientOptions options, string? host, int port, SshHostKey hostKey,
-        bool learnedOnThisConnection, ILogger logger)
+        bool learnedOnThisConnection, bool hostKeyUntrusted, ILogger logger)
     {
         if (options.HostKeyVerifier is not KnownHostsVerifier { UpdateHostKeys: true } knownHosts || hostKey.Certificate is not null)
         {
+            return;
+        }
+
+        if (hostKeyUntrusted)
+        {
+            // As ssh: a server whose key changed (accepted only because StrictHostKeyChecking is no) is not known to be the host, so it
+            // has no say in which keys are. UpdateHostKeysAsync would find its key missing from known_hosts too; this does not rely on it.
+            connection.HostKeysAnnounced = _ => SshLog.HostKeyUpdateSkipped(logger, "the connection's host key is not in known_hosts (it changed) and is not trusted");
             return;
         }
 

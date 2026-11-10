@@ -138,6 +138,13 @@ with ecdsa-sha2-nistp256, which is not allowed here"). As `ssh` does, the key wa
 signed by an authority the list allows, or add the host's plain key. See
 [Host certificates that cannot be used](../host-keys.md#host-certificates-that-cannot-be-used).
 
+### "Port forwarding is disabled to avoid man-in-the-middle attacks", or no password is sent
+
+The host key changed and `StrictHostKeyChecking` is `no`: the connection was accepted but is not trusted, so it sends no password
+or keyboard-interactive answers, forwards no agent and forwards no ports, as ssh does. The log has a `Warning` with the new key's
+fingerprint. Find out why the key changed, as above; see
+[A changed key under `No`](../how-to/verify-host-keys.md#a-changed-key-under-no).
+
 ### Over a stream: "There is no host name to look up in known_hosts"
 
 A connection over your own `Stream` has no host name. Set `SshClientOptions.HostKeyAlias`.

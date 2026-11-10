@@ -92,7 +92,7 @@ sequenceDiagram
 | `SigningFailed` | The server would take the key, but the agent did not sign: the key is gone, or the user declined a confirmation. |
 | `Declined` | This side gave up: a handler or the provider returned null, or keyboard-interactive asked something a password does not answer. |
 | `PasswordChangeRequired` | The password has expired and was not changed. |
-| `Unavailable` | Kerberos could not run here: no ticket, no GSS-API library, or .NET 8. |
+| `Unavailable` | Kerberos could not run here: no ticket, no GSS-API library, or .NET 8. For `password` and `keyboard-interactive`: the host key changed and was accepted only because `StrictHostKeyChecking` is `no`, so no password was sent (see [A changed key under `No`](verify-host-keys.md#a-changed-key-under-no)). |
 
 Each key appears by its SHA-256 fingerprint. `Attempts` and the message never contain a password, an answer or the user name, so
 they can be logged.
