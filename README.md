@@ -4,7 +4,7 @@
 
 [![CI](https://github.com/zcsizmadia/SshSharp/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/zcsizmadia/SshSharp/actions/workflows/ci.yml)
 [![NuGet](https://img.shields.io/nuget/v/SshSharp?logo=nuget&label=NuGet)](https://www.nuget.org/packages/SshSharp)
-[![.NET](https://img.shields.io/badge/.NET-8.0%20%7C%2010.0-512BD4?logo=dotnet)](https://dotnet.microsoft.com/download/dotnet)
+[![.NET](https://img.shields.io/badge/.NET-8.0%20%7C%2010.0%20%7C%2011.0-512BD4?logo=dotnet)](https://dotnet.microsoft.com/download/dotnet)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/zcsizmadia/SshSharp/blob/main/LICENSE)
 
 A managed, async-first SSH client library for .NET, with OpenSSH `ssh_config` and `known_hosts` support. Connect to a host
