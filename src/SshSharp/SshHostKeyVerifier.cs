@@ -62,6 +62,12 @@ public readonly record struct SshHostKeyVerdict
     /// <summary>Why the key was rejected (becomes the <see cref="SshHostKeyException"/> message).</summary>
     public string? Reason { get; }
 
+    /// <summary>
+    /// The key was not known and was recorded without the user confirming it (<see cref="Config.StrictHostKeyChecking.AcceptNew"/>): trusted on
+    /// first use, which ssh does not let update known_hosts further on the same connection.
+    /// </summary>
+    internal bool Learned { get; init; }
+
     /// <summary>Trust the key.</summary>
     public static SshHostKeyVerdict Accept() => new(true, null);
 

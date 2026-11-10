@@ -3,8 +3,9 @@ using SshSharp.Config;
 namespace SshSharp.Tests.Integration;
 
 /// <summary>
-/// UpdateHostKeys against OpenSSH: accept-new records the key used for the connection, then sshd announces all its host keys and proves
-/// the others, which get recorded too. Needs SSHSHARP_TEST_SSHD and SSHSHARP_TEST_USER with SSHSHARP_TEST_PASSWORD or SSHSHARP_TEST_KEYDIR.
+/// UpdateHostKeys against OpenSSH: as with ssh, accept-new records the key used for the first connection and nothing else; on the next
+/// connection sshd announces all its host keys and proves the others, which get recorded too. Needs SSHSHARP_TEST_SSHD and
+/// SSHSHARP_TEST_USER with SSHSHARP_TEST_PASSWORD or SSHSHARP_TEST_KEYDIR.
 /// </summary>
 [Category("Integration")]
 public sealed class UpdateHostKeysInteropTests : IDisposable
@@ -44,6 +45,15 @@ public sealed class UpdateHostKeysInteropTests : IDisposable
             HostKeyVerifier = new KnownHostsVerifier([knownHosts]) { Policy = StrictHostKeyChecking.AcceptNew, UpdateHostKeys = true },
             Logger = log,
         };
+
+        // First contact: the key is trusted on first use, so this connection records it and does not update (ssh disables UpdateHostKeys
+        // for a key that was neither known nor confirmed).
+        await using (var first = await SshClient.ConnectAsync(host, port, options, new CancellationTokenSource(TimeSpan.FromSeconds(90)).Token))
+        {
+            await first.RunCommandAsync("echo first", new CancellationTokenSource(TimeSpan.FromSeconds(90)).Token);
+            await Assert.That(KnownHostsFile.Load(knownHosts).Entries.Select(e => e.KeyType)).IsEquivalentTo([first.HostKey.KeyType]);
+            await Assert.That(log.Messages.Any(m => m.Contains("first recorded on this connection", StringComparison.Ordinal))).IsTrue();
+        }
 
         await using var client = await SshClient.ConnectAsync(host, port, options, new CancellationTokenSource(TimeSpan.FromSeconds(90)).Token);
         var types = Array.Empty<string>();

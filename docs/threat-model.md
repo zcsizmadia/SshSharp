@@ -89,9 +89,14 @@ A man in the middle can read, change, drop and inject bytes. The server itself m
   full-size exponentiation (about 0.65 s at 8192 bits) on every connection. A failed check fails the connection with
   `KeyExchangeFailed` before the client's public value is sent.
 - **Host key rotation (`UpdateHostKeys`):** off by default. A new key is recorded only after the server proves it holds it
-  (`hostkeys-prove-00@openssh.com`), and any invalid proof cancels the whole update. Nothing is updated when the connection's
-  own key is not in `known_hosts`: a changed key let through by `StrictHostKeyChecking no` proves nothing, and must not get the
-  real keys removed as stale. Only exact, plain host lines in the first user file are ever removed.
+  (`hostkeys-prove-00@openssh.com`), and any invalid proof cancels the whole update. Removing keys the server no longer announces
+  needs no proof, as in `ssh`, so the update is applied only when the connection itself was trusted through the user's own file
+  before it started: not a key from a global file or `KnownHostsCommand`, not a changed key let through by
+  `StrictHostKeyChecking no` (which proves nothing, and must not get the real keys removed as stale), and not a key `AcceptNew`
+  recorded on this connection (trusted on first use, which must not also teach or remove other keys). Like `ssh`, the update is
+  cancelled whenever a line for the host is a wildcard, names more than `host,address`, or is `@cert-authority` or `@revoked`, and
+  whenever a key it would keep or remove is also recorded under another name. Only plain host lines in the first user file are
+  ever changed.
 - **Recording host keys:** the host name is written into `known_hosts` only if it is a literal name. White space, control
   characters, commas, `*`, `?` and `!` are refused, since they would add lines or hosts, or turn the entry into a pattern that
   trusts the key for other hosts, and so is a leading `@` or `#`. Every line the library writes for the application
