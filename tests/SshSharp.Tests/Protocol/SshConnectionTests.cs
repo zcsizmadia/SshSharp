@@ -295,7 +295,7 @@ public class SshConnectionTests
     /// A stream whose writes can be made to stall half-way: the first half of a write goes through, the rest waits until
     /// <see cref="Resume"/>, and cancelling the write leaves it torn (as a cancelled socket write can).
     /// </summary>
-    private sealed class GatedStream(Stream inner) : Stream
+    internal sealed class GatedStream(Stream inner) : Stream
     {
         private volatile TaskCompletionSource? _stalled;
 

@@ -103,6 +103,14 @@ the method with `KexAlgorithms -diffie-hellman-group-exchange-sha256`.
 - A firewall drops idle TCP flows faster than keep-alives come: shorten `KeepAliveInterval`, or turn on TCP keep-alive with
   `ConfigureSocket` (see [Tune and inspect a connection](../how-to/tune-and-inspect-connections.md#set-socket-options)).
 
+### "The server is not reading the replies it asked for"
+
+`ProtocolError`: the server kept sending messages that require an answer (requests that want a reply, channel opens, pings, or
+messages the client does not implement) while it stopped reading what the client sent, until 256 KiB of answers were waiting. The
+client ends the connection rather than buffer them without limit (see the
+[threat model](../threat-model.md#the-network-and-the-server)). A working server never gets there: look for a server, or something
+on the path, that has stopped reading the connection but still sends on it.
+
 ### Transfers are slow over a long-distance link
 
 One channel moves at most one window per round trip: with the default 2 MiB window, about 20 MiB/s at 100 ms, whatever the

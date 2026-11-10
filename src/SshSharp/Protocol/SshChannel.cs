@@ -654,7 +654,7 @@ internal sealed class SshChannel
 
         if (reply)
         {
-            _connection.Post(FixedMessage(SshMessage.ChannelClose, RemoteId));
+            _connection.PostReply(FixedMessage(SshMessage.ChannelClose, RemoteId));
         }
 
         _sendWindow?.Fail(new SshException(SshFailureReason.ChannelClosed, "The channel is closed."));
@@ -704,7 +704,7 @@ internal sealed class SshChannel
 
         if (wantReply)
         {
-            _connection.Post(FixedMessage(handled ? SshMessage.ChannelSuccess : SshMessage.ChannelFailure, RemoteId));
+            _connection.PostReply(FixedMessage(handled ? SshMessage.ChannelSuccess : SshMessage.ChannelFailure, RemoteId));
         }
     }
     /// <summary>The longest signal name kept (RFC 4254's names are a few letters; extension names add an <c>@domain</c>).</summary>

@@ -74,6 +74,17 @@ A man in the middle can read, change, drop and inject bytes. The server itself m
   command output to `MaxCommandOutputBytes`, and banners, identification lines and `EXT_INFO` entries are bounded.
   A peer that overruns the window is a protocol error. With compression on, a packet must also inflate to less than 256 KiB
   ([Compression](#compression)).
+- **Owed replies:** many server messages require an answer from the client: a global or channel request that wants a reply, a
+  channel the server opens (confirmed or refused), a CLOSE, a message number the client does not implement
+  (`SSH_MSG_UNIMPLEMENTED`), and a transport ping (`ping@openssh.com`, answered with a pong). The client queues these answers
+  without waiting, as its receive loop must never wait on a send, and the server decides how many it asks for. So the answers
+  queued and not yet sent share one budget of 256 KiB, each counted as its size plus 64 bytes for the memory that holds it, and
+  given back once it is sent. A server that keeps asking but stops reading cannot grow the client's memory beyond that, which
+  keep-alives would not catch, as the server keeps sending. Over the budget, a ping goes unanswered (a pong is optional, and the
+  connection stays up), and any other message that requires an answer fails the connection with `SshProtocolException`
+  (`ProtocolError`): "The server is not reading the replies it asked for". A server that reads never comes near it: the budget
+  bounds the answers waiting, not the answers over the connection's life. The client's own messages (data, its own requests,
+  and window adjustments, which follow only data the application has read) are not counted.
 - **Keys and nonces:** keys are renewed after 1 GiB (configurable, capped at 64 GiB), 2^31 packets or one hour, so sequence
   numbers (the ChaCha20-Poly1305 nonce) never wrap under one key.
 - **Post-quantum key exchange:** `mlkem768x25519-sha256` and the FIPS-compatible `mlkem768nistp256-sha256` and
@@ -247,8 +258,9 @@ threat can usually read the data where the application uses it anyway. With comp
   `PrivateKeys`, whereas `ssh-agent` keeps keys in another process. For sensitive keys, serve a key behind an `SshKeySigner` (a KMS,
   an HSM, a smart card): its private half never enters the process, and the signer's own policy (`SshSignRequest.Purpose`) is a
   second check after the filter.
-- **Transport pings** (`ping@openssh.com`) are answered with a pong, as OpenSSH answers them. Pongs not yet sent are capped
-  (256 KiB), so a server that pings but stops reading cannot grow the client's memory; pings past the cap go unanswered.
+- **Transport pings** (`ping@openssh.com`) are answered with a pong, as OpenSSH answers them. Pongs not yet sent count against
+  the owed-reply budget (256 KiB; see [The network and the server](#the-network-and-the-server)), so a server that pings but
+  stops reading cannot grow the client's memory; pings past the budget go unanswered.
 - Forwarded connections the server opens are capped (`SshClientOptions.MaxForwardedConnections`, 1,000 by default, and a
   handler forwarding's `maxConnections`); above it, new ones are refused. Within that, a server can still send data up to each
   channel's window (2 MiB), and no more until it is read: a handler that stops reading holds the server back.

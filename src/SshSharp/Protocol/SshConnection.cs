@@ -25,8 +25,9 @@ internal sealed class SshConnection : IAsyncDisposable
     // Replies generated while receiving (CLOSE, request replies, window adjustments, UNIMPLEMENTED) are queued here and sent by their own task.
     // The receive loop must never wait on a send: while a key re-exchange is running, application sends wait for it to finish, and only the
     // receive loop can finish it, so a loop that sent directly would wait on itself (or on a peer that is blocked the same way).
-    private readonly Channel<(byte[] Payload, Func<bool>? Condition)> _outbox =
-        Channel.CreateUnbounded<(byte[] Payload, Func<bool>? Condition)>(new UnboundedChannelOptions { SingleReader = true });
+    // Owed is what a message counts against the owed-reply budget (0 for the client's own messages), given back once it is sent.
+    private readonly Channel<(byte[] Payload, Func<bool>? Condition, int Owed)> _outbox =
+        Channel.CreateUnbounded<(byte[] Payload, Func<bool>? Condition, int Owed)>(new UnboundedChannelOptions { SingleReader = true });
 
     private Task? _outboxLoop;
 
@@ -34,8 +35,16 @@ internal sealed class SshConnection : IAsyncDisposable
     private readonly Queue<TaskCompletionSource<GlobalReply>> _globalReplies = new();
     private readonly ConcurrentDictionary<ulong, TaskCompletionSource> _pings = new();
     private long _pingCounter;
-    private long _queuedPongBytes;
-    private const long MaxQueuedPongBytes = 256 * 1024;
+
+    // The replies the receive loop owes the peer and has queued but not yet sent: answers to its requests, refusals of its channel opens,
+    // UNIMPLEMENTED, CLOSE replies and pongs. The peer decides how many it asks for, so a peer that keeps asking but stops reading would
+    // otherwise grow the outbox without limit, and keep-alives never notice, as it keeps sending. Over the budget a pong is dropped (it is
+    // optional) and any other reply fails the connection. Each reply also costs a fixed overhead for the array and the queue slot that
+    // hold it: a one-byte REQUEST_FAILURE takes far more memory than one byte.
+    private long _owedReplyBytes;
+    internal const long MaxOwedReplyBytes = 256 * 1024;
+    internal const int OwedReplyOverhead = 64;
+
     private readonly CancellationTokenSource _closed = new();
     private readonly TimeProvider _time;
     private long _lastReceived;
@@ -374,10 +383,71 @@ internal sealed class SshConnection : IAsyncDisposable
     }
 
     /// <summary>Queues a message to be sent without waiting. For use from the receive loop and from synchronous callbacks.</summary>
-    internal void Post(byte[] payload) => _outbox.Writer.TryWrite((payload, null));
+    internal void Post(byte[] payload) => _outbox.Writer.TryWrite((payload, null, 0));
 
     /// <summary>Queues a message that is sent only if <paramref name="condition"/> still holds when its turn comes (see <see cref="SendIfAsync"/>).</summary>
-    internal void PostIf(byte[] payload, Func<bool> condition) => _outbox.Writer.TryWrite((payload, condition));
+    internal void PostIf(byte[] payload, Func<bool> condition) => _outbox.Writer.TryWrite((payload, condition, 0));
+
+    /// <summary>The owed replies queued and not yet sent, as counted against <see cref="MaxOwedReplyBytes"/>; for tests.</summary>
+    internal long OwedReplyBytes => Interlocked.Read(ref _owedReplyBytes);
+
+    /// <summary>
+    /// Queues a reply the peer's message requires (the protocol leaves no choice), against the owed-reply budget. Called on the receive
+    /// loop: over the budget it throws, which ends the loop and fails the connection, as any other protocol violation does.
+    /// </summary>
+    internal void PostReply(byte[] payload)
+    {
+        var owed = payload.Length + OwedReplyOverhead;
+        if (!TryOwe(owed))
+        {
+            throw NotReadingReplies();
+        }
+
+        Enqueue(payload, owed);
+    }
+
+    /// <summary>Queues a reply the peer can do without (a pong), against the owed-reply budget; over it, the reply is dropped.</summary>
+    private void PostOptionalReply(byte[] payload)
+    {
+        var owed = payload.Length + OwedReplyOverhead;
+        if (TryOwe(owed))
+        {
+            Enqueue(payload, owed);
+        }
+    }
+
+    private static SshProtocolException NotReadingReplies() =>
+        new($"The server is not reading the replies it asked for: {MaxOwedReplyBytes / 1024} KiB of them are waiting to be sent.");
+
+    /// <summary>Takes <paramref name="owed"/> bytes of the budget, or none when they do not fit, so the count never goes past it.</summary>
+    private bool TryOwe(int owed)
+    {
+        var current = Interlocked.Read(ref _owedReplyBytes);
+        while (true)
+        {
+            if (current + owed > MaxOwedReplyBytes)
+            {
+                return false;
+            }
+
+            var seen = Interlocked.CompareExchange(ref _owedReplyBytes, current + owed, current);
+            if (seen == current)
+            {
+                return true;
+            }
+
+            current = seen;
+        }
+    }
+
+    private void Enqueue(byte[] payload, int owed)
+    {
+        // Once the client has closed the outbox nothing more is sent, so the budget is given back at once.
+        if (!_outbox.Writer.TryWrite((payload, null, owed)))
+        {
+            Interlocked.Add(ref _owedReplyBytes, -owed);
+        }
+    }
 
     /// <summary>Sends a message, or throws if the connection has failed.</summary>
     public ValueTask SendAsync(ReadOnlyMemory<byte> payload, CancellationToken cancellationToken) => SendAsync(payload, null, cancellationToken);
@@ -621,15 +691,27 @@ internal sealed class SshConnection : IAsyncDisposable
     {
         try
         {
-            await foreach (var (payload, condition) in _outbox.Reader.ReadAllAsync(_stop.Token).ConfigureAwait(false))
+            await foreach (var (payload, condition, owed) in _outbox.Reader.ReadAllAsync(_stop.Token).ConfigureAwait(false))
             {
-                if (condition is null)
+                try
                 {
-                    await _transport.SendAsync(payload, _stop.Token).ConfigureAwait(false);
+                    if (condition is null)
+                    {
+                        await _transport.SendAsync(payload, _stop.Token).ConfigureAwait(false);
+                    }
+                    else
+                    {
+                        await _transport.SendIfAsync(payload, condition, _stop.Token).ConfigureAwait(false);
+                    }
                 }
-                else
+                finally
                 {
-                    await _transport.SendIfAsync(payload, condition, _stop.Token).ConfigureAwait(false);
+                    // An owed reply counts until it is sent, so a peer that stops reading keeps the budget used. When a send fails the
+                    // connection ends, and what is still queued is never sent or given back: the budget no longer matters then.
+                    if (owed != 0)
+                    {
+                        Interlocked.Add(ref _owedReplyBytes, -owed);
+                    }
                 }
             }
         }
@@ -767,7 +849,7 @@ internal sealed class SshConnection : IAsyncDisposable
                 }
                 else if (wantReply)
                 {
-                    Post([SshMessage.RequestFailure]);
+                    PostReply([SshMessage.RequestFailure]);
                 }
 
                 return false;
@@ -779,27 +861,15 @@ internal sealed class SshConnection : IAsyncDisposable
 
             case SshMessage.Ping:
             {
-                // PROTOCOL 1.8: the pong echoes the ping's data. A server that pings but does not read would grow the outbox by what it
-                // sends, so pongs not yet sent are capped; the pings past that go unanswered, which only a misbehaving server notices.
+                // PROTOCOL 1.8: the pong echoes the ping's data. It counts against the owed-reply budget like any reply, but over the budget
+                // the ping goes unanswered instead of failing the connection: nothing requires the answer, and only a misbehaving server,
+                // one that pings without reading, notices.
                 var data = reader.ReadString().ToArray();
-                var pong = Build(w =>
+                PostOptionalReply(Build(w =>
                 {
                     w.WriteByte(SshMessage.Pong);
                     w.WriteString(data);
-                });
-                if (Interlocked.Add(ref _queuedPongBytes, pong.Length) <= MaxQueuedPongBytes)
-                {
-                    PostIf(pong, () =>
-                    {
-                        Interlocked.Add(ref _queuedPongBytes, -pong.Length);
-                        return true;
-                    });
-                }
-                else
-                {
-                    Interlocked.Add(ref _queuedPongBytes, -pong.Length);
-                }
-
+                }));
                 return false;
             }
 
@@ -930,7 +1000,7 @@ internal sealed class SshConnection : IAsyncDisposable
             default:
                 // RFC 4253 section 11.4: tell the peer we do not implement this message, quoting its sequence number.
                 SshLog.UnimplementedMessage(_logger, type);
-                Post(_transport.BuildUnimplemented());
+                PostReply(_transport.BuildUnimplemented());
                 return false;
         }
     }
@@ -941,15 +1011,25 @@ internal sealed class SshConnection : IAsyncDisposable
     /// </summary>
     private void OnChannelOpen(string channelType, uint senderChannel, uint window, uint maxPacket, byte[] typeSpecificData)
     {
+        // A confirmation is owed like any reply, though a task of its own sends it (and waits while the peer is not reading). Its share
+        // of the budget is taken before the channel is accepted, so that a channel is never set up only for the budget to refuse it.
+        const int confirmationOwed = 1 + (4 * 4) + OwedReplyOverhead;
+        if (!TryOwe(confirmationOwed))
+        {
+            throw NotReadingReplies();
+        }
+
         if (AcceptChannel?.Invoke(channelType, typeSpecificData) is not { } start)
         {
-            Post(SshChannel.BuildOpenFailure(senderChannel, ChannelOpenFailureReason.AdministrativelyProhibited, "Channel type not supported."));
+            Interlocked.Add(ref _owedReplyBytes, -confirmationOwed);
+            PostReply(SshChannel.BuildOpenFailure(senderChannel, ChannelOpenFailureReason.AdministrativelyProhibited, "Channel type not supported."));
             return;
         }
 
         if (ReferenceEquals(start, RefuseResourceShortage))
         {
-            Post(SshChannel.BuildOpenFailure(senderChannel, ChannelOpenFailureReason.ResourceShortage, "Too many forwarded connections."));
+            Interlocked.Add(ref _owedReplyBytes, -confirmationOwed);
+            PostReply(SshChannel.BuildOpenFailure(senderChannel, ChannelOpenFailureReason.ResourceShortage, "Too many forwarded connections."));
             return;
         }
 
@@ -978,6 +1058,10 @@ internal sealed class SshConnection : IAsyncDisposable
             catch (Exception ex) when (ex is SshException or OperationCanceledException or ObjectDisposedException)
             {
                 return; // the connection is ending; the channel fails with it
+            }
+            finally
+            {
+                Interlocked.Add(ref _owedReplyBytes, -confirmationOwed);
             }
 
             start(accepted);

@@ -203,6 +203,11 @@ internal sealed class FakeSessionServer : IAsyncDisposable
 
     public bool GlobalFailureReceived { get; private set; }
 
+    /// <summary>How many SSH_MSG_REQUEST_FAILURE messages the client sent (its answers to the server's global requests).</summary>
+    public int GlobalFailuresReceived => Volatile.Read(ref _globalFailuresReceived);
+
+    private int _globalFailuresReceived;
+
     /// <summary>Where direct-tcpip channels go: return a stream to relay to (for example another fake server), or null to refuse.</summary>
     public Func<string, int, Stream?>? DirectTcpIp { get; set; }
 
@@ -922,8 +927,24 @@ internal sealed class FakeSessionServer : IAsyncDisposable
 
             case SshMessage.ChannelOpenConfirmation:
             {
-                // The client accepted a channel we opened (forwarded-tcpip).
-                var channel = Find(reader.ReadUInt32());
+                // The client accepted a channel we opened (forwarded-tcpip), or one a test opened with a raw message, which is recorded
+                // like any unexpected message.
+                ServerChannel? channel;
+                lock (_channels)
+                {
+                    _channels.TryGetValue(reader.ReadUInt32(), out channel);
+                }
+
+                if (channel is null)
+                {
+                    lock (Unrecognized)
+                    {
+                        Unrecognized.Add(payload);
+                    }
+
+                    break;
+                }
+
                 channel.ClientId = reader.ReadUInt32();
                 lock (channel)
                 {
@@ -960,6 +981,7 @@ internal sealed class FakeSessionServer : IAsyncDisposable
 
             case SshMessage.RequestFailure:
                 GlobalFailureReceived = true;
+                Interlocked.Increment(ref _globalFailuresReceived);
                 break;
 
             case SshMessage.Unimplemented:
@@ -1548,7 +1570,7 @@ internal sealed class FakeSessionServer : IAsyncDisposable
     }
 
     /// <summary>Sends a raw message to the client (to inject protocol violations).</summary>
-    public ValueTask SendRawAsync(byte[] payload) => _server.SendAsync(payload);
+    public ValueTask SendRawAsync(byte[] payload, CancellationToken cancellationToken = default) => _server.SendAsync(payload, cancellationToken);
 
     private static byte[] Build(Action<SshWriter> body)
     {
