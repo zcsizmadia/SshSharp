@@ -66,7 +66,10 @@ public sealed class SshAgentRequest
     /// <summary>For a <see cref="SshSignaturePurpose.FileSignature"/>, its namespace (for example <c>git</c> or <c>file</c>); otherwise null.</summary>
     public string? Namespace { get; init; }
 
-    /// <summary>For an <see cref="SshSignaturePurpose.Authentication"/> signature, the user name the program on the server logs in as; otherwise null.</summary>
+    /// <summary>
+    /// For an <see cref="SshSignaturePurpose.Authentication"/> signature, the user name the program on the server logs in as, as the server
+    /// sent it (clean it before showing or logging it); otherwise null.
+    /// </summary>
     public string? UserName { get; init; }
 
     /// <summary>

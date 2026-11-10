@@ -140,7 +140,7 @@ internal sealed class SshTransport : IAsyncDisposable
         _options.ClientIdentification.Write(_writer);
         await _writer.FlushAsync(cancellationToken).ConfigureAwait(false);
         ServerIdentification = await SshIdentification.ReadAsync(_reader, cancellationToken).ConfigureAwait(false);
-        SshLog.ServerIdentified(_options.Logger, ServerIdentification.Line);
+        SshLog.ServerIdentified(_options.Logger, ServerIdentification.CleanLine);
 
         var clientInit = KexInitMessage.ForClient(_options.Preferences);
         var clientInitPayload = Serialize(clientInit.Write);
@@ -1089,7 +1089,7 @@ internal sealed class SshTransport : IAsyncDisposable
             reader.ReadByte();
             var code = reader.ReadUInt32();
             var description = reader.ReadUtf8String();
-            return new SshException(SshFailureReason.ConnectionClosed, $"The server closed the connection (reason {code}): {description}");
+            return new SshException(SshFailureReason.ConnectionClosed, $"The server closed the connection (reason {code}): {ServerText.Clean(description)}");
         }
         catch (SshProtocolException)
         {

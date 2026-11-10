@@ -1712,24 +1712,7 @@ public sealed partial class SftpClient : IAsyncDisposable
     }
 
     /// <summary>The server's message, without control characters and at most 200 characters (it ends up in logs).</summary>
-    private static string SanitizedMessage(string text)
-    {
-        var clean = new StringBuilder(Math.Min(text.Length, 200));
-        foreach (var c in text)
-        {
-            if (clean.Length == 200)
-            {
-                break;
-            }
-
-            if (!char.IsControl(c))
-            {
-                clean.Append(c);
-            }
-        }
-
-        return clean.ToString().Trim();
-    }
+    private static string SanitizedMessage(string text) => ServerText.Clean(text);
 }
 
 /// <summary>The sizes an SFTP server accepts (<c>limits@openssh.com</c>), as used for reads and writes.</summary>
@@ -1741,7 +1724,7 @@ public sealed record SftpLimits(int MaxReadLength, int MaxWriteLength, int? MaxO
 /// <summary>A directory entry from <see cref="SftpClient.ListDirectoryAsync(string, CancellationToken)"/>.</summary>
 /// <param name="Name">The entry's name.</param>
 /// <param name="FullPath">The directory's path joined with the name.</param>
-/// <param name="LongName">The server's <c>ls -l</c> style line for the entry (informational; its format is not standard).</param>
+/// <param name="LongName">The server's <c>ls -l</c> style line for the entry (informational; its format is not standard), as it sent it: clean it before showing or logging it.</param>
 /// <param name="Attributes">The entry's attributes; a symbolic link is described itself, not its target.</param>
 public sealed record SftpFileInfo(string Name, string FullPath, string LongName, SftpFileAttributes Attributes);
 

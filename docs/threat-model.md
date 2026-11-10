@@ -444,6 +444,15 @@ connection, but not read or change it: each host's key is verified end to end, b
   application passed to the failing call can appear, as in .NET's own I/O exceptions; a path that comes from ssh_config does not
   (an `Include`d file is named by its file name only, a `RevokedHostKeys` file by the directive), nor does an agent destination's
   `[user@]host`. A ProxyJump hop that refuses to log in is named by its place in the list ("ProxyJump hop 2"), not by its name.
+- Text the server chooses reaches exception messages and log entries only cleaned: the reason in its `DISCONNECT`, the reason it
+  gives for refusing a channel, the comment in its identification line (logged; a malformed line is echoed in the exception),
+  SFTP status messages, the remote scp's error lines and stderr, an exit signal's name, and an SCP file name it was refused for.
+  Line breaks, tabs and Unicode line and paragraph separators become one space, other control and format characters (terminal
+  escapes, the bell, bidirectional overrides, zero-width characters) are removed, and the text is cut short (200 characters for
+  most), so a server cannot forge a log line or send escape sequences to a terminal that shows the message. The raw identification
+  line is still what the exchange hash covers. Text an application asks for and shows itself is not cleaned: banners and
+  keyboard-interactive prompts (see the authentication section), `SshExitSignal.ErrorMessage`, `SftpFileInfo.LongName` and a
+  forwarded agent request's user name are the server's, and an application that shows them should treat them as such.
 - Log values that carry an exception (an agent failure, say) are formatted to a sanitized reason and expose no public property
   holding the exception, so a structured log sink that records properties cannot record the agent's path from it either.
 - Traces and metrics carry no user name, host name, file or directory path, forwarding address, port or socket path, SOCKS

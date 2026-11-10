@@ -140,7 +140,7 @@ public class SshClientTests
         var name = (await client.RunCommandAsync("doomed", Timeout())).ExitSignal!.Name;
         await Assert.That(name.Any(char.IsControl)).IsFalse();
         await Assert.That(name.Length).IsLessThanOrEqualTo(64);
-        await Assert.That(name).StartsWith("TERMforged log line");
+        await Assert.That(name).StartsWith("TERM forged log line"); // a line break becomes one space
     }
 
     [Test]

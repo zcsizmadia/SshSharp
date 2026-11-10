@@ -242,7 +242,7 @@ public static class SshScpExtensions
             {
                 case 1 or 2:
                     // A file the source could not send (1), or a fatal error (2); it carries on after 1, so the rest still arrives.
-                    errors.Add((await scp.ReadLineAsync(cancellationToken).ConfigureAwait(false)).Trim());
+                    errors.Add(ServerText.Clean(await scp.ReadLineAsync(cancellationToken).ConfigureAwait(false)));
                     if (type == 2)
                     {
                         throw new SshException(SshFailureReason.TransferFailed, string.Join(" ", errors));
@@ -479,7 +479,7 @@ public static class SshScpExtensions
         if (name.Length == 0 || name is "." or ".." || name.Any(c => c is '/' or '\\' or ':' || char.IsControl(c))
             || (windows && (name[^1] is '.' or ' ' || IsWindowsDeviceName(name))))
         {
-            throw new SshException(SshFailureReason.TransferFailed, $"'{name}' is not an acceptable file name.");
+            throw new SshException(SshFailureReason.TransferFailed, $"'{ServerText.Clean(name, 100)}' is not an acceptable file name.");
         }
 
         return name;

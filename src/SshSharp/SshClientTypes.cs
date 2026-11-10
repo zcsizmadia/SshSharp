@@ -810,7 +810,7 @@ public sealed class SshClientOptions
 /// <summary>The signal that ended a remote program, from the server's <c>exit-signal</c> (RFC 4254 section 6.10).</summary>
 /// <param name="Name">The signal name without the <c>SIG</c> prefix, for example <c>KILL</c> or <c>TERM</c>.</param>
 /// <param name="CoreDumped">Whether the program dumped core.</param>
-/// <param name="ErrorMessage">The server's description, as it sent it; null when it sent none.</param>
+/// <param name="ErrorMessage">The server's description, as it sent it (control characters included: clean it before showing or logging it); null when it sent none.</param>
 public sealed record SshExitSignal(string Name, bool CoreDumped, string? ErrorMessage);
 
 /// <summary>The outcome of a remote command.</summary>

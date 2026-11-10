@@ -16,6 +16,12 @@ internal sealed record SshIdentification(string ProtocolVersion, string Software
     /// <summary>The identification line without the CR LF terminator.</summary>
     public string Line => $"SSH-{ProtocolVersion}-{SoftwareVersion}" + (string.IsNullOrEmpty(Comments) ? string.Empty : " " + Comments);
 
+    /// <summary>
+    /// <see cref="Line"/> fit for a log entry or a message: the comment part is free text the server chose, and could carry a line break
+    /// or terminal escapes (see <see cref="ServerText"/>). <see cref="Line"/> itself is what the exchange hash covers.
+    /// </summary>
+    public string CleanLine => ServerText.Clean(Line, MaxLength);
+
     /// <summary>This library's identification, with <paramref name="comments"/> after the software version when given.</summary>
     public static SshIdentification ForClient(string? comments = null) =>
         new("2.0", SshSharpInfo.SoftwareVersion, string.IsNullOrEmpty(comments) ? null : comments);
@@ -132,5 +138,6 @@ internal sealed record SshIdentification(string ProtocolVersion, string Software
         output.Advance(count + 2);
     }
 
-    private static string Truncate(string text) => text.Length <= 80 ? text : text[..80] + "...";
+    // The line is the server's: echoed into the message only once cleaned (see ServerText).
+    private static string Truncate(string text) => ServerText.Clean(text, 80) + (text.Length > 80 ? "..." : string.Empty);
 }

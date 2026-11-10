@@ -565,7 +565,7 @@ internal sealed class SshChannel
     });
 
     internal void OnOpenFailed(uint reason, string description) =>
-        _confirmed.TrySetException(new SshException(SshFailureReason.ChannelClosed, $"The server refused to open the channel (reason {reason}): {description}"));
+        _confirmed.TrySetException(new SshException(SshFailureReason.ChannelClosed, $"The server refused to open the channel (reason {reason}): {ServerText.Clean(description)}"));
 
     internal void OnWindowAdjust(uint bytes) => _sendWindow?.Add(bytes); // none before the open is confirmed: nothing to add to
 
@@ -715,7 +715,7 @@ internal sealed class SshChannel
     {
         // A signal name is a short word (TERM, KILL, or a vendor's name@domain); it is logged, so no control characters and no essay.
         var raw = reader.ReadUtf8String();
-        var name = new string(raw.Where(c => !char.IsControl(c)).Take(MaxSignalNameLength).ToArray());
+        var name = ServerText.Clean(raw, MaxSignalNameLength);
         var coreDumped = false;
         string? message = null;
         try

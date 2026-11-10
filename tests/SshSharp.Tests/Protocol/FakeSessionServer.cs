@@ -154,6 +154,9 @@ internal sealed class FakeSessionServer : IAsyncDisposable
     /// <summary>Refuse to open channels.</summary>
     public bool RefuseChannels { get; init; }
 
+    /// <summary>The description sent with <see cref="RefuseChannels"/>.</summary>
+    public string RefusalDescription { get; init; } = "administratively prohibited";
+
     /// <summary>The window and maximum packet size the server advertises for its own receiving.</summary>
     public uint ServerWindow { get; init; } = 2 * 1024 * 1024;
 
@@ -999,7 +1002,7 @@ internal sealed class FakeSessionServer : IAsyncDisposable
                         w.WriteByte(SshMessage.ChannelOpenFailure);
                         w.WriteUInt32(clientId);
                         w.WriteUInt32(2);
-                        w.WriteString("administratively prohibited");
+                        w.WriteString(RefusalDescription);
                         w.WriteString(string.Empty);
                     }));
                     break;

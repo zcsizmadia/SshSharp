@@ -127,7 +127,7 @@ internal sealed class ScpChannel : IAsyncDisposable
             case 0:
                 return;
             case 1 or 2:
-                throw new SshException(SshFailureReason.TransferFailed, (await ReadLineAsync(cancellationToken).ConfigureAwait(false)).Trim());
+                throw new SshException(SshFailureReason.TransferFailed, ServerText.Clean(await ReadLineAsync(cancellationToken).ConfigureAwait(false)));
             case -1:
                 throw await FailureAsync("The remote scp ended without answering.").ConfigureAwait(false);
             default:
@@ -248,7 +248,9 @@ internal sealed class ScpChannel : IAsyncDisposable
         Task errorsRead = _errors;
         await errorsRead.WaitAsync(TimeSpan.FromSeconds(2)).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
         var errors = _errors.IsCompletedSuccessfully ? _errors.Result : string.Empty;
-        return new SshException(SshFailureReason.TransferFailed, errors.Length > 0 ? $"{message} {errors.Trim()}" : message);
+        // What the remote scp wrote to stderr is its own text: cleaned, and longer than a status line may be.
+        var said = ServerText.Clean(errors, 1000);
+        return new SshException(SshFailureReason.TransferFailed, said.Length > 0 ? $"{message} {said}" : message);
     }
 
     private static async Task<string> ReadErrorsAsync(Stream errors, ArrayPool<byte> pool)

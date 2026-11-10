@@ -373,7 +373,7 @@ public sealed class SftpFileHashTests
         await Assert.That(reply.Status).IsEqualTo(SftpStatusCode.Failure);
         await Assert.That(reply.StatusMessage!.Any(char.IsControl)).IsFalse();
         await Assert.That(reply.StatusMessage!.Length).IsLessThanOrEqualTo(200);
-        await Assert.That(reply.StatusMessage).StartsWith("diskfull[31m");
+        await Assert.That(reply.StatusMessage).StartsWith("disk full[31m"); // a line break becomes one space
     }
 
     [Test]
