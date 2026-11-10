@@ -863,9 +863,11 @@ public sealed partial class SftpClient : IAsyncDisposable
     /// </summary>
     /// <returns>The number of bytes uploaded.</returns>
     public Task<long> UploadAsync(Stream source, string remotePath, SftpTransferOptions? options = null, CancellationToken cancellationToken = default) =>
-        TracedAsync("SshSharp.Sftp.Upload", () => UploadStreamAsync(source, remotePath, options, cancellationToken));
+        TracedAsync("SshSharp.Sftp.Upload", () => UploadStreamAsync(source, remotePath, options, preserved: null, cancellationToken));
 
-    private async Task<long> UploadStreamAsync(Stream source, string remotePath, SftpTransferOptions? options, CancellationToken cancellationToken)
+    // preserved: the local file's times and permissions, set on the handle once every write has landed.
+    private async Task<long> UploadStreamAsync(Stream source, string remotePath, SftpTransferOptions? options, SftpFileAttributes? preserved,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(source);
         options ??= new SftpTransferOptions();
@@ -900,7 +902,13 @@ public sealed partial class SftpClient : IAsyncDisposable
             });
             try
             {
-                return await UploadHandleAsync(handle, remotePath, source, start, options, state, cancellationToken, replies.Token).ConfigureAwait(false);
+                var uploaded = await UploadHandleAsync(handle, remotePath, source, start, options, state, cancellationToken, replies.Token).ConfigureAwait(false);
+                if (preserved is not null)
+                {
+                    await SetHandleAttributesAsync(handle, remotePath, preserved, cancellationToken).ConfigureAwait(false);
+                }
+
+                return uploaded;
             }
             catch (Exception ex) when (state.LandedPastGap || (state.Refused && state.Unsettled))
             {
@@ -960,28 +968,25 @@ public sealed partial class SftpClient : IAsyncDisposable
     {
         ArgumentException.ThrowIfNullOrEmpty(localPath);
         options ??= new SftpTransferOptions();
-        long total;
-        if (options.Segments > 1 && !options.Resume && OpenSibling is not null && new FileInfo(localPath).Length >= 2 * MinSegmentBytes)
-        {
-            total = await UploadSegmentedAsync(localPath, remotePath, options, cancellationToken).ConfigureAwait(false);
-        }
-        else
-        {
-            await using var file = new FileStream(localPath, FileMode.Open, FileAccess.Read, FileShare.Read, 64 * 1024, useAsync: true);
-            total = await UploadStreamAsync(file, remotePath, options, cancellationToken).ConfigureAwait(false);
-        }
 
-        if (options.Preserve)
-        {
-            await SetAttributesAsync(remotePath, new SftpFileAttributes
+        // Set through the open handle (fsetstat), before it is closed, as sftp does: a path setstat after the close follows whatever is
+        // at the path by then, and another user who can write to the directory could have put a symbolic link there, so the mode and
+        // times would land on the link's target, a file this user owns.
+        var preserved = options.Preserve
+            ? new SftpFileAttributes
             {
                 LastAccessTime = File.GetLastAccessTimeUtc(localPath),
                 LastWriteTime = File.GetLastWriteTimeUtc(localPath),
                 Permissions = LocalPermissions(localPath),
-            }, cancellationToken).ConfigureAwait(false);
+            }
+            : null;
+        if (options.Segments > 1 && !options.Resume && OpenSibling is not null && new FileInfo(localPath).Length >= 2 * MinSegmentBytes)
+        {
+            return await UploadSegmentedAsync(localPath, remotePath, options, preserved, cancellationToken).ConfigureAwait(false);
         }
 
-        return total;
+        await using var file = new FileStream(localPath, FileMode.Open, FileAccess.Read, FileShare.Read, 64 * 1024, useAsync: true);
+        return await UploadStreamAsync(file, remotePath, options, preserved, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -1761,7 +1766,9 @@ public sealed class SftpTransferOptions
     /// Copy the source's modification and access times, and its permission bits (read, write and execute for the owner, the group and
     /// others), to the destination, as <c>sftp -p</c> does. Permissions are copied only where the receiving side has Unix modes: a
     /// download to Windows keeps the times only, and an upload from Windows sends none. Unlike OpenSSH, setuid, setgid and the sticky bit
-    /// are never copied, so a server cannot hand this machine a setuid file.
+    /// are never copied, so a server cannot hand this machine a setuid file. An upload sets a file's attributes through its open handle
+    /// before closing it, and a directory's without following a symbolic link (<c>lsetstat@openssh.com</c>, where the server has it), so
+    /// another user who replaces either with a link meanwhile cannot have them applied to the link's target.
     /// </summary>
     public bool Preserve { get; init; }
 

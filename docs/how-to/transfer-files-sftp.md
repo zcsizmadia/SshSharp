@@ -148,7 +148,8 @@ several files at once over the same session:
   `MaxConcurrentFiles` is. Raise `MaxRequestsInFlight` if larger files in the tree should keep a full window while others run.
 - **`Segments`** still splits each large file, downloaded or uploaded, over sessions of its own, so the sessions add up across files. The
   server's `MaxSessions` (10 by default) caps them; a file that gets no extra session is transferred over the main one.
-- **`Preserve`** sets directory times and permissions after every file is in, the deepest first.
+- **`Preserve`** sets directory times and permissions after every file is in, the deepest first; on upload without following a
+  symbolic link (`lsetstat@openssh.com`), so a directory replaced by a link meanwhile does not pass them on to the link's target.
 - **`Progress`** reports each file by its path, interleaved, but never from two threads at once.
 
 ### Notes and pitfalls

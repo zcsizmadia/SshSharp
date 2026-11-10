@@ -320,6 +320,12 @@ connection, but not read or change it: each host's key is verified end to end, b
 - With `Preserve`, a download applies the server's permission bits (read, write and execute for owner, group and others; never
   set-id or sticky) where this machine has Unix modes, without the local umask, as `sftp -p` does: a server can make what it sends
   world-writable. A directory's mode is applied after its contents, and a name listed twice is fetched once.
+- With `Preserve`, an upload never sets times or permissions through a path that may have changed since the file or directory was
+  created. Another user who can write to the destination could replace it with a symbolic link meanwhile, and a path `SETSTAT`
+  would follow the link and apply this user's mode and times to its target, such as a file or directory this user owns. A file's
+  attributes are set on its open handle (`FSETSTAT`) once every write has landed and before it is closed (for a segmented upload,
+  before any session closes it), and a directory's with `lsetstat@openssh.com`, which does not follow links, as `sftp` does. A
+  server without that extension gets a plain `SETSTAT` for directories.
 - A recursive delete (`DeleteDirectoryAsync(path, recursive: true)`) removes symbolic links without following them, and checks
   every subdirectory with `LSTAT` before entering it, so a listing that describes a link as a directory cannot lead it outside the
   tree. It is bounded like a directory download (64 levels; each listing bounded) and touches only the server's files. The

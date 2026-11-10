@@ -35,7 +35,9 @@ public sealed partial class SftpClient
     /// waits is bounded by <see cref="CleanupWait"/>; when one runs out, the exception thrown carries
     /// <see cref="UploadCleanupIncompleteKey"/> in its <see cref="Exception.Data"/>.
     /// </remarks>
-    private async Task<long> UploadSegmentedAsync(string localPath, string remotePath, SftpTransferOptions options, CancellationToken cancellationToken)
+    // preserved: the local file's times and permissions, set on the first session's handle once every range has landed.
+    private async Task<long> UploadSegmentedAsync(string localPath, string remotePath, SftpTransferOptions options, SftpFileAttributes? preserved,
+        CancellationToken cancellationToken)
     {
         using var local = File.OpenHandle(localPath, FileMode.Open, FileAccess.Read, FileShare.Read, FileOptions.Asynchronous);
         var size = RandomAccess.GetLength(local);
@@ -82,7 +84,14 @@ public sealed partial class SftpClient
                 }
             }
 
-            return await WriteSegmentsAsync().ConfigureAwait(false);
+            var uploaded = await WriteSegmentsAsync().ConfigureAwait(false);
+            if (preserved is not null)
+            {
+                // Through the handle, before any session closes the file (see UploadLocalFileAsync).
+                await SetHandleAttributesAsync(handle, remotePath, preserved, cancellationToken).ConfigureAwait(false);
+            }
+
+            return uploaded;
         }
         catch
         {

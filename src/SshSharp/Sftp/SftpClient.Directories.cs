@@ -212,7 +212,7 @@ public sealed partial class SftpClient
                 summary.AddDirectory();
                 if (options.Preserve)
                 {
-                    await SetAttributesAsync(remote, new SftpFileAttributes
+                    await SetDirectoryAttributesAsync(remote, new SftpFileAttributes
                     {
                         LastWriteTime = directory.LastWriteTimeUtc,
                         LastAccessTime = directory.LastAccessTimeUtc,
@@ -436,7 +436,7 @@ public sealed partial class SftpClient
                     {
                         try
                         {
-                            await SetAttributesAsync(remote, new SftpFileAttributes
+                            await SetDirectoryAttributesAsync(remote, new SftpFileAttributes
                             {
                                 LastWriteTime = local.LastWriteTimeUtc,
                                 LastAccessTime = local.LastAccessTimeUtc,
@@ -631,6 +631,15 @@ public sealed partial class SftpClient
             }
         }
     }
+
+    /// <summary>
+    /// Sets an uploaded directory's times and permissions without following a symbolic link (<c>lsetstat@openssh.com</c>) where the
+    /// server offers it, as sftp does. They are set once the directory's contents are in, and by then another user who can write to the
+    /// parent could have replaced the directory with a link, which a plain setstat would follow to a file or directory this user owns.
+    /// A server without the extension gets the plain setstat.
+    /// </summary>
+    private Task SetDirectoryAttributesAsync(string path, SftpFileAttributes attributes, CancellationToken cancellationToken) =>
+        SetAttributesAsync(path, attributes, followSymbolicLinks: !Extensions.ContainsKey(SftpProtocol.LSetStatExtension), cancellationToken);
 
     /// <summary>The permission bits <see cref="SftpTransferOptions.Preserve"/> copies: read, write and execute for owner, group and others.</summary>
     private const UnixFileMode PreservedPermissions = (UnixFileMode)0x1FF; // 0777

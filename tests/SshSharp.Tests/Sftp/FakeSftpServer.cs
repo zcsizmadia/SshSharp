@@ -246,6 +246,23 @@ internal sealed class FakeSftpServer
 
     public void AddLink(string path, string target) => _nodes[path] = new Node { LinkTarget = target, Mode = 0x1FF };
 
+    /// <summary>
+    /// Replaces <paramref name="path"/>, and anything under it, with a symbolic link to <paramref name="target"/>: what another user
+    /// who can write to the parent directory could do while a transfer runs.
+    /// </summary>
+    public void ReplaceWithLink(string path, string target)
+    {
+        foreach (var key in _nodes.Keys.Where(k => k == path || k.StartsWith(path + "/", StringComparison.Ordinal)).ToList())
+        {
+            _nodes.Remove(key);
+        }
+
+        AddLink(path, target);
+    }
+
+    /// <summary>Called with a handle's path as the handle is closed, before the reply (under the server's lock).</summary>
+    public Action<string>? OnClosed { get; set; }
+
     public byte[]? FileData(string path) => _nodes.TryGetValue(path, out var node) && !node.IsDirectory && node.LinkTarget is null ? [.. node.Data] : null;
 
     public bool Exists(string path) => _nodes.ContainsKey(path);
@@ -934,7 +951,15 @@ internal sealed class FakeSftpServer
             }
 
             case 4: // CLOSE
-                return _handles.Remove(r.ReadUtf8String()) ? Status(id, 0) : Status(id, 4, "Bad handle");
+            {
+                if (!_handles.Remove(r.ReadUtf8String(), out var closed))
+                {
+                    return Status(id, 4, "Bad handle");
+                }
+
+                OnClosed?.Invoke(closed.Path);
+                return Status(id, 0);
+            }
 
             case 5: // READ
             {

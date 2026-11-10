@@ -32,7 +32,7 @@ latency. Each request is as large as the server allows (`limits@openssh.com`; 32
 | Option | Meaning |
 |---|---|
 | `Overwrite` (default true) | Replace an existing destination file; otherwise it is an error. |
-| `Preserve` | Copy the modification and access times, and the permission bits (`rwx` for owner, group and others), as `sftp -p` does. Permissions travel only where the receiving side has Unix modes, and setuid, setgid and the sticky bit are never copied. |
+| `Preserve` | Copy the modification and access times, and the permission bits (`rwx` for owner, group and others), as `sftp -p` does. Permissions travel only where the receiving side has Unix modes, and setuid, setgid and the sticky bit are never copied. An upload sets a file's through its open handle, and a directory's without following a symbolic link (`lsetstat@openssh.com`), as `sftp` does. |
 | `Progress` | An `IProgress<SftpTransferProgress>`: for each file, its remote `Path`, `BytesTransferred` so far (including what a resumed transfer found there) and `TotalBytes`, when known. |
 | `MaxRequestsInFlight` | The window of outstanding requests (1 to 1024), for the whole transfer: a directory transfer's files share it. |
 | `Resume` | Continue an interrupted transfer, as `reget` and `reput` do: only the part the destination lacks is sent. |
