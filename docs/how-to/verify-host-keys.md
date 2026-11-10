@@ -121,6 +121,7 @@ throw `ArgumentException` for such a value and write nothing.
 
 - **Connections over a stream** (a tunnel, `ProxyCommand`) have no host name: set `HostKeyAlias` so `known_hosts` can be consulted.
 - **Revocation.** `RevokedHostKeys` (a key list or an OpenSSH KRL) refuses keys in every mode, even ones `known_hosts` trusts.
+  So does an `@revoked` line in `known_hosts`; written without a port, it applies to the host on every port.
 - **Key rotation.** `UpdateHostKeys = true` adds keys the server proves it holds after login and removes ones it no longer has, so a
   rotation does not break the next connection. As in `ssh`, it skips hosts with wildcard or `@cert-authority` lines, keys under
   several names, and the first `AcceptNew` connection; behind a load balancer, use a host certificate instead.

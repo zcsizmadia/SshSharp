@@ -122,6 +122,12 @@ A man in the middle can read, change, drop and inject bytes. The server itself m
   certificate adds nothing. The unusable certificate is logged as a warning with the key's and the authority's fingerprints and
   the problem, never the host name or the key id (often a host name). A certificate whose key or authority is revoked
   (`@revoked`, `RevokedHostKeys`) is refused outright, with no fallback.
+- **`@revoked` lines in `known_hosts`:** refuse the key in every `StrictHostKeyChecking` mode, and win over any line that trusts
+  it. As in OpenSSH 10.6p2, a line written without a port (`@revoked server.example <key>`) revokes the key for the host on every
+  port, not only on 22, whether it is the plain key, a host certificate's certified key or its authority; a line with a port
+  (`[server.example]:2222`) applies to that port only. These lines are read from the user's and the global files (not from
+  `KnownHostsCommand` output, which is produced for the port), but not under `HostKeyAlias`, which is looked up on its own name.
+  `UpdateHostKeys` never learns a revoked key.
 
 ### Compression
 

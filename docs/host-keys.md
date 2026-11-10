@@ -25,7 +25,8 @@ var custom = new KnownHostsVerifier(["/etc/myapp/known_hosts"])
 | `No` | accepted | accepted and recorded | accepted (not recorded) |
 
 `No` turns off protection against a changed key, so use it only where interception is not a concern. `@revoked` entries
-reject a key in every mode, and `@cert-authority`
+reject a key in every mode, and one written without a port (`@revoked server.example <key>`) rejects it on every port of the
+host, as in OpenSSH 10.6p2. `@cert-authority`
 entries accept host certificates signed by that authority for the host (one that cannot be used falls back to its plain key,
 [as in `ssh`](#host-certificates-that-cannot-be-used)). The `known_hosts` format is fully supported:
 hashed hosts, `[host]:port`, wildcards and negation.

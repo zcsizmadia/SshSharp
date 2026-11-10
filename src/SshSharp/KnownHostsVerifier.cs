@@ -193,8 +193,40 @@ public sealed class KnownHostsVerifier : SshHostKeyVerifier
         {
             var keyType = new Protocol.SshReader(blob).ReadUtf8String();
             return revokedList?.IsRevoked(blob, certificate: null) != true
-                && !files.Any(f => f.Check(name, port, keyType, blob) is KnownHostsCheckResult.Match or KnownHostsCheckResult.Revoked);
+                && !files.Any(f => f.Check(name, port, keyType, blob) is KnownHostsCheckResult.Match or KnownHostsCheckResult.Revoked)
+                && !files.Any(f => RevokedWithoutPort(f, name, port, key => key.Span.SequenceEqual(blob)) is not null);
         })];
+    }
+
+    /// <summary>
+    /// The <c>@revoked</c> line written without a port that revokes a key <paramref name="revokes"/> accepts, or null. Like ssh, such a
+    /// line applies to the host on every port and wins over any other match. On port 22 the ordinary lookup already reads it, and an alias
+    /// is always looked up on port 22, so this adds nothing there (ssh does not apply it to an alias either).
+    /// </summary>
+    private static KnownHostsEntry? RevokedWithoutPort(KnownHostsFile file, string name, int port, Func<ReadOnlyMemory<byte>, bool> revokes) =>
+        port == 22 ? null : file.Find(name, 22).FirstOrDefault(e => e.Marker == KnownHostsMarker.Revoked && revokes(e.PublicKey));
+
+    /// <summary>
+    /// <see cref="RevokedWithoutPort"/> over the user's and the global files. Like ssh, not over the KnownHostsCommand output, which is
+    /// produced for this host and port.
+    /// </summary>
+    private async ValueTask<KnownHostsEntry?> RevokedWithoutPortAsync(string name, int port, Func<ReadOnlyMemory<byte>, bool> revokes,
+        CancellationToken cancellationToken)
+    {
+        if (port == 22)
+        {
+            return null;
+        }
+
+        foreach (var path in _userFiles.Concat(_globalFiles))
+        {
+            if (RevokedWithoutPort(await KnownHostsFile.LoadAsync(path, cancellationToken).ConfigureAwait(false), name, port, revokes) is { } entry)
+            {
+                return entry;
+            }
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -395,6 +427,7 @@ public sealed class KnownHostsVerifier : SshHostKeyVerifier
             knownTypes.AddRange(file.Find(name, port).Where(e => e.Marker == KnownHostsMarker.None).Select(e => e.KeyType));
         }
 
+        revoked = revoked || await RevokedWithoutPortAsync(name, port, k => k.Span.SequenceEqual(key.PublicKey.Span), cancellationToken).ConfigureAwait(false) is not null;
         if (revoked)
         {
             return SshHostKeyVerdict.Reject($"The host key {key.Fingerprint} is marked @revoked in known_hosts.");
@@ -446,6 +479,13 @@ public sealed class KnownHostsVerifier : SshHostKeyVerifier
     private async ValueTask<(SshHostKeyVerdict? Verdict, string? Problem)> VerifyCertificateAsync(SshCertificate certificate, SshHostKeyContext context,
         string name, int port, CancellationToken cancellationToken)
     {
+        if (await RevokedWithoutPortAsync(name, port,
+            k => k.Span.SequenceEqual(certificate.AuthorityKey.Span) || k.Span.SequenceEqual(certificate.PublicKey.Span), cancellationToken).ConfigureAwait(false) is { } revokedEverywhere)
+        {
+            var isAuthority = revokedEverywhere.PublicKey.Span.SequenceEqual(certificate.AuthorityKey.Span);
+            return (SshHostKeyVerdict.Reject($"The host certificate's {(isAuthority ? "authority" : "key")} is marked @revoked in known_hosts."), null);
+        }
+
         var trusted = false;
         await foreach (var file in SourcesAsync(name, port, "HOSTNAME", context.HostKey, asCertificate: true, cancellationToken).ConfigureAwait(false))
         {

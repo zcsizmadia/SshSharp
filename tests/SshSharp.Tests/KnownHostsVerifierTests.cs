@@ -329,6 +329,85 @@ public sealed class KnownHostsVerifierTests : IDisposable
     }
 
     [Test]
+    public async Task ARevokedLineWithoutAPort_RefusesTheKeyOnEveryPort_UnderEveryPolicy_AndRecordsNothing()
+    {
+        // As ssh: "@revoked host" applies to the host on every port, not only 22.
+        var key = Ed25519Key();
+        var contents = Line("server.example", key, "@revoked ");
+        File.WriteAllText(UserFile, contents);
+        foreach (var policy in Enum.GetValues<StrictHostKeyChecking>())
+        {
+            var verdict = await Verifier(policy, ask: (_, _) => ValueTask.FromResult(true)).VerifyAsync(Context(key, port: 2222), default);
+            await Assert.That(verdict.IsAccepted).IsFalse().Because($"policy {policy}");
+            await Assert.That(verdict.Reason).Contains("@revoked");
+        }
+
+        await Assert.That(File.ReadAllText(UserFile)).IsEqualTo(contents);
+    }
+
+    [Test]
+    public async Task ARevokedLineWithoutAPort_WinsOverAMatchForThePort_EvenInAGlobalFile()
+    {
+        var key = Ed25519Key();
+        var global = Path.Combine(_dir, "global_known_hosts");
+        File.WriteAllText(UserFile, Line("[server.example]:2222", key));
+        File.WriteAllText(global, Line("server.example", key, "@revoked "));
+
+        var verdict = await Verifier(StrictHostKeyChecking.Yes, global: global).VerifyAsync(Context(key, port: 2222), default);
+        await Assert.That(verdict.IsAccepted).IsFalse();
+        await Assert.That(verdict.Reason).Contains("@revoked");
+    }
+
+    [Test]
+    public async Task ARevokedLineForAnotherPort_OrAnotherHost_DoesNotApply_NorDoesTheHostsLineUnderAnAlias()
+    {
+        var key = Ed25519Key();
+        File.WriteAllText(UserFile, Line("[server.example]:2200", key, "@revoked ") + Line("other.example", key, "@revoked ") + Line("[server.example]:2222", key));
+        await Assert.That((await Verifier(StrictHostKeyChecking.Yes).VerifyAsync(Context(key, port: 2222), default)).IsAccepted).IsTrue();
+
+        // An alias is looked up under its own name, so the host's port-less revocation is not consulted (as ssh with HostKeyAlias).
+        File.WriteAllText(UserFile, Line("server.example", key, "@revoked ") + Line("box", key));
+        await Assert.That((await Verifier(StrictHostKeyChecking.Yes).VerifyAsync(Context(key, port: 2222, alias: "box"), default)).IsAccepted).IsTrue();
+    }
+
+    [Test]
+    public async Task ARevokedLineWithoutAPort_RefusesAHostCertificate_ByItsAuthorityOrItsKey()
+    {
+        using var hostKey = SshPrivateKey.Generate(SshKeyType.Ed25519);
+        using var authority = SshPrivateKey.Generate(SshKeyType.Ed25519);
+        var certificate = SshCertificate.FromBlob(Keys.TestKeys.Certificate(authority, hostKey.PublicKey.ToArray(), SshCertificateType.Host, ["server.example"]));
+        var presented = new SshHostKey(certificate.Algorithm, hostKey.KeyType, hostKey.Fingerprint, hostKey.PublicKey, 256) { Certificate = certificate };
+        var trust = $"@cert-authority * {authority.ToAuthorizedKeysLine()}\n";
+
+        File.WriteAllText(UserFile, trust);
+        await Assert.That((await Verifier(StrictHostKeyChecking.Yes).VerifyAsync(Context(presented, port: 2222), default)).IsAccepted).IsTrue();
+
+        File.WriteAllText(UserFile, trust + $"@revoked server.example {authority.ToAuthorizedKeysLine()}\n");
+        var byAuthority = await Verifier(StrictHostKeyChecking.Yes).VerifyAsync(Context(presented, port: 2222), default);
+        await Assert.That(byAuthority.IsAccepted).IsFalse();
+        await Assert.That(byAuthority.Reason).Contains("authority is marked @revoked");
+
+        File.WriteAllText(UserFile, trust + $"@revoked server.example {hostKey.ToAuthorizedKeysLine()}\n");
+        var byKey = await Verifier(StrictHostKeyChecking.Yes).VerifyAsync(Context(presented, port: 2222), default);
+        await Assert.That(byKey.IsAccepted).IsFalse();
+        await Assert.That(byKey.Reason).Contains("key is marked @revoked");
+    }
+
+    [Test]
+    public async Task UpdateHostKeys_NeverLearnsAKeyRevokedWithoutAPort()
+    {
+        var revoked = Ed25519Key();
+        var fine = EcdsaKey();
+        File.WriteAllText(UserFile, Line("server.example", revoked, "@revoked "));
+        var verifier = new KnownHostsVerifier([UserFile]) { UpdateHostKeys = true };
+
+        var unknown = await verifier.UnknownHostKeysAsync("server.example", 2222, [revoked.PublicKey.ToArray(), fine.PublicKey.ToArray()], default);
+
+        await Assert.That(unknown.Count).IsEqualTo(1);
+        await Assert.That(unknown[0].AsSpan().SequenceEqual(fine.PublicKey.Span)).IsTrue();
+    }
+
+    [Test]
     public async Task AcceptNew_RefusesANewKeyTypeForAKnownHost_AskSaysWhichTypesAreKnown()
     {
         // A man in the middle without the recorded Ed25519 key could offer an ECDSA key instead.
