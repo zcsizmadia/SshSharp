@@ -18,8 +18,9 @@ Console.WriteLine(result.StandardOutputText);
 
 > **Status:** 1.x: the public API follows semantic versioning, so breaking changes wait for a major version. The managed
 > cryptography has had an internal constant-time review but not yet an outside one. The client's behavior is reviewed against
-> OpenSSH's, most recently through OpenSSH 10.6p2 ([#419](https://github.com/zcsizmadia/SshSharp/issues/419)). See
-> [SECURITY.md](https://github.com/zcsizmadia/SshSharp/blob/main/SECURITY.md).
+> OpenSSH's, most recently through OpenSSH 10.6p2 ([#419](https://github.com/zcsizmadia/SshSharp/issues/419)); see
+> [OpenSSH compatibility](https://github.com/zcsizmadia/SshSharp/blob/main/docs/reference/openssh-compatibility.md) for what
+> matches `ssh` and what differs. See [SECURITY.md](https://github.com/zcsizmadia/SshSharp/blob/main/SECURITY.md).
 
 ## Features
 
