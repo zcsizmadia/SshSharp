@@ -663,20 +663,26 @@ public sealed partial class SshClient
     /// <summary>Routes the channels the server opens (installed once, by the first feature that receives them).</summary>
     private void EnsureChannelDispatch() => _connection.AcceptChannel ??= (type, data) =>
     {
-        if (type is "auth-agent@openssh.com" or "agent-connect")
-        {
-            // Agent forwarding: only when this client forwards an agent (the server asks for it after the agent request). RFC 9987 calls
-            // the channel "agent-connect"; OpenSSH's older name is accepted too, whichever request the server answered.
-            return ForwardedAgent is { } agent ? channel => _ = RelayAgentAsync(channel, agent) : null;
-        }
-
         Func<SshChannel, Task>? accept = null;
         Func<bool>? reserve = null;
         Action? release = null;
         var forwardingType = ForwardedConnectionMeasurement.Remote;
         try
         {
-            if (type == "forwarded-streamlocal@openssh.com")
+            if (type is "auth-agent@openssh.com" or "agent-connect")
+            {
+                // Agent forwarding: only when this client forwards an agent (the server asks for it after the agent request). RFC 9987
+                // calls the channel "agent-connect"; OpenSSH's older name is accepted too, whichever request the server answered. Each
+                // channel opens a connection to the local agent (or has the in-process one answer it), so it counts against the limit
+                // below like a forwarded connection; agent forwarding has no limit of its own.
+                // Not on a connection whose changed host key was let through by StrictHostKeyChecking no (ForwardedAgent is null then).
+                if (ForwardedAgent is { } agent)
+                {
+                    (accept, reserve, release) = (channel => RelayAgentAsync(channel, agent), static () => true, static () => { });
+                    forwardingType = ForwardedConnectionMeasurement.Agent;
+                }
+            }
+            else if (type == "forwarded-streamlocal@openssh.com")
             {
                 // The socket path that was connected, then a reserved string; only sockets this client asked for are served.
                 var reader = new SshReader(data);
@@ -708,10 +714,10 @@ public sealed partial class SshClient
             return null;
         }
 
-        // Each one is a local connection (or a SOCKS exchange, or a handler's work) on this machine: a server cannot make this client
-        // open without limit, over all forwardings, nor beyond a handler forwarding's own limit. Both counts are taken now, before the
-        // channel is confirmed, so concurrent opens cannot overshoot. (Should the confirmation fail to go out, the connection is ending,
-        // and its forwardings with it.)
+        // Each one is a local connection (or a SOCKS exchange, a handler's work, or the in-process agent's) on this machine: a server
+        // cannot make this client open without limit, over all forwardings and agent channels, nor beyond a handler forwarding's own
+        // limit. Both counts are taken now, before the channel is confirmed, so concurrent opens cannot overshoot. (Should the
+        // confirmation fail to go out, the connection is ending, and its forwardings with it.)
         if (Interlocked.Increment(ref _forwardedConnections) > _options.MaxForwardedConnections)
         {
             Interlocked.Decrement(ref _forwardedConnections);
@@ -732,7 +738,10 @@ public sealed partial class SshClient
 
     private int _forwardedConnections;
 
-    /// <summary>How many connections the server has forwarded to this client that are still open (all remote forwardings together).</summary>
+    /// <summary>
+    /// How many connections the server has forwarded to this client that are still open (all remote forwardings and agent channels
+    /// together).
+    /// </summary>
     internal int ForwardedConnections => Volatile.Read(ref _forwardedConnections);
 
     /// <summary>
@@ -742,8 +751,10 @@ public sealed partial class SshClient
     private async Task RelayAgentAsync(SshChannel channel, SshAgent agent)
     {
         var filter = _options.ForwardAgentFilter;
+        using var measurement = new ForwardedConnectionMeasurement(ForwardedConnectionMeasurement.Agent, _connection.Closed);
         if (agent.Keyring is { } keyring)
         {
+            measurement.Opened();
             await AgentChannelServer.RunAsync(channel, NewAgentServer(keyring, filter), _connection.Closed).ConfigureAwait(false);
             return;
         }
@@ -780,6 +791,7 @@ public sealed partial class SshClient
                 }
             }
 
+            measurement.Opened();
             if (filter is null)
             {
                 await StreamChannelRelay.RunAsync(stream, channel, _connection.Closed).ConfigureAwait(false);

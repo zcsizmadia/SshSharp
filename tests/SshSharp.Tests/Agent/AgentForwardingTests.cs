@@ -16,7 +16,7 @@ public sealed class AgentForwardingTests : IDisposable
 
     private static CancellationToken Timeout() => new CancellationTokenSource(TimeSpan.FromSeconds(60)).Token;
 
-    private static async Task<SshClient> ConnectAsync(FakeSessionServer server, SshAgent? forward)
+    private static async Task<SshClient> ConnectAsync(FakeSessionServer server, SshAgent? forward, int maxForwarded = 1000)
     {
         _ = server.StartAsync();
         return await SshClient.ConnectAsync(server.ClientStream, new SshClientOptions
@@ -25,6 +25,7 @@ public sealed class AgentForwardingTests : IDisposable
             Password = TestSecrets.Password,
             HostKeyVerifier = SshHostKeyVerifier.FromDelegate((_, _) => ValueTask.FromResult(true)),
             ForwardAgent = forward,
+            MaxForwardedConnections = maxForwarded,
         }, leaveOpen: true, Timeout());
     }
 
@@ -146,6 +147,72 @@ public sealed class AgentForwardingTests : IDisposable
 
         await shell.CloseInputAsync(Timeout());
         await shell.WaitForExitAsync(Timeout());
+    }
+
+    [Test]
+    [Arguments("auth-agent@openssh.com", false)]
+    [Arguments("agent-connect", false)]
+    [Arguments("auth-agent@openssh.com", true)]
+    [Arguments("agent-connect", true)]
+    public async Task AgentChannelsAboveMaxForwardedConnections_AreRefused_AndGiveTheirSlotsBack(string channelType, bool inProcess)
+    {
+        // Each agent channel makes a connection to the local agent (or work for the in-process one): a server must not be able to open
+        // them without limit. They count against MaxForwardedConnections like forwarded connections.
+        await using var agent = new FakeAgent();
+        using var key = SshPrivateKey.Parse(TestKeys.OpenSshEd25519(out _));
+        agent.Keys.Add((key, "laptop"));
+        await using var server = new FakeSessionServer { OnShell = IdleAsync };
+        await using var client = await ConnectAsync(server, inProcess ? SshAgent.FromKeys(key) : new SshAgent(agent.Path), maxForwarded: 2);
+        await using var shell = await client.StartShellAsync(cancellationToken: Timeout());
+
+        // Under the limit, the agent is served as before.
+        var first = await server.OpenAgentChannelAsync(channelType);
+        var second = await server.OpenAgentChannelAsync(channelType);
+        await Assert.That(first).IsNotNull();
+        await Assert.That(second).IsNotNull();
+        await Assert.That(await ListKeysAsync(first!)).IsEqualTo(((byte)12, 1u));
+        await Assert.That(await ListKeysAsync(second!)).IsEqualTo(((byte)12, 1u));
+        await Assert.That(client.ForwardedConnections).IsEqualTo(2);
+
+        // Above it, the channels are refused for lack of resources (SSH_OPEN_RESOURCE_SHORTAGE), and a refusal holds no slot.
+        await Assert.That(await server.OpenAgentChannelAsync(channelType)).IsNull();
+        await Assert.That(await server.OpenAgentChannelAsync(channelType)).IsNull();
+        uint[] reasons;
+        lock (server.OpenFailureReasons)
+        {
+            reasons = [.. server.OpenFailureReasons];
+        }
+
+        await Assert.That(reasons).IsEquivalentTo(new uint[] { 4, 4 });
+        await Assert.That(client.ForwardedConnections).IsEqualTo(2);
+
+        // Ending the relays gives their slots back, once each.
+        await first!.DisposeAsync();
+        await second!.DisposeAsync();
+        await WaitUntilAsync(() => client.ForwardedConnections == 0);
+        await Assert.That(client.ForwardedConnections).IsEqualTo(0);
+
+        await using (var again = await server.OpenAgentChannelAsync(channelType))
+        {
+            await Assert.That(again).IsNotNull();
+            await Assert.That(await ListKeysAsync(again!)).IsEqualTo(((byte)12, 1u));
+        }
+
+        await WaitUntilAsync(() => client.ForwardedConnections == 0);
+        await Assert.That(client.ForwardedConnections).IsEqualTo(0);
+        await Assert.That(client.IsConnected).IsTrue();
+        await shell.CloseInputAsync(Timeout());
+        await shell.WaitForExitAsync(Timeout());
+    }
+
+    /// <summary>Waits for a condition the client reaches on its own background work (a closed channel's relay ending).</summary>
+    private static async Task WaitUntilAsync(Func<bool> condition)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(30);
+        while (!condition() && DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(10);
+        }
     }
 
     [Test]

@@ -363,8 +363,9 @@ public sealed class SshClientOptions
 
     /// <summary>
     /// The most connections the server may have forwarded to this client at once, across all remote forwardings (port, dynamic and
-    /// Unix-socket). Each one makes a connection on this machine, so this bounds what a misbehaving server can make it open; above it, the
-    /// server's channel is refused (resource shortage) and its client sees the connection fail. Default 1000.
+    /// Unix-socket) and the agent channels of agent forwarding (<see cref="ForwardAgent"/>). Each one makes a connection on this machine
+    /// (an agent channel, one to the local agent), so this bounds what a misbehaving server can make it open; above it, the server's
+    /// channel is refused (resource shortage) and its client sees the connection fail. Default 1000.
     /// </summary>
     public int MaxForwardedConnections
     {

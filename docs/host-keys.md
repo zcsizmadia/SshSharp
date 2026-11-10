@@ -55,7 +55,8 @@ var verifier = new KnownHostsVerifier([knownHostsPath])
 `UpdateHostKeys = true` (`UpdateHostKeys yes`) keeps `known_hosts` in step with the keys the server announces after login:
 keys it proves it holds are added, and this host's keys it no longer announces are removed (that needs no proof, as in `ssh`), so
 a key rotation does not break the next connection. Only the first user file changes, and never the key the connection was
-verified with. To confirm changes first (as `UpdateHostKeys ask`), set `ConfirmHostKeyUpdate`:
+verified with. The server announces its keys once per connection; as with OpenSSH, a second announcement fails the connection
+with a protocol error (`SshProtocolException`). To confirm changes first (as `UpdateHostKeys ask`), set `ConfirmHostKeyUpdate`:
 
 ```csharp
 var verifier = new KnownHostsVerifier([knownHostsPath])

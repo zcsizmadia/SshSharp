@@ -40,7 +40,7 @@ flowchart LR
 | Secrets in memory | Key material is wiped (`CryptographicOperations.ZeroMemory`) when no longer needed, and disposing a key clears it. Passwords are managed strings and cannot be wiped. |
 | Logs and telemetry | Never contain passwords, private keys, command text, user names or host names. |
 | Downloads | SFTP and SCP directory downloads treat names from the server as hostile: no path separators, `..`, device names or control characters; nothing lands outside the target (CVE-2019-6111). |
-| Server-opened channels | Accepted only for forwardings and agent forwarding you started; at most `MaxForwardedConnections` at a time. |
+| Server-opened channels | Accepted only for forwardings and agent forwarding you started; at most `MaxForwardedConnections` at a time, agent channels included. |
 | Parsers and limits | Every parser treats its input as hostile and is mutation-fuzzed in each test run (and coverage-guided fuzzed nightly); packets, banners, listings and command output are bounded. |
 
 ## What is left to you

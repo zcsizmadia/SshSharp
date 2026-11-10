@@ -297,6 +297,9 @@ should log in to, or compare it with a key you expect.
 - **An in-process agent holds its keys in your process.** Keys loaded from files stay in memory while the agent is used, and it
   does not dispose them: keep them alive as long as the clients that forward it, and dispose them afterwards. For sensitive keys,
   serve a key behind an `SshKeySigner` (a KMS, an HSM), whose private half never enters the process.
+- **A limit.** Each agent channel the server opens is a connection to the agent (or work for the in-process one), and counts
+  against `SshClientOptions.MaxForwardedConnections` (1,000) with the forwarded connections. Above it, the server's channel is
+  refused (resource shortage), and the program on the server sees the agent fail.
 - **The filter runs on the connection's background work,** for several agent channels at once, with a token that is cancelled when the
   connection closes. Keep it quick, or make it asynchronous: a slow answer holds that one agent request, not the connection.
 

@@ -72,7 +72,8 @@ Received data is copied as little as possible on its way to your code:
   sessions count; tunnels do not.
 - **Packet size.** SshSharp accepts packets up to 256 KiB and asks for at most 32 KiB of data per channel packet by default
   (`SshClientOptions.ChannelMaxPacketSize`, up to 255 KiB).
-- **Forwarded connections.** At most `SshClientOptions.MaxForwardedConnections` (1,000) channels opened by the server at a time.
+- **Forwarded connections.** At most `SshClientOptions.MaxForwardedConnections` (1,000) channels opened by the server at a time,
+  forwarded connections and agent channels together.
 - **Idle channels.** `SshClientOptions.ChannelTimeouts` closes channels of a given type that carry no data for a while (OpenSSH's
   `ChannelTimeout`), without closing the connection.
 

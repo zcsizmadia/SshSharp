@@ -124,7 +124,10 @@ A man in the middle can read, change, drop and inject bytes. The server itself m
   recorded on this connection (trusted on first use, which must not also teach or remove other keys). Like `ssh`, the update is
   cancelled whenever a line for the host is a wildcard, names more than `host,address`, or is `@cert-authority` or `@revoked`, and
   whenever a key it would keep or remove is also recorded under another name. Only plain host lines in the first user file are
-  ever changed.
+  ever changed. A server announces its keys (`hostkeys-00@openssh.com`) once per connection, so the client acts on the first
+  announcement only, and a second one fails the connection with a protocol error, as in OpenSSH: a server cannot start update
+  after update, each racing the others on `known_hosts`. As in OpenSSH, a client that does not update (`UpdateHostKeys` off, a
+  certificate host key) ignores every announcement, repeats included.
 - **Recording host keys:** the host name is written into `known_hosts` only if it is a literal name. White space, control
   characters, commas, `*`, `?` and `!` are refused, since they would add lines or hosts, or turn the entry into a pattern that
   trusts the key for other hosts, and so is a leading `@` or `#`. Every line the library writes for the application
@@ -232,6 +235,9 @@ threat can usually read the data where the application uses it anyway. With comp
 - **Agent forwarding** relays the agent protocol unchanged, as `ssh -A` does: while the connection is up, the server can ask the
   agent to sign with any of its keys. Forward the agent only to servers you trust, and narrow what it can do: with
   `ForwardAgentFilter`, destination constraints (`ssh-add -h`), or the agent's own confirmation (`ssh-add -c`) for sensitive keys.
+  Each agent channel the server opens makes a connection to the local agent (or is served by the in-process one), so agent
+  channels count against `SshClientOptions.MaxForwardedConnections` with the forwarded connections; above it, the server's channel
+  is refused (resource shortage) and no agent connection is made.
 - **`ForwardAgentFilter`** puts the application between the server and the agent. A compromised server (or anyone with root on it)
   can then get only what the filter allows: each listed key and each signature is the filter's decision, and requests to add, remove
   or lock keys are refused, so they never reach a real agent. What it judges by:
@@ -261,9 +267,9 @@ threat can usually read the data where the application uses it anyway. With comp
 - **Transport pings** (`ping@openssh.com`) are answered with a pong, as OpenSSH answers them. Pongs not yet sent count against
   the owed-reply budget (256 KiB; see [The network and the server](#the-network-and-the-server)), so a server that pings but
   stops reading cannot grow the client's memory; pings past the budget go unanswered.
-- Forwarded connections the server opens are capped (`SshClientOptions.MaxForwardedConnections`, 1,000 by default, and a
-  handler forwarding's `maxConnections`); above it, new ones are refused. Within that, a server can still send data up to each
-  channel's window (2 MiB), and no more until it is read: a handler that stops reading holds the server back.
+- Forwarded connections and agent channels the server opens are capped together (`SshClientOptions.MaxForwardedConnections`,
+  1,000 by default, and a handler forwarding's `maxConnections`); above it, new ones are refused. Within that, a server can still
+  send data up to each channel's window (2 MiB), and no more until it is read: a handler that stops reading holds the server back.
 
 ### The agent
 

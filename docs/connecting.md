@@ -354,7 +354,7 @@ reading. `ForwardRemoteUnixSocketAsync` takes a handler in the same way. See
 [Serving a remote port from your app](how-to/port-forwarding.md#serving-a-remote-port-from-your-app).
 
 The server can open at most `SshClientOptions.MaxForwardedConnections` (1,000) forwarded connections at a time over all remote
-forwardings; more are refused until some close.
+forwardings and agent forwarding's agent channels; more are refused until some close.
 
 Remote Unix-socket forwarding (`ssh -R /remote/socket:target`, `streamlocal-forward@openssh.com`, OpenSSH 6.7 and later) has
 the server listen on a Unix socket instead of a port, and relays each connection to a host and port, or to a Unix socket on this

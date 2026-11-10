@@ -102,9 +102,10 @@ builder.Services.AddOpenTelemetry()
 
 `ssh.forwarding.type` is `local` (`ForwardLocalPortAsync`, `ForwardLocalUnixSocketAsync` and `LocalForward`), `dynamic` (a local SOCKS
 proxy, `ForwardDynamicPortAsync` and `DynamicForward`), `remote` (`ForwardRemotePortAsync`, `ForwardRemoteUnixSocketAsync`, a
-forwarding to a handler, and `RemoteForward` with a destination) or `remote_dynamic` (`ForwardRemoteDynamicPortAsync`, and
-`RemoteForward` without one). `OpenTcpTunnelAsync` and `OpenUnixSocketTunnelAsync` are channels of their own, counted in
-`sshsharp.channels` only.
+forwarding to a handler, and `RemoteForward` with a destination), `remote_dynamic` (`ForwardRemoteDynamicPortAsync`, and
+`RemoteForward` without one) or `agent` (an agent channel of agent forwarding, `ForwardAgent`: `opened` once it reaches the agent,
+`failed` when the agent cannot be reached or `MaxForwardedConnections` is reached). `OpenTcpTunnelAsync` and
+`OpenUnixSocketTunnelAsync` are channels of their own, counted in `sshsharp.channels` only.
 
 The spans nest like this; each file of an SFTP directory transfer is a span of its own, while an SCP directory transfer is one
 span:

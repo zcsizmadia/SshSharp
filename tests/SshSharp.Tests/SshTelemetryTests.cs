@@ -499,6 +499,39 @@ public sealed class SshTelemetryTests : IDisposable
         await Assert.That(Counted("failed")).IsTrue();
     }
 
+    [Test]
+    public async Task AgentChannels_AreCountedAsAgentForwarding_OpenedAndRefused()
+    {
+        using var measurements = new Measurements();
+        using var key = SshPrivateKey.Parse(Keys.TestKeys.OpenSshEd25519(out _));
+        await using var server = new FakeSessionServer { UserName = User, Password = _password };
+        _ = server.StartAsync();
+        await using var client = await SshClient.ConnectAsync(server.ClientStream, new SshClientOptions
+        {
+            UserName = User,
+            Password = _password,
+            HostKeyVerifier = SshHostKeyVerifier.FromDelegate((_, _) => ValueTask.FromResult(true)),
+            ForwardAgent = SshAgent.FromKeys(key),
+            MaxForwardedConnections = 1,
+        }, leaveOpen: true, Timeout());
+        await client.RunCommandAsync("true", Timeout()); // asks for agent forwarding
+
+        await using (var channel = await server.OpenAgentChannelAsync())
+        {
+            await Assert.That(channel).IsNotNull();
+            await Assert.That(await server.OpenAgentChannelAsync()).IsNull(); // above MaxForwardedConnections
+        }
+
+        await WaitUntilAsync(() => client.ForwardedConnections == 0);
+        bool Counted(string result) => measurements.Of("sshsharp.forwarding.connections")
+            .Any(m => Measurements.Has(m.Tags, "ssh.forwarding.type", "agent") && Measurements.Has(m.Tags, "result", result));
+        await Assert.That(Counted("opened")).IsTrue();
+        await Assert.That(Counted("failed")).IsTrue();
+        var active = measurements.Of("sshsharp.forwarding.active").Where(m => Measurements.Has(m.Tags, "ssh.forwarding.type", "agent")).ToList();
+        await Assert.That(active.Any(m => m.Value == 1)).IsTrue();
+        await Assert.That(active.Any(m => m.Value == -1)).IsTrue();
+    }
+
     // ---- keep-alive ----
 
     [Test]

@@ -265,6 +265,9 @@ internal sealed class FakeSessionServer : IAsyncDisposable
     /// </summary>
     public Task<Stream?> OpenAgentChannelAsync(string type = "auth-agent@openssh.com") => OpenChannelToClientAsync(type, null);
 
+    /// <summary>The reason codes of the client's refusals of channels the server opened (RFC 4254 section 5.1), in order; lock it to read.</summary>
+    public List<uint> OpenFailureReasons { get; } = [];
+
     /// <summary>The channel the server most recently opened to the client (a forwarded connection), to inspect its window.</summary>
     public ServerChannel? LastChannelToClient { get; private set; }
 
@@ -313,6 +316,21 @@ internal sealed class FakeSessionServer : IAsyncDisposable
 
     /// <summary>Host keys announced after authentication (hostkeys-00@openssh.com) and proven on request (UpdateHostKeys).</summary>
     public List<FakeHostKey>? AnnouncedHostKeys { get; init; }
+
+    /// <summary>Announces <see cref="AnnouncedHostKeys"/> again, as a misbehaving server would (sshd announces them once).</summary>
+    public Task AnnounceHostKeysAgainAsync() => AnnounceHostKeysAsync(AnnouncedHostKeys!);
+
+    private async Task AnnounceHostKeysAsync(List<FakeHostKey> keys) =>
+        await _server.SendAsync(Build(w =>
+        {
+            w.WriteByte(SshMessage.GlobalRequest);
+            w.WriteString("hostkeys-00@openssh.com");
+            w.WriteBoolean(false);
+            foreach (var key in keys)
+            {
+                w.WriteString(key.Blob);
+            }
+        }));
 
     /// <summary>Send invalid proofs for hostkeys-prove-00@openssh.com (an impostor that cannot sign with the announced keys).</summary>
     public bool CorruptHostKeyProofs { get; init; }
@@ -967,6 +985,11 @@ internal sealed class FakeSessionServer : IAsyncDisposable
 
                 if (channel?.Opened is { } opened)
                 {
+                    lock (OpenFailureReasons)
+                    {
+                        OpenFailureReasons.Add(reader.ReadUInt32());
+                    }
+
                     opened.TrySetResult(false);
                     break;
                 }
@@ -1341,16 +1364,7 @@ internal sealed class FakeSessionServer : IAsyncDisposable
         if (AnnouncedHostKeys is { } announced)
         {
             // Like sshd with UpdateHostKeys clients: list every host key right after authentication.
-            await _server.SendAsync(Build(w =>
-            {
-                w.WriteByte(SshMessage.GlobalRequest);
-                w.WriteString("hostkeys-00@openssh.com");
-                w.WriteBoolean(false);
-                foreach (var key in announced)
-                {
-                    w.WriteString(key.Blob);
-                }
-            }));
+            await AnnounceHostKeysAsync(announced);
         }
     }
 

@@ -49,7 +49,8 @@ public sealed partial class SshClient
             return;
         }
 
-        // The announcement arrives on the receive loop, which must not wait: the update runs on its own.
+        // The announcement arrives on the receive loop, which must not wait: the update runs on its own. The connection hands over only
+        // the first announcement (a second one fails it), so a connection runs one update at most.
         var current = hostKey.PublicKey.ToArray();
         connection.HostKeysAnnounced = keys => _ = Task.Run(() => UpdateHostKeysAsync(connection, knownHosts, name, lookupPort, current, keys, logger));
     }

@@ -330,6 +330,97 @@ public sealed class UpdateHostKeysTests : IDisposable
     }
 
     [Test]
+    public async Task ASecondAnnouncement_FailsTheConnection_AfterTheFirstUpdatedKnownHosts()
+    {
+        // sshd announces its keys once per connection; OpenSSH fails the connection on a second announcement ("server already sent
+        // hostkeys"), so a server cannot have the client update known_hosts again and again.
+        var current = FakeHostKey.Ed25519();
+        var added = FakeHostKey.Ecdsa(256);
+        File.WriteAllText(KnownHosts, Line(current));
+        await using var server = new FakeSessionServer(new FakeServerOptions { HostKey = current }) { AnnouncedHostKeys = [current, added] };
+        await using var client = await ConnectAsync(server, update: true);
+
+        // The first announcement updates known_hosts as before.
+        var lines = await WaitForLinesAsync(l => l.Length == 2);
+        await Assert.That(lines).IsEquivalentTo(new[] { Line(current).TrimEnd(), Line(added).TrimEnd() });
+
+        // The second one arrives before the replies to the command's channel, so the connection has failed by the time they would.
+        await server.AnnounceHostKeysAgainAsync();
+        await AssertFailedWithProtocolErrorAsync(client);
+        await Assert.That(Recorded()).IsEquivalentTo(new[] { Line(current).TrimEnd(), Line(added).TrimEnd() });
+    }
+
+    [Test]
+    public async Task ASecondAnnouncement_WhileTheFirstUpdateRuns_StartsNoSecondUpdate()
+    {
+        // Two updates at once would race each other on known_hosts. The first one is held at its confirmation while the second
+        // announcement arrives: the connection fails, and no second update reaches the confirmation.
+        var current = FakeHostKey.Ed25519();
+        var added = FakeHostKey.Ecdsa(256);
+        File.WriteAllText(KnownHosts, Line(current));
+        var asked = 0;
+        var waiting = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var server = new FakeSessionServer(new FakeServerOptions { HostKey = current }) { AnnouncedHostKeys = [current, added] };
+        await using var client = await ConnectAsync(server, async (_, ct) =>
+        {
+            Interlocked.Increment(ref asked);
+            waiting.TrySetResult();
+            await Task.Delay(System.Threading.Timeout.Infinite, ct); // held until the connection ends
+            return true;
+        });
+
+        await waiting.Task.WaitAsync(Timeout());
+        await server.AnnounceHostKeysAgainAsync();
+        await AssertFailedWithProtocolErrorAsync(client);
+        await Assert.That(Volatile.Read(ref asked)).IsEqualTo(1);
+        int proveRequests;
+        lock (server.GlobalRequests)
+        {
+            proveRequests = server.GlobalRequests.Count(r => r == "hostkeys-prove-00@openssh.com");
+        }
+
+        await Assert.That(proveRequests).IsEqualTo(1);
+    }
+
+    [Test]
+    public async Task WithUpdateHostKeysOff_RepeatedAnnouncementsAreIgnored()
+    {
+        // As in OpenSSH, only a client that acts on the announcements checks for repeats.
+        var current = FakeHostKey.Ed25519();
+        File.WriteAllText(KnownHosts, Line(current));
+        await using var server = new FakeSessionServer(new FakeServerOptions { HostKey = current }) { AnnouncedHostKeys = [current, FakeHostKey.Ed25519()] };
+        await using var client = await ConnectAsync(server, update: false);
+        await server.AnnounceHostKeysAgainAsync();
+        await server.AnnounceHostKeysAgainAsync();
+        await client.RunCommandAsync("sync", Timeout());
+        await Assert.That(client.IsConnected).IsTrue();
+        await Assert.That(Proved(server)).IsFalse();
+        await Assert.That(Recorded().Length).IsEqualTo(1);
+    }
+
+    /// <summary>
+    /// The next command fails, and the connection with a protocol error: the server sent what came before the command's replies, so the
+    /// client handled it first.
+    /// </summary>
+    private static async Task AssertFailedWithProtocolErrorAsync(SshClient client)
+    {
+        SshException? failure = null;
+        try
+        {
+            await client.RunCommandAsync("sync", Timeout());
+        }
+        catch (SshException ex)
+        {
+            failure = ex;
+        }
+
+        await Assert.That(failure).IsNotNull();
+        await Assert.That(client.IsConnected).IsFalse();
+        await Assert.That(client.ConnectionError).IsTypeOf<SshProtocolException>();
+        await Assert.That(((SshException)client.ConnectionError!).Reason).IsEqualTo(SshFailureReason.ProtocolError);
+    }
+
+    [Test]
     public async Task SshConfig_UpdateHostKeysAsk_IsOnOnlyWithAConfirmation()
     {
         var resolve = new SshConfigResolveOptions { LocalUser = "l", HomeDirectory = _dir };

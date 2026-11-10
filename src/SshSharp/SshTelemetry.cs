@@ -165,6 +165,7 @@ internal sealed class ForwardedConnectionMeasurement(KeyValuePair<string, object
     internal static readonly KeyValuePair<string, object?> Dynamic = new("ssh.forwarding.type", "dynamic");
     internal static readonly KeyValuePair<string, object?> Remote = new("ssh.forwarding.type", "remote");
     internal static readonly KeyValuePair<string, object?> RemoteDynamic = new("ssh.forwarding.type", "remote_dynamic");
+    internal static readonly KeyValuePair<string, object?> Agent = new("ssh.forwarding.type", "agent");
 
     private static readonly KeyValuePair<string, object?> OpenedResult = new("result", "opened");
     private static readonly KeyValuePair<string, object?> FailedResult = new("result", "failed");

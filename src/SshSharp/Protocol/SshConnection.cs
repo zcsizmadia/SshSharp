@@ -114,8 +114,13 @@ internal sealed class SshConnection : IAsyncDisposable
     /// <summary>Why the connection ended, if it did.</summary>
     public Exception? Failure => _failure;
 
-    /// <summary>Called on the receive loop with the host keys a server announces (<c>hostkeys-00@openssh.com</c>); must not block.</summary>
+    /// <summary>
+    /// Called on the receive loop with the host keys a server announces (<c>hostkeys-00@openssh.com</c>); must not block. Called once at
+    /// most: a second announcement fails the connection with a protocol error.
+    /// </summary>
     public Action<IReadOnlyList<byte[]>>? HostKeysAnnounced { get; set; }
+
+    private bool _hostKeysAnnounced; // only read and written on the receive loop
 
     /// <summary>The session identifier (the first exchange hash), which host key proofs are bound to.</summary>
     public ReadOnlyMemory<byte> SessionId => _transport.SessionId;
@@ -838,7 +843,17 @@ internal sealed class SshConnection : IAsyncDisposable
                 var wantReply = reader.ReadBoolean();
                 if (name == "hostkeys-00@openssh.com" && !wantReply && HostKeysAnnounced is { } announced)
                 {
-                    // OpenSSH's UpdateHostKeys (PROTOCOL 2.5): the server lists all its host keys after authentication.
+                    // OpenSSH's UpdateHostKeys (PROTOCOL 2.5): the server lists all its host keys once, after authentication. Acting on
+                    // every list would let a server start update after update, each racing the others on known_hosts, so a second one
+                    // is a protocol error, as in OpenSSH ("server already sent hostkeys"). Like OpenSSH, whose check is in the handler
+                    // that runs only when the client would update its host keys, a client that ignores the lists (UpdateHostKeys off, a
+                    // certificate host key) ignores repeats too: they cost it nothing.
+                    if (_hostKeysAnnounced)
+                    {
+                        throw new SshProtocolException("The server already sent its host keys (hostkeys-00@openssh.com).");
+                    }
+
+                    _hostKeysAnnounced = true;
                     var keys = new List<byte[]>();
                     while (!reader.IsEmpty && keys.Count < 64)
                     {
