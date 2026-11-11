@@ -110,6 +110,8 @@ SshSharp.Config.SshHostConfig.BindAddress.get -> string?
 SshSharp.Config.SshHostConfig.BindAddress.init -> void
 SshSharp.Config.SshHostConfig.BindInterface.get -> string?
 SshSharp.Config.SshHostConfig.BindInterface.init -> void
+SshSharp.Config.SshHostConfig.CASignatureAlgorithms.get -> string?
+SshSharp.Config.SshHostConfig.CASignatureAlgorithms.init -> void
 SshSharp.Config.SshHostConfig.CertificateFiles.get -> System.Collections.Generic.IReadOnlyList<string!>!
 SshSharp.Config.SshHostConfig.CertificateFiles.init -> void
 SshSharp.Config.SshHostConfig.ChannelTimeouts.get -> System.Collections.Generic.IReadOnlyList<SshSharp.SshChannelTimeout!>!
@@ -410,6 +412,8 @@ SshSharp.Sftp.SftpLimits.SftpLimits(int MaxReadLength, int MaxWriteLength, int? 
 SshSharp.Sftp.SftpListOptions
 SshSharp.Sftp.SftpListOptions.FollowSymbolicLinks.get -> bool
 SshSharp.Sftp.SftpListOptions.FollowSymbolicLinks.init -> void
+SshSharp.Sftp.SftpListOptions.IgnoreCase.get -> bool
+SshSharp.Sftp.SftpListOptions.IgnoreCase.init -> void
 SshSharp.Sftp.SftpListOptions.MaxConcurrentDirectories.get -> int
 SshSharp.Sftp.SftpListOptions.MaxConcurrentDirectories.init -> void
 SshSharp.Sftp.SftpListOptions.MaxDepth.get -> int
@@ -419,6 +423,10 @@ SshSharp.Sftp.SftpListOptions.Pattern.init -> void
 SshSharp.Sftp.SftpListOptions.Recursive.get -> bool
 SshSharp.Sftp.SftpListOptions.Recursive.init -> void
 SshSharp.Sftp.SftpListOptions.SftpListOptions() -> void
+SshSharp.Sftp.SftpListOptions.SkipUnreadableDirectories.get -> bool
+SshSharp.Sftp.SftpListOptions.SkipUnreadableDirectories.init -> void
+SshSharp.Sftp.SftpListOptions.UnreadableDirectory.get -> System.Action<SshSharp.Sftp.SftpFileInfo!>?
+SshSharp.Sftp.SftpListOptions.UnreadableDirectory.init -> void
 SshSharp.Sftp.SftpOwnerNames
 SshSharp.Sftp.SftpOwnerNames.<Clone>$() -> SshSharp.Sftp.SftpOwnerNames!
 SshSharp.Sftp.SftpOwnerNames.Deconstruct(out System.Collections.Generic.IReadOnlyDictionary<uint, string!>! UserNames, out System.Collections.Generic.IReadOnlyDictionary<uint, string!>! GroupNames) -> void
@@ -468,6 +476,10 @@ SshSharp.Sftp.SftpTransferOptions.Segments.init -> void
 SshSharp.Sftp.SftpTransferOptions.SftpTransferOptions() -> void
 SshSharp.Sftp.SftpTransferOptions.SkipUnchanged.get -> bool
 SshSharp.Sftp.SftpTransferOptions.SkipUnchanged.init -> void
+SshSharp.Sftp.SftpTransferOptions.SkipUnreadableDirectories.get -> bool
+SshSharp.Sftp.SftpTransferOptions.SkipUnreadableDirectories.init -> void
+SshSharp.Sftp.SftpTransferOptions.TimeTolerance.get -> System.TimeSpan
+SshSharp.Sftp.SftpTransferOptions.TimeTolerance.init -> void
 SshSharp.Sftp.SftpTransferProgress
 SshSharp.Sftp.SftpTransferProgress.<Clone>$() -> SshSharp.Sftp.SftpTransferProgress!
 SshSharp.Sftp.SftpTransferProgress.BytesTransferred.get -> long
@@ -496,6 +508,8 @@ SshSharp.Sftp.SftpTransferSummary.Skipped.get -> int
 SshSharp.Sftp.SftpTransferSummary.Skipped.init -> void
 SshSharp.Sftp.SftpTransferSummary.Unchanged.get -> int
 SshSharp.Sftp.SftpTransferSummary.Unchanged.init -> void
+SshSharp.Sftp.SftpTransferSummary.UnreadableDirectories.get -> System.Collections.Generic.IReadOnlyList<string!>!
+SshSharp.Sftp.SftpTransferSummary.UnreadableDirectories.init -> void
 SshSharp.Sftp.SshSftpExtensions
 SshSharp.SshAddKeyToAgentPrompt
 SshSharp.SshAddKeyToAgentPrompt.Comment.get -> string?
@@ -706,6 +720,8 @@ SshSharp.SshClientOptions.AddressFamily.get -> SshSharp.Config.SshAddressFamily
 SshSharp.SshClientOptions.AddressFamily.init -> void
 SshSharp.SshClientOptions.AuthenticationBanner.get -> System.Func<string!, System.Threading.CancellationToken, System.Threading.Tasks.ValueTask>?
 SshSharp.SshClientOptions.AuthenticationBanner.init -> void
+SshSharp.SshClientOptions.CASignatureAlgorithms.get -> SshSharp.SshAlgorithmList?
+SshSharp.SshClientOptions.CASignatureAlgorithms.init -> void
 SshSharp.SshClientOptions.ChangePassword.get -> System.Func<SshSharp.SshPasswordChangeRequest!, System.Threading.CancellationToken, System.Threading.Tasks.ValueTask<string?>>?
 SshSharp.SshClientOptions.ChangePassword.init -> void
 SshSharp.SshClientOptions.ChannelMaxPacketSize.get -> int
@@ -781,6 +797,8 @@ SshSharp.SshClientOptions.RekeyAfterTime.init -> void
 SshSharp.SshClientOptions.RequiredRsaSize.get -> int
 SshSharp.SshClientOptions.RequiredRsaSize.init -> void
 SshSharp.SshClientOptions.SshClientOptions() -> void
+SshSharp.SshClientOptions.StaggeredConnectDelay.get -> System.TimeSpan?
+SshSharp.SshClientOptions.StaggeredConnectDelay.init -> void
 SshSharp.SshClientOptions.UserName.get -> string!
 SshSharp.SshClientOptions.UserName.init -> void
 SshSharp.SshClientOptions.VersionAddendum.get -> string?
@@ -857,6 +875,8 @@ SshSharp.SshConfigConnectOptions.Proxy.init -> void
 SshSharp.SshConfigConnectOptions.ResolveOptions.get -> SshSharp.Config.SshConfigResolveOptions?
 SshSharp.SshConfigConnectOptions.ResolveOptions.init -> void
 SshSharp.SshConfigConnectOptions.SshConfigConnectOptions() -> void
+SshSharp.SshConfigConnectOptions.StaggeredConnectDelay.get -> System.TimeSpan?
+SshSharp.SshConfigConnectOptions.StaggeredConnectDelay.init -> void
 SshSharp.SshConfigConnectOptions.StartForwardings.get -> bool
 SshSharp.SshConfigConnectOptions.StartForwardings.init -> void
 SshSharp.SshConfigConnectOptions.UseAgent.get -> bool
