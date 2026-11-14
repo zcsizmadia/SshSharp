@@ -208,10 +208,12 @@ internal static class ProcessTree
     {
         if (OperatingSystem.IsLinux())
         {
+            // The mark is checked in a filter of its own: were it one more operand of the pid check, a single changed operator (a
+            // mutant) would select every process, and the sweep would kill all the user's processes, the test runner's among them.
             return Directory.EnumerateDirectories("/proc")
                 .Select(directory => (Directory: directory, Pid: ParsePid(directory)))
-                .Where(process => process.Pid > 0 && process.Pid != Environment.ProcessId &&
-                    Carries(LinuxEnvironment(process.Directory), tag))
+                .Where(process => process.Pid > 0 && process.Pid != Environment.ProcessId)
+                .Where(process => Carries(LinuxEnvironment(process.Directory), tag))
                 .Select(process => process.Pid)
                 .ToList();
         }
@@ -225,10 +227,17 @@ internal static class ProcessTree
 
     /// <summary>
     /// Whether <paramref name="block"/>, NUL-separated strings, holds <paramref name="tag"/> (<c>NAME=value</c> and its NUL) as one of
-    /// them, not as the end of a longer one.
+    /// them, not as the end of a longer one. An empty <paramref name="tag"/> is in no block.
     /// </summary>
     internal static bool Carries(ReadOnlySpan<byte> block, ReadOnlySpan<byte> tag)
     {
+        // An empty span is found at the start of every block, so without this a sweep given no mark would kill every process it may
+        // signal. A real mark is never empty; a mutant that loses it (a null tag) would otherwise kill the test runner and its host.
+        if (tag.IsEmpty)
+        {
+            return false;
+        }
+
         var offset = 0;
         while (true)
         {
