@@ -154,6 +154,12 @@ internal static class ProcessTree
 
             foreach (var pid in ParentsFirst(tagged))
             {
+                // Stryker disable once all : the guard against a mutant that selects every process (see HoldsMark)
+                if (!HoldsMark(pid, tag))
+                {
+                    continue;
+                }
+
                 var result = KillOne(pid);
                 Trace(root, $"{pid}: {result}"); // not inside the call: it compiles away outside the stress build, arguments and all
             }
@@ -162,6 +168,29 @@ internal static class ProcessTree
             Thread.Sleep(1);
         }
     }
+
+    // Stryker disable all : the sweep's second check, kept from mutation on purpose. Mutation testing runs one mutant at a time; a
+    // mutant in Tagged or Carries that selects every process (a lost mark, a "return false" made true) made the sweep kill every
+    // process the test host may signal: Stryker and the CI runner went with it, and the job ended with only "the runner lost
+    // communication". With this check left whole, such a mutant kills nothing, and the tests notice the processes it left.
+
+    /// <summary>Whether <paramref name="pid"/>'s environment holds <paramref name="tag"/>, checked apart from <see cref="Tagged"/>.</summary>
+    private static bool HoldsMark(int pid, byte[] tag)
+    {
+        if (tag.Length == 0)
+        {
+            return false;
+        }
+
+        if (OperatingSystem.IsLinux())
+        {
+            return LinuxEnvironment("/proc/" + pid.ToString(CultureInfo.InvariantCulture)).AsSpan().IndexOf(tag) >= 0;
+        }
+
+        return MacArguments(pid, new byte[MacArgumentsLimit()]).IndexOf(tag) >= 0;
+    }
+
+    // Stryker restore all
 
     /// <summary>
     /// <paramref name="pids"/> with each one's parent before it. A shell whose child is killed first runs its next command before its
@@ -208,12 +237,10 @@ internal static class ProcessTree
     {
         if (OperatingSystem.IsLinux())
         {
-            // The mark is checked in a filter of its own: were it one more operand of the pid check, a single changed operator (a
-            // mutant) would select every process, and the sweep would kill all the user's processes, the test runner's among them.
             return Directory.EnumerateDirectories("/proc")
                 .Select(directory => (Directory: directory, Pid: ParsePid(directory)))
-                .Where(process => process.Pid > 0 && process.Pid != Environment.ProcessId)
-                .Where(process => Carries(LinuxEnvironment(process.Directory), tag))
+                .Where(process => process.Pid > 0 && process.Pid != Environment.ProcessId &&
+                    Carries(LinuxEnvironment(process.Directory), tag))
                 .Select(process => process.Pid)
                 .ToList();
         }
@@ -231,8 +258,7 @@ internal static class ProcessTree
     /// </summary>
     internal static bool Carries(ReadOnlySpan<byte> block, ReadOnlySpan<byte> tag)
     {
-        // An empty span is found at the start of every block, so without this a sweep given no mark would kill every process it may
-        // signal. A real mark is never empty; a mutant that loses it (a null tag) would otherwise kill the test runner and its host.
+        // An empty span is found at the start of every block: without this, a sweep that lost its mark would select every process.
         if (tag.IsEmpty)
         {
             return false;

@@ -127,9 +127,9 @@ always finish. A sweep cuts the connection at 13 points from the first byte to w
   changed in the last eight days, so its scores cover those files alone; a run started by hand mutates everything. The workflow runs
   on Linux, so code for Windows only is not scored there: its mutants are annotated, and the Windows test job exercises that code. A
   mutant that cannot change what any caller sees (wiping a buffer, a message, an allocation size) is annotated in the code with the
-  reason, as `// Stryker disable once <mutator> : <reason>`. Code that kills processes (`ProcessTree`) is written so that no single
-  mutant can widen what it kills: a mutant that selected every process killed Stryker and the CI runner with it, and the job ended
-  with only "the runner lost communication".
+  reason, as `// Stryker disable once <mutator> : <reason>`. Code that kills processes (`ProcessTree`) checks each process a second
+  time, in code left unmutated, just before it kills it: a mutant that selected every process killed Stryker and the CI runner with
+  it, and the job ended with only "the runner lost communication".
 
   **Timeouts overstate the scores.** Stryker compiles a check into every mutated expression, and in hot code those checks cost far
   more than the code they guard: a tight arithmetic loop ran about 50 times slower. With the runner for Microsoft.Testing.Platform (a
