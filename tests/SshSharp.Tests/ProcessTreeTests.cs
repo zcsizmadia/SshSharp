@@ -247,6 +247,16 @@ public class ProcessTreeTests
         await Assert.That(ProcessTree.Carries(Encoding.ASCII.GetBytes(block), ProcessTree.Tag("AB"))).IsEqualTo(expected);
     }
 
+    [Test]
+    [Arguments("SSHSHARP_PROCESS_TREE=AB\0")]
+    [Arguments("\0")]
+    [Arguments("")]
+    public async Task Carries_AnEmptyMarkIsInNoBlock(string block)
+    {
+        // Were an empty mark found everywhere, a sweep that lost its mark would kill every process it may signal.
+        await Assert.That(ProcessTree.Carries(Encoding.ASCII.GetBytes(block), [])).IsFalse();
+    }
+
     // A command whose background child (a sleep of 30 s) outlives it: the command has exited once this returns, and the child is no
     // longer its descendant.
     private static async Task<(Process Process, int Orphan)> StartWithOrphanAsync()

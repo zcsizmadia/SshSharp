@@ -154,6 +154,12 @@ internal static class ProcessTree
 
             foreach (var pid in ParentsFirst(tagged))
             {
+                // Stryker disable once all : the guard against a mutant that selects every process (see HoldsMark)
+                if (!HoldsMark(pid, tag))
+                {
+                    continue;
+                }
+
                 var result = KillOne(pid);
                 Trace(root, $"{pid}: {result}"); // not inside the call: it compiles away outside the stress build, arguments and all
             }
@@ -162,6 +168,29 @@ internal static class ProcessTree
             Thread.Sleep(1);
         }
     }
+
+    // Stryker disable all : the sweep's second check, kept from mutation on purpose. Mutation testing runs one mutant at a time; a
+    // mutant in Tagged or Carries that selects every process (a lost mark, a "return false" made true) made the sweep kill every
+    // process the test host may signal: Stryker and the CI runner went with it, and the job ended with only "the runner lost
+    // communication". With this check left whole, such a mutant kills nothing, and the tests notice the processes it left.
+
+    /// <summary>Whether <paramref name="pid"/>'s environment holds <paramref name="tag"/>, checked apart from <see cref="Tagged"/>.</summary>
+    private static bool HoldsMark(int pid, byte[] tag)
+    {
+        if (tag.Length == 0)
+        {
+            return false;
+        }
+
+        if (OperatingSystem.IsLinux())
+        {
+            return LinuxEnvironment("/proc/" + pid.ToString(CultureInfo.InvariantCulture)).AsSpan().IndexOf(tag) >= 0;
+        }
+
+        return MacArguments(pid, new byte[MacArgumentsLimit()]).IndexOf(tag) >= 0;
+    }
+
+    // Stryker restore all
 
     /// <summary>
     /// <paramref name="pids"/> with each one's parent before it. A shell whose child is killed first runs its next command before its
@@ -225,10 +254,16 @@ internal static class ProcessTree
 
     /// <summary>
     /// Whether <paramref name="block"/>, NUL-separated strings, holds <paramref name="tag"/> (<c>NAME=value</c> and its NUL) as one of
-    /// them, not as the end of a longer one.
+    /// them, not as the end of a longer one. An empty <paramref name="tag"/> is in no block.
     /// </summary>
     internal static bool Carries(ReadOnlySpan<byte> block, ReadOnlySpan<byte> tag)
     {
+        // An empty span is found at the start of every block: without this, a sweep that lost its mark would select every process.
+        if (tag.IsEmpty)
+        {
+            return false;
+        }
+
         var offset = 0;
         while (true)
         {
