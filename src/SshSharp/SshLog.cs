@@ -181,6 +181,6 @@ internal static partial class SshLog
     public static partial void ConfiguredForwardingsDisabled(ILogger logger);
 
     // At the highest level among the entries it counts (Warning, or Information for refused agent requests only).
-    [LoggerMessage(EventId = 63, Message = "{Count} more entries the server triggered (refused or failed forwarded connections, unimplemented messages, refused agent requests) were written at Debug level: at most {Burst} a minute are written at their own level")]
-    public static partial void PeerTriggeredEntriesLowered(ILogger logger, LogLevel level, int count, int burst);
+    [LoggerMessage(EventId = 63, Message = "{Lowered} more entries the server triggered (refused or failed forwarded connections, unimplemented messages, refused agent requests) were written at Debug level: at most {Burst} a minute are written at their own level")]
+    public static partial void PeerTriggeredEntriesLowered(ILogger logger, LogLevel level, int lowered, int burst);
 }
