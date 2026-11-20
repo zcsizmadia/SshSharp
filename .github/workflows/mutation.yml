@@ -76,6 +76,10 @@ jobs:
           - scope: agent-server
             mutate: -m "**/Protocol/AgentServer.cs"
             tests: Agent/AgentServerTests.cs;Agent/InProcessAgentTests.cs
+          # The limit on the log entries a server can trigger repeatedly (unimplemented messages, refused forwards and agent requests).
+          - scope: peer-log-limiter
+            mutate: -m "**/PeerLogLimiter.cs"
+            tests: PeerLogLimiterTests.cs;Agent/AgentServerTests.cs
           - scope: sntrup761
             mutate: -m "**/Crypto/Sntrup761.cs"
             tests: Crypto/Sntrup761Tests.cs;Protocol/SntrupKexTests.cs

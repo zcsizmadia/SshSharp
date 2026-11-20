@@ -75,6 +75,15 @@ A man in the middle can read, change, drop and inject bytes. The server itself m
   command output to `MaxCommandOutputBytes`, and banners, identification lines and `EXT_INFO` entries are bounded.
   A peer that overruns the window is a protocol error. With compression on, a packet must also inflate to less than 256 KiB
   ([Compression](#compression)).
+- **Log volume:** a few log entries are triggered by the server's side, as often as it likes: a message number the client does
+  not implement, a forwarded connection that cannot be made or that a remote dynamic forwarding's filter refuses, and a forwarded
+  agent request that `ForwardAgentFilter` refuses. Their text is the library's, so they cannot forge a log line, but they could
+  fill a log. Like OpenSSH, which rate-limits its refused-forwarding messages, each connection writes at most 8 of them a minute
+  at their own level (Warning, or Information for refused agent requests); the window starts with the first and lasts a minute.
+  The rest are written at Debug, and when the window ends one summary says how many were (event id 63, "N more entries the server
+  triggered ... were written at Debug level"), at the highest level among them. The limit is shared by the connection, its
+  remote forwardings and its forwarded agent, and runs on the connection's `TimeProvider`. Closing the connection writes the
+  summary it still owes.
 - **Owed replies:** many server messages require an answer from the client: a global or channel request that wants a reply, a
   channel the server opens (confirmed or refused), a CLOSE, a message number the client does not implement
   (`SSH_MSG_UNIMPLEMENTED`), and a transport ping (`ping@openssh.com`, answered with a pong). The client queues these answers

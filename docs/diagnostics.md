@@ -65,6 +65,19 @@ attempts. Logs never contain passwords, private keys, command text or user names
 without its socket or pipe path, which can hold the user's name (Pageant's pipe does): a system error shows as its type or socket
 error code (`Could not reach the SSH agent (socket error ConnectionRefused).`).
 
+Some entries are triggered by the server's side and can repeat as fast as it sends: a message the client does not implement
+(event id 14), a remote-forwarded connection that cannot be made (28) or that a remote dynamic forwarding refuses (32), and a
+forwarded agent request `ForwardAgentFilter` refuses (45). Each connection writes at most 8 of them a minute at their own level;
+the rest go to Debug, and when the minute ends one entry (event id 63) says how many did:
+
+```text
+warn: SshSharp[63]
+      92 more entries the server triggered (refused or failed forwarded connections, unimplemented messages, refused agent requests) were written at Debug level: at most 8 a minute are written at their own level
+```
+
+So a quiet Warning log does not mean nothing was refused: set the minimum level to Debug to see every entry. The minute runs on
+`SshClientOptions.TimeProvider`. See "Log volume" in [the threat model](threat-model.md#the-network-and-the-server).
+
 ## Tracing and metrics
 
 SshSharp publishes an `ActivitySource` and a `Meter` named `SshTelemetry.SourceName` (`"SshSharp"`). With OpenTelemetry:

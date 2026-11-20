@@ -33,6 +33,9 @@ public sealed class SshRemotePortForwarder : IAsyncDisposable
     private int _disposed;
     private int _active;
 
+    /// <summary>The connection's limit on the warnings the server's side can trigger repeatedly; null (tests) for none.</summary>
+    internal PeerLogLimiter? PeerLog { get; init; }
+
     internal SshRemotePortForwarder(string bindAddress, int port, string localHost, int localPort, ILogger logger,
         Func<SshRemotePortForwarder, CancellationToken, Task> cancel, CancellationToken connectionClosed)
     {
@@ -209,7 +212,9 @@ public sealed class SshRemotePortForwarder : IAsyncDisposable
         }
         catch (Exception ex)
         {
-            SshLog.RemoteForwardingConnectFailed(_logger, IsDynamic ? RemotePort : LocalPort, ex.GetType().Name);
+            var level = PeerLog?.Admit(LogLevel.Warning) ?? LogLevel.Warning;
+            var reason = ex.GetType().Name;
+            SshLog.RemoteForwardingConnectFailed(_logger, level, IsDynamic ? RemotePort : LocalPort, reason);
             await CloseQuietlyAsync(channel).ConfigureAwait(false);
         }
         finally
@@ -273,7 +278,8 @@ public sealed class SshRemotePortForwarder : IAsyncDisposable
         catch (Exception ex) when (ex is SocketException or OperationCanceledException or ObjectDisposedException)
         {
             // Nothing listens locally: close the channel, as ssh does, so the remote client sees the connection end.
-            SshLog.RemoteForwardingConnectFailed(_logger, LocalPort, ex is SocketException socketError ? socketError.SocketErrorCode.ToString() : ex.GetType().Name);
+            var level = PeerLog?.Admit(LogLevel.Warning) ?? LogLevel.Warning;
+            SshLog.RemoteForwardingConnectFailed(_logger, level, LocalPort, ex is SocketException socketError ? socketError.SocketErrorCode.ToString() : ex.GetType().Name);
             socket.Dispose();
             await channel.CloseAsync(CancellationToken.None).ConfigureAwait(false);
             channel.DiscardUnread();
@@ -437,7 +443,8 @@ public sealed class SshRemotePortForwarder : IAsyncDisposable
     private async Task RefuseAsync(SshChannelStream stream, SocksRequest target, string reason)
     {
         // The destination stays out of the log: host names are not logged (see SshLog).
-        SshLog.RemoteDynamicConnectFailed(_logger, RemotePort, reason);
+        var level = PeerLog?.Admit(LogLevel.Warning) ?? LogLevel.Warning;
+        SshLog.RemoteDynamicConnectFailed(_logger, level, RemotePort, reason);
         try
         {
             await SocksHandshake.ReplyAsync(stream, target, success: false, _stop.Token).ConfigureAwait(false);

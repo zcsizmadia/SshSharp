@@ -229,7 +229,8 @@ See [Encrypted key files](../how-to/agent-and-keys.md#encrypted-key-files).
 ### The forwarded agent lists no keys or refuses to sign on the server
 
 - `ForwardAgentFilter` refused: refused requests are logged at `Information` with the key's fingerprint, and anything the filter
-  throws at `Warning`.
+  throws at `Warning`. Past 8 refusals a minute on one connection, the rest are logged at `Debug`, with one summary (event id 63)
+  when the minute ends: lower the log level to see each one.
 - A filter that relies on `DestinationHostKey` refuses everything when `ssh` on the server is older than OpenSSH 8.9: it does not
   bind its sessions, so the destination is not known.
 - An RSA signature requested as SHA-1 `ssh-rsa` is refused by an in-process agent and by any agent behind a filter.

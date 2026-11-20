@@ -256,7 +256,8 @@ before disposing; forwardings to a host and port, or dynamic ones, close their c
   `client.ConnectionClosed` if you need to know (see [Keep-alive and reconnecting](keepalive-and-reconnect.md)).
 - **Remote destinations come from the server's side.** With remote dynamic forwarding, every destination is allowed when
   `allowDestination` is null (or, from `ssh_config`, without `PermitRemoteOpen`), as with `ssh`. Pass a filter unless you trust
-  everyone on the server.
+  everyone on the server. Each refused destination is logged at Warning, without the destination, at most 8 a minute per
+  connection; the rest go to Debug, with one summary when the minute ends (see [Logging](../diagnostics.md#logging)).
 - **Limits.** The server can open at most `SshClientOptions.MaxForwardedConnections` (1,000) forwarded connections at a time
   (agent forwarding's channels count too), and a forwarding to a handler at most its `maxConnections`.
 - **Metrics.** `sshsharp.forwarding.connections` counts forwarded connections that opened or failed, and `sshsharp.forwarding.active`

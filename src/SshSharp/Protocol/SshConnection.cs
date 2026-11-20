@@ -55,11 +55,18 @@ internal sealed class SshConnection : IAsyncDisposable
     /// <summary>The clock for keep-alives and channel timeouts; replaceable in tests.</summary>
     internal TimeProvider Time => _time;
 
+    /// <summary>
+    /// Limits the entries the server can trigger again and again on this connection (unimplemented messages, refused forwarded
+    /// connections and agent requests), shared by the connection, its remote forwardings and its forwarded agent.
+    /// </summary>
+    internal PeerLogLimiter PeerLog { get; }
+
     public SshConnection(SshTransport transport, ILogger? logger = null, TimeProvider? timeProvider = null)
     {
         _transport = transport;
         _logger = logger ?? NullLogger.Instance;
         _time = timeProvider ?? TimeProvider.System;
+        PeerLog = new PeerLogLimiter(_logger, _time);
         _lastReceived = _time.GetTimestamp();
         _transport.KeyReexchanged = ResendPings;
     }
@@ -670,6 +677,9 @@ internal sealed class SshConnection : IAsyncDisposable
         await WaitQuietlyAsync(_channelTimeoutLoop).ConfigureAwait(false);
         await _transport.DisposeAsync().ConfigureAwait(false);
         _stop.Dispose();
+
+        // Last, after the loops: a summary of the entries lowered in the current window is written now, not lost.
+        PeerLog.Dispose();
     }
 
     /// <summary>How long <see cref="DisposeAsync"/> waits to send <c>SSH_MSG_DISCONNECT</c>.</summary>
@@ -1014,7 +1024,8 @@ internal sealed class SshConnection : IAsyncDisposable
 
             default:
                 // RFC 4253 section 11.4: tell the peer we do not implement this message, quoting its sequence number.
-                SshLog.UnimplementedMessage(_logger, type);
+                var level = PeerLog.Admit(LogLevel.Warning);
+                SshLog.UnimplementedMessage(_logger, level, type);
                 PostReply(_transport.BuildUnimplemented());
                 return false;
         }

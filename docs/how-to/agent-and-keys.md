@@ -164,7 +164,8 @@ With a filter, the forwarded agent is read-only and narrowed, whichever agent it
 - A login request on a connection bound to a session must be for that session, and a host-bound one must name its host key.
 - Keys whose type `SshPublicKey` does not read (DSA in a real agent, security-key certificates) are hidden and cannot sign.
 - Anything the filter throws refuses the request (logged at Warning); refused requests are logged at Information with the key's
-  fingerprint.
+  fingerprint, at most 8 a minute per connection: the rest go to Debug, with one summary when the minute ends (see
+  [Logging](../diagnostics.md#logging)).
 
 Without a filter, a real agent's connection is relayed byte for byte, as `ssh -A` relays it. The filter applies only to requests
 that come through agent forwarding; this client's own authentication through an agent is not filtered.

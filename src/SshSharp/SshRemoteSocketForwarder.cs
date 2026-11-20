@@ -27,6 +27,9 @@ public sealed class SshRemoteSocketForwarder : IAsyncDisposable
     private int _disposed;
     private int _active;
 
+    /// <summary>The connection's limit on the warnings the server's side can trigger repeatedly; null (tests) for none.</summary>
+    internal PeerLogLimiter? PeerLog { get; init; }
+
     internal SshRemoteSocketForwarder(string socketPath, string? localHost, int localPort, string? localSocketPath, ILogger logger,
         Func<SshRemoteSocketForwarder, CancellationToken, Task> cancel, CancellationToken connectionClosed)
     {
@@ -184,7 +187,8 @@ public sealed class SshRemoteSocketForwarder : IAsyncDisposable
             {
                 // Nothing listens locally: close the channel, as ssh does, so the remote client sees the connection end. The reason is the
                 // error code only: socket exception text can name the path.
-                SshLog.RemoteForwardingConnectFailed(_logger, LocalPort, ex is SocketException socketError ? socketError.SocketErrorCode.ToString() : ex.GetType().Name);
+                var level = PeerLog?.Admit(LogLevel.Warning) ?? LogLevel.Warning;
+                SshLog.RemoteForwardingConnectFailed(_logger, level, LocalPort, ex is SocketException socketError ? socketError.SocketErrorCode.ToString() : ex.GetType().Name);
                 await SshRemotePortForwarder.CloseQuietlyAsync(channel).ConfigureAwait(false);
                 return;
             }
@@ -197,7 +201,9 @@ public sealed class SshRemoteSocketForwarder : IAsyncDisposable
         }
         catch (Exception ex)
         {
-            SshLog.RemoteForwardingConnectFailed(_logger, LocalPort, ex.GetType().Name);
+            var level = PeerLog?.Admit(LogLevel.Warning) ?? LogLevel.Warning;
+            var reason = ex.GetType().Name;
+            SshLog.RemoteForwardingConnectFailed(_logger, level, LocalPort, reason);
             await SshRemotePortForwarder.CloseQuietlyAsync(channel).ConfigureAwait(false);
         }
         finally
