@@ -86,7 +86,6 @@ public class EncryptedKeyFormatTests
             ("RSA PRIVATE KEY", RandomNumberGenerator.GetBytes(100)),
             ("RSA PRIVATE KEY", der.Append((byte)0).ToArray()),
             ("EC PRIVATE KEY", der),
-            ("RSA PRIVATE KEY", NegativeModulus(rsa)),
         })
         {
             var pem = TestKeys.LegacyEncryptedPem(label, body, passphrase);
@@ -395,6 +394,11 @@ public class EncryptedKeyFormatTests
         using var rsa = RSA.Create(2048);
         var pkcs1 = NegativeModulus(rsa);
         await Assert.That(() => SshPrivateKey.Parse(Pem("RSA PRIVATE KEY", pkcs1), null)).Throws<FormatException>();
+
+        // The same key encrypted (traditional PEM): what a wrong passphrase decrypts to now and then. Only the type is checked, since
+        // the platforms fail at different steps (macOS imports it, and the key's check after the import refuses it).
+        var passphrase = TestSecrets.New();
+        await Assert.That(() => SshPrivateKey.Parse(TestKeys.LegacyEncryptedPem("RSA PRIVATE KEY", pkcs1, passphrase), passphrase)).Throws<FormatException>();
 
         var pkcs8 = new AsnWriter(AsnEncodingRules.DER);
         using (pkcs8.PushSequence())
