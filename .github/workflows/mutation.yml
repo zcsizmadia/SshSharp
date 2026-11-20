@@ -115,6 +115,11 @@ jobs:
           - scope: config-known-hosts
             mutate: -m "**/Config/KnownHosts*.cs" -m "**/Config/ForwardSpec.cs" -m "**/Config/SshExecMatcher.cs" -m "**/Config/SshTime.cs" -m "**/ProcessTree.cs"
             tests: Config/*Tests.cs;KnownHostsVerifierTests.cs;ConfigForwardingTests.cs;Fuzz/ParserRobustnessTests.cs;Keys/SshPublicKeyTests.cs;ProcessTreeTests.cs
+          # Host key trust: known_hosts lookups, @revoked and @cert-authority lines, RevokedHostKeys, StrictHostKeyChecking, recording new
+          # keys, KnownHostsCommand as a source, and UpdateHostKeys.
+          - scope: known-hosts-verifier
+            mutate: -m "**/KnownHostsVerifier.cs"
+            tests: KnownHostsVerifierTests.cs;UpdateHostKeysTests.cs;ChangedHostKeyTests.cs;CertificateTests.cs;CASignatureAlgorithmsTests.cs;Config/RevokedHostKeysTests.cs;Config/ConfigGapsTests.cs
           # The replies to the SFTP file hash extensions (check-file, md5-hash) and raw extended requests, and check-file announcements.
           - scope: sftp-extension-replies
             mutate: -m "**/Sftp/SftpExtensionReplies.cs"

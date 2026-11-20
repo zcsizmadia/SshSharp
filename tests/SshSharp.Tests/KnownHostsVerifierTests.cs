@@ -322,6 +322,76 @@ public sealed class KnownHostsVerifierTests : IDisposable
         await Assert.That(log.Entries).IsEmpty();
     }
 
+    [Test]
+    public async Task ACertificateFromAnAuthorityNotListed_ProvesNothing_EvenWhenAnotherAuthorityIsListed()
+    {
+        using var listed = SshPrivateKey.Generate(SshKeyType.Ed25519);
+        using var unlisted = SshPrivateKey.Generate(SshKeyType.Ed25519);
+        using var host = SshPrivateKey.Generate(SshKeyType.Ed25519);
+        var key = CertifiedKey(unlisted, host, "valid");
+
+        // Neither a @cert-authority line for another authority, nor the authority's key on a plain line for the host, trusts it.
+        File.WriteAllText(UserFile, AuthorityLine(listed) + $"server.example {unlisted.ToAuthorizedKeysLine()}\n");
+        var verdict = await CertificateVerifier(StrictHostKeyChecking.Yes).VerifyAsync(Context(key), default);
+        await Assert.That(verdict.IsAccepted).IsFalse();
+        await Assert.That(verdict.Reason).DoesNotContain("could not be used");
+
+        // Its key is then checked as a plain key, which a line for the host can trust.
+        File.WriteAllText(UserFile, AuthorityLine(listed) + $"server.example {host.ToAuthorizedKeysLine()}\n");
+        await Assert.That((await CertificateVerifier(StrictHostKeyChecking.Yes).VerifyAsync(Context(key), default)).IsAccepted).IsTrue();
+    }
+
+    [Test]
+    public async Task AnAuthorityListedTwice_IsTrusted_AndARevokedLineForAnotherKeyDoesNotRefuseItsCertificate()
+    {
+        using var authority = SshPrivateKey.Generate(SshKeyType.Ed25519);
+        using var host = SshPrivateKey.Generate(SshKeyType.Ed25519);
+        var key = CertifiedKey(authority, host, "valid");
+        File.WriteAllText(UserFile, AuthorityLine(authority) + AuthorityLine(authority) + Line("server.example", Ed25519Key(), "@revoked "));
+        await Assert.That((await CertificateVerifier(StrictHostKeyChecking.Yes).VerifyAsync(Context(key), default)).IsAccepted).IsTrue();
+    }
+
+    [Test]
+    public async Task CertificatesArePreferred_WhenAnAuthorityIsListedForTheNameLookedUp()
+    {
+        using var authority = SshPrivateKey.Generate(SshKeyType.Ed25519);
+        var verifier = Verifier(StrictHostKeyChecking.Yes);
+
+        // An alias is looked up on port 22, whatever port is connected to.
+        File.WriteAllText(UserFile, AuthorityLine(authority).Replace(" * ", " box ", StringComparison.Ordinal));
+        await Assert.That(await verifier.PrefersCertificatesAsync("server.example", 2222, "box", default)).IsTrue();
+        await Assert.That(await verifier.PrefersCertificatesAsync("server.example", 2222, null, default)).IsFalse();
+
+        File.WriteAllText(UserFile, AuthorityLine(authority).Replace(" * ", " [server.example]:2222 ", StringComparison.Ordinal));
+        await Assert.That(await verifier.PrefersCertificatesAsync("server.example", 2222, null, default)).IsTrue();
+        await Assert.That(await verifier.PrefersCertificatesAsync("server.example", 22, null, default)).IsFalse();
+
+        // Nothing to look up (a stream without HostKeyAlias): no preference, even with an authority for every host.
+        File.WriteAllText(UserFile, AuthorityLine(authority));
+        await Assert.That(await verifier.PrefersCertificatesAsync(null, 22, null, default)).IsFalse();
+    }
+
+    [Test]
+    public async Task AcceptNew_NamesEveryKnownType()
+    {
+        using var p384 = SshPrivateKey.Generate(SshKeyType.EcdsaNistp384);
+        File.WriteAllText(UserFile, Line("server.example", EcdsaKey()) + $"server.example {p384.ToAuthorizedKeysLine()}\n");
+        var verdict = await Verifier(StrictHostKeyChecking.AcceptNew).VerifyAsync(Context(Ed25519Key()), default);
+        await Assert.That(verdict.IsAccepted).IsFalse();
+        await Assert.That(verdict.Reason).Contains("only ecdsa-sha2-nistp256, ecdsa-sha2-nistp384 keys");
+    }
+
+    [Test]
+    public async Task ForCurrentUser_TakesThePolicy_AndTheArgumentsAreChecked()
+    {
+        await Assert.That(KnownHostsVerifier.ForCurrentUser(StrictHostKeyChecking.AcceptNew).Policy).IsEqualTo(StrictHostKeyChecking.AcceptNew);
+        await Assert.That(KnownHostsVerifier.ForCurrentUser().Policy).IsEqualTo(StrictHostKeyChecking.Ask);
+
+        await Assert.That(() => new KnownHostsVerifier(null!)).Throws<ArgumentNullException>();
+        await Assert.That(() => KnownHostsVerifier.FromConfig(null!)).Throws<ArgumentNullException>();
+        await Assert.That(async () => await Verifier(StrictHostKeyChecking.Yes).VerifyAsync(null!, default)).Throws<ArgumentNullException>();
+    }
+
     /// <summary>Collects log entries.</summary>
     private sealed class ListLogger : ILogger
     {
