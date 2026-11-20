@@ -427,7 +427,9 @@ public class EncryptedKeyFormatTests
             writer.WriteInteger(-new BigInteger(p.Modulus, isUnsigned: true, isBigEndian: true));
             foreach (var field in new[] { p.Exponent!, p.D!, p.P!, p.Q!, p.DP!, p.DQ!, p.InverseQ! })
             {
-                writer.WriteIntegerUnsigned(field);
+                // ExportParameters pads each field to a fixed length, and WriteIntegerUnsigned refuses a redundant leading zero byte,
+                // so a key whose field happens to start with 0x00 failed here; as a number, the field is written in its minimal form.
+                writer.WriteInteger(new BigInteger(field, isUnsigned: true, isBigEndian: true));
             }
         }
 
