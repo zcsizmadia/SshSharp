@@ -22,7 +22,7 @@ internal sealed record SshTokenContext(
     public string ProxyJump { get; init; } = string.Empty;
 
     /// <summary>
-    /// <c>%j</c> for a <c>ProxyJump</c> value, as OpenSSH 10.6p2 forms it (and <c>ssh -G</c> prints it): the hops before the last one as
+    /// <c>%j</c> for a <c>ProxyJump</c> value, as OpenSSH master forms it (and <c>ssh -G</c> prints it): the hops before the last one as
     /// written, then the last one as <c>[user@]host[:port]</c>, with the host in brackets when it is an address (it contains <c>:</c>,
     /// or only digits and dots). Empty for no value or <c>none</c>. A last hop that does not parse is kept as written; connecting
     /// through it fails anyway.
@@ -195,7 +195,7 @@ internal sealed record SshTokenContext(
     }
 
     /// <summary>
-    /// OpenSSH's <c>%C</c>: SHA-1 of <c>%l</c>, <c>%h</c>, <c>%p</c>, <c>%r</c> and <c>%j</c>, each followed by a NUL, as OpenSSH 10.6p2
+    /// OpenSSH's <c>%C</c>: SHA-1 of <c>%l</c>, <c>%h</c>, <c>%p</c>, <c>%r</c> and <c>%j</c>, each followed by a NUL, as OpenSSH master
     /// hashes them. The NULs keep the fields apart, so host 192.0.2.1 on port 2222 and 192.0.2.12 on port 222 no longer hash alike;
     /// older OpenSSH concatenated them without, so its values differ.
     /// </summary>

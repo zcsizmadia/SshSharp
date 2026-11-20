@@ -17,8 +17,8 @@ directive by directive, see [ssh_config directives](ssh-config.md).
 | Hashed `known_hosts` lines, `HashKnownHosts` | Same | |
 | Host certificates (`@cert-authority`), `CASignatureAlgorithms` | Same | `CASignatureAlgorithms` since 1.2 |
 | A certificate from a trusted authority that cannot be used falls back to the plain key | Same (1.2) | Logged as a warning; [Host certificates that cannot be used](../host-keys.md#host-certificates-that-cannot-be-used) |
-| `@revoked` lines; one without a port applies on every port | Same (1.2) | As OpenSSH 10.6p2; [Revoked host keys](../host-keys.md#revoked-host-keys) |
-| `RequiredRsaSize` also applies to a host certificate's RSA authority | Same (1.2) | As OpenSSH 10.6p2 |
+| `@revoked` lines; one without a port applies on every port | Same (1.2) | As OpenSSH master, in its next release ([d62150ded3](https://github.com/openssh/openssh-portable/commit/d62150ded3)); [Revoked host keys](../host-keys.md#revoked-host-keys) |
+| `RequiredRsaSize` also applies to a host certificate's RSA authority | Same (1.2) | As OpenSSH master, in its next release ([409167b833](https://github.com/openssh/openssh-portable/commit/409167b833)) |
 | A changed key accepted under `StrictHostKeyChecking no` gets no password, agent or port forwarding | Same (1.2) | [A changed key under `No`](../how-to/verify-host-keys.md#a-changed-key-under-no) |
 | `UpdateHostKeys` (`hostkeys-00@openssh.com`, `hostkeys-prove-00@openssh.com`), and the cases where it leaves `known_hosts` alone | Same | The cases follow OpenSSH 9.2p1 (1.2); a second announcement fails the connection |
 | `RevokedHostKeys` (KRLs and key lists), `KnownHostsCommand` | Same | |
@@ -51,7 +51,7 @@ directive by directive, see [ssh_config directives](ssh-config.md).
 | OpenSSH behavior | SshSharp | Notes |
 |---|---|---|
 | The first value wins; `Host` and `Match` blocks, `Include`, algorithm lists with `+`, `-` and `^` | Same | [ssh_config directives](ssh-config.md) |
-| `%C` hashes each field with its NUL terminator; `%j` is the whole `ProxyJump` specification | Same (1.2) | As OpenSSH 10.6p2: every `%C` value changed from 1.1 |
+| `%C` hashes each field with its NUL terminator; `%j` is the whole `ProxyJump` specification | Same (1.2) | As OpenSSH master, in its next release ([00bc2a1124](https://github.com/openssh/openssh-portable/commit/00bc2a1124), [d71cc75c99](https://github.com/openssh/openssh-portable/commit/d71cc75c99)): every `%C` value changed from 1.1 |
 | `Match canonical`, `Match final` and the second pass | Same (1.2) | |
 | `Match exec`, `localnetwork`, `sessiontype`, `command` and `tagged` | Same | `exec` runs only with `SshConfigResolveOptions.ExecMatcher` |
 | Directives that neither this page nor [ssh_config directives](ssh-config.md) lists | Differs | Parsed into `SshHostConfig.Options`, with no effect |

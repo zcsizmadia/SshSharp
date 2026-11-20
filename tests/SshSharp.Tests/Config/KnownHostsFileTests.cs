@@ -194,7 +194,7 @@ public class KnownHostsFileTests
     public async Task Parse_MarkersAndTabs()
     {
         var file = KnownHostsFile.Parse($"@cert-authority\t*.example.com\tssh-ed25519\t{KeyAText}\tca comment\n@revoked h ssh-ed25519 {KeyAText}\n@revoked h2 ssh-ed25519 {KeyAText} why\n"
-            + $"@revoked\th3\tssh-ed25519 {KeyAText} tab after the marker, spaces later\n"); // OpenSSH 10.6p2 (5c90a1d90e) reads this too
+            + $"@revoked\th3\tssh-ed25519 {KeyAText} tab after the marker, spaces later\n"); // OpenSSH master (5c90a1d90e) reads this too
 
         await Assert.That(file.Entries.Count).IsEqualTo(4);
         await Assert.That(file.Entries[0].Marker).IsEqualTo(KnownHostsMarker.CertAuthority);

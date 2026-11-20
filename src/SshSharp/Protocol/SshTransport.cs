@@ -1051,7 +1051,7 @@ internal sealed class SshTransport : IAsyncDisposable
             throw new SshHostKeyException($"The server's RSA host key is only {key.KeySizeBits} bits (minimum {_options.MinimumRsaBits}).");
         }
 
-        // As OpenSSH 10.6p2's RequiredRSASize: a host certificate's RSA authority is held to the same minimum as an RSA host key. The
+        // As OpenSSH master's RequiredRSASize: a host certificate's RSA authority is held to the same minimum as an RSA host key. The
         // certificate's own check only refuses an authority under 2048 bits, whatever the setting.
         if (certificate is not null && _options.MinimumRsaBits > SshClientOptions.DefaultMinimumRsaBits)
         {

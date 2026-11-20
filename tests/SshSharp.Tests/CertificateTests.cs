@@ -176,7 +176,7 @@ public sealed class CertificateTests : IDisposable
     [Test]
     public async Task RequiredRsaSize_AppliesToTheAuthorityOfAHostCertificate()
     {
-        // As OpenSSH 10.6p2: RequiredRSASize holds a host certificate's RSA authority to the same minimum as an RSA host key.
+        // As OpenSSH master: RequiredRSASize holds a host certificate's RSA authority to the same minimum as an RSA host key.
         using var small = SshPrivateKey.Generate(SshKeyType.Rsa, rsaBits: 2048);
         using var large = SshPrivateKey.Generate(SshKeyType.Rsa, rsaBits: 3072);
         var servers = new List<FakeSessionServer>();

@@ -60,7 +60,7 @@ public class SshPrivateKeyTests
     [Test]
     public async Task AnRsaKeyWhosePrimesAreNotItsModulus_IsRefused()
     {
-        // OpenSSH 10.6p2 checks that p * q = n. Here the key is proven by signing and verifying with its public key, which such a key
+        // OpenSSH master checks that p * q = n. Here the key is proven by signing and verifying with its public key, which such a key
         // fails on every platform. (A wrong d or iqmp is not refused everywhere: Windows recomputes them from p and q, and the key then
         // signs correctly, so it is usable. Checking them here would mean arithmetic on the private values that is not constant time.)
         using var rsa = RSA.Create(2048);

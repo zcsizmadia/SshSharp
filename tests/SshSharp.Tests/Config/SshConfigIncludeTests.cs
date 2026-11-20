@@ -114,7 +114,7 @@ public sealed class SshConfigIncludeTests : IDisposable
     [Arguments("locked/*/a.conf")]
     public async Task AnIncludeBehindADirectoryThatMayNotBeSearched_IsAnError_NotLeftOut(string pattern)
     {
-        // As OpenSSH 10.6p2 (c30113f351): a directory on the way that cannot be searched fails the Include, rather than leave out the
+        // As OpenSSH master (c30113f351): a directory on the way that cannot be searched fails the Include, rather than leave out the
         // settings it holds. A missing path is still nothing to include (Globs_AreInLexicalOrder_MissingFilesAreIgnored).
         if (OperatingSystem.IsWindows())
         {
