@@ -76,6 +76,14 @@ internal sealed class SftpFileInfoEntry(SftpFileSystem fileSystem, string path, 
         Refresh();
     }
 
+#if NET11_0_OR_GREATER
+    public void CreateAsHardLink(string pathToTarget)
+    {
+        Fs.File.CreateHardLink(FullName, pathToTarget);
+        Refresh();
+    }
+#endif
+
     public override void Delete()
     {
         Fs.File.Delete(FullName);

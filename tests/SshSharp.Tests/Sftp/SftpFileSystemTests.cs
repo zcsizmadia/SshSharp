@@ -303,6 +303,40 @@ public class SftpFileSystemTests
         await Assert.That(rig.Fs.Directory.ResolveLinkTarget("dirlink", false)).IsAssignableTo<IDirectoryInfo>();
     }
 
+#if NET11_0_OR_GREATER
+    [Test]
+    public async Task HardLinks_ShareTheTargetsContent()
+    {
+        await using var rig = await Rig.StartAsync(f => f.AddFile(Home + "/target.txt", "t"u8.ToArray()));
+
+        var link = rig.Fs.File.CreateHardLink("link.txt", "target.txt");
+        await Assert.That(link.Exists).IsTrue();
+        await Assert.That(link.LinkTarget).IsNull(); // a hard link is not a reparse point
+        rig.Fs.File.WriteAllText("link.txt", "changed");
+        await Assert.That(rig.Fs.File.ReadAllText("target.txt")).IsEqualTo("changed");
+
+        var info = rig.Fs.FileInfo.New("info.txt");
+        info.CreateAsHardLink("target.txt");
+        await Assert.That(info.Exists).IsTrue();
+        await Assert.That(info.Length).IsEqualTo(7L);
+
+        await Assert.That(() => rig.Fs.File.CreateHardLink("x", "missing")).Throws<FileNotFoundException>();
+        await Assert.That(() => rig.Fs.File.CreateHardLink("x", "")).Throws<ArgumentException>();
+    }
+
+    [Test]
+    public async Task HardLinks_WithoutTheExtension_AreNotSupported()
+    {
+        await using var rig = await Rig.StartAsync(f =>
+        {
+            f.Extensions.Clear();
+            f.AddFile(Home + "/target.txt", []);
+        });
+
+        await Assert.That(() => rig.Fs.File.CreateHardLink("link.txt", "target.txt")).Throws<NotSupportedException>();
+    }
+#endif
+
     [Test]
     public async Task UnsupportedFeatures_SayTheyAreNotSupported()
     {
@@ -315,6 +349,9 @@ public class SftpFileSystemTests
         await Assert.That(() => fs.File.Encrypt("f")).Throws<NotSupportedException>();
         await Assert.That(() => fs.File.Replace("f", "g", null)).Throws<NotSupportedException>();
         await Assert.That(() => fs.File.OpenHandle("f")).Throws<NotSupportedException>();
+#if NET11_0_OR_GREATER
+        await Assert.That(() => fs.File.OpenNullHandle()).Throws<NotSupportedException>();
+#endif
         await Assert.That(() => fs.RandomAccess.GetLength(null!)).Throws<NotSupportedException>();
         await Assert.That(() => fs.FileInfo.Wrap(new FileInfo("local"))).Throws<NotSupportedException>();
     }

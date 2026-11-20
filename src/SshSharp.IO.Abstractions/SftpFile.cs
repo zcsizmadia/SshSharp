@@ -329,6 +329,23 @@ internal sealed class SftpFile(SftpFileSystem fileSystem) : IFile
         return fileSystem.FileInfo.New(path);
     }
 
+#if NET11_0_OR_GREATER
+    // The server links by path, through hardlink@openssh.com; servers without that extension throw NotSupportedException.
+    public IFileSystemInfo CreateHardLink(string path, string pathToTarget)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(pathToTarget);
+        var full = fileSystem.Full(path);
+        var target = fileSystem.Full(pathToTarget);
+        if (fileSystem.Stat(target) is not { IsDirectory: false })
+        {
+            throw new FileNotFoundException($"Could not find file '{pathToTarget}'.", pathToTarget);
+        }
+
+        fileSystem.Run(full, true, (sftp, ct) => sftp.CreateHardLinkAsync(full, target, ct));
+        return fileSystem.FileInfo.New(path);
+    }
+#endif
+
     public IFileSystemInfo? ResolveLinkTarget(string linkPath, bool returnFinalTarget) => Links.Resolve(fileSystem, linkPath, returnFinalTarget, directory: false);
 
     // ---- attributes and times ----
@@ -387,6 +404,10 @@ internal sealed class SftpFile(SftpFileSystem fileSystem) : IFile
 
     public SafeFileHandle OpenHandle(string path, FileMode mode = FileMode.Open, FileAccess access = FileAccess.Read, FileShare share = FileShare.Read, FileOptions options = FileOptions.None, long preallocationSize = 0) =>
         throw Unsupported.Handles();
+
+#if NET11_0_OR_GREATER
+    public SafeFileHandle OpenNullHandle() => throw Unsupported.Handles();
+#endif
 
     public FileAttributes GetAttributes(SafeFileHandle fileHandle) => throw Unsupported.Handles();
 
