@@ -100,6 +100,8 @@ public sealed class KnownHostsVerifier : SshHostKeyVerifier
     /// <summary>The user's <c>~/.ssh/known_hosts</c> and <c>known_hosts2</c>, plus the system-wide files, as <c>ssh</c> uses by default.</summary>
     public static KnownHostsVerifier ForCurrentUser(StrictHostKeyChecking policy = StrictHostKeyChecking.Ask)
     {
+        // Stryker disable once String : a line with no directive SshSharp reads leaves every setting at its default, and these files do not
+        // depend on the host name
         var defaults = SshConfig.Parse(string.Empty).Resolve("localhost");
         return new KnownHostsVerifier(defaults.UserKnownHostsFiles, defaults.GlobalKnownHostsFiles) { Policy = policy };
     }
@@ -206,6 +208,7 @@ public sealed class KnownHostsVerifier : SshHostKeyVerifier
     /// is always looked up on port 22, so this adds nothing there (ssh does not apply it to an alias either).
     /// </summary>
     private static KnownHostsEntry? RevokedWithoutPort(KnownHostsFile file, string name, int port, Func<ReadOnlyMemory<byte>, bool> revokes) =>
+        // Stryker disable once Conditional : on port 22 the ordinary lookup has already read these lines; read again, they could only refuse more
         port == 22 ? null : file.Find(name, 22).FirstOrDefault(e => e.Marker == KnownHostsMarker.Revoked && revokes(e.PublicKey));
 
     /// <summary>
@@ -215,6 +218,7 @@ public sealed class KnownHostsVerifier : SshHostKeyVerifier
     private async ValueTask<KnownHostsEntry?> RevokedWithoutPortAsync(string name, int port, Func<ReadOnlyMemory<byte>, bool> revokes,
         CancellationToken cancellationToken)
     {
+        // Stryker disable once Block : RevokedWithoutPort finds nothing on port 22 either; this only saves reading the files
         if (port == 22)
         {
             return null;
@@ -314,6 +318,7 @@ public sealed class KnownHostsVerifier : SshHostKeyVerifier
             await KnownHostsFile.AppendAsync(_userFiles[0], name, port, keyType, blob, HashNewEntries, cancellationToken).ConfigureAwait(false);
         }
 
+        // Stryker disable once Equality : with nothing to remove, the file is read and nothing is removed, so nothing is written either
         if (removed.Count > 0)
         {
             var file = await KnownHostsFile.LoadAsync(_userFiles[0], cancellationToken).ConfigureAwait(false);
@@ -444,6 +449,7 @@ public sealed class KnownHostsVerifier : SshHostKeyVerifier
         {
             // As ssh, No lets the connection go on, but the key proves nothing about the server: the connection must not send it
             // anything a man in the middle could use (see SshHostKeyVerdict.IsUntrusted).
+            // Stryker disable once String : the message is for people
             return Policy == StrictHostKeyChecking.No
                 ? SshHostKeyVerdict.AcceptUntrusted()
                 : SshHostKeyVerdict.Reject(
@@ -458,6 +464,7 @@ public sealed class KnownHostsVerifier : SshHostKeyVerifier
                 return SshHostKeyVerdict.Reject($"The host key {key.Fingerprint} is not in known_hosts, and StrictHostKeyChecking is yes.");
 
             case StrictHostKeyChecking.AcceptNew when otherTypes.Count > 0:
+                // Stryker disable once String : the message is for people
                 return SshHostKeyVerdict.Reject(
                     $"The server presented a {key.KeyType} key ({key.Fingerprint}), but known_hosts has only {string.Join(", ", otherTypes)} keys "
                     + "for it. AcceptNew does not record a new key type for a known host.");
@@ -548,6 +555,7 @@ public sealed class KnownHostsVerifier : SshHostKeyVerifier
         FormatException => ex.Message.TrimEnd('.'),
         IOException { Message: RevokedKeyList.TooLargeMessage } => ex.Message.TrimEnd('.'),
         FileNotFoundException or DirectoryNotFoundException => "the file does not exist",
+        // Stryker disable once String : the message is for people, and a test cannot be denied access everywhere (root reads any file)
         UnauthorizedAccessException => "access to the file is denied",
         _ => ex.GetType().Name,
     };

@@ -611,6 +611,146 @@ public sealed class UpdateHostKeysTests : IDisposable
         await Assert.That(File.ReadAllText(KnownHosts)).IsEqualTo(original);
     }
 
+    // ---- the verifier's checks, called directly: which lines are stale, and why an update is skipped (the reason is logged) ----
+
+    private string SecondFile => Path.Combine(_dir, "known_hosts2");
+
+    private KnownHostsVerifier TwoFiles() => new([KnownHosts, SecondFile]) { UpdateHostKeys = true };
+
+    /// <summary>A key of a type this client does not use (DSA): it is never removed as stale, since the server could not announce it.</summary>
+    private static string UnsupportedLine(string hosts)
+    {
+        var buffer = new System.Buffers.ArrayBufferWriter<byte>();
+        var writer = new SshSharp.Protocol.SshWriter(buffer);
+        writer.WriteString("ssh-dss");
+        writer.WriteString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(16));
+        return $"{hosts} ssh-dss {Convert.ToBase64String(buffer.WrittenSpan)}\n";
+    }
+
+    [Test]
+    public async Task TheCheck_FindsTheStaleKeys_OfTheFirstUserFileOnly()
+    {
+        var current = FakeHostKey.Ed25519();
+        var retired = FakeHostKey.Ecdsa(256);
+        var retiredHashed = FakeHostKey.Ecdsa(384);
+        var inSecondFile = FakeHostKey.Ecdsa(521);
+        File.WriteAllText(KnownHosts,
+            Line(current)
+            + LineFor($"{Host},192.0.2.10", retired) // host and address, as ssh writes them: not a list to leave alone
+            + $"{KnownHostsEntry.HashHost(Host, 22)} {retiredHashed.KeyType} {Convert.ToBase64String(retiredHashed.Blob)}\n"
+            + UnsupportedLine(Host)
+            + LineFor("other.example.com", FakeHostKey.Ed25519())); // another host's key: neither stale nor a reason to skip
+        File.WriteAllText(SecondFile, Line(inSecondFile));
+
+        var (skip, stale) = await TwoFiles().CheckHostKeyUpdateAsync(Host, 22, current.Blob, [current.Blob], Timeout());
+
+        await Assert.That(skip).IsNull();
+        await Assert.That(stale.Count).IsEqualTo(2);
+        await Assert.That(stale.Any(k => k.SequenceEqual(retired.Blob))).IsTrue();
+        await Assert.That(stale.Any(k => k.SequenceEqual(retiredHashed.Blob))).IsTrue();
+    }
+
+    [Test]
+    public async Task TheCheck_NeedsTheConnectionsKey_AsAPlainLineInAUserFile()
+    {
+        var current = FakeHostKey.Ed25519();
+        var other = FakeHostKey.Ecdsa(256);
+
+        // In the second user file only: that is still a user file.
+        File.WriteAllText(KnownHosts, Line(other));
+        File.WriteAllText(SecondFile, Line(current));
+        await Assert.That((await TwoFiles().CheckHostKeyUpdateAsync(Host, 22, current.Blob, [current.Blob, other.Blob], Timeout())).Skip).IsNull();
+
+        // Another key recorded for the host does not stand for the connection's key.
+        File.WriteAllText(SecondFile, "");
+        var (skip, stale) = await TwoFiles().CheckHostKeyUpdateAsync(Host, 22, current.Blob, [current.Blob, other.Blob], Timeout());
+        await Assert.That(skip).IsEqualTo("the connection's host key is not in a user known_hosts file");
+        await Assert.That(stale).IsEmpty();
+
+        // Nor does a @revoked line for it.
+        File.WriteAllText(KnownHosts, LineFor($"@revoked {Host}", current));
+        await Assert.That((await TwoFiles().CheckHostKeyUpdateAsync(Host, 22, current.Blob, [current.Blob], Timeout())).Skip)
+            .IsEqualTo("the connection's host key is not in a user known_hosts file");
+    }
+
+    [Test]
+    public async Task TheCheck_SaysWhyItSkips()
+    {
+        var current = FakeHostKey.Ed25519();
+        var announced = FakeHostKey.Ecdsa(256);
+        var retired = FakeHostKey.Ecdsa(384);
+
+        async Task<string?> SkipAsync(string first, string second = "")
+        {
+            File.WriteAllText(KnownHosts, first);
+            File.WriteAllText(SecondFile, second);
+            var (skip, stale) = await TwoFiles().CheckHostKeyUpdateAsync(Host, 22, current.Blob, [current.Blob, announced.Blob], Timeout());
+            await Assert.That(stale).IsEmpty();
+            return skip;
+        }
+
+        // One of the announced keys (not the one in use) under another name.
+        await Assert.That(await SkipAsync(Line(current) + LineFor("alias.example.com", announced)))
+            .IsEqualTo("an announced key is also recorded under another name");
+        await Assert.That(await SkipAsync(Line(current) + LineFor($"@cert-authority {Host}", retired)))
+            .IsEqualTo("a @cert-authority or @revoked line applies to the host");
+        const string Complex = "a wildcard line, or a line naming more than a host and its address, applies to the host";
+        await Assert.That(await SkipAsync(Line(current) + LineFor("*.example.com", retired))).IsEqualTo(Complex);
+        await Assert.That(await SkipAsync(Line(current) + LineFor("rotating.example.co?", retired))).IsEqualTo(Complex);
+        await Assert.That(await SkipAsync(Line(current) + LineFor($"{Host},192.0.2.10,alias.example.com", retired))).IsEqualTo(Complex);
+
+        // The key to remove is also recorded under another name, in one user file of two.
+        await Assert.That(await SkipAsync(Line(current) + Line(retired) + LineFor("alias.example.com", retired)))
+            .IsEqualTo("a key to remove is also recorded under another name");
+    }
+
+    [Test]
+    public async Task TheUpdate_AddsAndRemoves_InTheFirstUserFile_AndOnlyRewritesItWhenSomethingIsRemoved()
+    {
+        var current = FakeHostKey.Ed25519();
+        var added = FakeHostKey.Ecdsa(256);
+        var retired = FakeHostKey.Ecdsa(384);
+        var retiredToo = FakeHostKey.Ecdsa(521);
+        File.WriteAllText(KnownHosts, Line(current) + Line(retired) + Line(retiredToo));
+
+        await TwoFiles().ApplyHostKeyUpdateAsync(Host, 22, [added.Blob], [retired.Blob, retiredToo.Blob], Timeout());
+        await Assert.That(File.ReadAllText(KnownHosts)).IsEqualTo(Line(current) + Line(added));
+        await Assert.That(File.Exists(SecondFile)).IsFalse();
+
+        // A removal that finds nothing leaves the file as it was, byte for byte (a rewrite would end the last line).
+        const string Unterminated = "# hand edited, no newline";
+        File.WriteAllText(KnownHosts, Unterminated);
+        await TwoFiles().ApplyHostKeyUpdateAsync(Host, 22, [], [retired.Blob], Timeout());
+        await Assert.That(File.ReadAllText(KnownHosts)).IsEqualTo(Unterminated);
+
+        // Without a user file there is nowhere to write.
+        await new KnownHostsVerifier([]).ApplyHostKeyUpdateAsync(Host, 22, [added.Blob], [retired.Blob], Timeout());
+    }
+
+    [Test]
+    public async Task KeysAlreadyKnown_InAnyFile_AreNotProvenAgain_NorAreKeysRevokedWithoutAPortInAnyFile()
+    {
+        var known = FakeHostKey.Ed25519();
+        var revoked = FakeHostKey.Ecdsa(256);
+        var unknown = FakeHostKey.Ecdsa(384);
+        var global = Path.Combine(_dir, "ssh_known_hosts");
+        File.WriteAllText(KnownHosts, LineFor($"[{Host}]:2222", known));
+        File.WriteAllText(global, LineFor($"@revoked {Host}", revoked));
+        var verifier = new KnownHostsVerifier([KnownHosts], [global]) { UpdateHostKeys = true };
+
+        var result = await verifier.UnknownHostKeysAsync(Host, 2222, [known.Blob, revoked.Blob, unknown.Blob], Timeout());
+
+        await Assert.That(result.Count).IsEqualTo(1);
+        await Assert.That(result[0].SequenceEqual(unknown.Blob)).IsTrue();
+    }
+
+    [Test]
+    public async Task ARevokedKeysFileThatCannotBeRead_LearnsNoKeys()
+    {
+        var verifier = new KnownHostsVerifier([KnownHosts]) { UpdateHostKeys = true, RevokedHostKeys = Path.Combine(_dir, "missing") };
+        await Assert.That(await verifier.UnknownHostKeysAsync(Host, 22, [FakeHostKey.Ed25519().Blob], Timeout())).IsEmpty();
+    }
+
     private static string Fingerprint(FakeHostKey key) =>
         "SHA256:" + Convert.ToBase64String(System.Security.Cryptography.SHA256.HashData(key.Blob)).TrimEnd('=');
 
