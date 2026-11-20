@@ -58,6 +58,7 @@ Features that SSH.NET users have asked for in its issue tracker, and that SshSha
 | RSA SHA-2 signatures with servers that announce them | `server-sig-algs` (RFC 8308) is used to pick `rsa-sha2-512` or `rsa-sha2-256` |
 | FIPS-approved algorithms only | `SshClientOptions.FipsMode`, including post-quantum key exchange on .NET 10 and later |
 | Cancellation everywhere | a `CancellationToken` on every network operation |
+| Open a channel type or send a global request that the server defines | `client.OpenChannelAsync(type, data)` returns an `SshCustomChannel` with a `Stream`; `client.SendGlobalRequestAsync(name, data)` (see [Vendor channels and global requests](how-to/custom-channels.md)) |
 
 ## Connecting
 

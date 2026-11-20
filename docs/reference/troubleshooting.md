@@ -350,6 +350,12 @@ The server decides what may be forwarded. How a refusal shows depends on the dir
 
 The server's log (`journalctl -u ssh`, `/var/log/auth.log`) says which rule refused it.
 
+### The log says "N more entries the server triggered ... were written at Debug level"
+
+More than 8 entries the server's side can trigger (refused or failed forwarded connections, unimplemented messages, refused agent
+requests) came within a minute on one connection, and the rest were written at `Debug`. This keeps a server from flooding your log.
+Set the minimum level to `Debug` to see each one. See [Logging](../diagnostics.md#logging).
+
 ### "Address already in use"
 
 Another process (or an earlier run) holds the local port. Use port 0 and read `LocalEndPoint.Port`.

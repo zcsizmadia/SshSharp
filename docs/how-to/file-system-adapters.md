@@ -119,8 +119,12 @@ on a connection you keep alive, such as the wrapper from [Keep-alive and reconne
 - **Errors after a drop.** With one `SftpClient`, a dropped connection is an `SshException` from the provider and an `IOException`
   from the file system, on every call. With a session factory, a failed open is reported the same way, with the factory's exception
   inside, and the next call tries again.
-- **Not supported** by `SftpFileSystem`: `DriveInfo`, `FileVersionInfo`, `RandomAccess`, encryption, `Replace`; SFTP has no creation
-  times. The [SFTP guide](../sftp.md#using-ifilesystem-systemioabstractions) has the full table.
+- **Hard links (.NET 11).** `File.CreateHardLink` and `FileInfo.CreateAsHardLink` work where the server offers
+  `hardlink@openssh.com` (OpenSSH does), and throw `NotSupportedException` where it does not. `SshSharp.IO.Abstractions` needs
+  TestableIO.System.IO.Abstractions 23 or later.
+- **Not supported** by `SftpFileSystem`: `DriveInfo`, `FileVersionInfo`, `RandomAccess`, `SafeFileHandle` overloads and
+  `File.OpenNullHandle`, encryption, `Replace`; SFTP has no creation times. The
+  [SFTP guide](../sftp.md#using-ifilesystem-systemioabstractions) has the full table.
 
 ## See also
 

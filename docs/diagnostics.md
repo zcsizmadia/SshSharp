@@ -75,8 +75,9 @@ warn: SshSharp[63]
       92 more entries the server triggered (refused or failed forwarded connections, unimplemented messages, refused agent requests) were written at Debug level: at most 8 a minute are written at their own level
 ```
 
-So a quiet Warning log does not mean nothing was refused: set the minimum level to Debug to see every entry. The minute runs on
-`SshClientOptions.TimeProvider`. See "Log volume" in [the threat model](threat-model.md#the-network-and-the-server).
+So a quiet Warning log does not mean nothing was refused: set the minimum level to Debug to see every entry. Each connection's
+minute starts with the first such entry, and closing the connection writes the summary it still owes. See "Log volume" in
+[the threat model](threat-model.md#the-network-and-the-server).
 
 ## Tracing and metrics
 

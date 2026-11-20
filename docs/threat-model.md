@@ -83,7 +83,11 @@ A man in the middle can read, change, drop and inject bytes. The server itself m
   The rest are written at Debug, and when the window ends one summary says how many were (event id 63, "N more entries the server
   triggered ... were written at Debug level"), at the highest level among them. The limit is shared by the connection, its
   remote forwardings and its forwarded agent, and runs on the connection's `TimeProvider`. Closing the connection writes the
-  summary it still owes.
+  summary it still owes. Because the entries share one budget, a server can spend it with cheap unimplemented messages and
+  lower a later entry that matters, such as a refused agent request with its key fingerprint, or a destination the forwarding
+  filter refused: that entry is still written, at Debug, and counted in the summary, but its details are then visible only at
+  Debug. An application that audits refused agent requests or forwardings keeps Debug for event ids 32 and 45, or does its own
+  logging in `ForwardAgentFilter` and `allowDestination`, which run for every request.
 - **Owed replies:** many server messages require an answer from the client: a global or channel request that wants a reply, a
   channel the server opens (confirmed or refused), a CLOSE, a message number the client does not implement
   (`SSH_MSG_UNIMPLEMENTED`), and a transport ping (`ping@openssh.com`, answered with a pong). The client queues these answers
@@ -120,7 +124,8 @@ A man in the middle can read, change, drop and inject bytes. The server itself m
     `ExitOnForwardFailure` the connection fails), and `SshClient`'s forwarding methods (local, remote, dynamic and Unix socket
     forwarding) throw `SshHostKeyException`. A man in the middle would otherwise receive the connections meant for the host, or
     open connections on this side. Tunnels (`OpenTcpTunnelAsync`, `OpenUnixSocketTunnelAsync`, as `ssh -W`, which ProxyJump uses)
-    still work: they listen nowhere and serve only this process;
+    still work: they listen nowhere and serve only this process. So do `OpenChannelAsync` and `SendGlobalRequestAsync`: what they
+    send is the application's choice, and channels the server opens are still checked against the client's own forwardings;
   - no host key updates (below).
 
   A warning with the new key's fingerprint (no host name) is logged once per connection. Each `ProxyJump` or `JumpHosts` hop is
@@ -151,7 +156,9 @@ A man in the middle can read, change, drop and inject bytes. The server itself m
   critical extension this library does not know, refuses every host key, as ssh does, rather than let a revoked key through. In a
   text key list, a malformed certificate line of a type SshSharp accepts (Ed25519, ECDSA, RSA, FIDO) does the same; a certificate
   line of a type it never accepts (DSA, or one it does not know) is skipped, as OpenSSH skips it, since no key it could name is ever
-  accepted. The KRL parser is bounded (16 MiB files, 1 MiB per serial bitmap) and fuzzed. KRL signatures are not verified: the file
+  accepted. A certificate line is not held to the 1.3 certificate rules (at most 256 principals, options and extensions in order):
+  only the key it certifies is read, and that key is revoked whatever the certificate's principals and options. The KRL parser is
+  bounded (16 MiB files, 1 MiB per serial bitmap) and fuzzed. KRL signatures are not verified: the file
   is local configuration, trusted like `known_hosts`. Refusals name the directive (`RevokedHostKeys`), not the file's path.
 - **Host certificates (`@cert-authority`):** a certificate is trusted only when an `@cert-authority` line for the host lists its
   authority and it is valid now, for the name connected to (or `HostKeyAlias`), with a valid signature, made with an algorithm
