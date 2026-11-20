@@ -13,6 +13,33 @@ updates:
       dotnet-runtime:
         patterns: ["Microsoft.Extensions.*", "System.IO.Pipelines"]
         exclude-patterns: ["Microsoft.Extensions.TimeProvider.Testing"]
+    # Servicing updates only for dotnet/runtime's packages. A new major drops the older targets (11.0.0 supports net10.0 and later), so
+    # it would break net8.0, which the libraries keep supporting on their framework's own versions. Moving to a new major is a
+    # deliberate change, with per-target versions like the net8.0 overrides in the library projects. Listed by name, because a pattern
+    # would also catch Microsoft.Extensions.TimeProvider.Testing, which has its own versions and still supports net8.0.
+    ignore:
+      - dependency-name: "System.IO.Pipelines"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "Microsoft.Extensions.Configuration.Json"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "Microsoft.Extensions.DependencyInjection"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "Microsoft.Extensions.DependencyInjection.Abstractions"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "Microsoft.Extensions.Diagnostics.HealthChecks"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "Microsoft.Extensions.FileProviders.Abstractions"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "Microsoft.Extensions.Hosting"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "Microsoft.Extensions.Http"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "Microsoft.Extensions.Logging.Abstractions"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "Microsoft.Extensions.Options"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "Microsoft.Extensions.Options.ConfigurationExtensions"
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: github-actions
     # The workflows, and the composite action they share.
     directories: ["/", "/.github/actions/*"]
