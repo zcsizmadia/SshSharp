@@ -34,6 +34,12 @@ public sealed class SshCertificate
     /// <summary>The smallest RSA authority key whose signature is accepted, as for every other RSA key the library checks by default.</summary>
     private const int MinimumAuthorityRsaBits = SshClientOptions.DefaultMinimumRsaBits;
 
+    /// <summary>
+    /// The most principals a certificate may list: OpenSSH's <c>SSHKEY_CERT_MAX_PRINCIPALS</c>, which draft-ietf-sshm-cert adopts. A
+    /// certificate with more is refused when it is read, and <see cref="SshCertificateBuilder"/> does not issue one.
+    /// </summary>
+    internal const int MaxPrincipals = 256;
+
     private SshCertificate(string certificateType, byte[] blob, VerifyingKey key, byte[] publicKeyBlob, ulong serial, SshCertificateType type,
         string keyId, IReadOnlyList<string> principals, ulong validAfter, ulong validBefore, IReadOnlyDictionary<string, string> criticalOptions,
         IReadOnlyDictionary<string, string> extensions, byte[] authorityKey, byte[] signedData, byte[] signature, string? comment)
@@ -84,7 +90,7 @@ public sealed class SshCertificate
     /// <summary>
     /// The user or host names the certificate is valid for. An empty list is refused by <see cref="IsValidFor"/>, by sshd for
     /// <c>TrustedUserCAKeys</c> and by ssh for host certificates; only an <c>authorized_keys</c> <c>cert-authority</c> line without
-    /// <c>principals=</c> takes it as any user.
+    /// <c>principals=</c> takes it as any user. A certificate lists at most 256, as OpenSSH allows; one with more is refused when it is read.
     /// </summary>
     public IReadOnlyList<string> Principals { get; }
 
@@ -291,7 +297,10 @@ public sealed class SshCertificate
         return plain;
     }
 
-    /// <summary>Parses a certificate blob (wire format). Throws <see cref="SshProtocolException"/> when it is malformed.</summary>
+    /// <summary>
+    /// Parses a certificate blob (wire format). Throws <see cref="SshProtocolException"/> when it is malformed, which includes more than
+    /// <see cref="MaxPrincipals"/> principals, and critical options or extensions out of lexical order or listed twice (draft-ietf-sshm-cert).
+    /// </summary>
     internal static SshCertificate FromBlob(ReadOnlySpan<byte> blob, string? comment = null)
     {
         var reader = new SshReader(blob);
@@ -345,7 +354,7 @@ public sealed class SshCertificate
             var other => throw new SshProtocolException($"Unknown certificate type {other}."),
         };
         var keyId = reader.ReadUtf8String();
-        var principals = ReadStrings(reader.ReadString());
+        var principals = ReadPrincipals(reader.ReadString());
         var validAfter = reader.ReadUInt64();
         var validBefore = reader.ReadUInt64();
         var criticalOptions = ReadOptions(reader.ReadString());
@@ -531,32 +540,53 @@ public sealed class SshCertificate
     private static DateTimeOffset ToTime(ulong seconds) =>
         seconds >= (ulong)DateTimeOffset.MaxValue.ToUnixTimeSeconds() ? DateTimeOffset.MaxValue : DateTimeOffset.FromUnixTimeSeconds((long)seconds);
 
-    private static List<string> ReadStrings(ReadOnlySpan<byte> packed)
+    /// <summary>The principals, at most <see cref="MaxPrincipals"/>: like OpenSSH, reading stops at the first one too many.</summary>
+    private static List<string> ReadPrincipals(ReadOnlySpan<byte> packed)
     {
         var reader = new SshReader(packed);
         var values = new List<string>();
         while (!reader.IsEmpty)
         {
+            if (values.Count == MaxPrincipals)
+            {
+                throw new SshProtocolException($"The certificate lists more than {MaxPrincipals} principals.");
+            }
+
             values.Add(reader.ReadUtf8String());
         }
 
         return values;
     }
 
-    /// <summary>Options and extensions: name, then a string holding the value (itself a string, or empty).</summary>
+    /// <summary>
+    /// Options and extensions: name, then a string holding the value (itself a string, or empty). The names must be in strictly increasing
+    /// lexical order (PROTOCOL.certkeys, draft-ietf-sshm-cert), compared as bytes, the order ssh-keygen writes them in. That also refuses
+    /// a name listed twice: two entries for one name would leave which one applies to whoever reads the certificate.
+    /// </summary>
     private static Dictionary<string, string> ReadOptions(ReadOnlySpan<byte> packed)
     {
         var reader = new SshReader(packed);
         var values = new Dictionary<string, string>(StringComparer.Ordinal);
+        byte[]? previous = null;
         while (!reader.IsEmpty)
         {
+            var nameBytes = new SshReader(reader.Remaining).ReadString();
             var name = reader.ReadUtf8String();
+            if (previous is not null)
+            {
+                var order = nameBytes.SequenceCompareTo(previous);
+                if (order <= 0)
+                {
+                    throw new SshProtocolException(order == 0
+                        ? $"The certificate option '{name}' appears twice."
+                        : $"The certificate option '{name}' is out of order: options and extensions must be sorted by name.");
+                }
+            }
+
             var data = reader.ReadString();
             var value = data.IsEmpty ? string.Empty : Encoding.UTF8.GetString(new SshReader(data).ReadString());
-            if (!values.TryAdd(name, value))
-            {
-                throw new SshProtocolException($"The certificate option '{name}' appears twice.");
-            }
+            values.Add(name, value);
+            previous = nameBytes.ToArray();
         }
 
         return values;

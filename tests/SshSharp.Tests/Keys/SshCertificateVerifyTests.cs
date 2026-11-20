@@ -223,6 +223,66 @@ public sealed class SshCertificateVerifyTests
         var blob = TestKeys.Certificate(ca, subject.PublicKey.ToArray(), SshCertificateType.User, ["deploy"],
             criticalOptions: [("force-command", "a"), ("force-command", "b")]);
         await Assert.That(() => SshCertificate.FromBlob(blob)).Throws<SshProtocolException>().WithMessageContaining("'force-command' appears twice");
+
+        blob = TestKeys.Certificate(ca, subject.PublicKey.ToArray(), SshCertificateType.User, ["deploy"], extensions: ["permit-pty", "permit-pty"]);
+        await Assert.That(() => SshCertificate.FromBlob(blob)).Throws<SshProtocolException>().WithMessageContaining("'permit-pty' appears twice");
+        await Assert.That(() => SshCertificate.Parse(TestKeys.CertificateLine(blob))).Throws<FormatException>()
+            .WithMessageContaining("'permit-pty' appears twice");
+    }
+
+    [Test]
+    public async Task AtMost256Principals_AreRead()
+    {
+        // OpenSSH's SSHKEY_CERT_MAX_PRINCIPALS (draft-ietf-sshm-cert): 256 is the last count accepted.
+        using var ca = SshPrivateKey.Generate(SshKeyType.Ed25519);
+        using var subject = SshPrivateKey.Generate(SshKeyType.Ed25519);
+        var names = Enumerable.Range(0, 257).Select(i => $"user{i}").ToArray();
+
+        var accepted = TestKeys.Certificate(ca, subject.PublicKey.ToArray(), SshCertificateType.User, names[..256]);
+        await Assert.That(SshCertificate.FromBlob(accepted).Principals.Count).IsEqualTo(256);
+        await Assert.That(SshCertificate.Parse(TestKeys.CertificateLine(accepted)).Principals.Count).IsEqualTo(256);
+
+        var refused = TestKeys.Certificate(ca, subject.PublicKey.ToArray(), SshCertificateType.User, names);
+        await Assert.That(() => SshCertificate.FromBlob(refused)).Throws<SshProtocolException>().WithMessageContaining("more than 256 principals");
+        await Assert.That(() => SshCertificate.Parse(TestKeys.CertificateLine(refused))).Throws<FormatException>()
+            .WithMessageContaining("more than 256 principals");
+    }
+
+    [Test]
+    [Arguments(true)]
+    [Arguments(false)]
+    public async Task OptionsAndExtensionsOutOfOrder_AreMalformed(bool criticalOptions)
+    {
+        // Names in strictly increasing byte order (PROTOCOL.certkeys, draft-ietf-sshm-cert), as ssh-keygen and SshCertificateBuilder write them.
+        using var ca = SshPrivateKey.Generate(SshKeyType.Ed25519);
+        using var subject = SshPrivateKey.Generate(SshKeyType.Ed25519);
+        byte[] Make(params string[] names) => criticalOptions
+            ? TestKeys.Certificate(ca, subject.PublicKey.ToArray(), SshCertificateType.User, ["deploy"],
+                criticalOptions: [.. names.Select(n => (n, "x"))], extensions: [])
+            : TestKeys.Certificate(ca, subject.PublicKey.ToArray(), SshCertificateType.User, ["deploy"], extensions: names);
+
+        // In order: read. Byte order puts upper case before lower case ("permit-X11-forwarding" before "permit-agent-forwarding"), and
+        // a name before every longer name it begins ("a@example.com" before "a@example.com2"), and the empty name sorts first. Bytes, not
+        // UTF-16: U+FF61 comes before U+1F600 in UTF-8, after it (a surrogate pair) in UTF-16.
+        string[] sorted = ["", "a@example.com", "a@example.com2", "a｡@example.com", "a\U0001F600@example.com", "permit-X11-forwarding",
+            "permit-agent-forwarding", "z@example.com"];
+        var certificate = SshCertificate.FromBlob(Make(sorted));
+        await Assert.That(criticalOptions ? certificate.CriticalOptions.Keys : certificate.Extensions).IsEquivalentTo(sorted);
+
+        foreach (var outOfOrder in new[]
+        {
+            new[] { "permit-pty", "permit-agent-forwarding" },
+            ["permit-agent-forwarding", "permit-X11-forwarding"],
+            ["a@example.com2", "a@example.com"],
+            ["a@example.com", "z@example.com", "b@example.com"],
+        })
+        {
+            var blob = Make(outOfOrder);
+            await Assert.That(() => SshCertificate.FromBlob(blob)).Throws<SshProtocolException>()
+                .WithMessageContaining($"'{outOfOrder[^1]}' is out of order");
+            await Assert.That(() => SshCertificate.Parse(TestKeys.CertificateLine(blob))).Throws<FormatException>()
+                .WithMessageContaining("is out of order");
+        }
     }
 
     [Test]

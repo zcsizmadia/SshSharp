@@ -122,7 +122,9 @@ flowchart TD
 So a host whose plain key is also in `known_hosts` keeps connecting when its certificate expires. Without that line, the key is
 an unknown key: `Yes` refuses it, and the refusal says why the certificate could not be used; `AcceptNew` and `No` record it, and
 `Ask` offers it to `AskHostKey`, as `ssh` does. What is recorded is the plain key, never the certificate. A revoked key or
-authority (`@revoked`, `RevokedHostKeys`) is refused with no fallback. To accept only certificates, use `StrictHostKeyChecking.Yes`
+authority (`@revoked`, `RevokedHostKeys`) is refused with no fallback, and so is a certificate that is malformed, which the
+connection fails on before any of this ([Certificates that are not read](how-to/certificates.md#certificates-that-are-not-read):
+more than 256 principals, or options and extensions out of order, for example). To accept only certificates, use `StrictHostKeyChecking.Yes`
 and keep plain lines for the host out of `known_hosts`, or [write a verifier](how-to/verify-host-keys.md#write-a-verifier).
 
 ### Revoked host keys

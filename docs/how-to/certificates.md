@@ -71,6 +71,22 @@ What they mean, as OpenSSH has it:
 
 `IsValidFor` does not check revocation; see [Check revocation](#check-revocation).
 
+### Certificates that are not read
+
+Before any of these checks, a certificate must be well formed, and `SshCertificate.Parse` throws `FormatException` for one that is
+not. Besides a truncated or padded certificate, that includes these rules from [draft-ietf-sshm-cert](https://datatracker.ietf.org/doc/draft-ietf-sshm-cert/):
+
+- **At most 256 principals.** This is OpenSSH's limit (`SSHKEY_CERT_MAX_PRINCIPALS`): 256 are read, 257 are not.
+- **Critical options and extensions sorted by name, each once.** The names must be in strictly increasing byte order, the order
+  `ssh-keygen` and `SshCertificateBuilder` write them in (so `permit-X11-forwarding` comes before `permit-agent-forwarding`). A name
+  out of order or listed twice makes the certificate malformed: two entries for one name would leave open which one applies.
+
+The same rules apply wherever SshSharp reads a certificate: a server's host certificate during the key exchange (the connection
+fails with `SshHostKeyException`, even when its authority is trusted), a `CertificateFile` or `-cert.pub` found from `ssh_config`
+(skipped, and logged as an unreadable identity is), and a certificate an agent lists (not offered). A revocation list is the
+exception: a certificate line there revokes the key it certifies whatever its principals and options, since refusing to read it
+would leave that key accepted.
+
 ### Read extension values
 
 `Extensions` lists the extensions' names; `ExtensionValues` has their values too. The standard ones (`permit-pty` and the rest) have
@@ -138,7 +154,7 @@ What the builder does for you:
   `permit-port-forwarding`, `permit-pty` and `permit-user-rc`. `Extensions.Remove(...)` takes one away, `Extensions.Clear()` all of
   them (as `ssh-keygen -O clear`). A host certificate starts with none.
 - **Critical options.** `ForceCommand` and `SourceAddress` take a value; `VerifyRequired` takes none. Host certificates have none.
-- **Checks.** At least one principal; option and extension names that are standard or a vendor's own (`name@example.com`); a
+- **Checks.** At least one principal and at most 256 (OpenSSH refuses a certificate with more: issue several); option and extension names that are standard or a vendor's own (`name@example.com`); a
   `source-address` list of addresses or CIDR blocks; a validity window that is not empty. A mistake throws `InvalidOperationException`
   before anything is signed.
 - **Encoding.** As `PROTOCOL.certkeys` has it, for Ed25519, ECDSA and RSA keys: a 32-byte random nonce, options and extensions

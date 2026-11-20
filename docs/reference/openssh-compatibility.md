@@ -19,6 +19,8 @@ directive by directive, see [ssh_config directives](ssh-config.md).
 | A certificate from a trusted authority that cannot be used falls back to the plain key | Same (1.2) | Logged as a warning; [Host certificates that cannot be used](../host-keys.md#host-certificates-that-cannot-be-used) |
 | `@revoked` lines; one without a port applies on every port | Same (1.2) | As OpenSSH master, in its next release ([d62150ded3](https://github.com/openssh/openssh-portable/commit/d62150ded3)); [Revoked host keys](../host-keys.md#revoked-host-keys) |
 | `RequiredRsaSize` also applies to a host certificate's RSA authority | Same (1.2) | As OpenSSH master, in its next release ([409167b833](https://github.com/openssh/openssh-portable/commit/409167b833)) |
+| A certificate with more than 256 principals is malformed (`SSHKEY_CERT_MAX_PRINCIPALS`) | Same (1.3) | Host, user and agent certificates; `SshCertificateBuilder` issues at most 256 ([Certificates that are not read](../how-to/certificates.md#certificates-that-are-not-read)) |
+| Critical options and extensions out of lexical order, or listed twice | Differs (1.3) | Refused as malformed, as draft-ietf-sshm-cert requires; OpenSSH writes them sorted but does not check the order when it reads them |
 | A changed key accepted under `StrictHostKeyChecking no` gets no password, agent or port forwarding | Same (1.2) | [A changed key under `No`](../how-to/verify-host-keys.md#a-changed-key-under-no) |
 | `UpdateHostKeys` (`hostkeys-00@openssh.com`, `hostkeys-prove-00@openssh.com`), and the cases where it leaves `known_hosts` alone | Same | The cases follow OpenSSH 9.2p1 (1.2); a second announcement fails the connection |
 | `RevokedHostKeys` (KRLs and key lists), `KnownHostsCommand` | Same | |

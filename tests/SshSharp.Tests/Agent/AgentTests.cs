@@ -162,6 +162,23 @@ public sealed class AgentTests : IDisposable
     }
 
     [Test]
+    public async Task AMalformedCertificateInTheAgent_IsNotOffered()
+    {
+        // Out of order or too many principals (draft-ietf-sshm-cert): the certificate is not read, so it is left out of the agent's keys,
+        // as a certificate type SshSharp does not read is.
+        using var authority = SshPrivateKey.Parse(TestKeys.OpenSshEd25519(out _));
+        TestKeys.OpenSshEd25519(out var blob);
+        await using var agent = new FakeAgent();
+        agent.RawIdentities.Add(TestKeys.Certificate(authority, blob, SshCertificateType.User, ["tester"], extensions: ["permit-pty", "permit-agent-forwarding"]));
+        agent.RawIdentities.Add(TestKeys.Certificate(authority, blob, SshCertificateType.User, [.. Enumerable.Range(0, 257).Select(i => $"user{i}")]));
+        agent.RawIdentities.Add(TestKeys.Certificate(authority, blob, SshCertificateType.User, ["tester"], extensions: ["permit-agent-forwarding", "permit-pty"]));
+
+        var keys = await new SshAgent(agent.Path).GetKeysAsync(Timeout());
+        await Assert.That(keys.Count).IsEqualTo(1);
+        await Assert.That(keys[0].Certificate!.Extensions).IsEquivalentTo(new[] { "permit-agent-forwarding", "permit-pty" });
+    }
+
+    [Test]
     public async Task ACertificateInTheAgent_OrAFileCertificateForAnAgentKey_Authenticates()
     {
         using var authority = SshPrivateKey.Parse(TestKeys.OpenSshEd25519(out _));
