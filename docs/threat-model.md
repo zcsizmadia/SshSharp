@@ -1,7 +1,7 @@
 # Threat model
 
 SshSharp is an SSH **client** library. This page lists who and what it trusts, and what it does about the rest.
-It is reviewed before each release; the last review covered everything up to 1.1.0. Up to 1.0.0 that included SFTP and its
+It is reviewed before each release; the last review covered everything up to 1.3.0. Up to 1.0.0 that included SFTP and its
 adapters, proxies, remote dynamic and Unix-socket forwarding, destination-constrained agent keys, SSH signatures, sntrup761,
 Kerberos (`gssapi-with-mic`), adding keys to the agent and Pageant, revoked host keys (KRLs), `ping@openssh.com`, channel idle
 timeouts (`ChannelTimeout`), segmented SFTP downloads, keys held elsewhere (`SshKeySigner`), SFTP `Preserve` with permissions,
@@ -9,7 +9,18 @@ and the dependency injection package (`SshSharp.Extensions.DependencyInjection`)
 exchange, the in-process agent (`SshAgent.FromKeys`) and the forwarded agent's filter, jump hosts (`JumpHosts`, and their
 credentials), custom proxies, SOCKS 5 authentication on the local SOCKS proxy, issuing certificates (`SshCertificateBuilder`),
 the public KRL reader (`SshKeyRevocationList`), the built-in DNS canonicalizer, segmented SFTP uploads, recursive SFTP listings
-and deletes, and local Unix-socket forwarding. Compression is not part of it; it is reviewed with its own change.
+and deletes, and local Unix-socket forwarding. Compression is not part of it; it is reviewed with its own change. The 1.2.0
+review added: the .NET 11 target (the platform's X25519, and commands that inherit only their standard streams and get `SIGTERM`
+first), encrypted traditional PEM and chacha20-poly1305 OpenSSH private keys, traces and metrics, SFTP's `TimeTolerance`,
+`IgnoreCase` and `SkipUnreadableDirectories`, `Match canonical` and the second configuration pass, the cases in which
+`UpdateHostKeys` leaves `known_hosts` alone, `CASignatureAlgorithms`, `RequiredRsaSize` for a host certificate's authority, the
+plain-key fallback for an unusable host certificate, `@revoked` lines without a port, the untrusted connection after a changed
+key under `StrictHostKeyChecking no`, cleaned server text, the owed-reply budget, agent channels under `MaxForwardedConnections`,
+one host key announcement per connection, `Preserve` uploads that do not follow links, `%C` and `%j`, the 64 MiB window step,
+`StaggeredConnectDelay`, and killing a command's process tree. The 1.3.0 review added: channels and global requests the
+application opens (`OpenChannelAsync`, `SendGlobalRequestAsync`), how SCP writes remote paths on the server's command line
+(`SshScpOptions.PathQuoting`), the per-connection limit on log entries a server can trigger, the 256-principal limit and option
+order of certificates, and hard links through the `SshSharp.IO.Abstractions` adapter.
 
 ## Trusted
 
@@ -65,11 +76,17 @@ A man in the middle can read, change, drop and inject bytes. The server itself m
   no small-order Ed25519 keys, an RSA exponent ≥ 3, and an RSA modulus of at most 16384 bits (OpenSSH's limit), so a server or a
   file cannot make each verification cost what a 64000-bit key would. Public keys the application reads itself (`SshPublicKey.Parse` and
   `FromBlob`: `.pub` and `authorized_keys` lines, key blobs) get the same checks, are bounded to 8 KiB, and are refused with
-  `FormatException`; a line with `authorized_keys` options is refused rather than read without its restrictions.
+  `FormatException`; a line with `authorized_keys` options is refused rather than read without its restrictions. Private key
+  files are bounded too: an RSA key over 16384 bits is refused before it is built, and an OpenSSH key may ask for at most 65,536
+  bcrypt rounds, so a hostile file can cost minutes of CPU only when a passphrase is given. Traditional encrypted PEM keys
+  (AES-CBC, OpenSSL's `EVP_BytesToKey` with MD5 and one iteration) are read but never written: their weak key derivation makes a
+  stolen file cheap to brute-force, so convert them with `ssh-keygen -p`.
 - **What the client says before encryption:** the identification line (`SSH-2.0-SshSharp_x.y.z`) is sent in the clear, as every
   SSH client's is, so anyone on the path learns the library and its version. `SshClientOptions.VersionAddendum` adds the
   application's own comment to it, equally in the clear and kept in server logs; nothing else is added, and the documentation
   warns against putting secrets or personal data there.
+- **Staggered connect:** with `StaggeredConnectDelay`, several TCP connections to the server's addresses may be open at once
+  (`ConfigureSocket` is called for each). Only the first to connect carries SSH; the others are closed before anything is sent.
 - **Resource exhaustion:** packets are limited to 256 KiB, channel data to the advertised window (`ChannelWindowSize`, 2 MiB by
   default and at most 1 GiB, which is also the most unread data one channel can buffer) and maximum packet size,
   command output to `MaxCommandOutputBytes`, and banners, identification lines and `EXT_INFO` entries are bounded.
@@ -98,7 +115,8 @@ A man in the middle can read, change, drop and inject bytes. The server itself m
   connection stays up), and any other message that requires an answer fails the connection with `SshProtocolException`
   (`ProtocolError`): "The server is not reading the replies it asked for". A server that reads never comes near it: the budget
   bounds the answers waiting, not the answers over the connection's life. The client's own messages (data, its own requests,
-  and window adjustments, which follow only data the application has read) are not counted.
+  and window adjustments, which follow only data the application has read or the client has discarded for a reader that is
+  gone, at most one per half window, 64 MiB at most) are not counted.
 - **Keys and nonces:** keys are renewed after 1 GiB (configurable, capped at 64 GiB), 2^31 packets or one hour, so sequence
   numbers (the ChaCha20-Poly1305 nonce) never wrap under one key.
 - **Post-quantum key exchange:** `mlkem768x25519-sha256` and the FIPS-compatible `mlkem768nistp256-sha256` and
@@ -138,11 +156,13 @@ A man in the middle can read, change, drop and inject bytes. The server itself m
   `StrictHostKeyChecking no` (which proves nothing, and must not get the real keys removed as stale), and not a key `AcceptNew`
   recorded on this connection (trusted on first use, which must not also teach or remove other keys). Like `ssh`, the update is
   cancelled whenever a line for the host is a wildcard, names more than `host,address`, or is `@cert-authority` or `@revoked`, and
-  whenever a key it would keep or remove is also recorded under another name. Only plain host lines in the first user file are
+  whenever a key the server announces, or one the update would remove, is also recorded under another name. Only plain host lines
+  in the first user file are
   ever changed. A server announces its keys (`hostkeys-00@openssh.com`) once per connection, so the client acts on the first
   announcement only, and a second one fails the connection with a protocol error, as in OpenSSH: a server cannot start update
   after update, each racing the others on `known_hosts`. As in OpenSSH, a client that does not update (`UpdateHostKeys` off, a
-  certificate host key) ignores every announcement, repeats included.
+  certificate host key, a key `AcceptNew` recorded on this connection) ignores every announcement, repeats included. A connection
+  whose changed key `StrictHostKeyChecking no` let through still fails on a second announcement.
 - **Recording host keys:** the host name is written into `known_hosts` only if it is a literal name. White space, control
   characters, commas, `*`, `?` and `!` are refused, since they would add lines or hosts, or turn the entry into a pattern that
   trusts the key for other hosts, and so is a leading `@` or `#`. Every line the library writes for the application
@@ -524,8 +544,9 @@ connection, but not read or change it: each host's key is verified end to end, b
   forwarded agent request's user name are the server's, and an application that shows them should treat them as such.
 - Log values that carry an exception (an agent failure, say) are formatted to a sanitized reason and expose no public property
   holding the exception, so a structured log sink that records properties cannot record the agent's path from it either.
-- Traces and metrics carry no user name, host name, file or directory path, forwarding address, port or socket path, SOCKS
-  destination, or dependency injection endpoint name. SFTP and SCP transfer spans carry byte and file counts, forwarding instruments only the
+- Traces and metrics carry no user name, host name, file or directory path, a forwarding's address, port or socket path, SOCKS
+  destination, or dependency injection endpoint name. The connect span records the server's TCP port (`server.port`), never its
+  address. SFTP and SCP transfer spans carry byte and file counts, forwarding instruments only the
   kind of forwarding, and the authentication span the method that succeeded and the number of requests, never which key was
   offered.
 - `SshAuthenticationException` (its message and `Attempts`) names methods, outcomes and the SHA-256 fingerprints of the keys
@@ -564,14 +585,16 @@ connection, but not read or change it: each host's key is verified end to end, b
   token values cannot inject commands; the run is limited to 30 seconds and 1 MiB of output. On Windows a batch file (`.bat`,
   `.cmd`) is refused, because Windows runs it through `cmd.exe`, which would reparse the arguments.
 - When the library stops one of these commands (`Match exec` cancelled or past its 30 seconds, `KnownHostsCommand` past its limit,
-  a `ProxyCommand` when its connection closes), it kills the command and every process it started. These processes run in the
-  application's own process group. Each gets `SIGKILL` alone, never `SIGSTOP` first: .NET's own tree kill stops each process
+  a `ProxyCommand` when its connection closes), it kills the command and every process it started. On Linux and macOS these
+  processes run in the application's own process group, and each gets `SIGKILL` alone, never `SIGSTOP` first: .NET's own tree kill stops each process
   before killing it, and a background child left stopped when its shell died made macOS send `SIGHUP` to that group, which
   terminates the application (#432). A process forked as its parent is killed is no longer in the tree (macOS completes the
   fork), so each command also runs with `SSHSHARP_PROCESS_TREE` set to a random value of its own, which everything it starts
   inherits: after the tree, every live process carrying that value is killed too, until none is left, each parent before its
   children, so that a shell cannot run its next command between its child's death and its own. Only processes of the
-  application's own user are found. A process that drops the variable from its environment and leaves the tree can escape.
+  application's own user are found. A process that drops the variable from its environment and leaves the tree can escape. On
+  Windows the command's process tree is ended as .NET ends it, which stops nothing first; there is no `SSHSHARP_PROCESS_TREE` mark
+  and no sweep there, so a process that has already left the tree survives.
 - On .NET 11, these commands inherit only their standard streams, not the other handles the application has open (sockets,
   files, the agent's pipe). Outside Windows, a command being stopped first gets `SIGTERM` and half a second to exit, so it can
   close its connection; then it and every process it started are killed as above. If it exits in time, the processes it left
