@@ -44,8 +44,9 @@ internal static partial class SshLog
     [LoggerMessage(EventId = 13, Level = LogLevel.Debug, Message = "Command on channel {Id} finished with exit status {ExitStatus} and signal {ExitSignal}")]
     public static partial void CommandFinished(ILogger logger, uint id, int? exitStatus, string? exitSignal);
 
-    [LoggerMessage(EventId = 14, Level = LogLevel.Warning, Message = "Received message {Type}, which this client does not implement")]
-    public static partial void UnimplementedMessage(ILogger logger, byte type);
+    // Warning, or Debug past PeerLogLimiter's burst: the server can send any number of them.
+    [LoggerMessage(EventId = 14, Message = "Received message {Type}, which this client does not implement")]
+    public static partial void UnimplementedMessage(ILogger logger, LogLevel level, byte type);
 
     [LoggerMessage(EventId = 15, Level = LogLevel.Error, Message = "The connection failed")]
     public static partial void ConnectionFailed(ILogger logger, Exception exception);
@@ -98,8 +99,9 @@ internal static partial class SshLog
     [LoggerMessage(EventId = 27, Level = LogLevel.Information, Message = "The server forwards its port {RemotePort} to local port {LocalPort}")]
     public static partial void RemoteForwardingStarted(ILogger logger, int remotePort, int localPort);
 
-    [LoggerMessage(EventId = 28, Level = LogLevel.Warning, Message = "A connection forwarded to local port {LocalPort} could not be made: {Reason}")]
-    public static partial void RemoteForwardingConnectFailed(ILogger logger, int localPort, string reason);
+    // Warning, or Debug past PeerLogLimiter's burst: whoever connects to the forwarded port decides how often.
+    [LoggerMessage(EventId = 28, Message = "A connection forwarded to local port {LocalPort} could not be made: {Reason}")]
+    public static partial void RemoteForwardingConnectFailed(ILogger logger, LogLevel level, int localPort, string reason);
 
     [LoggerMessage(EventId = 29, Level = LogLevel.Warning, Message = "{Keyword} number {Index} for this host was skipped: {Reason}")]
     public static partial void ConfiguredForwardingSkipped(ILogger logger, string keyword, int index, string reason);
@@ -122,8 +124,9 @@ internal static partial class SshLog
     [LoggerMessage(EventId = 41, Level = LogLevel.Information, Message = "Channel {Id} ({Type}) carried no data for {Seconds} s and was closed (ChannelTimeout)")]
     public static partial void ChannelTimedOut(ILogger logger, uint id, string type, int seconds);
 
-    [LoggerMessage(EventId = 32, Level = LogLevel.Warning, Message = "A connection through remote dynamic forwarding on port {RemotePort} was not made: {Reason}")]
-    public static partial void RemoteDynamicConnectFailed(ILogger logger, int remotePort, string reason);
+    // Warning, or Debug past PeerLogLimiter's burst, as for EventId 28.
+    [LoggerMessage(EventId = 32, Message = "A connection through remote dynamic forwarding on port {RemotePort} was not made: {Reason}")]
+    public static partial void RemoteDynamicConnectFailed(ILogger logger, LogLevel level, int remotePort, string reason);
 
     [LoggerMessage(EventId = 42, Level = LogLevel.Information, Message = "The server forwards its port {RemotePort} to a handler in this process")]
     public static partial void RemoteHandlerForwardingStarted(ILogger logger, int remotePort);
@@ -135,8 +138,9 @@ internal static partial class SshLog
     [LoggerMessage(EventId = 44, Level = LogLevel.Warning, Message = "The handler for a connection forwarded from remote port {RemotePort} (0 for a Unix socket) failed with {ExceptionType}; that connection was closed")]
     public static partial void RemoteForwardingHandlerFailed(ILogger logger, int remotePort, string exceptionType);
 
-    [LoggerMessage(EventId = 45, Level = LogLevel.Information, Message = "A forwarded agent request ({Operation}) for key {Fingerprint} was refused by ForwardAgentFilter")]
-    public static partial void ForwardedAgentRequestRefused(ILogger logger, SshAgentOperation operation, string fingerprint);
+    // Information, or Debug past PeerLogLimiter's burst: the server's side decides how many requests it sends.
+    [LoggerMessage(EventId = 45, Message = "A forwarded agent request ({Operation}) for key {Fingerprint} was refused by ForwardAgentFilter")]
+    public static partial void ForwardedAgentRequestRefused(ILogger logger, LogLevel level, SshAgentOperation operation, string fingerprint);
 
     // The exception's type only, as for forwarding handlers: its message is the application's.
     [LoggerMessage(EventId = 46, Level = LogLevel.Warning, Message = "ForwardAgentFilter failed with {ExceptionType}; the forwarded agent request was refused")]
@@ -175,4 +179,8 @@ internal static partial class SshLog
 
     [LoggerMessage(EventId = 62, Level = LogLevel.Warning, Message = "The forwardings ssh_config names for this host were not started: the host key has changed, and port forwarding is disabled to avoid man-in-the-middle attacks")]
     public static partial void ConfiguredForwardingsDisabled(ILogger logger);
+
+    // At the highest level among the entries it counts (Warning, or Information for refused agent requests only).
+    [LoggerMessage(EventId = 63, Message = "{Count} more entries the server triggered (refused or failed forwarded connections, unimplemented messages, refused agent requests) were written at Debug level: at most {Burst} a minute are written at their own level")]
+    public static partial void PeerTriggeredEntriesLowered(ILogger logger, LogLevel level, int count, int burst);
 }

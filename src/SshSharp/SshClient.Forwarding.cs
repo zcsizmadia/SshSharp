@@ -346,7 +346,7 @@ public sealed partial class SshClient
         ValidateRemoteListen(bindAddress, remotePort);
         ValidateDestination(localHost, localPort);
         return StartRemoteForwardAsync(bindAddress, remotePort,
-            port => new SshRemotePortForwarder(bindAddress, port, localHost, localPort, _logger, CancelRemoteForwardAsync, _connection.Closed),
+            port => new SshRemotePortForwarder(bindAddress, port, localHost, localPort, _logger, CancelRemoteForwardAsync, _connection.Closed) { PeerLog = _connection.PeerLog },
             cancellationToken);
     }
 
@@ -373,7 +373,7 @@ public sealed partial class SshClient
     {
         ValidateRemoteListen(bindAddress, remotePort);
         return StartRemoteForwardAsync(bindAddress, remotePort,
-            port => new SshRemotePortForwarder(bindAddress, port, allowDestination, _logger, CancelRemoteForwardAsync, _connection.Closed),
+            port => new SshRemotePortForwarder(bindAddress, port, allowDestination, _logger, CancelRemoteForwardAsync, _connection.Closed) { PeerLog = _connection.PeerLog },
             cancellationToken);
     }
 
@@ -387,7 +387,10 @@ public sealed partial class SshClient
         ValidateRemoteListen(bindAddress, remotePort);
         var allow = permitRemoteOpen is null ? null : ForwardSpec.PermitOpenFilter(permitRemoteOpen);
         return StartRemoteForwardAsync(bindAddress, remotePort,
-            port => new SshRemotePortForwarder(bindAddress, port, allow, _logger, CancelRemoteForwardAsync, _connection.Closed, checkResolvedAddresses: false),
+            port => new SshRemotePortForwarder(bindAddress, port, allow, _logger, CancelRemoteForwardAsync, _connection.Closed, checkResolvedAddresses: false)
+            {
+                PeerLog = _connection.PeerLog,
+            },
             cancellationToken);
     }
 
@@ -424,7 +427,7 @@ public sealed partial class SshClient
         ArgumentOutOfRangeException.ThrowIfLessThan(maxConnections, 1);
         return StartRemoteForwardAsync(bindAddress, remotePort,
             port => new SshRemotePortForwarder(bindAddress, port, handler, maxConnections, _logger, _connection.Time, CancelRemoteForwardAsync,
-                _connection.Closed),
+                _connection.Closed) { PeerLog = _connection.PeerLog },
             cancellationToken);
     }
 
@@ -440,7 +443,10 @@ public sealed partial class SshClient
         ValidateSocketPath(remoteSocketPath, nameof(remoteSocketPath));
         ValidateDestination(localHost, localPort);
         return StartRemoteSocketForwardAsync(remoteSocketPath,
-            path => new SshRemoteSocketForwarder(path, localHost, localPort, null, _logger, CancelRemoteSocketForwardAsync, _connection.Closed), cancellationToken);
+            path => new SshRemoteSocketForwarder(path, localHost, localPort, null, _logger, CancelRemoteSocketForwardAsync, _connection.Closed)
+            {
+                PeerLog = _connection.PeerLog,
+            }, cancellationToken);
     }
 
     /// <summary>
@@ -453,7 +459,10 @@ public sealed partial class SshClient
         ValidateSocketPath(remoteSocketPath, nameof(remoteSocketPath));
         ValidateSocketPath(localSocketPath, nameof(localSocketPath));
         return StartRemoteSocketForwardAsync(remoteSocketPath,
-            path => new SshRemoteSocketForwarder(path, null, 0, localSocketPath, _logger, CancelRemoteSocketForwardAsync, _connection.Closed), cancellationToken);
+            path => new SshRemoteSocketForwarder(path, null, 0, localSocketPath, _logger, CancelRemoteSocketForwardAsync, _connection.Closed)
+            {
+                PeerLog = _connection.PeerLog,
+            }, cancellationToken);
     }
 
     /// <summary>
@@ -486,7 +495,7 @@ public sealed partial class SshClient
         ArgumentOutOfRangeException.ThrowIfLessThan(maxConnections, 1);
         return StartRemoteSocketForwardAsync(remoteSocketPath,
             path => new SshRemoteSocketForwarder(path, handler, maxConnections, _logger, _connection.Time, CancelRemoteSocketForwardAsync,
-                _connection.Closed), cancellationToken);
+                _connection.Closed) { PeerLog = _connection.PeerLog }, cancellationToken);
     }
 
     private static void ValidateSocketPath(string path, string name)
@@ -806,7 +815,7 @@ public sealed partial class SshClient
     /// <summary>An agent protocol server for one forwarded channel, knowing this connection's server as the first forwarding hop.</summary>
     private AgentServer NewAgentServer(AgentBackend backend, Func<SshAgentRequest, CancellationToken, ValueTask<bool>>? filter)
     {
-        var server = new AgentServer(backend, filter, _logger);
+        var server = new AgentServer(backend, filter, _logger) { PeerLog = _connection.PeerLog };
         if (AgentBinding is { } binding)
         {
             server.AddForwardingHop(binding);

@@ -83,6 +83,12 @@ internal sealed class AgentServer
         _logger = logger;
     }
 
+    /// <summary>
+    /// For a forwarded agent, the connection's limit on the entries the server's side can trigger repeatedly (refused requests); null for
+    /// none, as for the in-process agent, whose requests come from this process.
+    /// </summary>
+    internal PeerLogLimiter? PeerLog { get; init; }
+
     /// <summary>One session the connection is bound to: the host key and its signature over the session identifier verified.</summary>
     private sealed record Binding(byte[] HostKeyBlob, SshPublicKey HostKey, byte[] SessionId, bool IsForwarding);
 
@@ -330,7 +336,8 @@ internal sealed class AgentServer
 
         if (!allowed)
         {
-            SshLog.ForwardedAgentRequestRefused(_logger, operation, key.Fingerprint);
+            var level = PeerLog?.Admit(LogLevel.Information) ?? LogLevel.Information;
+            SshLog.ForwardedAgentRequestRefused(_logger, level, operation, key.Fingerprint);
         }
 
         return allowed;

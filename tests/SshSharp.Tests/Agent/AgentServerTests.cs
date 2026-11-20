@@ -798,9 +798,33 @@ public class AgentServerTests
         await Assert.That(logger.Entries[1].Message).DoesNotContain("no prompt"); // the application's message stays out of the log
     }
 
+    [Test]
+    public async Task RepeatedRefusals_AreLimitedByTheConnectionsLimit()
+    {
+        // The server's side decides how many requests a forwarded agent gets: past the burst, refusals are logged at Debug.
+        using var key = SshPrivateKey.Generate(SshKeyType.Ed25519);
+        var logger = new ListLogger();
+        var time = new Microsoft.Extensions.Time.Testing.FakeTimeProvider();
+        using var limit = new PeerLogLimiter(logger, time);
+        var server = new AgentServer(new AgentKeyring([key]), (_, _) => ValueTask.FromResult(false), logger) { PeerLog = limit };
+        for (var i = 0; i < 20; i++)
+        {
+            await HandleAsync(server, Sign(key.PublicKey.Span, Login(key, "ssh-ed25519")));
+        }
+
+        var levels = logger.Entries.Where(e => e.EventId == 45).Select(e => e.Level).ToList();
+        await Assert.That(levels.Count(l => l == Microsoft.Extensions.Logging.LogLevel.Information)).IsEqualTo(PeerLogLimiter.Burst);
+        await Assert.That(levels.Count(l => l == Microsoft.Extensions.Logging.LogLevel.Debug)).IsEqualTo(20 - PeerLogLimiter.Burst);
+
+        time.Advance(PeerLogLimiter.Window);
+        var summary = logger.Entries[^1];
+        await Assert.That(summary.EventId).IsEqualTo(63);
+        await Assert.That(summary.Level).IsEqualTo(Microsoft.Extensions.Logging.LogLevel.Information);
+    }
+
     private sealed class ListLogger : Microsoft.Extensions.Logging.ILogger
     {
-        public List<(int EventId, string Message, Exception? Exception)> Entries { get; } = [];
+        public List<(int EventId, string Message, Exception? Exception, Microsoft.Extensions.Logging.LogLevel Level)> Entries { get; } = [];
 
         public IDisposable? BeginScope<TState>(TState state)
             where TState : notnull => null;
@@ -808,7 +832,7 @@ public class AgentServerTests
         public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => true;
 
         public void Log<TState>(Microsoft.Extensions.Logging.LogLevel logLevel, Microsoft.Extensions.Logging.EventId eventId, TState state, Exception? exception,
-            Func<TState, Exception?, string> formatter) => Entries.Add((eventId.Id, formatter(state, exception), exception));
+            Func<TState, Exception?, string> formatter) => Entries.Add((eventId.Id, formatter(state, exception), exception, logLevel));
     }
 
     /// <summary>A backend that lists what it is given and counts signatures, standing in for a real agent.</summary>
