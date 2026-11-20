@@ -324,7 +324,7 @@ internal static class PrivateKeyParser
             rsa.ImportFromEncryptedPem(text, passphrase);
             return FromRsa(rsa, null);
         }
-        catch (Exception ex) when (ex is CryptographicException or PlatformNotSupportedException)
+        catch (Exception ex) when (ex is CryptographicException or OverflowException or PlatformNotSupportedException)
         {
             rsa.Dispose();
         }
@@ -383,7 +383,7 @@ internal static class PrivateKeyParser
         {
             return import() ? create() : throw new FormatException(Message);
         }
-        catch (Exception ex) when (ex is CryptographicException or ArgumentException or PlatformNotSupportedException)
+        catch (Exception ex) when (ex is CryptographicException or ArgumentException or OverflowException or PlatformNotSupportedException)
         {
             algorithm.Dispose();
             throw new FormatException(Message, ex);
@@ -573,7 +573,7 @@ internal static class PrivateKeyParser
             import();
             return create();
         }
-        catch (Exception ex) when (ex is CryptographicException or ArgumentException or PlatformNotSupportedException)
+        catch (Exception ex) when (ex is CryptographicException or ArgumentException or OverflowException or PlatformNotSupportedException)
         {
             algorithm.Dispose();
             throw new FormatException("The PEM private key could not be read.", ex);
