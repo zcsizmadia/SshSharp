@@ -12,7 +12,7 @@ does. This page describes what is tested, against what, how intermittent failure
 | Real servers | OpenSSH (from 7.x to current, Linux and Windows), Dropbear, AsyncSSH, Apache MINA SSHD, Erlang/OTP `ssh`, and three SFTP-only servers (ProFTPD among them), on every pull request |
 | Network faults | A proxy that cuts, stalls, slows down and fragments connections to real servers, at any point |
 | Fuzzing | Coverage-guided fuzzing of the parsers that read untrusted input, nightly; mutation fuzzing in every test run |
-| Mutation testing | Stryker.NET over the cryptography, the packet codec and the configuration parsers |
+| Mutation testing | Stryker.NET over the cryptography, the packet codec, compression, the configuration parsers and resolver, the agent server, the SOCKS handshake, host key verification and the log rate limiter |
 | Stress | The whole suite in a loop on every platform, with an instrumented build that checks buffer ownership and received data |
 | Platforms | Linux (x64, Arm64), Windows (x64, Arm64), macOS (Arm64), each on .NET 8, .NET 10 and .NET 11, plus a Native AOT smoke test and the ML-KEM tests on Linux with OpenSSL 3.5 |
 | Algorithm audit | [ssh-audit](https://github.com/jtesta/ssh-audit) rates what the client offers, by default and in FIPS mode, on every pull request |
@@ -72,7 +72,7 @@ The interop tests run against real servers on every pull request. Each server ca
 |---|---|
 | **OpenSSH** on Linux (x64 and Arm64) | Keys of every type and format, host and user certificates from a test CA, `ssh-agent` and agent forwarding, PAM keyboard-interactive, Kerberos (a throwaway realm), every key exchange, cipher and MAC, forwarding of every kind, SFTP and SCP, re-keying every 32 KiB |
 | **OpenSSH** on Alpine 3.6, 3.13, 3.19, 3.22, 3.23 and edge | Releases from several eras, from ones without strict key exchange (Terrapin) to the newest (10.2p1 on 3.23, 10.6p2 on edge) |
-| **OpenSSH for Windows** | ConPTY terminals, Windows paths, and the Windows server's own behaviour |
+| **OpenSSH for Windows** | ConPTY terminals, Windows paths, the Windows server's own behaviour, and SCP's `DoubleQuote` path quoting with `cmd.exe` as the default shell |
 | **Dropbear** (two releases) | A second C implementation, with its own limits and quirks |
 | **AsyncSSH** | An independent implementation in Python. It found that SFTP symbolic links were sent in the wrong argument order for servers that follow the SFTP draft |
 | **Apache MINA SSHD** | An independent implementation in Java, the server inside Jenkins, Gerrit and Eclipse. It answers keep-alive requests, reports a killed command as an exit status, and has no pseudo-terminal. It re-keys only when the client does: with a small limit of its own, MINA 2.20.0 sometimes failed sessions while both sides re-keyed |

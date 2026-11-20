@@ -34,9 +34,11 @@ Console.WriteLine(result.StandardOutputText);
   formats, key generation and export, ssh-agent and Pageant, an in-process agent, agent forwarding with a filter, FIDO keys,
   KMS and HSM signers, certificates (also issued as a CA), revocation lists, keyboard-interactive, Kerberos, `ssh-keygen -Y`
   signatures.
-- **Commands and shells:** run or stream commands, shells with a terminal, `expect`-style scripting, signals, subsystems.
+- **Commands and shells:** run or stream commands, shells with a terminal, `expect`-style scripting, signals, subsystems, and the
+  channel types and global requests a server defines.
 - **SFTP and SCP:** pipelined and segmented transfers, directory trees with filters and skipping of unchanged files, recursive
-  listings, server-side hashes, remote file streams, SCP for servers without SFTP.
+  listings, server-side hashes, remote file streams, SCP for servers without SFTP (network devices and Windows servers
+  included).
 - **Forwarding:** local, remote and dynamic (SOCKS 5 with a password if you like), Unix sockets on either end, remote
   forwarding to a handler in your code, `HttpClient` through the connection.
 - **Cryptography:** post-quantum key exchange, ChaCha20-Poly1305 and AES-GCM, strict key exchange, a FIPS mode, delayed
@@ -95,6 +97,7 @@ Every feature, with its API and the page that shows how:
 | Any signal to a running session, including extension signals (`INFO@openssh.com`) | ✅ | ❌ (TERM or KILL, when cancelling a command) |
 | BREAK (RFC 4335, for serial consoles) | ✅ | ❌ |
 | Any subsystem (`ssh -s`) | ✅ | ❌ (SFTP and NETCONF only) |
+| Channel types and global requests the server defines (vendor extensions) | ✅ | ❌ |
 | Local, remote and dynamic port forwarding | ✅ (also started from `ssh_config`) | ✅ |
 | A SOCKS proxy (`ssh -D`) that asks for a user name and password (SOCKS 5, RFC 1929), so it can listen beyond loopback | ✅ | ❌ (SOCKS 4 and 5 without authentication only) |
 | Remote dynamic forwarding (`ssh -R port`, a SOCKS proxy on the client side) | ✅ | ❌ |
@@ -110,7 +113,7 @@ Every feature, with its API and the page that shows how:
 | Segmented SFTP downloads and uploads (one file in parallel ranges over several sessions) | ✅ | ❌ |
 | SFTP file hashes computed by the server (`check-file`, to verify a transfer) and raw extended requests | ✅ | ❌ |
 | SFTP `fsync@openssh.com` (durable uploads), `hardlink@openssh.com` and `limits@openssh.com` | ✅ | ❌ |
-| Remote files as an `IFileSystem` (System.IO.Abstractions: `File`, `Directory`, `Path`, streams) | ✅ (`SshSharp.IO.Abstractions`) | ❌ |
+| Remote files as an `IFileSystem` (System.IO.Abstractions: `File`, `Directory`, `Path`, streams) | ✅ (`SshSharp.IO.Abstractions`; hard links on .NET 11) | ❌ |
 | Remote files as an `IFileProvider` (ASP.NET Core static files, Razor, configuration) | ✅ (`SshSharp.FileProviders`) | ❌ |
 | Dependency injection: named endpoints from configuration, a shared connection that reconnects, health checks, `HttpClient` through an endpoint | ✅ (`SshSharp.Extensions.DependencyInjection`) | ❌ |
 | Native AOT | ✅ (an AOT-compiled binary connects to a real server in CI) | ✅ (AOT-compatible; an AOT publish is checked in CI) |
@@ -260,7 +263,7 @@ latest release.
 
 ## Testing
 
-Every pull request runs about 1,300 unit tests on Linux, Windows and macOS (x64 and Arm64), each on .NET 8, .NET 10 and .NET 11, and the
+Every pull request runs over 3,000 unit tests on Linux, Windows and macOS (x64 and Arm64), each on .NET 8, .NET 10 and .NET 11, and the
 interop tests against real servers: OpenSSH old and new on Linux and Windows, Dropbear, AsyncSSH, Apache MINA SSHD, Erlang/OTP,
 and SFTP-only servers. The cryptography is checked against reference vectors and about 6,400 Project Wycheproof edge cases. A
 fault-injection proxy cuts, stalls and slows connections at any point, the parsers are fuzzed nightly, and stress runs loop the
@@ -270,7 +273,7 @@ found, and what is not covered yet.
 
 ## Building
 
-- .NET SDK 10.0.401 or later (see `global.json`).
+- .NET SDK 11.0.100 or later (see `global.json`).
 - Build: `dotnet build -c Release`
 - Test (TUnit): `dotnet test --project tests/SshSharp.Tests -c Release`. Tests against real servers run when
   `SSHSHARP_TEST_SSHD` and related variables are set; CI sets them up on Linux, and `. ./scripts/test-server.ps1` starts the

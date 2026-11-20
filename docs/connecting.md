@@ -222,7 +222,7 @@ These options shape the connection itself. [Tune and inspect a connection](how-t
   `ssh_config`'s `TCPKeepAlive` (on unless it says `no`, as in `ssh`) and `IPQoS` have been applied, so what it sets wins.
 - **`ConnectionAttempts`** tries a server that could not be reached again, one second apart, as `ssh_config`'s directive does
   (default 1). `ConnectTimeout` bounds all the attempts together.
-- **`VersionAddendum`** adds a comment to the client's identification line (`SSH-2.0-SshSharp_1.2.0 inventory-sync/3.4`), which
+- **`VersionAddendum`** adds a comment to the client's identification line (`SSH-2.0-SshSharp_1.3.0 inventory-sync/3.4`), which
   servers log. It is sent unencrypted, so it must not hold anything secret or personal.
 - **`ChannelWindowSize`** (default 2 MiB) and **`ChannelMaxPacketSize`** (default 32 KiB) set how much the server may send on
   each channel before waiting, and in what packet size. A channel moves at most one window per round trip, so a larger window speeds

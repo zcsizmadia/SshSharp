@@ -29,5 +29,7 @@ connection fails, and owns those sessions.
 Paths are POSIX paths on the server (`fs.Path` uses `/` on every OS), relative to the login directory. Errors are the usual
 `System.IO` exceptions, from synchronous and asynchronous calls alike, and `Exists` never throws. The synchronous calls wait for
 the server, bounded by `SftpFileSystemOptions.OperationTimeout`; whole-file reads, writes and copies are bounded by the time
-without progress, so large files are not cut off. Not supported: `FileSystemWatcher`, `DriveInfo`, `FileVersionInfo`,
-`RandomAccess`, handles, encryption and `Replace`. Documentation: https://zcsizmadia.github.io/SshSharp/
+without progress, so large files are not cut off. On .NET 11, `File.CreateHardLink` and `FileInfo.CreateAsHardLink` create hard
+links where the server offers `hardlink@openssh.com` (OpenSSH does), and throw `NotSupportedException` where it does not. Not
+supported: `FileSystemWatcher`, `DriveInfo`, `FileVersionInfo`, `RandomAccess`, handles (`File.OpenNullHandle` too), encryption
+and `Replace`. Needs TestableIO.System.IO.Abstractions 23 or later. Documentation: https://zcsizmadia.github.io/SshSharp/

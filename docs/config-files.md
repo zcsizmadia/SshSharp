@@ -36,7 +36,7 @@ and `SshConfigResolveOptions` supplies the home directory, environment, local us
   ([00bc2a1124](https://github.com/openssh/openssh-portable/commit/00bc2a1124),
   [d71cc75c99](https://github.com/openssh/openssh-portable/commit/d71cc75c99)) <span class="badge text-bg-primary">1.2</span>:
   older OpenSSH hashed the fields run together, and put only the last hop's host name in `%j`, so paths built with `%C` (an `IdentityFile`, a
-  `UserKnownHostsFile` or a forwarded socket's path, say) differ between SshSharp 1.2 and `ssh` up to 10.6p2.
+  `UserKnownHostsFile` or a forwarded socket's path, say) differ between SshSharp 1.2 and later and `ssh` up to 10.6p2.
 
 `Match exec` runs a local command, so it is evaluated only when `SshConfigResolveOptions.ExecMatcher` is set, for configuration files
 you trust (`ExecMatcher = (command, ct) => new(SshExecMatcher.RunShellAsync(command, ct))` runs it in the system shell); without

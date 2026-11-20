@@ -59,6 +59,9 @@ The BCL's listeners see the same data, for a quick look in a console tool or a t
 - **Host names are not recorded**, by design (see the [threat model](../threat-model.md)): add `server.address` to a parent span of
   your own when you want it.
 - **Nothing is recorded unless something listens**, so the instrumentation costs nothing when unused.
+- **Entries the server can repeat are rate-limited.** Refused or failed forwarded connections, messages the client does not
+  implement and refused forwarded-agent requests: each connection writes at most 8 a minute at their own level and the rest at
+  `Debug`, with one summary entry (event id 63). See [Logging](../diagnostics.md#logging).
 - **Exception messages** can contain what the server said (an SFTP error, a refused command). Treat them as server-controlled
   text before showing them to end users.
 - **Comparing with `ssh -vvv`.** The `Debug` log shows the same stages (key exchange, host key, authentication methods), so it is
