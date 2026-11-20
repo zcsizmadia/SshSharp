@@ -223,6 +223,15 @@ internal sealed class FakeSessionServer : IAsyncDisposable
     /// <summary>The socket path of every direct-streamlocal channel the client asked for.</summary>
     public List<string> DirectStreamLocalRequests { get; } = [];
 
+    /// <summary>
+    /// When set, where channels of other types go (not session, direct-tcpip or direct-streamlocal): given the type and its
+    /// type-specific data, a stream to relay to, or null to refuse the type as unknown.
+    /// </summary>
+    public Func<string, byte[], Stream?>? CustomChannel { get; set; }
+
+    /// <summary>When set, answers global requests: given the name and data, the success reply's data, or null to fall through.</summary>
+    public Func<string, byte[], byte[]?>? CustomGlobalRequest { get; set; }
+
     /// <summary>Refuse tcpip-forward (sshd's AllowTcpForwarding no).</summary>
     public bool RefuseRemoteForwarding { get; init; }
 
@@ -934,6 +943,20 @@ internal sealed class FakeSessionServer : IAsyncDisposable
                     break;
                 }
 
+                if (CustomGlobalRequest?.Invoke(name, reader.Remaining.ToArray()) is { } answer)
+                {
+                    if (wantReply)
+                    {
+                        await _server.SendAsync(Build(w =>
+                        {
+                            w.WriteByte(SshMessage.RequestSuccess);
+                            w.WriteBytes(answer);
+                        }));
+                    }
+
+                    break;
+                }
+
                 // Like OpenSSH: unknown requests (keepalive@openssh.com included) get a failure, which is still an answer.
                 if (wantReply && !IgnoreGlobalRequests)
                 {
@@ -1040,6 +1063,8 @@ internal sealed class FakeSessionServer : IAsyncDisposable
                         DirectStreamLocalRequests.Add(socketPath);
                     }
                 }
+
+                var typeSpecificData = reader.Remaining.ToArray(); // what is left, for CustomChannel
                 if (RefuseChannels)
                 {
                     await _server.SendAsync(Build(w =>
@@ -1073,6 +1098,25 @@ internal sealed class FakeSessionServer : IAsyncDisposable
                 if (socketPath is not null)
                 {
                     tunnel = DirectStreamLocal?.Invoke(socketPath);
+                }
+
+                // Any other type, when a test handles them: unknown types are refused as sshd refuses them (reason 3).
+                var custom = CustomChannel is not null && tunnelHost is null && socketPath is null && channelType != "session";
+                if (custom)
+                {
+                    tunnel = CustomChannel!(channelType, typeSpecificData);
+                    if (tunnel is null)
+                    {
+                        await _server.SendAsync(Build(w =>
+                        {
+                            w.WriteByte(SshMessage.ChannelOpenFailure);
+                            w.WriteUInt32(clientId);
+                            w.WriteUInt32(3);
+                            w.WriteString("unknown channel type");
+                            w.WriteString(string.Empty);
+                        }));
+                        break;
+                    }
                 }
 
                 if (tunnelHost is not null || socketPath is not null)

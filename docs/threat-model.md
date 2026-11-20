@@ -271,6 +271,21 @@ threat can usually read the data where the application uses it anyway. With comp
   1,000 by default, and a handler forwarding's `maxConnections`); above it, new ones are refused. Within that, a server can still
   send data up to each channel's window (2 MiB), and no more until it is read: a handler that stops reading holds the server back.
 
+### Channels and global requests the application opens
+
+`SshClient.OpenChannelAsync` and `SendGlobalRequestAsync` send a channel type or request name and data that the application
+chooses. They go to the destination only, never to a jump host. SshSharp checks only that the name is well formed (RFC 4251
+section 6) and that the data fits in one packet; the bytes themselves are the application's to encode and the server's to read.
+A few limits keep these from getting around what the library enforces elsewhere:
+- **No sessions.** A `session` channel opened this way would bypass `PreventNewSessionsAsync` and the session options, so that type
+  is refused.
+- **Standard names are not blocked, but gain nothing.** The application may send a global request such as `tcpip-forward`. Any
+  channel the server then opens is still checked against the forwardings the client itself started, as described above.
+- **Answers are untrusted.** An `SshGlobalRequestResult` and a custom channel's data are what the server sent, unchecked. The
+  application parses them as input from an untrusted peer.
+- **The data is never logged** or recorded in telemetry. Global request names aren't logged either. A channel type appears only in
+  the idle-timeout log line (`ChannelTimeout`), as for every channel type. Names should not carry secrets.
+
 ### The agent
 
 - **Windows named pipes:** any user can create a pipe under a name nobody holds yet, so another user on the same machine could

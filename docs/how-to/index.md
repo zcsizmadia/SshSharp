@@ -30,6 +30,7 @@ Every example on these pages is compiled with the library in CI, so it matches t
 | [Jump hosts (ProxyJump)](jump-hosts.md) | Reach hosts through one or more bastions. |
 | [Tune and inspect a connection](tune-and-inspect-connections.md) | Set socket options, identify your application to the server, raise the channel window for long links, compress a slow link, read a connection's endpoints and traffic, and re-key on demand. |
 | [Tune for throughput](performance-tuning.md) | Find what limits a slow transfer, and set the channel window, SFTP concurrency, cipher and socket options for it. |
+| [Vendor channels and global requests](custom-channels.md) | Open a channel type, or send a global request, that the server defines and SshSharp has no API for. |
 
 ## Configuration and trust
 
