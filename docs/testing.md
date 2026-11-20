@@ -71,7 +71,7 @@ The interop tests run against real servers on every pull request. Each server ca
 | Server | What it checks |
 |---|---|
 | **OpenSSH** on Linux (x64 and Arm64) | Keys of every type and format, host and user certificates from a test CA, `ssh-agent` and agent forwarding, PAM keyboard-interactive, Kerberos (a throwaway realm), every key exchange, cipher and MAC, forwarding of every kind, SFTP and SCP, re-keying every 32 KiB |
-| **OpenSSH** on Alpine 3.6, 3.13, 3.19 and 3.22 | Releases from several eras, including ones without strict key exchange (Terrapin) |
+| **OpenSSH** on Alpine 3.6, 3.13, 3.19, 3.22, 3.23 and edge | Releases from several eras, from ones without strict key exchange (Terrapin) to the newest (10.2p1 on 3.23, 10.6p2 on edge) |
 | **OpenSSH for Windows** | ConPTY terminals, Windows paths, and the Windows server's own behaviour |
 | **Dropbear** (two releases) | A second C implementation, with its own limits and quirks |
 | **AsyncSSH** | An independent implementation in Python. It found that SFTP symbolic links were sent in the wrong argument order for servers that follow the SFTP draft |

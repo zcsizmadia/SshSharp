@@ -358,6 +358,19 @@ jobs:
             server: openssh
             software: OpenSSH
             strict: '1'
+          # alpine:3.23, OpenSSH 10.2p1 (10.2_p1-r1).
+          - name: OpenSSH, Alpine 3.23
+            image: alpine@sha256:469c9ea410b9215eaee7976ba6c0639039b444be8e5d638f7abbada189971eb2
+            server: openssh
+            software: OpenSSH
+            strict: '1'
+          # alpine:edge as of 2026-11-20, OpenSSH 10.6p2 (10.6_p2-r0). The digest pins the base image; apk still installs edge's
+          # current openssh package, so the version in the job summary's server line is the one tested.
+          - name: OpenSSH, Alpine edge
+            image: alpine@sha256:020dfcbaaf4cc1078bf2d9c7ba31a8466e334061dcd2f248001d68f79e52c000
+            server: openssh
+            software: OpenSSH
+            strict: '1'
           - name: Dropbear, Alpine 3.13
             image: alpine@sha256:469b6e04ee185740477efa44ed5bdd64a07bbdd6c7e5f5d169e540889597b911
             server: dropbear
