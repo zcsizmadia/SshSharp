@@ -73,6 +73,13 @@ public sealed class ScpInteropTests : IDisposable
             await client.DownloadAsync($"{remote}/note.txt", memory, cancellationToken: Timeout());
             await Assert.That(Encoding.UTF8.GetString(memory.ToArray())).IsEqualTo("hello from a stream\n");
 
+            // Unquoted, as for network devices: a plain path (mktemp's names are letters, digits, '.', '_' and '/') reaches scp the same.
+            var none = new SshScpOptions { PathQuoting = SshScpPathQuoting.None };
+            await client.UploadAsync(new MemoryStream("unquoted\n"u8.ToArray()), $"{remote}/plain-file.txt", options: none, cancellationToken: Timeout());
+            using var plain = new MemoryStream();
+            await client.DownloadAsync($"{remote}/plain-file.txt", plain, none, Timeout());
+            await Assert.That(Encoding.UTF8.GetString(plain.ToArray())).IsEqualTo("unquoted\n");
+
             // A tree, with times kept, round-tripped.
             var tree = Directory.CreateDirectory(Path.Combine(_dir, "tree"));
             await File.WriteAllTextAsync(Path.Combine(tree.FullName, "a.txt"), "A");

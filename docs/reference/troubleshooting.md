@@ -306,8 +306,22 @@ See [Writes in flight](../sftp.md#writes-in-flight).
 
 ### SCP fails on a Windows server
 
-Remote paths are single-quoted for a POSIX shell. A Windows OpenSSH server whose default shell is `cmd.exe` or PowerShell reads
-them differently: use SFTP, which OpenSSH for Windows provides by default.
+Remote paths are single-quoted for a POSIX shell by default. A Windows OpenSSH server whose default shell is `cmd.exe` or PowerShell
+reads them differently: set `SshScpOptions.PathQuoting = SshScpPathQuoting.DoubleQuote`, or use SFTP, which OpenSSH for Windows
+provides by default. See [Network devices and Windows servers](../how-to/transfer-files-scp.md#network-devices-and-windows-servers).
+
+### SCP to a router or switch fails with a quoted file name
+
+A network device's SCP server (Cisco IOS, MikroTik RouterOS) reads `scp -t <path>` itself, without a shell, so the default single
+quotes become part of the name ("`'flash:/x.cfg'`: no such file"), or `--` is taken for the path. Set
+`SshScpOptions.PathQuoting = SshScpPathQuoting.None`. See
+[Network devices and Windows servers](../how-to/transfer-files-scp.md#network-devices-and-windows-servers).
+
+### `ArgumentException` for a remote SCP path
+
+`PathQuoting` `None` and `DoubleQuote` refuse paths they cannot carry safely, before anything is sent: the message names the
+character. `None` takes only letters, digits and `/ . _ - : + @ , =` (no spaces), not `-` first; `DoubleQuote` refuses control
+characters, `" % ! $` `` ` ``, `< > | * ?` and a trailing `\`. Rename the file, or use SFTP.
 
 ## Forwarding
 

@@ -14,7 +14,7 @@ permissions:
 # (Handshakes).
 env:
   UNIT_TESTS: /*/*/*/*[(Category!=Integration)&(Category!=Measure)]
-  INTEROP_TESTS: /*/*/*/*[(Category=Integration)&(Category!=SshAudit)&(Category!=Measure)&(Category!=Handshakes)]
+  INTEROP_TESTS: /*/*/*/*[(Category=Integration)&(Category!=SshAudit)&(Category!=Measure)&(Category!=Handshakes)&(Category!=WindowsCmd)]
 
 # A newer push to the same PR or branch makes the running workflow obsolete.
 concurrency:
@@ -270,11 +270,11 @@ jobs:
       - name: Interop tests against the real server (net8.0)
         run: dotnet test --project tests/SshSharp.Tests -c Release -f net8.0 --no-build --treenode-filter "$TESTS" --report-trx --report-trx-filename interop-net8.0.trx --results-directory TestResults
         env:
-          TESTS: /*/*/*/*[((Category=Integration)|(Category=LocalTools))&(Category!=SshAudit)&(Category!=Measure)&(Category!=Handshakes)]
+          TESTS: /*/*/*/*[((Category=Integration)|(Category=LocalTools))&(Category!=SshAudit)&(Category!=Measure)&(Category!=Handshakes)&(Category!=WindowsCmd)]
       - name: Interop tests against the real server (net10.0)
         run: dotnet test --project tests/SshSharp.Tests -c Release -f net10.0 --no-build --treenode-filter "$TESTS" --report-trx --report-trx-filename interop-net10.0.trx --results-directory TestResults
         env:
-          TESTS: /*/*/*/*[((Category=Integration)|(Category=LocalTools))&(Category!=SshAudit)&(Category!=Measure)&(Category!=Handshakes)]
+          TESTS: /*/*/*/*[((Category=Integration)|(Category=LocalTools))&(Category!=SshAudit)&(Category!=Measure)&(Category!=Handshakes)&(Category!=WindowsCmd)]
       - name: Native AOT smoke test against the real server
         # Trim and AOT warnings fail the publish; the binary then connects and uses every main feature. Once per target framework,
         # read from the project (Directory.Build.props), so a new .NET version needs no change here.
@@ -547,6 +547,16 @@ jobs:
         if: ${{ !cancelled() }}
         shell: pwsh
         run: tests/ci/check-skips.ps1 -Job "interop (OpenSSH for Windows)" -Trx TestResults/interop.trx
+      - name: SCP with cmd.exe as the default shell
+        # OpenSSH for Windows' own default, for SshScpPathQuoting.DoubleQuote (ScpWindowsCmdInteropTests). The other interop tests run
+        # POSIX commands through Git Bash, so this runs after them. Without DefaultShell, each new session runs cmd.exe /c "<command>".
+        shell: pwsh
+        run: |
+          Remove-ItemProperty -Path HKLM:\SOFTWARE\OpenSSH -Name DefaultShell
+          $env:SSHSHARP_TEST_SERVER_SHELL = 'cmd'
+          dotnet test --project tests/SshSharp.Tests -c Release -f net10.0 --no-build --treenode-filter "/*/*/*/*[Category=WindowsCmd]" --report-trx --report-trx-filename interop-cmd.trx --results-directory TestResults/cmd
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          tests/ci/check-skips.ps1 -Job "interop (OpenSSH for Windows, cmd.exe)" -Trx TestResults/cmd/interop-cmd.trx
       - name: Server log
         if: failure()
         shell: pwsh

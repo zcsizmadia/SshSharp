@@ -446,4 +446,29 @@ internal static class FileTransfer
         await client.DownloadDirectoryAsync("/var/log/app", "logs", options, cancellationToken);
         // </scp-directory>
     }
+
+    public static async Task ScpDeviceAsync(SshClient router, CancellationToken cancellationToken)
+    {
+        // <scp-device>
+        // Cisco IOS and MikroTik RouterOS read "scp -t <path>" themselves, with no shell: send the path without quotes.
+        var device = new SshScpOptions { PathQuoting = SshScpPathQuoting.None };
+
+        // Cisco IOS (ip scp server enable): a file system prefix and a path.
+        await router.DownloadFileAsync("nvram:startup-config", "r1-startup-config.txt", device, cancellationToken);
+        await router.UploadFileAsync("acl-update.txt", "flash:/acl-update.txt", device, cancellationToken);
+
+        // MikroTik RouterOS: paths are relative to its file store.
+        await router.DownloadFileAsync("backup-2024-05.rsc", "backup-2024-05.rsc", device, cancellationToken);
+        // </scp-device>
+    }
+
+    public static async Task ScpWindowsAsync(SshClient windows, CancellationToken cancellationToken)
+    {
+        // <scp-windows>
+        // OpenSSH for Windows runs the line through cmd.exe, which does not read single quotes: double-quote the path instead.
+        var cmd = new SshScpOptions { PathQuoting = SshScpPathQuoting.DoubleQuote };
+        await windows.UploadFileAsync("report.csv", @"C:\Reports\May 2024\report.csv", cmd, cancellationToken);
+        await windows.DownloadFileAsync("C:/Logs/app.log", "app.log", cmd, cancellationToken); // forward slashes work too
+        // </scp-windows>
+    }
 }

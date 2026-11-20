@@ -113,6 +113,7 @@ The four packages share one version: `SshSharp` (the client), `SshSharp.Extensio
 | Feature | What it does | API | Docs |
 |---|---|---|---|
 | Files, streams and directories | Uploads and downloads with progress and kept times, for servers without SFTP | `UploadFileAsync`, `DownloadFileAsync`, `UploadDirectoryAsync`, `DownloadDirectoryAsync` (`SshSharp.Scp`), `SshScpOptions` | [Transfer files with SCP](how-to/transfer-files-scp.md) |
+| Path quoting for devices and Windows | Remote paths unquoted for network devices (Cisco IOS, MikroTik), or double-quoted for OpenSSH for Windows with `cmd.exe`; unsafe paths refused before sending <span class="badge text-bg-primary">1.3</span> | `SshScpOptions.PathQuoting`, `SshScpPathQuoting` | [Transfer files with SCP](how-to/transfer-files-scp.md#network-devices-and-windows-servers) |
 | Hostile-server checks | A server cannot write outside the target or slip in extra files | built in | [File transfer (SCP)](scp.md) |
 
 ## Forwarding and tunnels

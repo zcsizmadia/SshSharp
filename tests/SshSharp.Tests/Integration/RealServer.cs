@@ -134,6 +134,12 @@ internal static class RealServer
     public static bool IsMsys => Environment.GetEnvironmentVariable("SSHSHARP_TEST_SERVER_OS") is { } os
         && (os.Equals("msys", StringComparison.OrdinalIgnoreCase) || os.Equals("cygwin", StringComparison.OrdinalIgnoreCase));
 
+    /// <summary>
+    /// Whether the server is OpenSSH for Windows with <c>cmd.exe</c> as its default shell (SSHSHARP_TEST_SERVER_SHELL=cmd), as CI sets
+    /// up for the last step of its Windows job; the other interop tests need a POSIX shell.
+    /// </summary>
+    public static bool IsWindowsCmd => string.Equals(Environment.GetEnvironmentVariable("SSHSHARP_TEST_SERVER_SHELL"), "cmd", StringComparison.OrdinalIgnoreCase);
+
     /// <summary>Whether the server supports strict KEX (OpenSSH 9.6+, Dropbear 2024.84+); SSHSHARP_TEST_SERVER_STRICTKEX=0 for older ones.</summary>
     public static bool SupportsStrictKex => Environment.GetEnvironmentVariable("SSHSHARP_TEST_SERVER_STRICTKEX") != "0";
 }

@@ -51,7 +51,10 @@ internal sealed class ScpChannel : IAsyncDisposable
         _errors = ReadErrorsAsync(session.StandardError, pool);
     }
 
-    /// <summary>Starts <c>scp {flags} -- {path}</c> on the server, with the path quoted for its shell.</summary>
+    /// <summary>
+    /// Starts <c>scp {flags} -- {path}</c> on the server, with the path written as <see cref="SshScpOptions.PathQuoting"/> says. A path
+    /// that mode cannot carry is refused before anything is sent.
+    /// </summary>
     /// <param name="client">The connected client.</param>
     /// <param name="options">The transfer's options.</param>
     /// <param name="flags">The scp mode and flags.</param>
@@ -61,23 +64,114 @@ internal sealed class ScpChannel : IAsyncDisposable
     public static async Task<ScpChannel> StartAsync(SshClient client, SshScpOptions options, string flags, string path, CancellationToken cancellationToken,
         ArrayPool<byte>? pool = null)
     {
-        var command = $"{options.ScpCommand} {flags}{(options.Preserve ? " -p" : "")} -- {QuoteForShell(path)}";
+        var command = CommandLine(options, flags, path);
         var session = await client.StartCommandAsync(command, cancellationToken: cancellationToken).ConfigureAwait(false);
         return new ScpChannel(session, pool ?? ArrayPool<byte>.Shared);
     }
 
     private byte[] Buffer => _buffer ?? throw new ObjectDisposedException(nameof(ScpChannel));
 
-    /// <summary>A POSIX shell word for <paramref name="path"/>: single-quoted, with embedded quotes as <c>'\''</c>.</summary>
-    internal static string QuoteForShell(string path)
+    /// <summary>The command line that runs the remote scp: <c>scp {flags} [-p] -- {path}</c>, with the path written as the options say.</summary>
+    internal static string CommandLine(SshScpOptions options, string flags, string path)
     {
-        if (path.Length == 0 || path.Any(c => c is '\0' or '\n' or '\r'))
+        var preserve = options.Preserve ? " -p" : "";
+        return options.PathQuoting switch
         {
-            throw new ArgumentException("A remote path must be non-empty, without NUL or line breaks.", nameof(path));
+            SshScpPathQuoting.Posix => $"{options.ScpCommand} {flags}{preserve} -- {QuoteForShell(path)}",
+
+            // Devices parse the line themselves and may take "--" for the path, so it is left out; CheckUnquoted refuses a leading "-".
+            SshScpPathQuoting.None => $"{options.ScpCommand} {flags}{preserve} {CheckUnquoted(path)}",
+            SshScpPathQuoting.DoubleQuote => $"{options.ScpCommand} {flags}{preserve} -- {QuoteForCmd(path)}",
+            _ => throw new ArgumentOutOfRangeException(nameof(options), options.PathQuoting, "Unknown SshScpPathQuoting value."),
+        };
+    }
+
+    /// <summary>A POSIX shell word for <paramref name="remotePath"/>: single-quoted, with embedded quotes as <c>'\''</c>.</summary>
+    internal static string QuoteForShell(string remotePath)
+    {
+        if (remotePath.Length == 0 || remotePath.Any(c => c is '\0' or '\n' or '\r'))
+        {
+            throw new ArgumentException("A remote path must be non-empty, without NUL or line breaks.", nameof(remotePath));
         }
 
-        return "'" + path.Replace("'", "'\\''", StringComparison.Ordinal) + "'";
+        return "'" + remotePath.Replace("'", "'\\''", StringComparison.Ordinal) + "'";
     }
+
+    /// <summary>
+    /// <paramref name="remotePath"/> unchanged, for <see cref="SshScpPathQuoting.None"/>, once it is known to be one word that no shell or
+    /// device reads specially: letters, digits and <c>/ . _ - : + @ , =</c>, not starting with <c>-</c>.
+    /// </summary>
+    internal static string CheckUnquoted(string remotePath)
+    {
+        RefuseEmptyOrControl(remotePath);
+        if (remotePath[0] == '-')
+        {
+            throw new ArgumentException("A remote path sent without quoting must not start with '-', which the server would read as an option.", nameof(remotePath));
+        }
+
+        foreach (var c in remotePath)
+        {
+            // An allow list rather than a list of what to refuse: whatever reads the line (a device's parser, or a shell if the server
+            // turns out to have one) treats none of these specially, so the path stays one word that names a file and nothing else.
+            if (!char.IsLetterOrDigit(c) && c is not ('/' or '.' or '_' or '-' or ':' or '+' or '@' or ',' or '='))
+            {
+                throw new ArgumentException(
+                    $"A remote path sent without quoting may hold only letters, digits and / . _ - : + @ , = (it has {Describe(c)}).", nameof(remotePath));
+            }
+        }
+
+        return remotePath;
+    }
+
+    /// <summary>
+    /// A double-quoted word for <paramref name="remotePath"/>, for <see cref="SshScpPathQuoting.DoubleQuote"/>: Windows OpenSSH runs the line
+    /// as <c>cmd.exe /c "line"</c> (or <c>powershell -c line</c>), and scp.exe splits its command line by the C runtime's rules.
+    /// </summary>
+    internal static string QuoteForCmd(string remotePath)
+    {
+        RefuseEmptyOrControl(remotePath);
+        foreach (var c in remotePath)
+        {
+            // cmd.exe expands %name% (and !name! with delayed expansion) even inside double quotes, and PowerShell expands $ and `
+            // there and also ends the string at its typographic quotes. Without these, and without any '"' (which no Windows name
+            // has), the quoted word is literal to both shells, so & | < > ^ ( ) ; and spaces in it cannot run anything.
+            if (c is '"' or '%' or '!' or '$' or '`' or '\u201C' or '\u201D' or '\u201E' or '<' or '>' or '|' or '*' or '?')
+            {
+                throw new ArgumentException($"A double-quoted remote path must not hold {Describe(c)}.", nameof(remotePath));
+            }
+        }
+
+        // The C runtime reads \" as a literal quote, so a trailing backslash would swallow the closing quote and join the path with
+        // whatever followed it.
+        if (remotePath[^1] == '\\')
+        {
+            throw new ArgumentException(@"A double-quoted remote path must not end with '\': write C:\dir or C:/dir/ instead.", nameof(remotePath));
+        }
+
+        return "\"" + remotePath + "\"";
+    }
+
+    private static void RefuseEmptyOrControl(string remotePath)
+    {
+        if (remotePath.Length == 0)
+        {
+            throw new ArgumentException("A remote path must be non-empty.", nameof(remotePath));
+        }
+
+        foreach (var c in remotePath)
+        {
+            if (char.IsControl(c) || c is '\u2028' or '\u2029')
+            {
+                throw new ArgumentException($"A remote path must not hold control characters (it has {Describe(c)}).", nameof(remotePath));
+            }
+        }
+    }
+
+    /// <summary>Names a refused character by its code point, so the message shows it even when it is invisible or a quote.</summary>
+    private static string Describe(char c) =>
+        char.IsControl(c) || char.IsWhiteSpace(c) || char.IsSurrogate(c)
+            ? $"U+{(int)c:X4}"
+            : $"'{c}' (U+{(int)c:X4})";
 
     // ---- reading ----
 
