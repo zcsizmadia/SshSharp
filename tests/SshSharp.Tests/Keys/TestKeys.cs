@@ -250,7 +250,7 @@ internal static class TestKeys
     /// </summary>
     public static byte[] Certificate(SshPrivateKey authority, byte[] publicKeyBlob, SshCertificateType type, string[]? principals = null,
         DateTimeOffset? validAfter = null, DateTimeOffset? validBefore = null, (string Name, string Value)[]? criticalOptions = null,
-        string keyId = "test-certificate", ulong serial = 7, string? authorityAlgorithm = null)
+        string keyId = "test-certificate", ulong serial = 7, string? authorityAlgorithm = null, string[]? extensions = null)
     {
         var reader = new SshReader(publicKeyBlob);
         var keyType = reader.ReadUtf8String();
@@ -282,8 +282,11 @@ internal static class TestKeys
             }));
             w.WriteString(Blob(e =>
             {
-                e.WriteString("permit-pty");
-                e.WriteString(ReadOnlySpan<byte>.Empty);
+                foreach (var name in extensions ?? ["permit-pty"])
+                {
+                    e.WriteString(name);
+                    e.WriteString(ReadOnlySpan<byte>.Empty);
+                }
             }));
             w.WriteString(ReadOnlySpan<byte>.Empty);
             w.WriteString(authority.PublicKey.Span);

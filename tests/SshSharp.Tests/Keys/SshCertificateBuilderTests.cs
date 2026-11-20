@@ -248,6 +248,7 @@ public sealed class SshCertificateBuilderTests
         ("empty principal", b => b.Principals.Add(string.Empty), "must not be empty"),
         ("control character", b => b.Principals.Add("de\nploy"), "control characters"),
         ("twice", b => b.Principals.Add("deploy"), "listed twice"),
+        ("257 principals", b => AddPrincipals(b, 256), "at most 256 principals; this one has 257"),
         ("unknown option", b => b.CriticalOptions["force-comand"] = "x", "Unknown critical option 'force-comand': the standard ones are force-command, source-address, verify-required"),
         ("bad option name", b => b.CriticalOptions["a b"] = "x", "The critical option name 'a b'"),
         ("bare @", b => b.CriticalOptions["@example.com"] = "x", "Unknown critical option"),
@@ -283,6 +284,25 @@ public sealed class SshCertificateBuilderTests
         await Assert.That(async () => await builder.SignAsync(authority, Timeout())).Throws<InvalidOperationException>().WithMessageContaining(message)
             .Because(@case);
         await Assert.That(signer.Calls).IsEqualTo(0);
+    }
+
+    private static void AddPrincipals(SshCertificateBuilder builder, int count)
+    {
+        for (var i = 0; i < count; i++)
+        {
+            builder.Principals.Add($"user{i}");
+        }
+    }
+
+    [Test]
+    public async Task ExactlyTheMostPrincipals_AreIssued()
+    {
+        // 256, OpenSSH's limit: the builder signs it, and the certificate reads back with all of them.
+        var builder = User();
+        AddPrincipals(builder, 255);
+        var certificate = await builder.SignAsync(Keys[SshKeyType.Ed25519], Timeout());
+        await Assert.That(certificate.Principals.Count).IsEqualTo(256);
+        await Assert.That(SshCertificate.Parse(certificate.ToAuthorizedKeysLine()).Principals.Count).IsEqualTo(256);
     }
 
     [Test]

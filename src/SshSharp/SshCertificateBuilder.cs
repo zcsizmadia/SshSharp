@@ -22,9 +22,9 @@ namespace SshSharp;
 /// <c>Extensions.Clear()</c> for none, as <c>ssh-keygen -O clear</c> does. A host certificate starts with none.
 /// </para>
 /// <para>
-/// The builder checks what it signs: at least one principal, option and extension names that are the standard ones or a vendor's own
-/// (<c>name@example.com</c>), values where the option needs one (and none where it takes none), parseable <c>source-address</c>
-/// lists, no critical options on a host certificate, and a validity window that is not empty. Names are written sorted and once each, as
+/// The builder checks what it signs: at least one principal and at most 256 (OpenSSH's limit), option and extension names that are
+/// the standard ones or a vendor's own (<c>name@example.com</c>), values where the option needs one (and none where it takes none),
+/// parseable <c>source-address</c> lists, no critical options on a host certificate, and a validity window that is not empty. Names are written sorted and once each, as
 /// PROTOCOL.certkeys requires. A builder is not thread-safe; it can sign any number of certificates, each with a fresh nonce.
 /// </para>
 /// </remarks>
@@ -118,7 +118,8 @@ public sealed class SshCertificateBuilder
     /// <summary>
     /// The user names (for a user certificate) or host names (for a host certificate, where <c>*</c> and <c>?</c> are wildcards) the
     /// certificate is valid for (<c>ssh-keygen -n</c>). At least one is required: a certificate without principals would be valid for any
-    /// user where a server's <c>authorized_keys</c> trusts the authority without <c>principals=</c>.
+    /// user where a server's <c>authorized_keys</c> trusts the authority without <c>principals=</c>. At most 256: OpenSSH refuses a
+    /// certificate with more.
     /// </summary>
     public IList<string> Principals { get; } = [];
 
@@ -163,7 +164,7 @@ public sealed class SshCertificateBuilder
     /// <exception cref="ArgumentException">The authority's key is paired with a certificate (an authority's key cannot itself be a
     /// certificate), or is a FIDO security key, whose signatures SshSharp cannot check.</exception>
     /// <exception cref="InvalidOperationException">What the builder holds is not a valid certificate: no <see cref="ValidBefore"/>, an
-    /// empty validity window, no principals, or an invalid option, extension or value. The message says which.</exception>
+    /// empty validity window, no principals or more than 256, or an invalid option, extension or value. The message says which.</exception>
     /// <exception cref="CryptographicException">The authority's signature does not verify against its public key, or an
     /// <see cref="SshKeySigner"/> returned one that does not.</exception>
     /// <exception cref="SshException">An SSH agent holding the authority's key refused to sign, or signed with another algorithm (an old
@@ -271,6 +272,13 @@ public sealed class SshCertificateBuilder
             }
 
             principals.Add(principal);
+        }
+
+        if (principals.Count > SshCertificate.MaxPrincipals)
+        {
+            // OpenSSH, and SshSharp's own reader, refuse a certificate with more: issuing one would give a certificate nobody accepts.
+            throw new InvalidOperationException(
+                $"A certificate lists at most {SshCertificate.MaxPrincipals} principals; this one has {principals.Count}. Issue more than one certificate.");
         }
 
         return principals.Count > 0

@@ -153,7 +153,10 @@ A man in the middle can read, change, drop and inject bytes. The server itself m
   the certificate. This trusts nothing a plain key would not be trusted for: the server still proved it holds that key, and the
   certificate adds nothing. The unusable certificate is logged as a warning with the key's and the authority's fingerprints and
   the problem, never the host name or the key id (often a host name). A certificate whose key or authority is revoked
-  (`@revoked`, `RevokedHostKeys`) is refused outright, with no fallback.
+  (`@revoked`, `RevokedHostKeys`) is refused outright, with no fallback. A host certificate that is malformed is not read at all,
+  and fails the connection whatever its authority: besides truncated or padded ones, that is one with more than 256 principals
+  (OpenSSH's limit) or with critical options or extensions out of lexical order or listed twice (draft-ietf-sshm-cert), so two
+  readers can never disagree on which entry applies.
 - **`@revoked` lines in `known_hosts`:** refuse the key in every `StrictHostKeyChecking` mode, and win over any line that trusts
   it. As in OpenSSH master, in its next release ([d62150ded3](https://github.com/openssh/openssh-portable/commit/d62150ded3)), a
   line written without a port (`@revoked server.example <key>`) revokes the key for the host on every
@@ -425,7 +428,8 @@ connection, but not read or change it: each host's key is verified end to end, b
 
 ### Certificates the application checks or issues
 
-- **Checking** (`SshCertificate`): a certificate is parsed as hostile input (and fuzzed). `VerifySignature` proves only that the
+- **Checking** (`SshCertificate`): a certificate is parsed as hostile input (and fuzzed), and refused when malformed, including more
+  than 256 principals and options or extensions out of order or repeated (draft-ietf-sshm-cert). `VerifySignature` proves only that the
   key in the certificate's `AuthorityKey` signed it; anyone can make a CA, so trusting a certificate means comparing its authority
   with one you trust. `IsValidFor` does both, then the type, the validity window (`valid_after <= now < valid_before`), the principal
   (exact for users, a pattern for hosts; a certificate without principals is no one's) and refuses any critical option, since only
@@ -450,7 +454,7 @@ connection, but not read or change it: each host's key is verified end to end, b
   have login keys refuse that purpose). Issue for the shortest time that works (there is no default end, so nothing is valid
   forever by accident), name principals exactly (at least one is required, so no certificate is valid for any user), drop the
   extensions a use does not need, give each certificate its own serial for revocation, and log what is issued. The builder checks
-  option names and values before anything is signed, writes options sorted and once each, uses a fresh 32-byte random nonce, signs
+  option names and values before anything is signed, writes options sorted and once each, refuses more than 256 principals, uses a fresh 32-byte random nonce, signs
   RSA with `rsa-sha2-512` (never `ssh-rsa`), and verifies the signature before returning the certificate, so a signer or agent that
   answers with the wrong key or algorithm fails instead of producing a certificate servers would refuse.
 - **What it decides:** who gets a certificate is the application's decision. The library does not authenticate the requester.

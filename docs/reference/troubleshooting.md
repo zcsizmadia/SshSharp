@@ -146,6 +146,14 @@ with ecdsa-sha2-nistp256, which is not allowed here"). As `ssh` does, the key wa
 signed by an authority the list allows, or add the host's plain key. See
 [Host certificates that cannot be used](../host-keys.md#host-certificates-that-cannot-be-used).
 
+### `HostKeyRejected`: "The server's host certificate is malformed"
+
+The certificate could not be read, so it is not trusted, and not checked as a plain key either. Besides a truncated one, that is a
+certificate with more than 256 principals ("lists more than 256 principals") or with critical options or extensions not sorted by
+name ("is out of order") or listed twice ("appears twice"). `ssh-keygen` writes neither; re-issue the certificate with it, or with
+an authority that sorts options and keeps to 256 principals. See
+[Certificates that are not read](../how-to/certificates.md#certificates-that-are-not-read).
+
 ### "Port forwarding is disabled to avoid man-in-the-middle attacks", or no password is sent
 
 The host key changed and `StrictHostKeyChecking` is `no`: the connection was accepted but is not trusted, so it sends no password

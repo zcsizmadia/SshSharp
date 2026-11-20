@@ -174,6 +174,34 @@ public sealed class CertificateTests : IDisposable
     };
 
     [Test]
+    [Arguments("257 principals")]
+    [Arguments("extensions out of order")]
+    [Arguments("extension twice")]
+    public async Task AHostCertificateDraftIetfSshmCertRefuses_EndsTheKeyExchange(string @case)
+    {
+        // Even from a trusted authority: the certificate is malformed (draft-ietf-sshm-cert), so it is not read, let alone trusted.
+        File.WriteAllText(KnownHosts, AuthorityLine("*.example.com"));
+        var key = FakeHostKey.Ed25519();
+        var certificate = @case switch
+        {
+            "257 principals" => TestKeys.Certificate(_authority, key.Blob, SshCertificateType.Host,
+                [Host, .. Enumerable.Range(0, 256).Select(i => $"web{i}.example.com")]),
+            "extensions out of order" => TestKeys.Certificate(_authority, key.Blob, SshCertificateType.Host, [Host],
+                extensions: ["z@example.com", "a@example.com"]),
+            _ => TestKeys.Certificate(_authority, key.Blob, SshCertificateType.Host, [Host], extensions: ["a@example.com", "a@example.com"]),
+        };
+        await using var server = new FakeSessionServer(new FakeServerOptions { HostKey = key, HostCertificate = FakeHostKey.Certified(key, certificate) });
+        var ex = await Assert.ThrowsAsync<SshHostKeyException>(async () => await ConnectAsync(server));
+        await Assert.That(ex!.Message).Contains("host certificate is malformed")
+            .And.Contains(@case switch
+            {
+                "257 principals" => "more than 256 principals",
+                "extensions out of order" => "'a@example.com' is out of order",
+                _ => "'a@example.com' appears twice",
+            });
+    }
+
+    [Test]
     public async Task RequiredRsaSize_AppliesToTheAuthorityOfAHostCertificate()
     {
         // As OpenSSH master: RequiredRSASize holds a host certificate's RSA authority to the same minimum as an RSA host key.
@@ -307,7 +335,9 @@ public sealed class CertificateTests : IDisposable
     }
 
     /// <summary>Collects warnings.</summary>
-    private sealed class WarningLogger : Microsoft.Extensions.Logging.ILogger
+    /// <summary>Records the messages logged at <paramref name="level"/> (warnings by default).</summary>
+    private sealed class WarningLogger(Microsoft.Extensions.Logging.LogLevel level = Microsoft.Extensions.Logging.LogLevel.Warning)
+        : Microsoft.Extensions.Logging.ILogger
     {
         private readonly List<string> _warnings = [];
 
@@ -330,7 +360,7 @@ public sealed class CertificateTests : IDisposable
         public void Log<TState>(Microsoft.Extensions.Logging.LogLevel logLevel, Microsoft.Extensions.Logging.EventId eventId, TState state, Exception? exception,
             Func<TState, Exception?, string> formatter)
         {
-            if (logLevel == Microsoft.Extensions.Logging.LogLevel.Warning)
+            if (logLevel == level)
             {
                 lock (_warnings)
                 {
@@ -431,5 +461,39 @@ public sealed class CertificateTests : IDisposable
             },
         }, Timeout());
         await Assert.That(client.IsConnected).IsTrue();
+    }
+
+    [Test]
+    [Arguments(true)]
+    [Arguments(false)]
+    public async Task ConfigConnect_SkipsACertificateFileWithOptionsOutOfOrder(bool criticalOptions)
+    {
+        // The malformed certificate is skipped (logged, as an unreadable identity is), so the key is offered alone, which this server,
+        // trusting only the authority, refuses.
+        var keyPath = Path.Combine(_dir, "id_ed25519");
+        var certificatePath = Path.Combine(_dir, "user-cert.pub");
+        File.WriteAllText(keyPath, TestKeys.OpenSshEd25519(out var blob));
+        File.WriteAllText(certificatePath, TestKeys.CertificateLine(criticalOptions
+            ? TestKeys.Certificate(_authority, blob, SshCertificateType.User, ["tester"],
+                criticalOptions: [(SshCertificateBuilder.SourceAddress, "192.0.2.0/24"), (SshCertificateBuilder.ForceCommand, "true")])
+            : TestKeys.Certificate(_authority, blob, SshCertificateType.User, ["tester"], extensions: ["permit-pty", "permit-agent-forwarding"])));
+
+        await using var server = new FakeSessionServer { AdvertisedMethods = ["publickey"], TrustedUserAuthority = _authority.PublicKey.ToArray() };
+        var logger = new WarningLogger(Microsoft.Extensions.Logging.LogLevel.Information);
+        var connect = async () => await SshClient.ConnectAsync("srv", new SshConfigConnectOptions
+        {
+            UseAgent = false,
+            Config = SshConfig.Parse(
+                $"Host srv\n User tester\n IdentityFile \"{keyPath}\"\n CertificateFile \"{certificatePath}\"\n StrictHostKeyChecking no\n UserKnownHostsFile none\n"),
+            ResolveOptions = new SshConfigResolveOptions { LocalUser = "l", HomeDirectory = _dir },
+            Logger = logger,
+            TcpConnector = (_, _, _, _) =>
+            {
+                _ = server.StartAsync();
+                return ValueTask.FromResult<(Stream, IAsyncDisposable?)>((server.ClientStream, null));
+            },
+        }, Timeout());
+        await Assert.That(connect).Throws<SshAuthenticationException>();
+        await Assert.That(logger.Warnings).Contains(m => m.Contains("user-cert.pub", StringComparison.Ordinal) && m.Contains("is out of order", StringComparison.Ordinal));
     }
 }
