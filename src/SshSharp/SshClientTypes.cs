@@ -866,3 +866,20 @@ public sealed class SshCommandResult
         throw new SshCommandException(message, ExitStatus, ExitSignal, StandardError);
     }
 }
+/// <summary>The server's answer to <see cref="SshClient.SendGlobalRequestAsync"/>.</summary>
+public sealed class SshGlobalRequestResult
+{
+    internal SshGlobalRequestResult(bool success, ReadOnlyMemory<byte> data)
+    {
+        Success = success;
+        Data = data;
+    }
+
+    /// <summary>Whether the server granted the request (<c>SSH_MSG_REQUEST_SUCCESS</c>); false for <c>SSH_MSG_REQUEST_FAILURE</c>, also
+    /// the answer to a request the server does not know.</summary>
+    public bool Success { get; }
+
+    /// <summary>The data that followed the answer's message number, as the server sent it; empty for a failure and for most
+    /// successes.</summary>
+    public ReadOnlyMemory<byte> Data { get; }
+}

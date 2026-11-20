@@ -1,7 +1,7 @@
 # Features
 
 Everything SshSharp does, one row per feature, with the API or `ssh_config` directive to use and the page that shows how.
-<span class="badge text-bg-primary">1.1</span> and <span class="badge text-bg-primary">1.2</span> mark a feature added in that release.
+<span class="badge text-bg-primary">1.1</span>, <span class="badge text-bg-primary">1.2</span> and <span class="badge text-bg-primary">1.3</span> mark a feature added in that release.
 [OpenSSH compatibility](reference/openssh-compatibility.md) lists what behaves as `ssh` does and what differs.
 
 The four packages share one version: `SshSharp` (the client), `SshSharp.Extensions.DependencyInjection`,
@@ -130,6 +130,7 @@ The four packages share one version: `SshSharp` (the client), `SshSharp.Extensio
 | Tunnels without a listener | A `Stream` to a host and port, or a Unix socket, on the server's side | `OpenTcpTunnelAsync`, `OpenUnixSocketTunnelAsync` | [Port forwarding](how-to/port-forwarding.md) |
 | `HttpClient` through SSH | HTTP requests that connect through the SSH connection | `CreateHttpConnectCallback`; `UseSshTunnel` <span class="badge text-bg-primary">1.1</span> | [Port forwarding](how-to/port-forwarding.md) |
 | Forwardings from `ssh_config` | `LocalForward`, `RemoteForward` and `DynamicForward` started with the connection | `SshConfigConnectOptions.StartForwardings` | [ssh_config and known_hosts](how-to/ssh-config-and-known-hosts.md) |
+| Vendor channels and global requests | Open a channel of any type and send a global request of any name, for what the server defines and SshSharp has no API for; half-close on the channel <span class="badge text-bg-primary">1.3</span> | `OpenChannelAsync`, `SshCustomChannel`, `SendGlobalRequestAsync` | [Vendor channels and global requests](how-to/custom-channels.md) |
 
 ## Cryptography
 

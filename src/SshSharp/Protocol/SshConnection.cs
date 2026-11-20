@@ -598,7 +598,7 @@ internal sealed class SshConnection : IAsyncDisposable
             w.WriteUInt32(0); // reserved
         }, cancellationToken);
 
-    private async Task<SshChannel> OpenChannelAsync(string type, Action<SshWriter>? typeSpecificData, CancellationToken cancellationToken)
+    internal async Task<SshChannel> OpenChannelAsync(string type, Action<SshWriter>? typeSpecificData, CancellationToken cancellationToken)
     {
         if (_failure is { } failure)
         {

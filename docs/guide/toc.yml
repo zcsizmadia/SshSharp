@@ -39,6 +39,8 @@
           href: ../how-to/tune-and-inspect-connections.md
         - name: Tune for throughput
           href: ../how-to/performance-tuning.md
+        - name: Vendor channels and global requests
+          href: ../how-to/custom-channels.md
     - name: Configuration and trust
       items:
         - name: Use ssh_config and known_hosts

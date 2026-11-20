@@ -1,1 +1,12 @@
 #nullable enable
+SshSharp.SshClient.OpenChannelAsync(string! channelType, System.ReadOnlyMemory<byte> typeSpecificData = default(System.ReadOnlyMemory<byte>), System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SshSharp.SshCustomChannel!>!
+SshSharp.SshClient.SendGlobalRequestAsync(string! requestName, System.ReadOnlyMemory<byte> requestData = default(System.ReadOnlyMemory<byte>), System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SshSharp.SshGlobalRequestResult!>!
+SshSharp.SshGlobalRequestResult
+SshSharp.SshGlobalRequestResult.Data.get -> System.ReadOnlyMemory<byte>
+SshSharp.SshGlobalRequestResult.Success.get -> bool
+SshSharp.SshCustomChannel
+SshSharp.SshCustomChannel.ChannelType.get -> string!
+SshSharp.SshCustomChannel.Dispose() -> void
+SshSharp.SshCustomChannel.DisposeAsync() -> System.Threading.Tasks.ValueTask
+SshSharp.SshCustomChannel.ShutdownSendAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+SshSharp.SshCustomChannel.Stream.get -> System.IO.Stream!
