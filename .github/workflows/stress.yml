@@ -98,6 +98,21 @@ jobs:
             server: openssh
             software: OpenSSH
             strict: '1'
+          # alpine:3.23, OpenSSH 10.2p1 (10.2_p1-r1).
+          - name: OpenSSH, Alpine 3.23
+            image: alpine@sha256:469c9ea410b9215eaee7976ba6c0639039b444be8e5d638f7abbada189971eb2
+            server: openssh
+            software: OpenSSH
+            strict: '1'
+            artifact: openssh-alpine-3.23
+          # alpine:edge as of 2026-11-20, OpenSSH 10.6p2 (10.6_p2-r0). The digest pins the base image; apk still installs edge's
+          # current openssh package, so the version in the job summary's server line is the one tested.
+          - name: OpenSSH, Alpine edge
+            image: alpine@sha256:020dfcbaaf4cc1078bf2d9c7ba31a8466e334061dcd2f248001d68f79e52c000
+            server: openssh
+            software: OpenSSH
+            strict: '1'
+            artifact: openssh-alpine-edge
           - name: Dropbear, Alpine 3.22
             image: alpine@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8
             server: dropbear
@@ -143,7 +158,8 @@ jobs:
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
-          name: stress-interop-${{ matrix.server }}
+          # One artifact per job: three jobs run OpenSSH, so the newer two name theirs.
+          name: stress-interop-${{ matrix.artifact || matrix.server }}
           path: ${{ runner.temp }}/stress/
           if-no-files-found: ignore
 
