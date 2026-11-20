@@ -1,3 +1,5 @@
+using System.Formats.Asn1;
+using System.Numerics;
 using System.Security.Cryptography;
 using System.Text;
 using SshSharp.Keys;
@@ -84,6 +86,7 @@ public class EncryptedKeyFormatTests
             ("RSA PRIVATE KEY", RandomNumberGenerator.GetBytes(100)),
             ("RSA PRIVATE KEY", der.Append((byte)0).ToArray()),
             ("EC PRIVATE KEY", der),
+            ("RSA PRIVATE KEY", NegativeModulus(rsa)),
         })
         {
             var pem = TestKeys.LegacyEncryptedPem(label, body, passphrase);
@@ -383,6 +386,52 @@ public class EncryptedKeyFormatTests
         var misaligned = TestKeys.OpenSshEd25519(out _, padding: pad, passphrase: passphrase, cipher: ChaCha);
         await Assert.That(() => SshPrivateKey.Parse(misaligned, passphrase)).Throws<FormatException>().WithMessageContaining("invalid length");
     }
+
+    [Test]
+    public async Task RsaKeysWithANegativeInteger_AreAFormatError()
+    {
+        // DER INTEGERs are signed. .NET 8 converts each RSA field with ToByteArray(isUnsigned: true), which throws OverflowException
+        // on a negative one; found by EncryptedKeyRobustnessTests, where a mutated ciphertext decrypted to such a key.
+        using var rsa = RSA.Create(2048);
+        var pkcs1 = NegativeModulus(rsa);
+        await Assert.That(() => SshPrivateKey.Parse(Pem("RSA PRIVATE KEY", pkcs1), null)).Throws<FormatException>();
+
+        var pkcs8 = new AsnWriter(AsnEncodingRules.DER);
+        using (pkcs8.PushSequence())
+        {
+            pkcs8.WriteInteger(0);
+            using (pkcs8.PushSequence())
+            {
+                pkcs8.WriteObjectIdentifier("1.2.840.113549.1.1.1");
+                pkcs8.WriteNull();
+            }
+
+            pkcs8.WriteOctetString(pkcs1);
+        }
+
+        await Assert.That(() => SshPrivateKey.Parse(Pem("PRIVATE KEY", pkcs8.Encode()), null)).Throws<FormatException>();
+    }
+
+    /// <summary>A PKCS#1 RSAPrivateKey whose modulus is encoded as a negative INTEGER.</summary>
+    private static byte[] NegativeModulus(RSA rsa)
+    {
+        var p = rsa.ExportParameters(true);
+        var writer = new AsnWriter(AsnEncodingRules.DER);
+        using (writer.PushSequence())
+        {
+            writer.WriteInteger(0);
+            writer.WriteInteger(-new BigInteger(p.Modulus, isUnsigned: true, isBigEndian: true));
+            foreach (var field in new[] { p.Exponent!, p.D!, p.P!, p.Q!, p.DP!, p.DQ!, p.InverseQ! })
+            {
+                writer.WriteIntegerUnsigned(field);
+            }
+        }
+
+        return writer.Encode();
+    }
+
+    private static string Pem(string label, byte[] der) =>
+        $"-----BEGIN {label}-----\n{Convert.ToBase64String(der)}\n-----END {label}-----\n";
 
     private static byte[] Body(string pem) =>
         Convert.FromBase64String(string.Concat(pem.Split('\n').Where(l => l.Length > 0 && !l.StartsWith("-----", StringComparison.Ordinal))));
