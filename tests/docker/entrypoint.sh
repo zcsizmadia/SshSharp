@@ -4,6 +4,24 @@ set -e
 echo "sshsharp:$TEST_PASSWORD" | chpasswd
 if command -v dropbear > /dev/null 2>&1; then
   mkdir -p /etc/dropbear
+  # Every host key is made before the server starts, as on a real server. With -R alone Dropbear makes each type when a client
+  # first asks for it, and an RSA key took about 7 s on a busy runner: longer than a host key scan waits (5 s, as ssh-keyscan -T),
+  # so the scan test failed whenever it was the first to ask for RSA. -R stays, for any type this Dropbear knows that is not listed.
+  # RSA and ECDSA must be made here (a failure stops the container, so the fix cannot silently do nothing); Ed25519 may be missing
+  # from an old Dropbear.
+  for type in rsa ecdsa ed25519; do
+    key="/etc/dropbear/dropbear_${type}_host_key"
+    if [ ! -f "$key" ]; then
+      if ! dropbearkey -t "$type" -f "$key" > /dev/null 2>&1; then
+        if [ "$type" = ed25519 ]; then
+          echo "dropbearkey cannot make an ed25519 key; left to -R" >&2
+        else
+          echo "dropbearkey could not make the $type host key" >&2
+          exit 1
+        fi
+      fi
+    fi
+  done
   exec dropbear -F -E -R -p 22
 fi
 # AsyncSSH runs as the test account, so it listens on an unprivileged port (2222); it checks the password itself.
