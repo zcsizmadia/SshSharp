@@ -41,7 +41,7 @@ public class SshTokensTests
     [Test]
     public async Task ConnectionHash_IsOpenSsh106p2s_WithEachFieldNulTerminated()
     {
-        // SHA-1 of "laptop.corp.example\0real.example.com\0" "2222\0bob\0" + %j + "\0", as OpenSSH 10.6p2's ssh_connection_hash.
+        // SHA-1 of "laptop.corp.example\0real.example.com\0" "2222\0bob\0" + %j + "\0", as OpenSSH master's ssh_connection_hash.
         await Assert.That(Context().ExpandTokens("%C")).IsEqualTo("8bf3d5e25763262ea4768b72db65e6bd159321a0");
         await Assert.That((Context() with { ProxyJump = "jump.example.com" }).ExpandTokens("%C")).IsEqualTo("4f1e25ea4131f3d7c0247bcf869d5a53d674dede");
     }
@@ -71,7 +71,7 @@ public class SshTokensTests
     [Arguments("j1:notaport", "j1:notaport")] // does not parse: kept as written
     public async Task JumpSpec_IsTheWholeProxyJump_WithTheLastHopAsSshPrintsIt(string? proxyJump, string expected)
     {
-        // As OpenSSH 10.6p2's ssh_jump_spec (and its regress test proxyjump.sh): earlier hops as written, the last one rebuilt.
+        // As OpenSSH master's ssh_jump_spec (and its regress test proxyjump.sh): earlier hops as written, the last one rebuilt.
         await Assert.That(SshTokenContext.JumpSpec(proxyJump)).IsEqualTo(expected);
     }
 

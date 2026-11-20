@@ -56,7 +56,8 @@ A man in the middle can read, change, drop and inject bytes. The server itself m
   and `FipsMode` still applies on top. The one setting that lowers the bar is the smallest RSA host key
   (`SshClientOptions.RequiredRsaSize`, `RequiredRSASize` in `ssh_config`): an application may accept down to 1024 bits for an old
   device, as `ssh` allows, and never less. A value above 2048 also applies to the RSA authority that signed a host certificate, as
-  in OpenSSH 10.6p2; a lower one does not lower the 2048 bits every certificate's authority needs. The algorithms a host
+  in OpenSSH master, in its next release ([409167b833](https://github.com/openssh/openssh-portable/commit/409167b833)); a lower
+  one does not lower the 2048 bits every certificate's authority needs. The algorithms a host
   certificate's authority may have signed with (`SshClientOptions.CASignatureAlgorithms`, `CASignatureAlgorithms` in
   `ssh_config`) can likewise only be narrowed: SHA-1 `ssh-rsa` and `sk-*` signatures stay refused whatever the list says.
 - **Malformed input:** every parser treats its input as hostile, rejecting it with a protocol error, never with an
@@ -154,7 +155,8 @@ A man in the middle can read, change, drop and inject bytes. The server itself m
   the problem, never the host name or the key id (often a host name). A certificate whose key or authority is revoked
   (`@revoked`, `RevokedHostKeys`) is refused outright, with no fallback.
 - **`@revoked` lines in `known_hosts`:** refuse the key in every `StrictHostKeyChecking` mode, and win over any line that trusts
-  it. As in OpenSSH 10.6p2, a line written without a port (`@revoked server.example <key>`) revokes the key for the host on every
+  it. As in OpenSSH master, in its next release ([d62150ded3](https://github.com/openssh/openssh-portable/commit/d62150ded3)), a
+  line written without a port (`@revoked server.example <key>`) revokes the key for the host on every
   port, not only on 22, whether it is the plain key, a host certificate's certified key or its authority; a line with a port
   (`[server.example]:2222`) applies to that port only. These lines are read from the user's and the global files (not from
   `KnownHostsCommand` output, which is produced for the port), but not under `HostKeyAlias`, which is looked up on its own name.

@@ -419,7 +419,7 @@ public class SshSignatureTests
     [Test]
     public async Task AllowedSigners_RefuseACertificateItsAuthoritySignedWithSha1()
     {
-        // As OpenSSH 10.6p2 (9327423571): a cert-authority line does not vouch for a certificate the authority signed with ssh-rsa
+        // As OpenSSH master (9327423571): a cert-authority line does not vouch for a certificate the authority signed with ssh-rsa
         // (SHA-1), whatever the authority's key; the same certificate signed with rsa-sha2-256 is accepted.
         using var rsa = System.Security.Cryptography.RSA.Create(2048);
         using var authority = SshPrivateKey.Parse(TestKeys.OpenSshRsa(rsa.ExportParameters(true), out _));

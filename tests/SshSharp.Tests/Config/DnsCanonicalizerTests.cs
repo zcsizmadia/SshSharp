@@ -152,7 +152,7 @@ public sealed class DnsCanonicalizerTests
     [Test]
     public async Task ACnameInCapitals_CannotSlipPastANegatedTarget_AndIsFollowedLowercased()
     {
-        // As OpenSSH 10.6p2 (42751c85c5): the target is matched without regard to case, so a DNS answer in capitals cannot evade a
+        // As OpenSSH master (42751c85c5): the target is matched without regard to case, so a DNS answer in capitals cannot evade a
         // negated pattern, and the name connected to is lowercase.
         const string Rule = "CanonicalizePermittedCNAMEs *.corp.example.com:!evil.example.net,*.example.net\n";
         var evil = new FakeDns(("web.corp.example.com.", "EVIL.example.net"));

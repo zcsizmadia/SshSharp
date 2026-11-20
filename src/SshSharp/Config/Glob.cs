@@ -76,7 +76,7 @@ internal static class Glob
 
     /// <summary>
     /// Whether <paramref name="path"/> is an existing file (or directory). A path that cannot be looked at, because a directory on the way
-    /// may not be searched, is an <see cref="UnauthorizedAccessException"/>, not a missing file: as OpenSSH 10.6p2 fails an <c>Include</c>
+    /// may not be searched, is an <see cref="UnauthorizedAccessException"/>, not a missing file: as OpenSSH master fails an <c>Include</c>
     /// whose glob hits such a directory, rather than leave out the settings the file holds.
     /// </summary>
     internal static bool Exists(string path, bool directory)

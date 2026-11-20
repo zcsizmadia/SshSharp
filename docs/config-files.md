@@ -32,9 +32,11 @@ and `SshConfigResolveOptions` supplies the home directory, environment, local us
 - `%j` is the whole `ProxyJump` specification: the hops before the last one as written, then the last one as `ssh -G` prints it,
   `[user@]host[:port]`, with an address in brackets (`ProxyJump ssh://alice@192.0.2.10:2222` gives `alice@[192.0.2.10]:2222`).
   `%C` is the SHA-1 of `%l`, `%h`, `%p`, `%r` and `%j`, each followed by a NUL, so that host `192.0.2.1` on port `2222` and
-  `192.0.2.12` on port `222` differ. Both are as in OpenSSH 10.6p2 <span class="badge text-bg-primary">1.2</span>: older OpenSSH
-  hashed the fields run together, and put only the last hop's host name in `%j`, so paths built with `%C` (an `IdentityFile`, a
-  `UserKnownHostsFile` or a forwarded socket's path, say) differ between SshSharp 1.2 and `ssh` before 10.6p2.
+  `192.0.2.12` on port `222` differ. Both are as in OpenSSH master, in its next release
+  ([00bc2a1124](https://github.com/openssh/openssh-portable/commit/00bc2a1124),
+  [d71cc75c99](https://github.com/openssh/openssh-portable/commit/d71cc75c99)) <span class="badge text-bg-primary">1.2</span>:
+  older OpenSSH hashed the fields run together, and put only the last hop's host name in `%j`, so paths built with `%C` (an `IdentityFile`, a
+  `UserKnownHostsFile` or a forwarded socket's path, say) differ between SshSharp 1.2 and `ssh` up to 10.6p2.
 
 `Match exec` runs a local command, so it is evaluated only when `SshConfigResolveOptions.ExecMatcher` is set, for configuration files
 you trust (`ExecMatcher = (command, ct) => new(SshExecMatcher.RunShellAsync(command, ct))` runs it in the system shell); without
