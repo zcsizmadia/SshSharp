@@ -471,11 +471,23 @@ connection, but not read or change it: each host's key is verified end to end, b
   in a dot or space are refused too.
 - A single-file download refuses a second file or a directory.
 - File modes from the server apply only with `Preserve`, and only the permission bits, never set-id or sticky.
-- Remote paths, for downloads and uploads, are passed to the server's shell as one single-quoted word. That is safe with a POSIX
-  shell. On a Windows OpenSSH server the command runs through `cmd.exe`, which does not treat single quotes as quotes, or
-  PowerShell, which escapes a quote inside them differently. There, a path the application does not control can run a command as
-  the logged-in user: the issue behind CVE-2020-15778 and SSH.NET's GHSA-mggc-4xg6-vcxf. Applications pass such paths to SFTP,
-  which runs no shell.
+- Remote paths, for downloads and uploads, are part of the command line run on the server (`scp -t <path>`, `scp -f <path>`), so
+  how they are written decides whether a path can run a command as the logged-in user: the issue behind CVE-2020-15778 and
+  SSH.NET's GHSA-mggc-4xg6-vcxf. `SshScpOptions.PathQuoting` chooses how:
+  - `Posix` (the default) writes one single-quoted word. That is safe for any path with a POSIX shell. On a Windows OpenSSH server
+    the command runs through `cmd.exe`, which does not treat single quotes as quotes, or PowerShell, which escapes a quote inside
+    them differently, so there a path the application does not control can run a command.
+  - `None` (1.3) writes the path as given, with no quotes and no `--`, for network devices that read the line without a shell. It
+    allows only letters, digits and `/ . _ - : + @ , =`, not `-` first, so even a server that does have a shell gets one word that
+    is not an option and expands to nothing.
+  - `DoubleQuote` (1.3) writes one double-quoted word, for OpenSSH for Windows with `cmd.exe` (which runs `cmd.exe /c "<line>"`).
+    It refuses control characters, `"`, what `cmd.exe` expands inside double quotes (`%`, and `!` with delayed expansion), what
+    PowerShell expands or ends a string at (`$`, `` ` ``, its typographic double quotes), `< > | * ?`, and a trailing `\` (which
+    the C runtime would read, with the closing quote, as a literal `"`).
+
+  Both new modes refuse a path before anything is sent, with `ArgumentException`. Their checks keep a path to one word, but do not
+  confine it: a path can still name any file the account can reach. They are meant for paths the application controls;
+  applications pass other paths to SFTP, which runs no shell.
 - Total size, file count and directory depth are not limited: a server can fill the target's disk.
 
 ### Secrets in memory and logs

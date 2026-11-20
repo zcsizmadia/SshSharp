@@ -47,7 +47,7 @@ public static class SshScpExtensions
         options ??= new SshScpOptions();
         var size = length ?? (source.CanSeek ? source.Length - source.Position : throw new ArgumentException("The length is needed for a stream that cannot seek.", nameof(length)));
         ArgumentOutOfRangeException.ThrowIfNegative(size, nameof(length));
-        var name = RemoteFileName(remotePath);
+        var name = RemoteFileName(remotePath, options.PathQuoting);
         await using var scp = await ScpChannel.StartAsync(client, options, "-t", remotePath, cancellationToken).ConfigureAwait(false);
         await scp.ReadAckAsync(cancellationToken).ConfigureAwait(false);
         await SendFileAsync(scp, name, source, size, (int)options.FileMode, null, remotePath, options, cancellationToken).ConfigureAwait(false);
@@ -539,11 +539,21 @@ public static class SshScpExtensions
     private static int FileModeOf(FileInfo file, SshScpOptions options) =>
         options.Preserve && !OperatingSystem.IsWindows() ? (int)file.UnixFileMode & 0x1FF : (int)options.FileMode;
 
-    /// <summary>The name to send for a stream upload: the last component of the remote path.</summary>
-    private static string RemoteFileName(string remotePath)
+    /// <summary>
+    /// The name to send for a stream upload: the last component of the remote path. Besides <c>/</c>, a Windows path (double-quoted)
+    /// also ends components at <c>\</c> and a drive's <c>:</c>, and a device path (unquoted) at its file system's <c>:</c>, as in
+    /// <c>flash:backup.cfg</c>; scp refuses a name that still holds a separator.
+    /// </summary>
+    private static string RemoteFileName(string remotePath, SshScpPathQuoting quoting)
     {
-        var name = remotePath.TrimEnd('/');
-        name = name[(name.LastIndexOf('/') + 1)..];
+        char[] separators = quoting switch
+        {
+            SshScpPathQuoting.DoubleQuote => ['/', '\\', ':'],
+            SshScpPathQuoting.None => ['/', ':'],
+            _ => ['/'],
+        };
+        var name = remotePath.TrimEnd(separators);
+        name = name[(name.LastIndexOfAny(separators) + 1)..];
         return name.Length > 0 ? name : throw new ArgumentException("The remote path must name a file.", nameof(remotePath));
     }
 }

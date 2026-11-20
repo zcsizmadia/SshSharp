@@ -24,7 +24,7 @@ env:
   # As in CI (ci.yml): the unit jobs leave out the tests that need a real server and the opt-in measurements; the interop jobs run the
   # tests that need a server, except the ssh-audit one and the opt-in key-exchange volume test.
   UNIT_TESTS: /*/*/*/*[(Category!=Integration)&(Category!=Measure)]
-  INTEROP_TESTS: /*/*/*/*[(Category=Integration)&(Category!=SshAudit)&(Category!=Measure)&(Category!=Handshakes)]
+  INTEROP_TESTS: /*/*/*/*[(Category=Integration)&(Category!=SshAudit)&(Category!=Measure)&(Category!=Handshakes)&(Category!=WindowsCmd)]
 
 concurrency:
   group: stress-${{ github.ref }}

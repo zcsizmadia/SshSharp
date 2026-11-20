@@ -51,15 +51,29 @@ await client.UploadFileAsync("secrets.env", "/etc/app/secrets.env", options, can
 A failed transfer (a missing file, permission denied, a server without `scp`) throws an `SshException` with
 `SshFailureReason.TransferFailed` and the server's own message.
 
-SCP runs `scp` on the server through the server's shell, and the remote path is part of that command. SshSharp passes it as one
-single-quoted word, so spaces and special characters are safe with a POSIX shell (`sh`, `bash`).
+SCP runs `scp` on the server through the server's shell, and the remote path is part of that command. By default SshSharp passes it
+as one single-quoted word, so spaces and special characters are safe with a POSIX shell (`sh`, `bash`).
+
+`SshScpOptions.PathQuoting` (1.3) writes it for other servers: `None` sends it unquoted, for network devices (Cisco IOS, MikroTik
+RouterOS) that read the line themselves, and `DoubleQuote` double-quotes it, for OpenSSH for Windows with `cmd.exe`. Both refuse,
+with `ArgumentException` and before anything is sent, a path they cannot carry safely. See
+[Network devices and Windows servers](how-to/transfer-files-scp.md#network-devices-and-windows-servers).
+
+```csharp
+// Cisco IOS: "scp -f nvram:startup-config", no quotes.
+await router.DownloadFileAsync("nvram:startup-config", "startup-config.txt", new SshScpOptions { PathQuoting = SshScpPathQuoting.None });
+
+// OpenSSH for Windows with cmd.exe: scp -t -- "C:\Reports\May 2024\report.csv".
+await windows.UploadFileAsync("report.csv", @"C:\Reports\May 2024\report.csv", new SshScpOptions { PathQuoting = SshScpPathQuoting.DoubleQuote });
+```
 
 > [!WARNING]
-> Windows OpenSSH servers run commands through `cmd.exe` by default, or PowerShell when configured so, and neither reads that
+> Windows OpenSSH servers run commands through `cmd.exe` by default, or PowerShell when configured so, and neither reads the default
 > quoting as a POSIX shell does. `cmd.exe` does not treat single quotes as quotes at all, so a path with `&` in it runs what follows
 > as a command. PowerShell does, but escapes a quote inside them differently, so a path with a `'` in it can end the quoted word
-> and run a command. Either runs as the logged-in user. Pass only remote paths you control to SCP on such a server. For a path that
-> comes from user input or another untrusted source, use [SFTP](sftp.md), which sends paths as data and runs no shell.
+> and run a command. Either runs as the logged-in user. On such a server set `PathQuoting = SshScpPathQuoting.DoubleQuote`, which
+> refuses the characters either shell would act on, and pass only remote paths you control. For a path that comes from user input
+> or another untrusted source, use [SFTP](sftp.md), which sends paths as data and runs no shell.
 
 When downloading, every name the server sends must be a single path component (no `/`, `\`, `:`, `.`, `..` or control characters),
 and a single-file download accepts exactly one file: a hostile server cannot write outside the target or slip in extra files

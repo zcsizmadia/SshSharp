@@ -23,6 +23,15 @@ public sealed class SshScpOptions
 
     /// <summary>The server's scp program. Default <c>scp</c>.</summary>
     public string ScpCommand { get; init; } = "scp";
+
+    /// <summary>
+    /// How the remote path is written on the command line run on the server. Default <see cref="SshScpPathQuoting.Posix"/>, one
+    /// single-quoted word, which is safe for any path with a POSIX shell. <see cref="SshScpPathQuoting.None"/> is for network devices
+    /// that read the line without a shell, and <see cref="SshScpPathQuoting.DoubleQuote"/> for Windows OpenSSH with <c>cmd.exe</c>; both
+    /// refuse, before anything is sent, a path they cannot pass on safely (an <see cref="ArgumentException"/>), and are meant only for
+    /// paths the application controls.
+    /// </summary>
+    public SshScpPathQuoting PathQuoting { get; init; }
 }
 
 /// <summary>Progress of one file in an SCP transfer.</summary>

@@ -370,6 +370,168 @@ public sealed class ScpTests : IDisposable
         await Assert.That(() => ScpChannel.QuoteForShell("")).Throws<ArgumentException>();
     }
 
+    // ---- path quoting modes ----
+
+    [Test]
+    public async Task WithoutQuoting_ThePathGoesAsGiven_WithoutDoubleDash()
+    {
+        var received = new List<string>();
+        await using var server = new FakeSessionServer
+        {
+            OnExec = script => script.Command.Contains(" -f ", StringComparison.Ordinal)
+                ? Source(File("startup-config", "hostname r1\n"))(script)
+                : Sink(received, [])(script),
+        };
+        await using var client = await ConnectAsync(server);
+        var none = new SshScpOptions { PathQuoting = SshScpPathQuoting.None };
+
+        await client.UploadAsync(new MemoryStream(Text("x")), "flash:/backup-2024_05.cfg", cancellationToken: Timeout(), options: none);
+        await Assert.That(server.Commands.Last()).IsEqualTo("scp -t flash:/backup-2024_05.cfg");
+
+        await client.UploadAsync(new MemoryStream(Text("x")), "disk0:/a+b@c,d=e.rsc", length: 1,
+            new SshScpOptions { PathQuoting = SshScpPathQuoting.None, Preserve = true }, Timeout());
+        await Assert.That(server.Commands.Last()).IsEqualTo("scp -t -p disk0:/a+b@c,d=e.rsc");
+
+        // A device's file system prefix is not part of the name sent for a stream.
+        await client.UploadAsync(new MemoryStream(Text("x")), "flash:running.cfg", cancellationToken: Timeout(), options: none);
+        await Assert.That(server.Commands.Last()).IsEqualTo("scp -t flash:running.cfg");
+        await Assert.That(received.Where(l => l[0] == 'C')).IsEquivalentTo(new[] { "C0644 1 backup-2024_05.cfg", "C0644 1 a+b@c,d=e.rsc", "C0644 1 running.cfg" });
+
+        using var memory = new MemoryStream();
+        await client.DownloadAsync("nvram:startup-config", memory, none, Timeout());
+        await Assert.That(server.Commands.Last()).IsEqualTo("scp -f nvram:startup-config");
+        await Assert.That(Encoding.UTF8.GetString(memory.ToArray())).IsEqualTo("hostname r1\n");
+
+        var tree = Directory.CreateDirectory(Path.Combine(_dir, "cfg"));
+        await System.IO.File.WriteAllTextAsync(Path.Combine(tree.FullName, "a.rsc"), "A");
+        await client.UploadDirectoryAsync(tree.FullName, "flash/cfg", none, Timeout());
+        await Assert.That(server.Commands.Last()).IsEqualTo("scp -r -t flash/cfg");
+    }
+
+    [Test]
+    public async Task DoubleQuoting_WritesOneDoubleQuotedWord()
+    {
+        var received = new List<string>();
+        await using var server = new FakeSessionServer
+        {
+            OnExec = script => script.Command.Contains(" -f ", StringComparison.Ordinal)
+                ? Source(File("app.log", "ok\n"))(script)
+                : Sink(received, [])(script),
+        };
+        await using var client = await ConnectAsync(server);
+        var quoted = new SshScpOptions { PathQuoting = SshScpPathQuoting.DoubleQuote };
+
+        // cmd.exe's & ^ ( ) ; and spaces, and a single quote, are all literal inside the double quotes.
+        await client.UploadAsync(new MemoryStream(Text("x")), @"C:\Users\deploy\in box\a&b (1)'s;^.csv", cancellationToken: Timeout(), options: quoted);
+        await Assert.That(server.Commands.Last()).IsEqualTo(@"scp -t -- ""C:\Users\deploy\in box\a&b (1)'s;^.csv""");
+        await client.UploadAsync(new MemoryStream(Text("x")), "C:report.csv", cancellationToken: Timeout(), options: quoted);
+        await Assert.That(received.Where(l => l[0] == 'C')).IsEquivalentTo(new[] { "C0644 1 a&b (1)'s;^.csv", "C0644 1 report.csv" }); // a Windows path's name
+
+        using var memory = new MemoryStream();
+        await client.DownloadAsync("C:/logs/app.log", memory,
+            new SshScpOptions { PathQuoting = SshScpPathQuoting.DoubleQuote, Preserve = true, ScpCommand = "scp.exe" }, Timeout());
+        await Assert.That(server.Commands.Last()).IsEqualTo(@"scp.exe -f -p -- ""C:/logs/app.log""");
+
+        var tree = Directory.CreateDirectory(Path.Combine(_dir, "site"));
+        await System.IO.File.WriteAllTextAsync(Path.Combine(tree.FullName, "index.html"), "hi");
+        await client.UploadDirectoryAsync(tree.FullName, @"D:\www\site", quoted, Timeout());
+        await Assert.That(server.Commands.Last()).IsEqualTo(@"scp -r -t -- ""D:\www\site""");
+    }
+
+    [Test]
+    [Arguments("")]
+    [Arguments("flash:/a b.cfg")]       // whitespace would split the path
+    [Arguments("flash:/a\tb.cfg")]
+    [Arguments("flash:/a\u00A0b.cfg")]  // so would Unicode spaces
+    [Arguments("flash:/a\nreload")]     // control characters, always
+    [Arguments("flash:/a\u0085b")]
+    [Arguments("flash:/a\u2028b")]
+    [Arguments("-oProxyCommand=x")]     // taken for an option, with no "--" before it
+    [Arguments("flash:/a;reload")]      // and everything a shell would read, in case there is one after all
+    [Arguments("flash:/$(id)")]
+    [Arguments("flash:/`id`")]
+    [Arguments("flash:/a|b")]
+    [Arguments("flash:/a&b")]
+    [Arguments("flash:/a>b")]
+    [Arguments("flash:/'a'")]
+    [Arguments("flash:/\"a\"")]
+    [Arguments(@"flash:\a")]
+    [Arguments("~/a")]
+    [Arguments("a*")]
+    [Arguments("a#b")]
+    [Arguments("a%PATH%")]
+    [Arguments("a\U0001F600")]          // not a letter
+    public async Task WithoutQuoting_ARiskyPath_IsRefusedBeforeAnythingIsSent(string path)
+    {
+        await using var server = new FakeSessionServer { OnExec = Sink([], []) };
+        await using var client = await ConnectAsync(server);
+        var options = new SshScpOptions { PathQuoting = SshScpPathQuoting.None };
+
+        await Assert.That(() => ScpChannel.CheckUnquoted(path)).Throws<ArgumentException>();
+        if (path.Length > 0)
+        {
+            var error = await Assert.ThrowsAsync<ArgumentException>(() => client.UploadAsync(new MemoryStream(Text("x")), path, cancellationToken: Timeout(), options: options));
+            await Assert.That(error!.ParamName).IsEqualTo("remotePath");
+            using var sink = new MemoryStream();
+            await Assert.That(() => client.DownloadAsync(path, sink, options, Timeout())).Throws<ArgumentException>();
+        }
+
+        await Assert.That(server.Commands).IsEmpty();
+    }
+
+    [Test]
+    [Arguments("")]
+    [Arguments("C:\\a\r\nb")]           // control characters, always
+    [Arguments("C:\\a\u001Bb")]
+    [Arguments("C:\\a\u2029b")]
+    [Arguments("C:\\a\" & calc & \"")]  // a quote would end the word
+    [Arguments("C:\\%USERPROFILE%\\x")] // cmd.exe expands inside double quotes
+    [Arguments("C:\\!x!")]              // so does delayed expansion
+    [Arguments("C:\\$env:x")]           // and PowerShell
+    [Arguments("C:\\$(calc)")]
+    [Arguments("C:\\`x")]
+    [Arguments("C:\\\u201Cx")]          // PowerShell's typographic double quotes end a string too
+    [Arguments("C:\\\u201Dx")]
+    [Arguments("C:\\\u201Ex")]
+    [Arguments("C:\\a<b")]              // not in Windows names
+    [Arguments("C:\\a>b")]
+    [Arguments("C:\\a|b")]
+    [Arguments("C:\\a*")]
+    [Arguments("C:\\a?")]
+    [Arguments("C:\\dir\\")]            // \" would be a literal quote to scp.exe
+    [Arguments("C:\\")]
+    public async Task DoubleQuoting_ARiskyPath_IsRefusedBeforeAnythingIsSent(string path)
+    {
+        await using var server = new FakeSessionServer { OnExec = Sink([], []) };
+        await using var client = await ConnectAsync(server);
+        var options = new SshScpOptions { PathQuoting = SshScpPathQuoting.DoubleQuote };
+
+        await Assert.That(() => ScpChannel.QuoteForCmd(path)).Throws<ArgumentException>();
+        if (path.Length > 0)
+        {
+            var error = await Assert.ThrowsAsync<ArgumentException>(() => client.UploadAsync(new MemoryStream(Text("x")), path, cancellationToken: Timeout(), options: options));
+            await Assert.That(error!.ParamName).IsEqualTo("remotePath");
+            using var sink = new MemoryStream();
+            await Assert.That(() => client.DownloadAsync(path, sink, options, Timeout())).Throws<ArgumentException>();
+        }
+
+        await Assert.That(server.Commands).IsEmpty();
+    }
+
+    [Test]
+    public async Task EachMode_KeepsWhatItAllows_AndAnUnknownModeIsRefused()
+    {
+        await Assert.That(new SshScpOptions().PathQuoting).IsEqualTo(SshScpPathQuoting.Posix);
+        await Assert.That(ScpChannel.CommandLine(new SshScpOptions(), "-t", "/a b")).IsEqualTo("scp -t -- '/a b'");
+        await Assert.That(ScpChannel.CheckUnquoted("flash:/a-b_c.d")).IsEqualTo("flash:/a-b_c.d");
+        await Assert.That(ScpChannel.CheckUnquoted("Konfiguráció/ünnep.rsc")).IsEqualTo("Konfiguráció/ünnep.rsc"); // letters of any script
+        await Assert.That(ScpChannel.QuoteForCmd(@"C:\a b\c")).IsEqualTo(@"""C:\a b\c""");
+        await Assert.That(ScpChannel.QuoteForCmd("C:/dir/")).IsEqualTo(@"""C:/dir/""");
+        await Assert.That(ScpChannel.QuoteForCmd(@"\\server\share\x")).IsEqualTo(@"""\\server\share\x""");
+        await Assert.That(() => ScpChannel.CommandLine(new SshScpOptions { PathQuoting = (SshScpPathQuoting)7 }, "-t", "/a"))
+            .Throws<ArgumentOutOfRangeException>();
+    }
+
     // ---- pooled buffers ----
 
     /// <summary>

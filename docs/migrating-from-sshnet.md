@@ -373,7 +373,12 @@ await client.UploadFileAsync("site.tar.gz", "/tmp/site.tar.gz");
 | `scp.Download(path, Stream)` | `client.DownloadAsync(remotePath, stream)` |
 | `scp.Download(path, FileInfo)` / `DirectoryInfo` | `client.DownloadFileAsync(...)` / `DownloadDirectoryAsync(...)` |
 | `Uploading` / `Downloading` events | `SshScpOptions.Progress` |
-| `RemotePathTransformation` | not needed: remote paths are always quoted as one word for the server's shell |
+| `RemotePathTransformation` (`ShellQuote`, `None`, `DoubleQuote`) | `SshScpOptions.PathQuoting` (`Posix`, the default, `None`, `DoubleQuote`) |
+
+SSH.NET's `None` and `DoubleQuote` pass any path through (`DoubleQuote` escapes only `"`). SshSharp's refuse, with
+`ArgumentException`, a path that could split the word or run a command: `None` allows only letters, digits and `/ . _ - : + @ , =`,
+and `DoubleQuote` refuses `" % ! $` `` ` ``, control characters and a trailing `\`. See
+[Network devices and Windows servers](how-to/transfer-files-scp.md#network-devices-and-windows-servers).
 
 See [File transfer (SCP)](scp.md).
 

@@ -189,6 +189,7 @@ The test classes carry a TUnit `[Category]`, and each CI job selects its tests b
 | `LocalTools` | Key files read back by `ssh-keygen`, OpenSSL and `puttygen`, and encrypted key files those tools make (with passphrases generated per run) read by SshSharp; no server | The unit jobs and the OpenSSH runner job. CI installs PuTTY's command-line `puttygen` on Linux and macOS; on Windows, PuTTY's `puttygen.exe` has only a window, so the `.ppk` tests skip there |
 | `Integration` | Tests against a real server (`SSHSHARP_TEST_SSHD` and the other `SSHSHARP_TEST_*` variables) | The interop jobs |
 | `SshAudit` | The client audit; also `Integration`, but it needs ssh-audit listening, not an SSH server | The audit job |
+| `WindowsCmd` | SCP's `DoubleQuote` path quoting against OpenSSH for Windows with `cmd.exe` as its default shell; also `Integration`. It needs `SSHSHARP_TEST_SERVER_SHELL=cmd` | The last step of the OpenSSH for Windows job, after it switches the server's default shell from Git Bash to `cmd.exe` |
 | `Measure` | Measurements, not checks (`SSHSHARP_MEASURE=1`) | Nowhere in CI; by hand |
 | `Handshakes` | The key-exchange volume test against a real server; also `Integration`. It needs `SSHSHARP_TEST_HANDSHAKES` (handshakes per host key type) | Nowhere in CI; by hand, when hunting an intermittent key exchange failure |
 
@@ -197,7 +198,7 @@ The selections, as TUnit tree filters (Microsoft.Testing.Platform's `--treenode-
 | Run | Filter |
 |---|---|
 | Unit tests | `/*/*/*/*[(Category!=Integration)&(Category!=Measure)]` |
-| Interop tests | `/*/*/*/*[(Category=Integration)&(Category!=SshAudit)&(Category!=Measure)&(Category!=Handshakes)]` |
+| Interop tests | `/*/*/*/*[(Category=Integration)&(Category!=SshAudit)&(Category!=Measure)&(Category!=Handshakes)&(Category!=WindowsCmd)]` |
 | A measurement | `/*/*/*/*[Category=Measure]`, with `SSHSHARP_MEASURE=1` |
 | The key-exchange volume test | `/*/*/TransportInteropTests/*[Category=Handshakes]`, with a server and, for example, `SSHSHARP_TEST_HANDSHAKES=2000` |
 
@@ -214,7 +215,7 @@ dotnet build tests/SshSharp.Tests -c Release
 # the unit tests
 dotnet tests/SshSharp.Tests/bin/Release/net10.0/SshSharp.Tests.dll --treenode-filter "/*/*/*/*[(Category!=Integration)&(Category!=Measure)]"
 # the interop tests, against a server named by SSHSHARP_TEST_SSHD, SSHSHARP_TEST_USER and so on (without one they all skip)
-dotnet tests/SshSharp.Tests/bin/Release/net10.0/SshSharp.Tests.dll --treenode-filter "/*/*/*/*[(Category=Integration)&(Category!=SshAudit)&(Category!=Measure)&(Category!=Handshakes)]"
+dotnet tests/SshSharp.Tests/bin/Release/net10.0/SshSharp.Tests.dll --treenode-filter "/*/*/*/*[(Category=Integration)&(Category!=SshAudit)&(Category!=Measure)&(Category!=Handshakes)&(Category!=WindowsCmd)]"
 ```
 
 Without a filter everything runs, and the Integration tests skip at once when no server is configured.
