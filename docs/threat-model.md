@@ -482,12 +482,14 @@ connection, but not read or change it: each host's key is verified end to end, b
     the command runs through `cmd.exe`, which does not treat single quotes as quotes, or PowerShell, which escapes a quote inside
     them differently, so there a path the application does not control can run a command.
   - `None` (1.3) writes the path as given, with no quotes and no `--`, for network devices that read the line without a shell. It
-    allows only letters, digits and `/ . _ - : + @ , =`, not `-` first, so even a server that does have a shell gets one word that
-    is not an option and expands to nothing.
+    allows only letters, digits and `/ . _ - : + @ =`, with no `-`, `=` or `@` first, so even a server that does have a shell gets
+    one word that is not an option and that the common shells read literally: zsh and tcsh expand a leading `=`, and PowerShell
+    splats a leading `@` and splits a word at `,`.
   - `DoubleQuote` (1.3) writes one double-quoted word, for OpenSSH for Windows with `cmd.exe` (which runs `cmd.exe /c "<line>"`).
     It refuses control characters, `"`, what `cmd.exe` expands inside double quotes (`%`, and `!` with delayed expansion), what
-    PowerShell expands or ends a string at (`$`, `` ` ``, its typographic double quotes), `< > | * ?`, and a trailing `\` (which
-    the C runtime would read, with the closing quote, as a literal `"`).
+    PowerShell expands or ends a string at (`$`, `` ` ``, its typographic double quotes), `< > | * ?`, a trailing `\` (which
+    the C runtime would read, with the closing quote, as a literal `"`), and a leading `-`, so the path cannot be read as an option
+    even by a shell that drops the `--` before it.
 
   Both new modes refuse a path before anything is sent, with `ArgumentException`. Their checks keep a path to one word, but do not
   confine it: a path can still name any file the account can reach. They are meant for paths the application controls;

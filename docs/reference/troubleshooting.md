@@ -329,8 +329,9 @@ quotes become part of the name ("`'flash:/x.cfg'`: no such file"), or `--` is ta
 ### `ArgumentException` for a remote SCP path
 
 `PathQuoting` `None` and `DoubleQuote` refuse paths they cannot carry safely, before anything is sent: the message names the
-character. `None` takes only letters, digits and `/ . _ - : + @ , =` (no spaces), not `-` first; `DoubleQuote` refuses control
-characters, `" % ! $` `` ` ``, `< > | * ?` and a trailing `\`. Rename the file, or use SFTP.
+character. `None` takes only letters, digits and `/ . _ - : + @ =` (no spaces or commas), not `-`, `=` or `@` first;
+`DoubleQuote` refuses control characters, `" % ! $` `` ` ``, `< > | * ?`, a leading `-` and a trailing `\`. Rename the file, or use
+SFTP.
 
 ## Forwarding
 

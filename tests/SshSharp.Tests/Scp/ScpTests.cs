@@ -388,14 +388,14 @@ public sealed class ScpTests : IDisposable
         await client.UploadAsync(new MemoryStream(Text("x")), "flash:/backup-2024_05.cfg", cancellationToken: Timeout(), options: none);
         await Assert.That(server.Commands.Last()).IsEqualTo("scp -t flash:/backup-2024_05.cfg");
 
-        await client.UploadAsync(new MemoryStream(Text("x")), "disk0:/a+b@c,d=e.rsc", length: 1,
+        await client.UploadAsync(new MemoryStream(Text("x")), "disk0:/a+b@c=d.rsc", length: 1,
             new SshScpOptions { PathQuoting = SshScpPathQuoting.None, Preserve = true }, Timeout());
-        await Assert.That(server.Commands.Last()).IsEqualTo("scp -t -p disk0:/a+b@c,d=e.rsc");
+        await Assert.That(server.Commands.Last()).IsEqualTo("scp -t -p disk0:/a+b@c=d.rsc");
 
         // A device's file system prefix is not part of the name sent for a stream.
         await client.UploadAsync(new MemoryStream(Text("x")), "flash:running.cfg", cancellationToken: Timeout(), options: none);
         await Assert.That(server.Commands.Last()).IsEqualTo("scp -t flash:running.cfg");
-        await Assert.That(received.Where(l => l[0] == 'C')).IsEquivalentTo(new[] { "C0644 1 backup-2024_05.cfg", "C0644 1 a+b@c,d=e.rsc", "C0644 1 running.cfg" });
+        await Assert.That(received.Where(l => l[0] == 'C')).IsEquivalentTo(new[] { "C0644 1 backup-2024_05.cfg", "C0644 1 a+b@c=d.rsc", "C0644 1 running.cfg" });
 
         using var memory = new MemoryStream();
         await client.DownloadAsync("nvram:startup-config", memory, none, Timeout());
@@ -460,6 +460,9 @@ public sealed class ScpTests : IDisposable
     [Arguments("a*")]
     [Arguments("a#b")]
     [Arguments("a%PATH%")]
+    [Arguments("flash:/a,b")]           // PowerShell splits a word at a comma
+    [Arguments("=ls")]                  // zsh and tcsh expand a leading =
+    [Arguments("@args")]                // PowerShell splats a leading @
     [Arguments("a\U0001F600")]          // not a letter
     public async Task WithoutQuoting_ARiskyPath_IsRefusedBeforeAnythingIsSent(string path)
     {
@@ -500,6 +503,7 @@ public sealed class ScpTests : IDisposable
     [Arguments("C:\\a?")]
     [Arguments("C:\\dir\\")]            // \" would be a literal quote to scp.exe
     [Arguments("C:\\")]
+    [Arguments("-oProxyCommand=x")]     // an option, should the shell drop the "--" before it
     public async Task DoubleQuoting_ARiskyPath_IsRefusedBeforeAnythingIsSent(string path)
     {
         await using var server = new FakeSessionServer { OnExec = Sink([], []) };
