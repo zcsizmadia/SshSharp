@@ -100,6 +100,8 @@ public sealed class KnownHostsVerifier : SshHostKeyVerifier
     /// <summary>The user's <c>~/.ssh/known_hosts</c> and <c>known_hosts2</c>, plus the system-wide files, as <c>ssh</c> uses by default.</summary>
     public static KnownHostsVerifier ForCurrentUser(StrictHostKeyChecking policy = StrictHostKeyChecking.Ask)
     {
+        // Stryker disable once String : a line with no directive SshSharp reads leaves every setting at its default, and these files do not
+        // depend on the host name
         var defaults = SshConfig.Parse(string.Empty).Resolve("localhost");
         return new KnownHostsVerifier(defaults.UserKnownHostsFiles, defaults.GlobalKnownHostsFiles) { Policy = policy };
     }
