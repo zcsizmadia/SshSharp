@@ -99,24 +99,27 @@ internal sealed class ScpChannel : IAsyncDisposable
 
     /// <summary>
     /// <paramref name="remotePath"/> unchanged, for <see cref="SshScpPathQuoting.None"/>, once it is known to be one word that no shell or
-    /// device reads specially: letters, digits and <c>/ . _ - : + @ , =</c>, not starting with <c>-</c>.
+    /// device reads specially: letters, digits and <c>/ . _ - : + @ =</c>, not starting with <c>-</c>, <c>=</c> or <c>@</c>.
     /// </summary>
     internal static string CheckUnquoted(string remotePath)
     {
         RefuseEmptyOrControl(remotePath);
-        if (remotePath[0] == '-')
+        if (remotePath[0] is '-' or '=' or '@')
         {
-            throw new ArgumentException("A remote path sent without quoting must not start with '-', which the server would read as an option.", nameof(remotePath));
+            // '-' would be read as an option; zsh and tcsh expand a leading '=' (to a command's path, or a directory-stack entry), and
+            // PowerShell splats a leading '@name'.
+            throw new ArgumentException($"A remote path sent without quoting must not start with '{remotePath[0]}'.", nameof(remotePath));
         }
 
         foreach (var c in remotePath)
         {
             // An allow list rather than a list of what to refuse: whatever reads the line (a device's parser, or a shell if the server
             // turns out to have one) treats none of these specially, so the path stays one word that names a file and nothing else.
-            if (!char.IsLetterOrDigit(c) && c is not ('/' or '.' or '_' or '-' or ':' or '+' or '@' or ',' or '='))
+            // No ',': PowerShell splits a word there into several arguments.
+            if (!char.IsLetterOrDigit(c) && c is not ('/' or '.' or '_' or '-' or ':' or '+' or '@' or '='))
             {
                 throw new ArgumentException(
-                    $"A remote path sent without quoting may hold only letters, digits and / . _ - : + @ , = (it has {Describe(c)}).", nameof(remotePath));
+                    $"A remote path sent without quoting may hold only letters, digits and / . _ - : + @ = (it has {Describe(c)}).", nameof(remotePath));
             }
         }
 
@@ -130,6 +133,13 @@ internal sealed class ScpChannel : IAsyncDisposable
     internal static string QuoteForCmd(string remotePath)
     {
         RefuseEmptyOrControl(remotePath);
+        if (remotePath[0] == '-')
+        {
+            // The '--' before the path keeps scp.exe from reading it as an option, but only if the shell passes '--' on; not every
+            // PowerShell version is known to, and no Windows path starts with '-' anyway.
+            throw new ArgumentException("A double-quoted remote path must not start with '-'.", nameof(remotePath));
+        }
+
         foreach (var c in remotePath)
         {
             // cmd.exe expands %name% (and !name! with delayed expansion) even inside double quotes, and PowerShell expands $ and `

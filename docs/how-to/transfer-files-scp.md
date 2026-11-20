@@ -43,9 +43,9 @@ SCP runs `scp -t <path>` (or `scp -f <path>`) on the server, and by default writ
 [!code-csharp[](../snippets/FileTransfer.cs#scp-device)]
 
 `None` sends the path exactly as given, without `--` (which some devices would take for the path). So that nothing on the line can
-be split, taken for an option or run, it allows only letters, digits and `/ . _ - : + @ , =`, and not `-` first; any other path
-throws `ArgumentException` before anything is sent. That covers device paths such as `flash:/config.txt`, `nvram:startup-config`
-or `disk0:/images/file.bin`. A path with a space cannot be sent this way.
+be split, taken for an option, expanded or run, it allows only letters, digits and `/ . _ - : + @ =`, and not `-`, `=` or `@`
+first; any other path throws `ArgumentException` before anything is sent. That covers device paths such as `flash:/config.txt`,
+`nvram:startup-config` or `disk0:/images/file.bin`. A path with a space or a comma cannot be sent this way.
 
 ### Windows servers
 
@@ -61,7 +61,8 @@ before anything is sent, what they would still read:
 - `$` and `` ` ``, which PowerShell expands inside double quotes, so that a server whose default shell is PowerShell cannot run
   anything either (the mode is meant and tested for `cmd.exe`);
 - PowerShell's typographic double quotes (`“ ” „`), and `< > | * ?`, which Windows does not allow in names;
-- a `\` at the end, which `scp.exe` would read, with the closing quote, as a literal `"`. Write `C:\Reports` or `C:/Reports/`.
+- a `\` at the end, which `scp.exe` would read, with the closing quote, as a literal `"`. Write `C:\Reports` or `C:/Reports/`;
+- a `-` first, which would be an option should the shell drop the `--` before the path (no Windows path starts with one).
 
 CI runs the Windows mode against OpenSSH for Windows with `cmd.exe` as its shell.
 
