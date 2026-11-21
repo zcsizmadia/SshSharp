@@ -395,8 +395,11 @@ public sealed class KnownHostsVerifier : SshHostKeyVerifier
                 // used (expired, not issued for this name, or signed with a CA signature algorithm not allowed) is not a refusal, only a
                 // certificate that proves nothing. The key it certifies is checked as a plain key below, and the problem is said when that
                 // refuses it too.
-                SshLog.HostCertificateUnusable(context.Logger, context.HostKey.Fingerprint, certificate.AuthorityFingerprint, problem);
-                unusable = $"The host certificate (key id '{certificate.KeyId}', authority {certificate.AuthorityFingerprint}) could not be used either: {problem}.";
+                // The problem can quote the certificate's signature algorithm and critical option names, and the key id is any text: all
+                // of them the server's, so they are cleaned like other server text before a log or an exception message gets them.
+                var shown = ServerText.Clean(problem, maxLength: 400);
+                SshLog.HostCertificateUnusable(context.Logger, context.HostKey.Fingerprint, certificate.AuthorityFingerprint, shown);
+                unusable = $"The host certificate (key id '{ServerText.Clean(certificate.KeyId)}', authority {certificate.AuthorityFingerprint}) could not be used either: {shown}.";
             }
         }
 

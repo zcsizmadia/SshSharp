@@ -47,7 +47,7 @@ internal abstract class VerifyingKey
             SshAlgorithms.SshEd25519 => ParseEd25519(ref reader, copy),
             SshAlgorithms.EcdsaNistp256 or SshAlgorithms.EcdsaNistp384 or SshAlgorithms.EcdsaNistp521 => ParseEcdsa(type, ref reader, copy),
             "ssh-rsa" => ParseRsa(ref reader, copy),
-            _ => throw new SshProtocolException($"Unsupported host key type '{type}'."),
+            _ => throw new SshProtocolException($"Unsupported host key type '{ServerText.Clean(type, 64)}'."),
         };
         if (!reader.IsEmpty)
         {
@@ -110,7 +110,7 @@ internal abstract class VerifyingKey
         var point = reader.ReadString();
         if (id != curve.Name)
         {
-            throw new SshProtocolException($"Curve '{id}' does not match key type '{type}'.");
+            throw new SshProtocolException($"Curve '{ServerText.Clean(id, 64)}' does not match key type '{type}'.");
         }
 
         var fieldSize = curve.FieldSize;

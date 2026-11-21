@@ -190,7 +190,8 @@ public sealed class KnownHostsVerifierTests : IDisposable
     private static readonly DateTimeOffset Now = new(2026, 6, 1, 12, 0, 0, TimeSpan.Zero);
 
     /// <summary>A host key with a certificate for it from <paramref name="authority"/>, unusable for the default host as <paramref name="problem"/> says.</summary>
-    private static SshHostKey CertifiedKey(SshPrivateKey authority, SshPrivateKey host, string problem = "expired")
+    private static SshHostKey CertifiedKey(SshPrivateKey authority, SshPrivateKey host, string problem = "expired", string keyId = "web-1",
+        (string Name, string Value)[]? criticalOptions = null)
     {
         var (principals, after, before) = problem switch
         {
@@ -200,8 +201,30 @@ public sealed class KnownHostsVerifierTests : IDisposable
             _ => (["server.example"], null, null),
         };
         var blob = host.PublicKey.ToArray();
-        var certificate = SshCertificate.FromBlob(TestKeys.Certificate(authority, blob, SshCertificateType.Host, principals, after, before, keyId: "web-1"));
+        var certificate = SshCertificate.FromBlob(TestKeys.Certificate(authority, blob, SshCertificateType.Host, principals, after, before,
+            criticalOptions, keyId: keyId));
         return new SshHostKey(certificate.Algorithm, host.KeyType, host.Fingerprint, blob, 256) { Certificate = certificate };
+    }
+
+    [Test]
+    public async Task AnUnusableCertificate_PutsNoServerControlCharactersInTheMessageOrTheLog()
+    {
+        // The key id and critical option names are the server's to choose: line breaks, a terminal title escape and a bell must not
+        // reach the exception message or the log, where they could forge a log line or drive a terminal.
+        using var authority = SshPrivateKey.Generate(SshKeyType.Ed25519);
+        using var host = SshPrivateKey.Generate(SshKeyType.Ed25519);
+        var key = CertifiedKey(authority, host, "unknown option", keyId: "web-1\r\nFAKE\u001b]0;title\u0007‮end",
+            criticalOptions: [("evil\r\n\u001b[2Joption", "")]);
+        File.WriteAllText(UserFile, AuthorityLine(authority));
+
+        var log = new ListLogger();
+        var refused = await CertificateVerifier(StrictHostKeyChecking.Yes).VerifyAsync(LoggedContext(key, log), default);
+        await Assert.That(refused.IsAccepted).IsFalse();
+        await Assert.That(refused.Reason).Contains("could not be used either").And.Contains("web-1 FAKE").And.Contains("option");
+        foreach (var text in new[] { refused.Reason!, log.Entries.Single().Message })
+        {
+            await Assert.That(text.Any(c => char.IsControl(c) || c == '‮')).IsFalse();
+        }
     }
 
     private static string AuthorityLine(SshPrivateKey authority, string marker = "@cert-authority") =>

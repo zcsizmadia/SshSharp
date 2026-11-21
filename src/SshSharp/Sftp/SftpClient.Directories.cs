@@ -834,7 +834,7 @@ public sealed partial class SftpClient
         var inside = root.EndsWith(Path.DirectorySeparatorChar) ? root : root + Path.DirectorySeparatorChar;
         if (!path.StartsWith(inside, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
         {
-            throw new SshException(SshFailureReason.TransferFailed, $"'{name}' would be written outside the target directory.");
+            throw new SshException(SshFailureReason.TransferFailed, $"'{ServerText.Clean(name)}' would be written outside the target directory.");
         }
 
         return path;

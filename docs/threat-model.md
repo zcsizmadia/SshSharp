@@ -188,7 +188,9 @@ A man in the middle can read, change, drop and inject bytes. The server itself m
   a plain `known_hosts` line accepts it, `Yes` refuses it, and `AcceptNew`, `No` and an accepted `Ask` record the plain key, never
   the certificate. This trusts nothing a plain key would not be trusted for: the server still proved it holds that key, and the
   certificate adds nothing. The unusable certificate is logged as a warning with the key's and the authority's fingerprints and
-  the problem, never the host name or the key id (often a host name). A certificate whose key or authority is revoked
+  the problem, never the host name or the key id (often a host name). If the plain key is then refused, the exception message
+  names the key id, cleaned like other server text, since the application asked about this host. A certificate whose key or
+  authority is revoked
   (`@revoked`, `RevokedHostKeys`) is refused outright, with no fallback. A host certificate that is malformed is not read at all,
   and fails the connection whatever its authority: besides truncated or padded ones, that is one with more than 256 principals
   (OpenSSH's limit) or with critical options or extensions out of lexical order or listed twice (draft-ietf-sshm-cert), so two
@@ -535,7 +537,9 @@ connection, but not read or change it: each host's key is verified end to end, b
   `[user@]host`. A ProxyJump hop that refuses to log in is named by its place in the list ("ProxyJump hop 2"), not by its name.
 - Text the server chooses reaches exception messages and log entries only cleaned: the reason in its `DISCONNECT`, the reason it
   gives for refusing a channel, the comment in its identification line (logged; a malformed line is echoed in the exception),
-  SFTP status messages, the remote scp's error lines and stderr, an exit signal's name, and an SCP file name it was refused for.
+  SFTP status messages, the remote scp's error lines and stderr, an exit signal's name, an SCP or SFTP file name it was refused
+  for, and, since 1.3.0, the names a server sends before its host key is verified (an unknown host key, curve or certificate
+  type) and an unusable host certificate's key id, signature algorithm and critical option names.
   Line breaks, tabs and Unicode line and paragraph separators become one space, other control and format characters (terminal
   escapes, the bell, bidirectional overrides, zero-width characters) are removed, and the text is cut short (200 characters for
   most), so a server cannot forge a log line or send escape sequences to a terminal that shows the message. The raw identification

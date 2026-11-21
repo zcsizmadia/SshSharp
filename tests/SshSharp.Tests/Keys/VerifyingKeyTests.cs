@@ -338,6 +338,27 @@ public class VerifyingKeyTests
     }
 
     [Test]
+    public async Task Parse_PutsNoServerControlCharactersInItsMessages()
+    {
+        // The key type, curve name and certificate type come from the server, before its host key is verified: a line break or a
+        // terminal escape in them must not reach the exception message (and from there a log or a terminal).
+        const string Hostile = "evil\r\nFAKE LOG LINE\u001b[2J\u0007‮";
+        var unknown = Assert.Throws<SshProtocolException>(() => VerifyingKey.Parse(Blob(w => w.WriteString(Hostile))));
+        var curve = Assert.Throws<SshProtocolException>(() => VerifyingKey.Parse(Blob(w =>
+        {
+            w.WriteString("ecdsa-sha2-nistp256");
+            w.WriteString(Hostile);
+            w.WriteString(new byte[65]);
+        })));
+        var certificate = Assert.Throws<SshProtocolException>(() => SshCertificate.FromBlob(Blob(w => w.WriteString(Hostile))));
+        foreach (var error in new[] { unknown, curve, certificate })
+        {
+            await Assert.That(error!.Message).Contains("evil FAKE LOG LINE");
+            await Assert.That(error.Message.Any(c => char.IsControl(c) || c == '‮')).IsFalse();
+        }
+    }
+
+    [Test]
     public async Task Parse_RejectsBadEcdsaKeys()
     {
         var good = PublicKeyBlob(Load("ecdsa256").Pub);

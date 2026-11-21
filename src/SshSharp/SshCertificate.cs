@@ -307,7 +307,7 @@ public sealed class SshCertificate
         var certificateType = reader.ReadUtf8String();
         if (!IsCertificateAlgorithm(certificateType))
         {
-            throw new SshProtocolException($"'{certificateType}' is not a certificate type.");
+            throw new SshProtocolException($"'{ServerText.Clean(certificateType, 64)}' is not a certificate type.");
         }
 
         reader.ReadString(); // nonce
@@ -342,7 +342,7 @@ public sealed class SshCertificate
 
             default:
                 // Stryker disable once String : the message is for people
-                throw new SshProtocolException($"Unsupported certificate key type '{keyType}'.");
+                throw new SshProtocolException($"Unsupported certificate key type '{ServerText.Clean(keyType, 64)}'.");
         }
 
         var parsedKey = VerifyingKey.Parse(plain);
