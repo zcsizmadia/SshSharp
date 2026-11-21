@@ -171,7 +171,10 @@ public class PeerLogLimiterTests
         var summary = logger.Entries.Single(e => e.EventId == SummaryEvent);
         await Assert.That(summary.Level).IsEqualTo(LogLevel.Warning);
         await Assert.That(summary.Message).StartsWith("92 more entries");
-        await Assert.That(server.UnimplementedReceived).IsTrue();
+
+        // The client logs each message before it queues its SSH_MSG_UNIMPLEMENTED answer, which is sent in the background: wait for it
+        // to reach the server rather than assume it already has (on a loaded macOS runner it had not, once).
+        await WaitUntilAsync(() => server.UnimplementedReceived);
         await Assert.That(client.IsConnected).IsTrue();
     }
 
