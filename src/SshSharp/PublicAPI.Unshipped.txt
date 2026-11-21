@@ -1,18 +1,1 @@
 #nullable enable
-SshSharp.SshClient.OpenChannelAsync(string! channelType, System.ReadOnlyMemory<byte> typeSpecificData = default(System.ReadOnlyMemory<byte>), System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SshSharp.SshCustomChannel!>!
-SshSharp.SshClient.SendGlobalRequestAsync(string! requestName, System.ReadOnlyMemory<byte> requestData = default(System.ReadOnlyMemory<byte>), System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SshSharp.SshGlobalRequestResult!>!
-SshSharp.SshGlobalRequestResult
-SshSharp.SshGlobalRequestResult.Data.get -> System.ReadOnlyMemory<byte>
-SshSharp.SshGlobalRequestResult.Success.get -> bool
-SshSharp.SshCustomChannel
-SshSharp.SshCustomChannel.ChannelType.get -> string!
-SshSharp.SshCustomChannel.Dispose() -> void
-SshSharp.SshCustomChannel.DisposeAsync() -> System.Threading.Tasks.ValueTask
-SshSharp.SshCustomChannel.ShutdownSendAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
-SshSharp.SshCustomChannel.Stream.get -> System.IO.Stream!
-SshSharp.Scp.SshScpOptions.PathQuoting.get -> SshSharp.Scp.SshScpPathQuoting
-SshSharp.Scp.SshScpOptions.PathQuoting.init -> void
-SshSharp.Scp.SshScpPathQuoting
-SshSharp.Scp.SshScpPathQuoting.DoubleQuote = 2 -> SshSharp.Scp.SshScpPathQuoting
-SshSharp.Scp.SshScpPathQuoting.None = 1 -> SshSharp.Scp.SshScpPathQuoting
-SshSharp.Scp.SshScpPathQuoting.Posix = 0 -> SshSharp.Scp.SshScpPathQuoting
