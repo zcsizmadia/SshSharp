@@ -86,7 +86,16 @@ internal sealed class ScpChannel : IAsyncDisposable
         };
     }
 
-    /// <summary>A POSIX shell word for <paramref name="remotePath"/>: single-quoted, with embedded quotes as <c>'\''</c>.</summary>
+    /// <summary>
+    /// One shell word for <paramref name="remotePath"/>: single-quoted, with each <c>'</c>, <c>\</c> and <c>!</c> written outside the
+    /// quotes, escaped (<c>'\''</c>, <c>'\\'</c>, <c>'\!'</c>).
+    /// </summary>
+    /// <remarks>
+    /// sshd runs the line with the account's login shell, which is not always a POSIX shell. fish reads <c>\'</c> and <c>\\</c> as
+    /// escapes even inside single quotes, so a path holding <c>\'</c> could end the word and run the rest; tcsh and csh expand
+    /// <c>!</c> (history) even inside single quotes. Escaped outside the quotes, each of the three is the literal character in sh,
+    /// bash, zsh, fish and tcsh alike.
+    /// </remarks>
     internal static string QuoteForShell(string remotePath)
     {
         if (remotePath.Length == 0 || remotePath.Any(c => c is '\0' or '\n' or '\r'))
@@ -94,7 +103,19 @@ internal sealed class ScpChannel : IAsyncDisposable
             throw new ArgumentException("A remote path must be non-empty, without NUL or line breaks.", nameof(remotePath));
         }
 
-        return "'" + remotePath.Replace("'", "'\\''", StringComparison.Ordinal) + "'";
+        var word = new StringBuilder(remotePath.Length + 2).Append('\'');
+        foreach (var c in remotePath)
+        {
+            _ = c switch
+            {
+                '\'' => word.Append(@"'\''"),
+                '\\' => word.Append(@"'\\'"),
+                '!' => word.Append(@"'\!'"),
+                _ => word.Append(c),
+            };
+        }
+
+        return word.Append('\'').ToString();
     }
 
     /// <summary>

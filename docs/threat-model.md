@@ -507,7 +507,10 @@ connection, but not read or change it: each host's key is verified end to end, b
 - Remote paths, for downloads and uploads, are part of the command line run on the server (`scp -t <path>`, `scp -f <path>`), so
   how they are written decides whether a path can run a command as the logged-in user: the issue behind CVE-2020-15778 and
   SSH.NET's GHSA-mggc-4xg6-vcxf. `SshScpOptions.PathQuoting` chooses how:
-  - `Posix` (the default) writes one single-quoted word. That is safe for any path with a POSIX shell. On a Windows OpenSSH server
+  - `Posix` (the default) writes one single-quoted word, with each `'`, `\` and `!` written outside the quotes, escaped
+    (`'\''`, `'\\'`, `'\!'`). sshd runs the line with the account's login shell, and this is safe for any path with sh, bash and
+    zsh, but also with fish, which reads `\'` and `\\` as escapes even inside single quotes, and tcsh, which expands `!` there.
+    Up to 1.2.0 a path holding them could run a command when the account's shell was fish or tcsh. On a Windows OpenSSH server
     the command runs through `cmd.exe`, which does not treat single quotes as quotes, or PowerShell, which escapes a quote inside
     them differently, so there a path the application does not control can run a command.
   - `None` (1.3) writes the path as given, with no quotes and no `--`, for network devices that read the line without a shell. It

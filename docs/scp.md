@@ -52,7 +52,8 @@ A failed transfer (a missing file, permission denied, a server without `scp`) th
 `SshFailureReason.TransferFailed` and the server's own message.
 
 SCP runs `scp` on the server through the server's shell, and the remote path is part of that command. By default SshSharp passes it
-as one single-quoted word, so spaces and special characters are safe with a POSIX shell (`sh`, `bash`).
+as one single-quoted word, so spaces and special characters are safe with the shells sshd uses on Unix-like servers (`sh`, `bash`,
+`zsh`, `fish`, `tcsh`).
 
 `SshScpOptions.PathQuoting` (1.3) writes it for other servers: `None` sends it unquoted, for network devices (Cisco IOS, MikroTik
 RouterOS) that read the line themselves, and `DoubleQuote` double-quotes it, for OpenSSH for Windows with `cmd.exe`. Both refuse,

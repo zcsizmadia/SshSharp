@@ -12,8 +12,9 @@ namespace SshSharp.Scp;
 public enum SshScpPathQuoting
 {
     /// <summary>
-    /// The default: <c>scp -t -- '/path'</c>, one single-quoted POSIX shell word, with each <c>'</c> in it written as <c>'\''</c>.
-    /// Safe for any path with a POSIX shell (<c>sh</c>, <c>bash</c>, <c>zsh</c>). Refuses an empty path, NUL and line breaks.
+    /// The default: <c>scp -t -- '/path'</c>, one single-quoted shell word, with each <c>'</c>, <c>\</c> and <c>!</c> in it written
+    /// outside the quotes, escaped (<c>'\''</c>, <c>'\\'</c>, <c>'\!'</c>). Safe for any path with the login shells sshd runs the
+    /// line with: <c>sh</c>, <c>bash</c>, <c>zsh</c>, <c>fish</c> and <c>tcsh</c>. Refuses an empty path, NUL and line breaks.
     /// </summary>
     Posix,
 

@@ -28,8 +28,9 @@ As with `scp -r`, the directory becomes the target when that does not exist, or 
 
 ## Network devices and Windows servers
 
-SCP runs `scp -t <path>` (or `scp -f <path>`) on the server, and by default writes the path as one single-quoted POSIX shell word:
-`scp -t -- '/srv/in box/report.csv'`. That is safe for any path, but only a POSIX shell reads it that way.
+SCP runs `scp -t <path>` (or `scp -f <path>`) on the server, and by default writes the path as one single-quoted shell word:
+`scp -t -- '/srv/in box/report.csv'`, with any `'`, `\` and `!` escaped outside the quotes. That is safe for any path with the
+shells sshd uses on Unix-like servers (sh, bash, zsh, fish, tcsh), but not on servers that read the line differently.
 `SshScpOptions.PathQuoting` (new in 1.3) writes it for servers that read the line differently:
 
 | `PathQuoting` | The line | For |
@@ -77,7 +78,8 @@ where the server offers it.
 
 - **Errors.** A failed transfer (missing file, permission denied, no `scp` on the server) throws `SshException` with
   `SshFailureReason.TransferFailed` and the server's own message.
-- **Quoting.** By default, remote paths are passed to the server's shell as one single-quoted word, which is safe with POSIX shells.
+- **Quoting.** By default, remote paths are passed to the server's shell as one single-quoted word, which is safe with sh, bash,
+  zsh, fish and tcsh.
   A Windows server whose default shell is `cmd.exe` or PowerShell does not read single quotes that way, and a network device reads
   them as part of the name: see [Network devices and Windows servers](#network-devices-and-windows-servers).
 - **Hostile servers.** Every name the server sends must be one path component, and a single-file download accepts exactly one file,

@@ -366,6 +366,15 @@ public sealed class ScpTests : IDisposable
     public async Task RemotePathsAreQuoted_AndUnquotablePathsRejected()
     {
         await Assert.That(ScpChannel.QuoteForShell("/a b/$(rm -rf ~)/`x`;'q'")).IsEqualTo("'/a b/$(rm -rf ~)/`x`;'\\''q'\\'''");
+
+        // The account's login shell may not be a POSIX shell: fish reads \' and \\ as escapes inside single quotes, and tcsh expands
+        // ! there, so both are written outside the quotes, escaped. Each line below was checked to reach the program as the exact
+        // path, running nothing, under sh, bash, zsh, fish 4.0 and tcsh 6.24.
+        await Assert.That(ScpChannel.QuoteForShell(@"\'; touch /tmp/x; #")).IsEqualTo(@"''\\''\''; touch /tmp/x; #'");
+        await Assert.That(ScpChannel.QuoteForShell(@"dir\")).IsEqualTo(@"'dir'\\''");
+        await Assert.That(ScpChannel.QuoteForShell("a!b")).IsEqualTo(@"'a'\!'b'");
+        await Assert.That(ScpChannel.QuoteForShell("x!#y")).IsEqualTo(@"'x'\!'#y'");
+        await Assert.That(ScpChannel.QuoteForShell(@"a b'c\d!e")).IsEqualTo(@"'a b'\''c'\\'d'\!'e'");
         await Assert.That(() => ScpChannel.QuoteForShell("a\nb")).Throws<ArgumentException>();
         await Assert.That(() => ScpChannel.QuoteForShell("")).Throws<ArgumentException>();
     }
