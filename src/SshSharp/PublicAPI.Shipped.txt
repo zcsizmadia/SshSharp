@@ -259,6 +259,8 @@ SshSharp.Scp.SshScpOptions.DirectoryMode.get -> System.IO.UnixFileMode
 SshSharp.Scp.SshScpOptions.DirectoryMode.init -> void
 SshSharp.Scp.SshScpOptions.FileMode.get -> System.IO.UnixFileMode
 SshSharp.Scp.SshScpOptions.FileMode.init -> void
+SshSharp.Scp.SshScpOptions.PathQuoting.get -> SshSharp.Scp.SshScpPathQuoting
+SshSharp.Scp.SshScpOptions.PathQuoting.init -> void
 SshSharp.Scp.SshScpOptions.Preserve.get -> bool
 SshSharp.Scp.SshScpOptions.Preserve.init -> void
 SshSharp.Scp.SshScpOptions.Progress.get -> System.IProgress<SshSharp.Scp.SshScpProgress!>?
@@ -266,6 +268,10 @@ SshSharp.Scp.SshScpOptions.Progress.init -> void
 SshSharp.Scp.SshScpOptions.ScpCommand.get -> string!
 SshSharp.Scp.SshScpOptions.ScpCommand.init -> void
 SshSharp.Scp.SshScpOptions.SshScpOptions() -> void
+SshSharp.Scp.SshScpPathQuoting
+SshSharp.Scp.SshScpPathQuoting.DoubleQuote = 2 -> SshSharp.Scp.SshScpPathQuoting
+SshSharp.Scp.SshScpPathQuoting.None = 1 -> SshSharp.Scp.SshScpPathQuoting
+SshSharp.Scp.SshScpPathQuoting.Posix = 0 -> SshSharp.Scp.SshScpPathQuoting
 SshSharp.Scp.SshScpProgress
 SshSharp.Scp.SshScpProgress.<Clone>$() -> SshSharp.Scp.SshScpProgress!
 SshSharp.Scp.SshScpProgress.BytesTransferred.get -> long
@@ -700,6 +706,7 @@ SshSharp.SshClient.IsConnected.get -> bool
 SshSharp.SshClient.LocalEndPoint.get -> System.Net.EndPoint?
 SshSharp.SshClient.LocalForwardings.get -> System.Collections.Generic.IReadOnlyList<SshSharp.SshLocalPortForwarder!>!
 SshSharp.SshClient.LocalSocketForwardings.get -> System.Collections.Generic.IReadOnlyList<SshSharp.SshLocalSocketForwarder!>!
+SshSharp.SshClient.OpenChannelAsync(string! channelType, System.ReadOnlyMemory<byte> typeSpecificData = default(System.ReadOnlyMemory<byte>), System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SshSharp.SshCustomChannel!>!
 SshSharp.SshClient.OpenTcpTunnelAsync(string! host, int port, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.IO.Stream!>!
 SshSharp.SshClient.OpenUnixSocketTunnelAsync(string! path, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.IO.Stream!>!
 SshSharp.SshClient.PingAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.TimeSpan>!
@@ -710,6 +717,7 @@ SshSharp.SshClient.RemoteForwardings.get -> System.Collections.Generic.IReadOnly
 SshSharp.SshClient.RemoteSocketForwardings.get -> System.Collections.Generic.IReadOnlyList<SshSharp.SshRemoteSocketForwarder!>!
 SshSharp.SshClient.RunCommandAsync(string! command, SshSharp.SshSessionOptions? options, SshSharp.SshCommandInput? standardInput = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SshSharp.SshCommandResult!>!
 SshSharp.SshClient.RunCommandAsync(string! command, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SshSharp.SshCommandResult!>!
+SshSharp.SshClient.SendGlobalRequestAsync(string! requestName, System.ReadOnlyMemory<byte> requestData = default(System.ReadOnlyMemory<byte>), System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SshSharp.SshGlobalRequestResult!>!
 SshSharp.SshClient.ServerIdentification.get -> string!
 SshSharp.SshClient.SessionId.get -> System.ReadOnlyMemory<byte>
 SshSharp.SshClient.StartCommandAsync(string! command, SshSharp.SshSessionOptions? options = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SshSharp.SshSession!>!
@@ -881,6 +889,12 @@ SshSharp.SshConfigConnectOptions.StartForwardings.get -> bool
 SshSharp.SshConfigConnectOptions.StartForwardings.init -> void
 SshSharp.SshConfigConnectOptions.UseAgent.get -> bool
 SshSharp.SshConfigConnectOptions.UseAgent.init -> void
+SshSharp.SshCustomChannel
+SshSharp.SshCustomChannel.ChannelType.get -> string!
+SshSharp.SshCustomChannel.Dispose() -> void
+SshSharp.SshCustomChannel.DisposeAsync() -> System.Threading.Tasks.ValueTask
+SshSharp.SshCustomChannel.ShutdownSendAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+SshSharp.SshCustomChannel.Stream.get -> System.IO.Stream!
 SshSharp.SshDynamicPortForwarder
 SshSharp.SshDynamicPortForwarder.ActiveConnections.get -> int
 SshSharp.SshDynamicPortForwarder.DisposeAsync() -> System.Threading.Tasks.ValueTask
@@ -939,6 +953,9 @@ SshSharp.SshForwardedConnection.OriginatorPort.get -> int?
 SshSharp.SshForwardedConnection.RemoteSocketPath.get -> string?
 SshSharp.SshForwardedConnection.ShutdownSendAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
 SshSharp.SshForwardedConnection.Stream.get -> System.IO.Stream!
+SshSharp.SshGlobalRequestResult
+SshSharp.SshGlobalRequestResult.Data.get -> System.ReadOnlyMemory<byte>
+SshSharp.SshGlobalRequestResult.Success.get -> bool
 SshSharp.SshGssapiOptions
 SshSharp.SshGssapiOptions.Credential.get -> System.Net.NetworkCredential?
 SshSharp.SshGssapiOptions.Credential.init -> void
